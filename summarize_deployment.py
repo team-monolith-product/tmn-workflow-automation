@@ -49,11 +49,11 @@ load_dotenv()
 
 # Notion API credentials
 NOTION_API_KEY = os.getenv('NOTION_API_KEY')
-NOTION_DATABASE_ID = os.getenv('NOTION_DATABASE_ID')
+NOTION_DATABASE_ID = 'a9de18b3877c453a8e163c2ee1ff4137'
 
 # Slack API credentials
 SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')
-SLACK_CHANNEL_ID = os.getenv('SLACK_CHANNEL_ID')
+SLACK_CHANNEL_ID = 'C02VA2LLXH9'
 
 def get_today_tasks():
     url = f'https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query'
