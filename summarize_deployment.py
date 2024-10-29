@@ -43,6 +43,7 @@ import os
 import requests
 import datetime
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
@@ -76,15 +77,20 @@ def get_today_tasks():
     data = response.json()
     return data['results']
 
-def get_slack_user_id(notion_user_email):
+def get_slack_users():
     url = 'https://slack.com/api/users.list'
     headers = {
         'Authorization': f'Bearer {SLACK_BOT_TOKEN}'
     }
     response = requests.get(url, headers=headers)
     response.raise_for_status()
-    users = response.json().get('members', [])
-    for user in users:
+    data = response.json()
+    if not data.get('ok'):
+        raise Exception(f"Error fetching Slack users: {data.get('error')}")
+    return data.get('members', [])
+
+def get_slack_user_id(notion_user_email, slack_users):
+    for user in slack_users:
         profile = user.get('profile', {})
         slack_user_email = profile.get('email')
         if slack_user_email and slack_user_email.lower() == notion_user_email.lower():
@@ -129,12 +135,28 @@ def get_pr_links(pr_relations):
             pass
     return pr_links
 
+def format_pr_link(pr_url):
+    parsed_url = urlparse(pr_url)
+    path_parts = parsed_url.path.strip('/').split('/')
+    if len(path_parts) >= 4 and path_parts[2] == 'pull':
+        repo_name = path_parts[1]
+        pr_number = path_parts[3]
+        display_text = f"{repo_name}#{pr_number}"
+        slack_link = f"<{pr_url}|{display_text}>"
+        return slack_link
+    else:
+        # 예상되는 형식이 아닐 경우 원래 URL 반환
+        return pr_url
+
 def main():
     tasks = get_today_tasks()
     if not tasks:
         print("No tasks scheduled for deployment today.")
         send_slack_message("오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?")
         return
+
+    # **Slack 사용자 목록을 한 번만 가져옵니다.**
+    slack_users = get_slack_users()
 
     message = "오늘 배포 예정 과업!\n"
     for task in tasks:
@@ -145,7 +167,8 @@ def main():
         if assignees:
             notion_user_email = assignees[0].get('person', {}).get('email')
             if notion_user_email:
-                slack_user_id = get_slack_user_id(notion_user_email)
+                # 캐시된 사용자 목록을 사용하여 Slack 사용자 ID를 찾습니다.
+                slack_user_id = get_slack_user_id(notion_user_email, slack_users)
                 if slack_user_id:
                     assignee_mention = f"<@{slack_user_id}>"
                 else:
@@ -162,16 +185,22 @@ def main():
         else:
             task_title = "No Title"
 
+        # Construct Notion Page URL
+        task_id = task['id']
+        notion_page_url = f"https://www.notion.so/{task_id.replace('-', '')}"
+        task_title_link = f"<{notion_page_url}|{task_title}>"
+
         # Get PR Links
         pr_link_property = properties.get('GitHub 풀 리퀘스트', {})
         pr_relations = pr_link_property.get('relation', [])
         pr_links = get_pr_links(pr_relations)
 
-        # PR 링크들을 문자열로 결합
-        pr_links_str = ', '.join(pr_links) if pr_links else "No PR Link"
+        # Format PR Links
+        formatted_pr_links = [format_pr_link(pr_link) for pr_link in pr_links]
+        pr_links_str = ', '.join(formatted_pr_links) if formatted_pr_links else "No PR Link"
 
         # Construct the message line
-        message_line = f"{assignee_mention} {task_title} ({pr_links_str})\n"
+        message_line = f"{assignee_mention} {task_title_link} ({pr_links_str})\n"
         message += message_line
 
     # Send the message to Slack
