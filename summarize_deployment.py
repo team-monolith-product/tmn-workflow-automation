@@ -143,10 +143,10 @@ def format_pr_link(pr_url):
         pr_number = path_parts[3]
         display_text = f"{repo_name}#{pr_number}"
         slack_link = f"<{pr_url}|{display_text}>"
-        return slack_link
+        return slack_link, repo_name
     else:
         # 예상되는 형식이 아닐 경우 원래 URL 반환
-        return pr_url
+        return pr_url, None
 
 def main():
     tasks = get_today_tasks()
@@ -157,6 +157,9 @@ def main():
 
     # **Slack 사용자 목록을 한 번만 가져옵니다.**
     slack_users = get_slack_users()
+
+    # 배포해야 할 레포지토리 이름을 저장할 집합
+    repos_to_deploy = set()
 
     message = "오늘 배포 예정 과업!\n"
     for task in tasks:
@@ -195,13 +198,24 @@ def main():
         pr_relations = pr_link_property.get('relation', [])
         pr_links = get_pr_links(pr_relations)
 
-        # Format PR Links
-        formatted_pr_links = [format_pr_link(pr_link) for pr_link in pr_links]
+        # Format PR Links and collect repository names
+        formatted_pr_links = []
+        for pr_link in pr_links:
+            formatted_link, repo_name = format_pr_link(pr_link)
+            formatted_pr_links.append(formatted_link)
+            if repo_name:
+                repos_to_deploy.add(repo_name)
+
         pr_links_str = ', '.join(formatted_pr_links) if formatted_pr_links else "No PR Link"
 
         # Construct the message line
         message_line = f"{assignee_mention} {task_title_link} ({pr_links_str})\n"
         message += message_line
+
+    if repos_to_deploy:
+        message += "\n아래의 레포지토리를 배포해주세요 :ship:\n"
+        for repo in sorted(repos_to_deploy):
+            message += f"• {repo}\n"
 
     # Send the message to Slack
     send_slack_message(message)
