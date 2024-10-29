@@ -45,17 +45,27 @@ def get_page(page_id: str) -> Dict[str, Any]:
     response.raise_for_status()
     return response.json()
 
-def get_pr_links(pr_relations: List[Dict[str, Any]]) -> List[str]:
-    """PR 관계 속성에서 PR 링크들을 추출합니다."""
-    pr_links: List[str] = []
+def get_pr_links(pr_relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
+    pr_links_info: List[Dict[str, Any]] = []
     for relation in pr_relations:
         pr_page_id: str = relation['id']
         pr_page: Dict[str, Any] = get_page(pr_page_id)
         properties: Dict[str, Any] = pr_page['properties']
+
         url_property: Dict[str, Any] = properties.get('_external_object_url', {})
         if 'url' in url_property and url_property['url']:
-            pr_links.append(url_property['url'])
+            pr_url: str = url_property['url']
+            # 'Merged At' 필드에서 병합 여부 추출
+            merged_at_property: Dict[str, Any] = properties.get('Merged At', {})
+            is_merged: bool = False
+            if merged_at_property.get('date') and merged_at_property['date'].get('start'):
+                is_merged = True
+            pr_links_info.append({
+                'url': pr_url,
+                'merged': is_merged
+            })
         else:
             # URL 속성이 없는 경우 처리 로직을 추가할 수 있습니다.
             pass
-    return pr_links
+    return pr_links_info

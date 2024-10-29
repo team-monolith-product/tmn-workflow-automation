@@ -58,15 +58,21 @@ def get_slack_user_id(notion_user_email: str, slack_users: List[Dict[str, Any]])
             return user['id']
     return None
 
-def format_pr_link(pr_url: str) -> Tuple[str, Optional[str]]:
-    """PR 링크를 포맷하고 레포지토리 이름을 추출합니다."""
+def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    """PR 링크를 포맷하고 레포지토리 이름을 추출하며 병합 상태에 따라 이모지를 추가합니다."""
+    pr_url: str = pr_info['url']
+    is_merged: bool = pr_info['merged']
     parsed_url = urlparse(pr_url)
     path_parts = parsed_url.path.strip('/').split('/')
     if len(path_parts) >= 4 and path_parts[2] == 'pull':
         repo_name: str = path_parts[1]
         pr_number: str = path_parts[3]
         display_text: str = f"{repo_name}#{pr_number}"
-        slack_link: str = f"<{pr_url}|{display_text}>"
+
+        # 병합 상태에 따른 이모지 결정
+        emoji: str = "✅" if is_merged else "❌"
+
+        slack_link: str = f"<{pr_url}|{display_text}>{emoji}"
         return slack_link, repo_name
     else:
         # 예상되는 형식이 아닐 경우 원래 URL 반환
@@ -120,12 +126,12 @@ def main() -> None:
         # PR 링크 가져오기
         pr_link_property: Dict[str, Any] = properties.get('GitHub 풀 리퀘스트', {})
         pr_relations: List[Dict[str, Any]] = pr_link_property.get('relation', [])
-        pr_links: List[str] = get_pr_links(pr_relations)
+        pr_links_info: List[Dict[str, Any]] = get_pr_links(pr_relations)
 
         # PR 링크 포맷 및 레포지토리 이름 수집
         formatted_pr_links: List[str] = []
-        for pr_link in pr_links:
-            formatted_link, repo_name = format_pr_link(pr_link)
+        for pr_info in pr_links_info:
+            formatted_link, repo_name = format_pr_link(pr_info)
             formatted_pr_links.append(formatted_link)
             if repo_name:
                 repos_to_deploy.add(repo_name)
