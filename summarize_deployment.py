@@ -39,58 +39,15 @@ ChatGPT의 도움으로 개발되었습니다. (https://chatgpt.com/share/671b5c
 - 팀원들에게 오늘의 배포 과업에 대해 알리기 위한 워크플로우를 자동화하기 위해 개발되었습니다.
 - 수작업을 줄이고 팀 내 의사소통 효율성을 향상시키는 것을 목표로 합니다.
 """
-import os
-import requests
-import datetime
-from dotenv import load_dotenv
-from urllib.parse import urlparse
 from typing import List, Dict, Any, Optional, Set, Tuple
+from urllib.parse import urlparse
 
-# 환경 변수 로드
-load_dotenv()
+from apis.notion import get_today_tasks, get_pr_links
+from apis.slack import get_slack_users, send_slack_message
 
-# Notion API 인증 정보
-NOTION_API_KEY: Optional[str] = os.getenv('NOTION_API_KEY')
+# Notion과 Slack 설정
 NOTION_DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
-
-# Slack API 인증 정보
-SLACK_BOT_TOKEN: Optional[str] = os.getenv('SLACK_BOT_TOKEN')
 SLACK_CHANNEL_ID: str = 'C02VA2LLXH9'
-
-def get_today_tasks() -> List[Dict[str, Any]]:
-    """오늘 배포 예정인 노션 과업들을 가져옵니다."""
-    url: str = f'https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query'
-    headers: Dict[str, str] = {
-        'Authorization': f'Bearer {NOTION_API_KEY}',
-        'Notion-Version': '2022-06-28',
-        'Content-Type': 'application/json'
-    }
-    today: str = datetime.datetime.now().date().isoformat()
-    payload: Dict[str, Any] = {
-        "filter": {
-            "property": "배포 예정 날짜",
-            "date": {
-                "equals": today
-            }
-        }
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    data: Dict[str, Any] = response.json()
-    return data['results']
-
-def get_slack_users() -> List[Dict[str, Any]]:
-    """Slack 사용자 목록을 가져옵니다."""
-    url: str = 'https://slack.com/api/users.list'
-    headers: Dict[str, str] = {
-        'Authorization': f'Bearer {SLACK_BOT_TOKEN}'
-    }
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    data: Dict[str, Any] = response.json()
-    if not data.get('ok'):
-        raise Exception(f"Error fetching Slack users: {data.get('error')}")
-    return data.get('members', [])
 
 def get_slack_user_id(notion_user_email: str, slack_users: List[Dict[str, Any]]) -> Optional[str]:
     """노션 사용자 이메일을 기반으로 Slack 사용자 ID를 찾습니다."""
@@ -100,47 +57,6 @@ def get_slack_user_id(notion_user_email: str, slack_users: List[Dict[str, Any]])
         if slack_user_email and slack_user_email.lower() == notion_user_email.lower():
             return user['id']
     return None
-
-def send_slack_message(message: str) -> Dict[str, Any]:
-    """Slack 채널에 메시지를 전송합니다."""
-    url: str = 'https://slack.com/api/chat.postMessage'
-    headers: Dict[str, str] = {
-        'Authorization': f'Bearer {SLACK_BOT_TOKEN}',
-        'Content-Type': 'application/json'
-    }
-    payload: Dict[str, Any] = {
-        'channel': SLACK_CHANNEL_ID,
-        'text': message
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    return response.json()
-
-def get_page(page_id: str) -> Dict[str, Any]:
-    """노션 페이지의 상세 정보를 가져옵니다."""
-    url: str = f'https://api.notion.com/v1/pages/{page_id}'
-    headers: Dict[str, str] = {
-        'Authorization': f'Bearer {NOTION_API_KEY}',
-        'Notion-Version': '2022-06-28',
-    }
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    return response.json()
-
-def get_pr_links(pr_relations: List[Dict[str, Any]]) -> List[str]:
-    """PR 관계 속성에서 PR 링크들을 추출합니다."""
-    pr_links: List[str] = []
-    for relation in pr_relations:
-        pr_page_id: str = relation['id']
-        pr_page: Dict[str, Any] = get_page(pr_page_id)
-        properties: Dict[str, Any] = pr_page['properties']
-        url_property: Dict[str, Any] = properties.get('_external_object_url', {})
-        if 'url' in url_property and url_property['url']:
-            pr_links.append(url_property['url'])
-        else:
-            # URL 속성이 없는 경우 처리 로직을 추가할 수 있습니다.
-            pass
-    return pr_links
 
 def format_pr_link(pr_url: str) -> Tuple[str, Optional[str]]:
     """PR 링크를 포맷하고 레포지토리 이름을 추출합니다."""
@@ -157,10 +73,10 @@ def format_pr_link(pr_url: str) -> Tuple[str, Optional[str]]:
         return pr_url, None
 
 def main() -> None:
-    tasks: List[Dict[str, Any]] = get_today_tasks()
+    tasks: List[Dict[str, Any]] = get_today_tasks(NOTION_DATABASE_ID)
     if not tasks:
         print("No tasks scheduled for deployment today.")
-        send_slack_message("오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?")
+        send_slack_message(SLACK_CHANNEL_ID, "오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?")
         return
 
     # Slack 사용자 목록을 한 번만 가져옵니다.
@@ -226,7 +142,7 @@ def main() -> None:
             message += f"• {repo}\n"
 
     # 슬랙에 메시지 전송
-    send_slack_message(message)
+    send_slack_message(SLACK_CHANNEL_ID, message)
     print("Message sent to Slack.")
 
 if __name__ == "__main__":
