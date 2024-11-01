@@ -2,7 +2,7 @@ name: Summarize Deployment
 
 on:
   schedule:
-    - cron: '0 7 * * *'    # 매일 오후 4시 00분 실행 (UTC 7시 00분)
+    - cron: '0 7 * * 1-5'    # 매일 오후 4시 00분 실행 (UTC 7시 00분)
   workflow_dispatch:        # 수동 트리거 (디버그 목적)
 
 jobs:
