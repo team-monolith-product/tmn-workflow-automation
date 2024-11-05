@@ -4,7 +4,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 
-from apis.slack import get_slack_user_ids_in_channel, send_slack_message, get_user_info, lookup_sections, edit_canvas
+from apis.slack import get_slack_user_ids_in_channel, get_user_info, lookup_sections, edit_canvas
 
 # 환경 변수 로드
 load_dotenv()
@@ -13,7 +13,8 @@ load_dotenv()
 SLACK_CHANNEL_ID = 'C02JX95U7AP'  # 또는 환경 변수로 설정
 
 # 이모지 목록
-emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", ":party-blob:", ":sad_cat_thumbs_up:"]
+emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊",
+          "😇", ":party-blob:", ":sad_cat_thumbs_up:", "🥎"]
 
 
 def daily_scrum():
@@ -27,12 +28,6 @@ def daily_scrum():
     ]
     # 사용자 순서 랜덤 셔플
     random.shuffle(user_ids)
-    # 사용자 멘션 생성
-    mentions = ' '.join([f'<@{user_id}>' for user_id in user_ids])
-    # 메시지 생성
-    message = f"🚀 *데일리 스크럼 시간입니다!* \n{mentions}\n\n오늘 스크럼에 참여 가능하신가요?\n참여 가능하면 보드의 체크박스를 눌러주세요! ✅"
-    # 메시지 전송
-    send_slack_message(SLACK_CHANNEL_ID, message)
 
     canvas_id = 'F07UUHABV1P'
 
