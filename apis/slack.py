@@ -106,3 +106,18 @@ def lookup_sections(canvas_id):
     else :
         print(response_data)
         raise Exception("캔버스 섹션 조회 실패: " + response_data.get("error", "Unknown error"))
+
+
+def get_conversation_info(channel_id):
+    url = "https://slack.com/api/conversations.info"
+    data = {
+        "channel": channel_id,
+    }
+    response = requests.get(url, headers=HEADERS, params=data)
+    response_data = response.json()
+
+    if response_data.get("ok"):
+        return response_data["channel"]
+    else :
+        print(response_data)
+        raise Exception("채널 조회 실패: " + response_data.get("error", "Unknown error"))

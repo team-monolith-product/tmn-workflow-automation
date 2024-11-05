@@ -10,7 +10,16 @@ from apis.slack import get_slack_user_ids_in_channel, get_user_info, lookup_sect
 load_dotenv()
 
 # Slack 채널 ID
-SLACK_CHANNEL_ID = 'C02JX95U7AP'  # 또는 환경 변수로 설정
+SLACK_CHANNEL_ID = 'C02JX95U7AP'
+
+# print_conversation_info.py 를 통해 획득됨.
+# 추가로 workflow automation app이 채널에 등록돼야함.
+SLACK_CANVAS_ID = 'F05S8Q78CGZ'
+
+# 슬랙 리마인더로 정해진 시간에 메세지를 보내며
+# 이 파일을 실행하여 캔버스를 업데이트 합니다.
+# /remind #--데일리-- 스크럼 시간입니다! 출석부를 작성해주세요 😆 @channel every weekday at 16:30pm
+# /remind #--데일리-- 스크럼 시간입니다! 출석부를 작성해주세요 :laughing: @channel every weekday at 16:30pm
 
 # 이모지 목록
 emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊",
@@ -29,14 +38,12 @@ def daily_scrum():
     # 사용자 순서 랜덤 셔플
     random.shuffle(user_ids)
 
-    canvas_id = 'F07UUHABV1P'
-
-    sections = lookup_sections(canvas_id)
+    sections = lookup_sections(SLACK_CANVAS_ID)
 
     # 캔버스 내용 지우기
     for section in sections:
         edit_canvas(
-            canvas_id, [{'operation': 'delete', 'section_id': section['id']}])
+            SLACK_CANVAS_ID, [{'operation': 'delete', 'section_id': section['id']}])
 
     # 캔버스 내용 생성
     today = datetime.now().strftime("%Y년 %m월 %d일")
@@ -48,7 +55,7 @@ def daily_scrum():
         content += f"- [ ] {user_name} {emoji}\n"
 
     # 캔버스 편집
-    edit_canvas(canvas_id, [{
+    edit_canvas(SLACK_CANVAS_ID, [{
         'operation': 'insert_at_end',
         "document_content": {
             "type": "markdown",
