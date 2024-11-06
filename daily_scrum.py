@@ -23,7 +23,10 @@ SLACK_CANVAS_ID = 'F05S8Q78CGZ'
 
 # 이모지 목록
 emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊",
-          "😇", ":party-blob:", ":sad_cat_thumbs_up:", "🥎", "💭", ":cat:", ":squirrel:", ":cubimal_chick:"]
+          "😇", ":party-blob:", ":sad_cat_thumbs_up:", "🥎", "💭",
+          ":cat:", ":squirrel:", ":cubimal_chick:", ":face_with_spiral_eyes:",
+          ":melting_face:", ":grin:", ":face_with_raised_eyebrow:",
+          ":woman-bouncing-ball:", ":tada:"]
 
 
 def daily_scrum():
