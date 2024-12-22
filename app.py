@@ -16,7 +16,14 @@ client = OpenAI()
 notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
 DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
 
-def create_notion_task(title, task_type, component, thread_url):
+PROJECT_TO_PAGE_ID = {
+    "유지보수": "12d1cc820da680c7ae8cdd40b5667798",
+    "기술개선": "12d1cc820da68060b803eb9c0904e40c",
+    "경험개선": "12d1cc820da68005a4b4fdb6f7221ff3",
+    "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
+}
+
+def create_notion_task(title, task_type, component, project, thread_url):
     response = notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
@@ -44,7 +51,7 @@ def create_notion_task(title, task_type, component, thread_url):
             "프로젝트": {
                 "relation": [
                     {
-                        "id": "12d1cc820da680c7ae8cdd40b5667798"  # 유지보수 프로젝트 페이지 ID
+                        "id": PROJECT_TO_PAGE_ID[project]
                     }
                 ]
             },
@@ -95,7 +102,12 @@ functions = [
                     "type": "string",
                     "enum": ["Front", "Back", "Infra", "Data", "Plan", "AI"],
                     "description": "과업의 구성요소"
-                }
+                },
+                "project": {
+                    "type": "string",
+                    "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"],
+                    "description": "과업이 속한 프로젝트"
+                },
             },
             "required": ["title", "task_type", "component"]
         }
@@ -170,6 +182,7 @@ def event_test(body, say, logger):
                 title=arguments.get("title"),
                 task_type=arguments.get("task_type"),
                 component=arguments.get("component"),
+                project=arguments.get("project"),
                 thread_url=slack_thread_url
             )
             say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}", thread_ts=thread_ts)

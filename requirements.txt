@@ -1,5 +1,4 @@
-requests
 python-dotenv
-slack_bolt
+slack-bolt
 openai
 notion-client
