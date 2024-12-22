@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -22,6 +23,7 @@ PROJECT_TO_PAGE_ID = {
     "경험개선": "12d1cc820da68005a4b4fdb6f7221ff3",
     "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
 }
+
 
 def create_notion_task(title, task_type, component, project, thread_url):
     response = notion.pages.create(
@@ -81,6 +83,45 @@ def create_notion_task(title, task_type, component, project, thread_url):
 
     return response["url"]
 
+
+def update_notion_task_deadline(page_id: str, new_deadline: str):
+    """
+    기존 노션 페이지의 종료일(date)을 업데이트한다.
+    page_id: 노션 페이지 ID (ex: '12d1cc82...')
+    new_deadline: 'YYYY-MM-DD' 형태의 문자열
+    """
+    # 1) 기존 페이지 정보 조회
+    page_data = notion.pages.retrieve(page_id)
+
+    # 2) 기존 '타임라인'의 start 값 가져오기
+    #    (없는 경우 None 처리 등 분기 필요)
+    old_start = None
+    timeline_property = page_data["properties"].get("타임라인", {})
+    date_value = timeline_property.get("date", {})
+    old_start = date_value.get("start")  # 예: '2024-12-01'
+
+    # 만약 start가 None이라면 end 업데이트가 무의미할 수도 있으므로,
+    # 필요 시 분기 처리(없으면 start == end로 맞춘다던가).
+    if old_start is None:
+        # 예: start가 없던 경우 -> end만 존재하거나?
+        # 사용 용도에 맞춰 처리
+        old_start = new_deadline
+
+    # 3) Notion 페이지 업데이트 (start는 기존값, end만 바꿔치기)
+    notion.pages.update(
+        page_id=page_id,
+        properties={
+            # 예) 속성 이름이 "종료일"인 경우
+            "타임라인": {
+                "date": {
+                    "start": old_start,
+                    "end": new_deadline
+                }
+            }
+        }
+    )
+
+
 # OpenAI 함수 정의
 functions = [
     {
@@ -111,11 +152,30 @@ functions = [
             },
             "required": ["title", "task_type", "component"]
         }
+    },
+    {
+        "name": "update_notion_task_deadline",
+        "description": "노션 과업의 타입라인의 종료일을 업데이트합니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "노션 페이지 ID (ex: '12d1cc82...')"
+                },
+                "new_deadline": {
+                    "type": "string",
+                    "description": "새로운 기한 (YYYY-MM-DD 포맷)"
+                }
+            },
+            "required": ["task_id", "new_deadline"]
+        }
     }
 ]
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+
 
 @app.event("app_mention")
 def event_test(body, say, logger):
@@ -140,9 +200,12 @@ def event_test(body, say, logger):
         if user["id"] in user_ids
     }
 
+    today_str = datetime.now().strftime('%Y-%m-%d(%A)')
     messages = [{
         "role": "system",
-        "content": "You are a helpful assistant who is integrated in Slack. We are a edu-tech startup in Korea. Always answer in Korean."
+        "content": f"You are a helpful assistant who is integrated in Slack. "
+                f"We are a edu-tech startup in Korea. Always answer in Korean. "
+                f"Today's date is {today_str}"
     }]
 
     threads = []
@@ -185,7 +248,18 @@ def event_test(body, say, logger):
                 project=arguments.get("project"),
                 thread_url=slack_thread_url
             )
-            say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}", thread_ts=thread_ts)
+            say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}",
+                thread_ts=thread_ts)
+        elif function_name == "update_notion_task_deadline":
+            # 새로 추가된 로직
+            notion_page_id = arguments.get("task_id")
+            new_deadline = arguments.get("new_deadline")
+
+            # 실제 Notion 과업의 기한 업데이트
+            update_notion_task_deadline(notion_page_id, new_deadline)
+
+            # 사용자에게 완료 메시지
+            say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.", thread_ts=thread_ts)
     else:
         say(response_message.content, thread_ts=thread_ts)
 
