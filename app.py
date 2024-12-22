@@ -121,6 +121,22 @@ def update_notion_task_deadline(page_id: str, new_deadline: str):
         }
     )
 
+def update_notion_task_status(page_id: str, new_status: str):
+    """
+    기존 노션 페이지의 '상태' 필드를 업데이트한다.
+    page_id: 노션 페이지 ID (ex: '12d1cc82...')
+    new_status: 업데이트할 상태명 (ex: '완료', '진행', '리뷰', etc.)
+    """
+    notion.pages.update(
+        page_id=page_id,
+        properties={
+            "상태": {
+                "status": {
+                    "name": new_status
+                }
+            }
+        }
+    )
 
 # OpenAI 함수 정의
 functions = [
@@ -169,6 +185,25 @@ functions = [
                 }
             },
             "required": ["task_id", "new_deadline"]
+        }
+    },
+    {
+        "name": "update_notion_task_status",
+        "description": "노션 과업의 상태(예: 완료, 진행, 대기 등)를 변경합니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "노션 페이지 ID (ex: '12d1cc82...')"
+                },
+                "new_status": {
+                    "type": "string",
+                    "enum": ["대기", "진행", "리뷰", "완료", "중단"],
+                    "description": "새로운 상태명"
+                }
+            },
+            "required": ["task_id", "new_status"]
         }
     }
 ]
@@ -260,6 +295,15 @@ def event_test(body, say, logger):
 
             # 사용자에게 완료 메시지
             say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.", thread_ts=thread_ts)
+        elif function_name == "update_notion_task_status":
+            notion_page_id = arguments.get("task_id")
+            new_status = arguments.get("new_status")
+            
+            # 새로 만든 함수 호출
+            update_notion_task_status(notion_page_id, new_status)
+
+            say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.", 
+                thread_ts=thread_ts)
     else:
         say(response_message.content, thread_ts=thread_ts)
 
