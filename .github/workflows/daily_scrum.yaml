@@ -1,4 +1,4 @@
-name: Summarize Deployment
+name: Daily Scrum
 
 on:
   schedule:

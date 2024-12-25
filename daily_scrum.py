@@ -1,10 +1,10 @@
 # daily_scrum.py
-
+import os
 import random
 from datetime import datetime
 from dotenv import load_dotenv
 
-from apis.slack import get_slack_user_ids_in_channel, get_user_info, lookup_sections, edit_canvas
+from slack_sdk import WebClient
 
 # 환경 변수 로드
 load_dotenv()
@@ -30,23 +30,35 @@ emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊"
 
 
 def daily_scrum():
+    slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+
     # Slack 사용자 목록 가져오기
-    user_ids = get_slack_user_ids_in_channel(SLACK_CHANNEL_ID)
+    user_ids = slack_client.conversations_members(
+        channel=SLACK_CHANNEL_ID)["members"]
     # 봇 사용자 제외
-    user_id_to_user_info = {user_id: get_user_info(
-        user_id) for user_id in user_ids}
+
+    user_id_to_user_info = {
+        user_id: slack_client.users_info(user=user_id)['user'] for user_id in user_ids
+    }
     user_ids = [
         user_id for user_id in user_ids if not user_id_to_user_info[user_id].get('is_bot', False)
     ]
     # 사용자 순서 랜덤 셔플
     random.shuffle(user_ids)
 
-    sections = lookup_sections(SLACK_CANVAS_ID)
+    sections = slack_client.canvases_sections_lookup(
+        canvas_id=SLACK_CANVAS_ID,
+        criteria={
+            "contains_text": " "
+        }
+    )["sections"]
 
     # 캔버스 내용 지우기
     for section in sections:
-        edit_canvas(
-            SLACK_CANVAS_ID, [{'operation': 'delete', 'section_id': section['id']}])
+        slack_client.canvases_edit(
+            canvas_id=SLACK_CANVAS_ID,
+            changes=[{'operation': 'delete', 'section_id': section['id']}]
+        )
 
     # 캔버스 내용 생성
     today = datetime.now().strftime("%Y년 %m월 %d일")
@@ -58,14 +70,16 @@ def daily_scrum():
         content += f"- [ ] {user_name} {emoji}\n"
 
     # 캔버스 편집
-    edit_canvas(SLACK_CANVAS_ID, [{
+    slack_client.canvases_edit(
+        canvas_id=SLACK_CANVAS_ID,
+        changes=[{
         'operation': 'insert_at_end',
         "document_content": {
             "type": "markdown",
             "markdown": content
         }
-    }])
-
+    }]
+    )
 
 if __name__ == "__main__":
     daily_scrum()
