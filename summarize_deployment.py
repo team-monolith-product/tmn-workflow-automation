@@ -1,11 +1,7 @@
-
-
 """
 프로젝트 설명:
 이 파이썬 스크립트는 오늘 배포 예정인 과업들을 노션(Notion) 데이터베이스에서 가져와, 지정된 슬랙(Slack) 채널에 포맷된 메시지를 전송합니다.
 메시지에는 담당자가 멘션되고, 관련된 GitHub 풀 리퀘스트 링크가 포함됩니다.
-
-ChatGPT의 도움으로 개발되었습니다. (https://chatgpt.com/share/671b5c5f-1710-8002-9843-c0bfe87377c5)
 
 요구 사항:
 - 노션 API에 연결하여 '배포 예정 날짜'가 오늘인 과업들을 가져옵니다.
@@ -19,44 +15,74 @@ ChatGPT의 도움으로 개발되었습니다. (https://chatgpt.com/share/671b5c
 오늘 배포 예정 과업! @담당자 과업 제목 (PR 링크)
 ```
 
-- 적절한 인증과 API 토큰의 안전한 처리를 보장합니다.
-- 이름 대신 이메일을 기반으로 슬랙 사용자들을 매칭하여 정확도를 향상시킵니다.
-
 특이사항:
 - 스크립트는 노션의 'people' 속성에 접근하여 담당자 이메일을 추출합니다.
-- 슬랙 API 스코프에 `users:read.email`을 포함하여 사용자 이메일 정보에 접근합니다.
-- API 키와 토큰과 같은 모든 민감한 정보는 스크립트에 하드코딩하지 않고 환경 변수나 `.env` 파일을 통해 관리합니다.
-- 사용자 이메일이 없거나 슬랙 사용자와 매칭되지 않는 경우를 처리하기 위한 에러 핸들링이 포함되어 있습니다.
-- API 호출 제한을 주의하고, 슬랙 앱에 필요한 권한이 부여되었는지 확인합니다.
-- 이 스크립트는 Flask 앱이 아닌 독립 실행형 파이썬 스크립트로 실행되도록 설계되었습니다.
-
-사용 방법:
-- 모든 의존성을 설치하세요 (`requests`, `python-dotenv`).
-- 필요한 환경 변수를 설정하세요: `NOTION_API_KEY`, `NOTION_DATABASE_ID`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`.
-- `python your_script_name.py` 명령으로 스크립트를 실행하세요.
+- API 호출 제한을 주의하여 Bulk 요청을 활용합니다.
 
 참고:
 - 팀원들에게 오늘의 배포 과업에 대해 알리기 위한 워크플로우를 자동화하기 위해 개발되었습니다.
 - 수작업을 줄이고 팀 내 의사소통 효율성을 향상시키는 것을 목표로 합니다.
 """
-from typing import List, Dict, Any, Optional, Set, Tuple
+import os
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
-from apis.notion import get_today_tasks, get_pr_links
-from apis.slack import get_slack_users, send_slack_message
+from notion_client import Client as NotionClient
+from slack_sdk import WebClient
 
-# Notion과 Slack 설정
-NOTION_DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
-SLACK_CHANNEL_ID: str = 'C02VA2LLXH9'
 
-def get_slack_user_id(notion_user_email: str, slack_users: List[Dict[str, Any]]) -> Optional[str]:
-    """노션 사용자 이메일을 기반으로 Slack 사용자 ID를 찾습니다."""
-    for user in slack_users:
-        profile: Dict[str, Any] = user.get('profile', {})
-        slack_user_email: Optional[str] = profile.get('email')
-        if slack_user_email and slack_user_email.lower() == notion_user_email.lower():
-            return user['id']
-    return None
+NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
+
+
+def get_slack_user_map(slack_client: WebClient) -> Dict[str, str]:
+    """
+    Slack의 사용자 목록을 가져와서 이메일 -> Slack user_id 매핑 딕셔너리를 반환합니다.
+    """
+    email_to_slack_id = {}
+    cursor = None
+
+    while True:
+        response = slack_client.users_list(cursor=cursor)
+        members = response.get("members", [])
+
+        for member in members:
+            profile = member.get("profile", {})
+            email = profile.get("email")
+            if email:
+                email_to_slack_id[email.lower()] = member["id"]
+
+        cursor = response.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    return email_to_slack_id
+
+def get_pr_links(pr_relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
+    pr_links_info: List[Dict[str, Any]] = []
+    for relation in pr_relations:
+        pr_page_id: str = relation['id']
+        pr_page: Dict[str, Any] = get_page(pr_page_id)
+        properties: Dict[str, Any] = pr_page['properties']
+
+        url_property: Dict[str, Any] = properties.get('_external_object_url', {})
+        if 'url' in url_property and url_property['url']:
+            pr_url: str = url_property['url']
+            # 'Merged At' 필드에서 병합 여부 추출
+            merged_at_property: Dict[str, Any] = properties.get('Merged At', {})
+            is_merged: bool = False
+            if merged_at_property.get('date') and merged_at_property['date'].get('start'):
+                is_merged = True
+            pr_links_info.append({
+                'url': pr_url,
+                'merged': is_merged
+            })
+        else:
+            # URL 속성이 없는 경우 처리 로직을 추가할 수 있습니다.
+            pass
+    return pr_links_info
 
 def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
     """PR 링크를 포맷하고 레포지토리 이름을 추출하며 병합 상태에 따라 이모지를 추가합니다."""
@@ -78,53 +104,81 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         # 예상되는 형식이 아닐 경우 원래 URL 반환
         return pr_url, None
 
-def main() -> None:
-    tasks: List[Dict[str, Any]] = get_today_tasks(NOTION_DATABASE_ID)
+
+def main_deploy_script():
+    """
+    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업을 가져오고
+    2) 담당자를 이메일로 매핑해서 Slack 멘션
+    3) GitHub PR 링크 파싱
+    4) 한 번에 정리된 메시지를 Slack에 전송
+    """
+    notion = NotionClient(auth=os.environ["NOTION_API_KEY"])
+    slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    email_to_slack_id = get_slack_user_map(slack_client)
+
+    today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
+
+    # 1) 오늘 배포할 과업 목록 조회
+    #    여기서는 예시로 '배포 예정 날짜'라는 Date 속성이 있고, 여기에 오늘 날짜가 'equals'로 설정된 경우를 가져온다고 가정
+    query_result = notion.databases.query(
+        **{
+            "database_id": NOTION_DATABASE_ID,
+            "filter": {
+                "property": "배포 예정 날짜",
+                "date": {
+                    "equals": today_str
+                }
+            },
+        }
+    )
+
+    tasks = query_result.get("results", [])
     if not tasks:
+        # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?"
+        )
         print("No tasks scheduled for deployment today.")
-        send_slack_message(SLACK_CHANNEL_ID, "오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?")
         return
 
-    # Slack 사용자 목록을 한 번만 가져옵니다.
-    slack_users: List[Dict[str, Any]] = get_slack_users()
-
-    # 배포해야 할 레포지토리 이름을 저장할 집합
+    # 여러 PR에서 뽑은 레포지토리들
     repos_to_deploy: Set[str] = set()
 
-    message: str = "오늘 배포 예정 과업!\n"
-    for task in tasks:
-        properties: Dict[str, Any] = task['properties']
+    # 메시지 헤더
+    message = "오늘 배포 예정 과업!\n"
 
-        # 담당자 정보 가져오기
-        assignees: List[Dict[str, Any]] = properties.get('담당자', {}).get('people', [])
+    for task in tasks:
+        props = task["properties"]
+
+        # 2) 담당자(people 속성)에서 이메일을 추출하여 Slack 멘션 처리
+        assignees = props.get("담당자", {}).get("people", [])
         if assignees:
-            assignee: Dict[str, Any] = assignees[0]
-            notion_user_email: Optional[str] = assignee.get('person', {}).get('email')
-            if notion_user_email:
-                slack_user_id: Optional[str] = get_slack_user_id(notion_user_email, slack_users)
+            notion_email = assignees[0].get("person", {}).get("email")
+            if notion_email:
+                slack_user_id = email_to_slack_id.get(notion_email)
                 if slack_user_id:
-                    assignee_mention: str = f"<@{slack_user_id}>"
+                    assignee_mention = f"<@{slack_user_id}>"
                 else:
-                    assignee_mention = notion_user_email
+                    assignee_mention = notion_email
             else:
                 assignee_mention = "Unknown Email"
         else:
             assignee_mention = "Unassigned"
 
-        # 과업 제목 가져오기
-        title_property: Dict[str, Any] = properties.get('제목', {})
-        if 'title' in title_property and title_property['title']:
-            task_title: str = title_property['title'][0]['plain_text']
+        # 3) 과업 제목, 노션 페이지 링크
+        title_prop = props.get("제목", {})
+        if "title" in title_prop and title_prop["title"]:
+            task_title = title_prop["title"][0]["plain_text"]
         else:
             task_title = "No Title"
 
-        # 노션 페이지 URL 생성
-        task_id: str = task['id']
-        notion_page_url: str = f"https://www.notion.so/{task_id.replace('-', '')}"
-        task_title_link: str = f"<{notion_page_url}|{task_title}>"
+        # 노션 페이지 URL
+        notion_page_url = task["url"]
+        task_title_link = f"<{notion_page_url}|{task_title}>"
 
-        # PR 링크 가져오기
-        pr_link_property: Dict[str, Any] = properties.get('GitHub 풀 리퀘스트', {})
+        # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
+        pr_link_property: Dict[str, Any] = props.get('GitHub 풀 리퀘스트', {})
         pr_relations: List[Dict[str, Any]] = pr_link_property.get('relation', [])
         pr_links_info: List[Dict[str, Any]] = get_pr_links(pr_relations)
 
@@ -142,14 +196,16 @@ def main() -> None:
         message_line: str = f"{assignee_mention} {task_title_link} ({pr_links_str})\n"
         message += message_line
 
+    # 레포지토리 안내 추가
     if repos_to_deploy:
         message += "\n아래의 레포지토리를 배포해주세요 :ship:\n"
         for repo in sorted(repos_to_deploy):
             message += f"• {repo}\n"
 
-    # 슬랙에 메시지 전송
-    send_slack_message(SLACK_CHANNEL_ID, message)
+    # 최종 메시지 전송
+    slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=message)
     print("Message sent to Slack.")
 
+
 if __name__ == "__main__":
-    main()
+    main_deploy_script()
