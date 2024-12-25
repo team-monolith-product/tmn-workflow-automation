@@ -1,0 +1,19 @@
+name: Build Workflow Automation Slack
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+
+  build:
+    uses: team-monolith-product/tmn-gh-actions/.github/workflows/build.yml@main
+    with:
+      env: prd
+      target: main
+      awsImageName: jce-ecr-workflow-automation-slack-all-prd
+      awsValueFilePath: workflow-automation-slack/prd.yaml
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      MACHINE_TOKEN: ${{ secrets.MACHINE_TOKEN }}
