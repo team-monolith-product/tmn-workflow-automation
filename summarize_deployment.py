@@ -59,12 +59,12 @@ def get_slack_user_map(slack_client: WebClient) -> Dict[str, str]:
 
     return email_to_slack_id
 
-def get_pr_links(pr_relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def get_pr_links(notion: NotionClient, pr_relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
     pr_links_info: List[Dict[str, Any]] = []
     for relation in pr_relations:
         pr_page_id: str = relation['id']
-        pr_page: Dict[str, Any] = get_page(pr_page_id)
+        pr_page: Dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
         properties: Dict[str, Any] = pr_page['properties']
 
         url_property: Dict[str, Any] = properties.get('_external_object_url', {})
@@ -180,7 +180,7 @@ def main_deploy_script():
         # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
         pr_link_property: Dict[str, Any] = props.get('GitHub 풀 리퀘스트', {})
         pr_relations: List[Dict[str, Any]] = pr_link_property.get('relation', [])
-        pr_links_info: List[Dict[str, Any]] = get_pr_links(pr_relations)
+        pr_links_info: List[Dict[str, Any]] = get_pr_links(notion, pr_relations)
 
         # PR 링크 포맷 및 레포지토리 이름 수집
         formatted_pr_links: List[str] = []
