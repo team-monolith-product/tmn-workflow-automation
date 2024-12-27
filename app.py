@@ -1,12 +1,14 @@
-import os
 from datetime import datetime
+import json
+import os
+from typing import Literal
+
 from dotenv import load_dotenv
+from notion_client import Client as NotionClient
+from openai import OpenAI
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-
-from openai import OpenAI
-from notion_client import Client as NotionClient
-import json
+from md2notionpage.core import parse_md
 
 # 환경 변수 로드
 load_dotenv()
@@ -24,8 +26,28 @@ PROJECT_TO_PAGE_ID = {
     "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
 }
 
+def create_notion_task(
+    title: str,
+    task_type: Literal["작업 🔨", "버그 🐞"],
+    component: Literal["Front", "Back", "Infra", "Data", "Plan", "AI"],
+    project: Literal["유지보수", "기술개선", "경험개선", "오픈소스"],
+    blocks: str | None,
+    thread_url: str
+) -> str:
+    """
+    노션에 새로운 과업을 생성한다.
 
-def create_notion_task(title, task_type, component, project, thread_url):
+    Args:
+        title: 과업의 제목
+        task_type: 과업의 유형 (작업 🔨, 버그 🐞)
+        component: 과업의 구성요소 (Front, Back, Infra, Data, Plan, AI)
+        project: 과업이 속한 프로젝트 (유지보수, 기술개선, 경험개선, 오픈소스)
+        blocks: 노션 블록으로 작성될 마크다운 형식의 문자열
+        thread_url: Slack 스레드 링크
+    
+    Returns:
+        생성된 노션 페이지의 URL
+    """
     response = notion.pages.create(
         parent={"database_id": DATABASE_ID},
         properties={
@@ -81,6 +103,26 @@ def create_notion_task(title, task_type, component, project, thread_url):
             ]
         )
 
+    if blocks:
+        for block in parse_md(blocks):
+            notion.blocks.children.append(
+                page_id,
+                children=[block]
+            )
+        
+        # 템플릿의 나머지 영역을 블록으로 추가
+        template = """
+        # 작업 내용
+
+        # 검증
+
+        """
+        for block in parse_md(template):
+            notion.blocks.children.append(
+                page_id,
+                children=[block]
+            )
+
     return response["url"]
 
 
@@ -121,6 +163,7 @@ def update_notion_task_deadline(page_id: str, new_deadline: str):
         }
     )
 
+
 def update_notion_task_status(page_id: str, new_status: str):
     """
     기존 노션 페이지의 '상태' 필드를 업데이트한다.
@@ -137,6 +180,7 @@ def update_notion_task_status(page_id: str, new_status: str):
             }
         }
     )
+
 
 # OpenAI 함수 정의
 functions = [
@@ -165,6 +209,18 @@ functions = [
                     "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"],
                     "description": "과업이 속한 프로젝트"
                 },
+                "blocks": {
+                    "type": "string",
+                    "description": (
+                        "과업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
+                        "# 슬랙 대화 요약\n"
+                        "_슬랙 대화 내용을 요약하여 작성한다._\n"
+                        "# 기획\n"
+                        "_과업 배경, 요구 사항 등을 정리하여 작성한다._\n"
+                        "# 의견\n"
+                        "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 과업을 해결하기 위한 기술적 방향을 제시._\n"
+                    ),
+                }
             },
             "required": ["title", "task_type", "component"]
         }
@@ -213,7 +269,7 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 
 
 @app.event("app_mention")
-def event_test(body, say, logger):
+def app_mention(body, say, logger):
     thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
     channel = body["event"]["channel"]
 
@@ -281,6 +337,7 @@ def event_test(body, say, logger):
                 task_type=arguments.get("task_type"),
                 component=arguments.get("component"),
                 project=arguments.get("project"),
+                blocks=arguments.get("blocks"),
                 thread_url=slack_thread_url
             )
             say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}",
@@ -298,11 +355,11 @@ def event_test(body, say, logger):
         elif function_name == "update_notion_task_status":
             notion_page_id = arguments.get("task_id")
             new_status = arguments.get("new_status")
-            
+
             # 새로 만든 함수 호출
             update_notion_task_status(notion_page_id, new_status)
 
-            say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.", 
+            say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
                 thread_ts=thread_ts)
     else:
         say(response_message.content, thread_ts=thread_ts)

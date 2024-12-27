@@ -2,3 +2,4 @@ python-dotenv
 slack-bolt
 openai
 notion-client
+md2notionpage
