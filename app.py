@@ -1,19 +1,24 @@
+"""
+슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 과업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
+"""
 from datetime import datetime
 import json
 import os
 from typing import Literal
 
+from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from openai import OpenAI
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk import WebClient
 from md2notionpage.core import parse_md
 
 # 환경 변수 로드
 load_dotenv()
 
-client = OpenAI()
+openai_client = OpenAI()
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
@@ -25,6 +30,7 @@ PROJECT_TO_PAGE_ID = {
     "경험개선": "12d1cc820da68005a4b4fdb6f7221ff3",
     "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
 }
+
 
 def create_notion_task(
     title: str,
@@ -44,7 +50,7 @@ def create_notion_task(
         project: 과업이 속한 프로젝트 (유지보수, 기술개선, 경험개선, 오픈소스)
         blocks: 노션 블록으로 작성될 마크다운 형식의 문자열
         thread_url: Slack 스레드 링크
-    
+
     Returns:
         생성된 노션 페이지의 URL
     """
@@ -109,7 +115,7 @@ def create_notion_task(
                 page_id,
                 children=[block]
             )
-        
+
         # 템플릿의 나머지 영역을 블록으로 추가
         template = """# 작업 내용
 
@@ -179,6 +185,14 @@ def update_notion_task_status(page_id: str, new_status: str):
             }
         }
     )
+
+
+@cached(TTLCache(maxsize=100, ttl=3600))
+def users_list(client: WebClient):
+    """
+    사용자 목록을 조회한다.
+    """
+    return client.users_list()
 
 
 # OpenAI 함수 정의
@@ -268,7 +282,10 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 
 
 @app.event("app_mention")
-def app_mention(body, say, logger):
+def app_mention(body, say, _logger):
+    """
+    슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
+    """
     thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
     channel = body["event"]["channel"]
 
@@ -283,7 +300,7 @@ def app_mention(body, say, logger):
     user_ids.add(body["event"]["user"])
 
     # 사용자 정보 일괄 조회
-    user_info_list = app.client.users_list()
+    user_info_list = users_list(app.client)
     user_dict = {
         user["id"]: user["real_name"]
         for user in user_info_list["members"]
@@ -307,7 +324,11 @@ def app_mention(body, say, logger):
     threads_joined = '\n\n'.join(threads)
     messages.append({
         "role": "user",
-        "content": f"{threads_joined}\n위는 슬랙에서 진행된 대화이다. {user_name}이(가) 너에게 위 대화에 기반하여 다음과 같이 질문하니 답변하여라.\n{body['event']['text']}"
+        "content": (
+            f"{threads_joined}\n"
+            f"위는 슬랙에서 진행된 대화이다. {user_name}이(가) 너에게 위 대화에 기반하여 다음과 같이 질문하니 답변하여라.\n"
+            f"{body['event']['text']}\n"
+        )
     })
 
     # Slack 스레드 링크 만들기
@@ -315,9 +336,10 @@ def app_mention(body, say, logger):
     # thread_ts는 보통 소수점 형태 ex) 1690891234.123456이므로 '.' 제거
     slack_workspace = "monolith-keb2010"  # 실제 워크스페이스 도메인으로 변경 필요
     thread_ts_for_link = thread_ts.replace('.', '')
-    slack_thread_url = f"https://{slack_workspace}.slack.com/archives/{channel}/p{thread_ts_for_link}"
+    slack_thread_url = (f"https://{slack_workspace}.slack.com"
+                        f"/archives/{channel}/p{thread_ts_for_link}")
 
-    chat_completion = client.chat.completions.create(
+    chat_completion = openai_client.chat.completions.create(
         messages=messages,
         model="gpt-4o",
         functions=functions,
