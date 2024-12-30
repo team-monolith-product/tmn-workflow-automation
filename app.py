@@ -235,7 +235,7 @@ functions = [
                     ),
                 }
             },
-            "required": ["title", "task_type", "component"]
+            "required": ["title", "task_type", "component", "project"]
         }
     },
     {
