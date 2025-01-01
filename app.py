@@ -37,6 +37,7 @@ def create_notion_task(
     task_type: Literal["작업 🔨", "버그 🐞"],
     component: Literal["Front", "Back", "Infra", "Data", "Plan", "AI"],
     project: Literal["유지보수", "기술개선", "경험개선", "오픈소스"],
+    assignee_id: str | None,
     blocks: str | None,
     thread_url: str
 ) -> str:
@@ -89,6 +90,13 @@ def create_notion_task(
                 "status": {
                     "name": "대기"
                 }
+            },
+            "담당자": {
+                "people": [
+                    {
+                        "id": assignee_id
+                    }
+                ]
             }
         }
     )
@@ -188,12 +196,18 @@ def update_notion_task_status(page_id: str, new_status: str):
 
 
 @cached(TTLCache(maxsize=100, ttl=3600))
-def users_list(client: WebClient):
+def slack_users_list(client: WebClient):
     """
-    사용자 목록을 조회한다.
+    슬랙 사용자 목록을 조회한다.
     """
     return client.users_list()
 
+@cached(TTLCache(maxsize=100, ttl=3600))
+def notion_users_list(client: NotionClient):
+    """
+    노션 사용자 목록을 조회한다.
+    """
+    return client.users.list()
 
 # OpenAI 함수 정의
 functions = [
@@ -284,7 +298,7 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 
 
 @app.event("app_mention")
-def app_mention(body, say, _logger):
+def app_mention(body, say):
     """
     슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
     """
@@ -302,33 +316,41 @@ def app_mention(body, say, _logger):
     user_ids.add(body["event"]["user"])
 
     # 사용자 정보 일괄 조회
-    user_info_list = users_list(app.client)
+    user_info_list = slack_users_list(app.client)
     user_dict = {
-        user["id"]: user["real_name"]
-        for user in user_info_list["members"]
+        user["id"]: user for user in user_info_list["members"]
         if user["id"] in user_ids
     }
 
     today_str = datetime.now().strftime('%Y-%m-%d(%A)')
     messages = [{
         "role": "system",
-        "content": f"You are a helpful assistant who is integrated in Slack. "
-                f"We are a edu-tech startup in Korea. Always answer in Korean. "
-                f"Today's date is {today_str}"
+        "content": (
+            f"You are a helpful assistant who is integrated in Slack. "
+            f"We are a edu-tech startup in Korea. Always answer in Korean. "
+            f"Today's date is {today_str}"
+        )
     }]
 
     threads = []
     for message in result["messages"]:
-        user_name = user_dict.get(message["user"], "Unknown")
-        threads.append(f"{user_name}:\n{message['text']}")
+        slack_user_id = message["user"]
+        user_profile = user_dict.get(slack_user_id, {})
+        user_real_name = user_profile.get("real_name", "Unknown")
+        text = message["text"]
+        threads.append(f"{user_real_name}:\n{text}")
 
-    user_name = user_dict.get(body["event"]["user"], "Unknown")
-    threads_joined = '\n\n'.join(threads)
+    # 최종 질의한 사용자 정보
+    slack_user_id = body["event"]["user"]
+    user_profile = user_dict.get(slack_user_id, {})
+    user_real_name = user_profile.get("real_name", "Unknown")
+
+    threads_joined = "\n\n".join(threads)
     messages.append({
         "role": "user",
         "content": (
             f"{threads_joined}\n"
-            f"위는 슬랙에서 진행된 대화이다. {user_name}이(가) 너에게 위 대화에 기반하여 다음과 같이 질문하니 답변하여라.\n"
+            f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
             f"{body['event']['text']}\n"
         )
     })
@@ -340,6 +362,21 @@ def app_mention(body, say, _logger):
     thread_ts_for_link = thread_ts.replace('.', '')
     slack_thread_url = (f"https://{slack_workspace}.slack.com"
                         f"/archives/{channel}/p{thread_ts_for_link}")
+
+    user_email = user_profile.get("profile", {}).get("email")
+
+    notion_users = notion_users_list(notion)
+
+    # 이메일이 slack_email인 Notion 사용자 찾기
+    matched_notion_user = next(
+        (
+            user for user in notion_users["results"]
+            if user["type"] == "person" and user["person"]["email"] == user_email
+        ),
+        None
+    )
+
+    notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
 
     chat_completion = openai_client.chat.completions.create(
         messages=messages,
@@ -360,6 +397,7 @@ def app_mention(body, say, _logger):
                 task_type=arguments.get("task_type"),
                 component=arguments.get("component"),
                 project=arguments.get("project"),
+                assignee_id=notion_assignee_id,
                 blocks=arguments.get("blocks"),
                 thread_url=slack_thread_url
             )
