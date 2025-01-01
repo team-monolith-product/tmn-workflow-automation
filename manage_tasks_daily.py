@@ -11,6 +11,7 @@ load_dotenv()
 DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
 CHANNEL_ID: str = 'C02F56PACF7'
 
+
 def main():
     notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -119,9 +120,13 @@ def alert_overdue_tasks(
     for result in results.get("results", []):
         task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
         page_url = result["url"]
-        assignee_email = result["properties"]["담당자"]["people"][0]["person"]["email"]
+        people = result["properties"]["담당자"]["people"]
+        if people:
+            assignee_email = people[0]["person"]["email"]
+            slack_user_id = email_to_slack_id.get(assignee_email)
+        else:
+            slack_user_id = None
 
-        slack_user_id = email_to_slack_id.get(assignee_email)
         if slack_user_id:
             text = f"과업 <{page_url}|{task_name}>이(가) 기한이 지났습니다. <@{slack_user_id}> 확인 부탁드립니다."
         else:
@@ -186,9 +191,13 @@ def alert_no_due_tasks(
     for result in results.get("results", []):
         task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
         page_url = result["url"]
-        assignee_email = result["properties"]["담당자"]["people"][0]["person"]["email"]
+        people = result["properties"]["담당자"]["people"]
+        if people:
+            assignee_email = people[0]["person"]["email"]
+            slack_user_id = email_to_slack_id.get(assignee_email)
+        else:
+            slack_user_id = None
 
-        slack_user_id = email_to_slack_id.get(assignee_email)
         if slack_user_id:
             text = (
                 f"과업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있습니다."
@@ -267,7 +276,8 @@ def alert_no_tasks(
         )
         return
 
-    e_group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
+    e_group_users_response = slack_client.usergroups_users_list(
+        usergroup=usergroup_id)
     e_user_ids = e_group_users_response.get("users", [])
 
     # 4. email_to_slack_id는 "email -> slack user id" 매핑이므로,
