@@ -246,7 +246,8 @@ functions = [
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "노션 페이지 ID (ex: '12d1cc82...')"
+                    "description": "노션 페이지 ID (ex: '12d1cc82...')",
+                    "pattern": "^[a-f0-9]{32}$"
                 },
                 "new_deadline": {
                     "type": "string",
@@ -264,7 +265,8 @@ functions = [
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "노션 페이지 ID (ex: '12d1cc82...')"
+                    "description": "노션 페이지 ID (ex: '12d1cc82...')",
+                    "pattern": "^[a-f0-9]{32}$"
                 },
                 "new_status": {
                     "type": "string",
