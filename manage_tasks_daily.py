@@ -9,7 +9,7 @@ from slack_sdk import WebClient
 load_dotenv()
 
 DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
-CHANNEL_ID: str = 'C02F56PACF7'
+CHANNEL_ID: str = 'C087PDC9VG8'
 
 
 def main():
