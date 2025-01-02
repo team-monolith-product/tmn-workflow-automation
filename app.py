@@ -333,9 +333,12 @@ def app_mention(body, say):
 
     threads = []
     for message in result["messages"]:
-        slack_user_id = message["user"]
-        user_profile = user_dict.get(slack_user_id, {})
-        user_real_name = user_profile.get("real_name", "Unknown")
+        slack_user_id = message.get("user", None)
+        if slack_user_id:
+            user_profile = user_dict.get(slack_user_id, {})
+            user_real_name = user_profile.get("real_name", "Unknown")
+        else:
+            user_real_name = "Bot"
         text = message["text"]
         threads.append(f"{user_real_name}:\n{text}")
 
