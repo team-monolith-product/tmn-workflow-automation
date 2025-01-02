@@ -311,7 +311,7 @@ def app_mention(body, say):
     )
 
     # 메시지에서 사용자 ID를 수집
-    user_ids = set(message["user"] for message in result["messages"])
+    user_ids = set(message["user"] for message in result["messages"] if "user" in message)
     user_ids.add(body["event"]["user"])
 
     # 사용자 정보 일괄 조회
