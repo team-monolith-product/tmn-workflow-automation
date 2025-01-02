@@ -193,26 +193,6 @@ def update_notion_task_status(page_id: str, new_status: str):
         }
     )
 
-def create_slack_reminder(user_id: str, text: str, remind_time: str) -> dict:
-    """
-    Slack reminders.add 메서드를 호출하여 특정 사용자에게 리마인더를 등록한다.
-
-    Args:
-        user_id (str): 리마인더를 받을 사용자의 Slack ID
-        text (str): 리마인더 내용
-        remind_time (str): Can also take a type of integer. When this reminder should happen: the Unix timestamp (up to five years from now), the number of seconds until the reminder (if within 24 hours), or a natural language description (Ex. "in 15 minutes," or "every Thursday")
-    
-    Returns:
-        dict: Slack API 호출 결과
-    """
-    # Slack WebClient를 통해 reminders.add 메서드 호출
-    # (bot token으로 접근 시, 해당 기능이 허용되는 권한 범위(scopes) 확인 필요)
-    response = app.client.reminders_add(
-        text=text,
-        time=remind_time,
-        user=user_id
-    )
-    return response
 
 @cached(TTLCache(maxsize=100, ttl=3600))
 def slack_users_list(client: WebClient):
@@ -308,27 +288,6 @@ functions = [
                 }
             },
             "required": ["task_id", "new_status"]
-        }
-    },
-    {
-        "name": "create_slack_reminder",
-        "description": "지정된 사용자에게 Slack 리마인더를 등록합니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "리마인더 내용. (예: 신규 분기 과업에 대해 논의하기)"
-                },
-                "remind_time": {
-                    "type": "string",
-                    "description": (
-                        "언제 리마인드를 받을지 나타내는 문자열. "
-                        "자연어(in 10 minutes, tomorrow, every Monday, next Friday) 또는 '2025-01-02 10:00' 같은 구체적 날짜"
-                    )
-                }
-            },
-            "required": ["text", "remind_time"]
         }
     }
 ]
@@ -462,18 +421,6 @@ def app_mention(body, say):
 
             say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
                 thread_ts=thread_ts)
-        elif function_name == "create_slack_reminder":
-            # 새로 추가된 함수 호출 처리
-            text = arguments.get("text")
-            remind_time = arguments.get("remind_time")
-            create_slack_reminder(slack_user_id, text, remind_time)
-
-            # 사용자에게 알림
-            say(
-                f"<@{slack_user_id}>님에게 다음 내용으로 리마인더를 등록했습니다:\n"
-                f"- 내용: {text}\n"
-                f"- 시점: {remind_time}\n"
-            )
     else:
         say(response_message.content, thread_ts=thread_ts)
 
