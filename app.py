@@ -23,11 +23,10 @@ openai_client = OpenAI()
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
 DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
-
 PROJECT_TO_PAGE_ID = {
     "유지보수": "16f1cc820da68045a972c1da9a72f335",
-    "기술개선": "12d1cc820da68060b803eb9c0904e40c",
-    "경험개선": "12d1cc820da68005a4b4fdb6f7221ff3",
+    "기술개선": "16f1cc820da680c99d35dde36ad2f7f2",
+    "경험개선": "16f1cc820da6809fb2d3dc7f91401c1d",
     "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
 }
 
