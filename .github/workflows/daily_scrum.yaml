@@ -24,5 +24,7 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          WANTEDSPACE_API_KEY: ${{ secrets.WANTEDSPACE_API_KEY }}
+          WANTEDSPACE_API_SECRET: ${{ secrets.WANTEDSPACE_API_SECRET }}
         run: |
           python daily_scrum.py

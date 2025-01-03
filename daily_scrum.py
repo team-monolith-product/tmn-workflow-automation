@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 
+import requests
 from slack_sdk import WebClient
 
 # 환경 변수 로드
@@ -31,6 +32,16 @@ emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊"
 
 def daily_scrum():
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+
+    # 1) 원티드스페이스에서 오늘자 WorkEvent(휴가/외근)를 받아옵니다.
+    work_events = get_wantedspace_workevent().get('results', [])
+    email_to_event = {}
+    for event in work_events:
+        email = event.get('email')
+        event_name = event.get('event_name')
+        if email and event_name:
+            # 여러 건이 있을 수도 있으나, 보통은 하나만 쓰면 되므로 간단하게 처리
+            email_to_event[email] = event_name
 
     # Slack 사용자 목록 가져오기
     user_ids = slack_client.conversations_members(
@@ -67,7 +78,17 @@ def daily_scrum():
         user_info = user_id_to_user_info[user_id]
         user_name = user_info.get('real_name', 'Unknown User')
         emoji = random.choice(emojis)
-        content += f"- [ ] {user_name} {emoji}\n"
+
+        user_profile = user_info.get('profile', {})
+        user_email = user_profile.get('email', "")
+
+        # ex) '연차(오후)'
+        event_reason = email_to_event.get(user_email, "")  
+
+        if event_reason:
+            content += f"- [ ] {user_name} {emoji} - {event_reason}\n"
+        else:
+            content += f"- [ ] {user_name} {emoji}\n"
 
     # 캔버스 편집
     slack_client.canvases_edit(
@@ -80,6 +101,51 @@ def daily_scrum():
         }
     }]
     )
+
+
+def get_wantedspace_workevent():
+    """
+    Args:
+        None
+
+    Returns:
+        {
+            "next": None,
+            "previous": None,
+            "count": 3,
+            "results": [
+                {
+                    "wk_start_date": "2025-01-03",
+                    "wk_end_date": "2025-01-03",
+                    "event_name": "연차(오후)",
+                    "wk_counted_days": 0.5,
+                    "wk_alter_days": 0.0,
+                    "wk_comp_days": 0.0,
+                    "status": "INFORMED",
+                    "wk_location": "",
+                    "wk_comment": "",
+                    "username": "김바바",
+                    "email": "kpapa@team-mono.com",
+                    "eid": "",
+                    "evt_start_time": "13:00:00",
+                    "evt_end_time": "17:00:00",
+                    "wk_event": "WNS_VACATION_PM",
+                    "applied_days": 1
+                },
+                ...
+            ]
+        }
+    """
+    url = 'https://api.wantedspace.ai/tools/openapi/workevent/'
+    query = {
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'key': os.environ.get('WANTEDSPACE_API_KEY')
+    }
+    headers = {
+        'Authorization': os.environ.get('WANTEDSPACE_API_SECRET')
+    }
+    response = requests.get(url, params=query, headers=headers, timeout=10)
+    return response.json()
 
 if __name__ == "__main__":
     daily_scrum()

@@ -4,3 +4,4 @@ openai
 notion-client
 md2notionpage
 cachetools
+requests
