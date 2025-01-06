@@ -18,6 +18,7 @@ def main():
 
     email_to_slack_id = get_slack_user_map(slack_client)
 
+    send_intro_message(slack_client, CHANNEL_ID)
     alert_overdue_tasks(
         notion,
         slack_client,
@@ -61,6 +62,27 @@ def get_slack_user_map(slack_client: WebClient):
 
     return email_to_slack_id
 
+
+def send_intro_message(
+    slack_client: WebClient,
+    channel_id: str,
+):
+    """
+    지연된 과업에 대한 인트로 메시지를 전송하는 함수
+
+    Args:
+        slack_client (WebClient): Slack
+        channel_id (str): Slack channel id
+
+    Returns:
+        None
+    """
+    intro_message = (
+        "좋은 아침입니다! \n"
+        "아래 지연된 과업에 대해 적절한 사유를 댓글로 남기고, 로봇을 통해 일정을 변경해주시길 부탁드립니다.\n"
+        "항상 협조해 주셔서 감사합니다."
+    )
+    slack_client.chat_postMessage(channel=channel_id, text=intro_message)
 
 def alert_overdue_tasks(
     notion: NotionClient,
