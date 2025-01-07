@@ -10,7 +10,8 @@ from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
-from openai import OpenAI
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
+from langchain_openai import ChatOpenAI
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
@@ -18,8 +19,6 @@ from md2notionpage.core import parse_md
 
 # 환경 변수 로드
 load_dotenv()
-
-openai_client = OpenAI()
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
@@ -362,14 +361,15 @@ def app_mention(body, say):
     }
 
     today_str = datetime.now().strftime('%Y-%m-%d(%A)')
-    messages = [{
-        "role": "system",
-        "content": (
-            f"You are a helpful assistant who is integrated in Slack. "
-            f"We are a edu-tech startup in Korea. Always answer in Korean. "
-            f"Today's date is {today_str}"
-        )
-    }]
+
+    model = ChatOpenAI(model="gpt-4o")
+    model = model.bind_tools(tools)
+
+    messages: list[BaseMessage] = [SystemMessage(content=(
+        f"You are a helpful assistant who is integrated in Slack. "
+        f"We are a edu-tech startup in Korea. Always answer in Korean. "
+        f"Today's date is {today_str}"
+    ))]
 
     threads = []
     for message in result["messages"]:
@@ -388,14 +388,13 @@ def app_mention(body, say):
     user_real_name = user_profile.get("real_name", "Unknown")
 
     threads_joined = "\n\n".join(threads)
-    messages.append({
-        "role": "user",
-        "content": (
+    messages.append(HumanMessage(
+        content=(
             f"{threads_joined}\n"
             f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
             f"{body['event']['text']}\n"
         )
-    })
+    ))
 
     # Slack 스레드 링크 만들기
     # Slack 메시지 링크 형식: https://<workspace>.slack.com/archives/<channel_id>/p<message_ts>
@@ -422,21 +421,11 @@ def app_mention(body, say):
 
     should_terminate = False
     for _ in range(3):
-        chat_completion = openai_client.chat.completions.create(
-            messages=messages,
-            model="gpt-4o",
-            tools=tools
-        )
+        response = model.invoke(messages)
+        messages.append(response)
 
-        response_message = chat_completion.choices[0].message
-        messages.append({
-            "role": "assistant",
-            "content": response_message.content,
-            "tool_calls": response_message.tool_calls
-        })
-
-        if response_message.tool_calls:
-            for tool_call in response_message.tool_calls:
+        if response.tool_calls:
+            for tool_call in response.tool_calls:
                 function_name = tool_call.function.name
                 arguments = json.loads(tool_call.function.arguments)
 
@@ -472,13 +461,12 @@ def app_mention(body, say):
                 elif function_name == "get_notion_page":
                     notion_page_id = arguments.get("page_id")
                     page_data = get_notion_page(notion_page_id)
-                    messages.append({
-                        "role": "tool",
-                        "content": page_data,
-                        "tool_call_id": tool_call.id
-                    })
+                    messages.append(ToolMessage(
+                        content=page_data,
+                        tool_call_id=tool_call.id
+                    ))
         else:
-            say(response_message.content, thread_ts=thread_ts)
+            say(response.content, thread_ts=thread_ts)
             should_terminate = True
 
         if should_terminate:

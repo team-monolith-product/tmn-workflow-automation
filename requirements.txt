@@ -6,3 +6,5 @@ md2notionpage
 cachetools
 requests
 notion2md
+langchain-community
+langchain-openai
