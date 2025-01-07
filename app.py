@@ -9,8 +9,9 @@ from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import tool
+from langchain_community.agent_toolkits import SlackToolkit
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from slack_bolt import App
@@ -50,6 +51,9 @@ def notion_users_list(client: NotionClient):
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+
+# SlackToolkit이 요구함.
+os.environ["SLACK_USER_TOKEN"] = os.environ.get("SLACK_BOT_TOKEN")
 
 
 @app.event("app_mention")
@@ -316,7 +320,7 @@ def app_mention(body, say):
         노션 페이지를 마크다운 형태로 조회합니다.
         """
 
-        say(f"노션 페이지를 조회했습니다.", thread_ts=thread_ts)
+        say("노션 페이지를 조회했습니다.", thread_ts=thread_ts)
 
         return StringExporter(block_id=page_id, output_path="test").export()
 
@@ -325,7 +329,7 @@ def app_mention(body, say):
         update_notion_task_deadline,
         update_notion_task_status,
         get_notion_page
-    ])
+    ] + SlackToolkit().get_tools())
     response = agent_executor.invoke({"messages": messages})
     messages = response["messages"]
 
