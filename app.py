@@ -351,8 +351,7 @@ def app_mention(body, say):
                         thread_ts=thread_ts)
                     should_terminate = True
                 elif function_name == "get_notion_page":
-                    notion_page_id = arguments.get("page_id")
-                    page_data = get_notion_page(notion_page_id)
+                    page_data = get_notion_page.invoke(arguments)
                     messages.append(ToolMessage(
                         content=page_data,
                         tool_call_id=tool_call['id']
