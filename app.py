@@ -239,7 +239,7 @@ def app_mention(body, say):
                     children=[block]
                 )
 
-        say(f"노션에 과업 '{title}'이 생성되었습니다.\n링크: {response["url"]}",
+        say(f"노션에 과업 '{title}'이 생성되었습니다.\n링크: {response['url']}",
             thread_ts=thread_ts)
 
         return response["url"]
