@@ -426,8 +426,8 @@ def app_mention(body, say):
 
         if response.tool_calls:
             for tool_call in response.tool_calls:
-                function_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments)
+                function_name = tool_call['name']
+                arguments = json.loads(tool_call['args'])
 
                 if function_name == "create_notion_task":
                     task_url = create_notion_task(
