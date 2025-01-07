@@ -2,7 +2,6 @@
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 과업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
 from datetime import datetime
-import json
 import os
 from typing import Literal
 
@@ -427,7 +426,7 @@ def app_mention(body, say):
         if response.tool_calls:
             for tool_call in response.tool_calls:
                 function_name = tool_call['name']
-                arguments = json.loads(tool_call['args'])
+                arguments = tool_call['args']
 
                 if function_name == "create_notion_task":
                     task_url = create_notion_task(
