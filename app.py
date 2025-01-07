@@ -462,7 +462,7 @@ def app_mention(body, say):
                     page_data = get_notion_page(notion_page_id)
                     messages.append(ToolMessage(
                         content=page_data,
-                        tool_call_id=tool_call.id
+                        tool_call_id=tool_call['id']
                     ))
         else:
             say(response.content, thread_ts=thread_ts)
