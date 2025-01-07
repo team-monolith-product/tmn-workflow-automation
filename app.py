@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
-from langchain_core.tools import tool
+from langchain_core.tools import Tool, tool
 from langchain_community.agent_toolkits import SlackToolkit
+from langchain_google_community import GoogleSearchAPIWrapper
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from slack_bolt import App
@@ -55,6 +56,14 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 # SlackToolkit이 요구함.
 os.environ["SLACK_USER_TOKEN"] = os.environ.get("SLACK_BOT_TOKEN")
 
+
+search = GoogleSearchAPIWrapper()
+
+search_tool = Tool(
+    name="google_search",
+    description="Search Google for recent results.",
+    func=search.run,
+)
 
 @app.event("app_mention")
 def app_mention(body, say):
@@ -328,7 +337,8 @@ def app_mention(body, say):
         create_notion_task,
         update_notion_task_deadline,
         update_notion_task_status,
-        get_notion_page
+        get_notion_page,
+        search_tool
     ] + SlackToolkit().get_tools())
     response = agent_executor.invoke({"messages": messages})
     messages = response["messages"]

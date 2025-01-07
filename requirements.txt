@@ -9,3 +9,4 @@ notion2md
 langchain-community
 langchain-openai
 langgraph
+langchain-google-community
