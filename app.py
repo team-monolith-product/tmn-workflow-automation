@@ -9,6 +9,7 @@ from typing import Literal
 from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
+from notion2md.exporter.block import StringExporter
 from openai import OpenAI
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -48,6 +49,7 @@ def create_notion_task(
         task_type: 과업의 유형 (작업 🔨, 버그 🐞)
         component: 과업의 구성요소 (Front, Back, Infra, Data, Plan, AI)
         project: 과업이 속한 프로젝트 (유지보수, 기술개선, 경험개선, 오픈소스)
+        assignee_id: 노션에서 과업을 배정할 사용자 ID
         blocks: 노션 블록으로 작성될 마크다운 형식의 문자열
         thread_url: Slack 스레드 링크
 
@@ -194,12 +196,21 @@ def update_notion_task_status(page_id: str, new_status: str):
     )
 
 
+def get_notion_page(page_id: str):
+    """
+    노션 페이지를 조회한다.
+    page_id: 노션 페이지 ID (ex: '12d1cc82...')
+    """
+    return StringExporter(block_id=page_id, output_path="test").export()
+
+
 @cached(TTLCache(maxsize=100, ttl=3600))
 def slack_users_list(client: WebClient):
     """
     슬랙 사용자 목록을 조회한다.
     """
     return client.users_list()
+
 
 @cached(TTLCache(maxsize=100, ttl=3600))
 def notion_users_list(client: NotionClient):
@@ -208,86 +219,114 @@ def notion_users_list(client: NotionClient):
     """
     return client.users.list()
 
+
 # OpenAI 함수 정의
-functions = [
+tools = [
     {
-        "name": "create_notion_task",
-        "description": "노션에 새로운 과업을 생성합니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "과업의 제목"
+        "type": "function",
+        "function": {
+            "name": "create_notion_task",
+            "description": "노션에 새로운 과업을 생성합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "과업의 제목"
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "enum": ["작업 🔨", "버그 🐞"],
+                        "description": "과업의 유형"
+                    },
+                    "component": {
+                        "type": "string",
+                        "enum": ["Front", "Back", "Infra", "Data", "Plan", "AI"],
+                        "description": "과업의 구성요소"
+                    },
+                    "project": {
+                        "type": "string",
+                        "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"],
+                        "description": "과업이 속한 프로젝트"
+                    },
+                    "blocks": {
+                        "type": "string",
+                        "description": (
+                            "과업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
+                            "# 슬랙 대화 요약\n"
+                            "_슬랙 대화 내용을 요약하여 작성한다._\n"
+                            "# 기획\n"
+                            "_과업 배경, 요구 사항 등을 정리하여 작성한다._\n"
+                            "# 의견\n"
+                            "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 과업을 해결하기 위한 기술적 방향을 제시._\n"
+                        ),
+                    }
                 },
-                "task_type": {
-                    "type": "string",
-                    "enum": ["작업 🔨", "버그 🐞"],
-                    "description": "과업의 유형"
-                },
-                "component": {
-                    "type": "string",
-                    "enum": ["Front", "Back", "Infra", "Data", "Plan", "AI"],
-                    "description": "과업의 구성요소"
-                },
-                "project": {
-                    "type": "string",
-                    "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"],
-                    "description": "과업이 속한 프로젝트"
-                },
-                "blocks": {
-                    "type": "string",
-                    "description": (
-                        "과업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
-                        "# 슬랙 대화 요약\n"
-                        "_슬랙 대화 내용을 요약하여 작성한다._\n"
-                        "# 기획\n"
-                        "_과업 배경, 요구 사항 등을 정리하여 작성한다._\n"
-                        "# 의견\n"
-                        "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 과업을 해결하기 위한 기술적 방향을 제시._\n"
-                    ),
-                }
-            },
-            "required": ["title", "task_type", "component", "project"]
+                "required": ["title", "task_type", "component", "project"]
+            }
         }
     },
     {
-        "name": "update_notion_task_deadline",
-        "description": "노션 과업의 타입라인의 종료일을 업데이트합니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "노션 페이지 ID (ex: '12d1cc82...')",
-                    "pattern": "^[a-f0-9]{32}$"
+        "type": "function",
+        "function": {
+            "name": "update_notion_task_deadline",
+            "description": "노션 과업 타임라인의 종료일을 업데이트합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "노션 페이지 ID (ex: '12d1cc82...')",
+                        "pattern": "^[a-f0-9]{32}$"
+                    },
+                    "new_deadline": {
+                        "type": "string",
+                        "description": "새로운 기한 (YYYY-MM-DD 포맷)"
+                    }
                 },
-                "new_deadline": {
-                    "type": "string",
-                    "description": "새로운 기한 (YYYY-MM-DD 포맷)"
-                }
-            },
-            "required": ["task_id", "new_deadline"]
+                "required": ["task_id", "new_deadline"]
+            }
         }
     },
     {
-        "name": "update_notion_task_status",
-        "description": "노션 과업의 상태(예: 완료, 진행, 대기 등)를 변경합니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "노션 페이지 ID (ex: '12d1cc82...')",
-                    "pattern": "^[a-f0-9]{32}$"
+        "type": "function",
+        "function": {
+            "name": "update_notion_task_status",
+            "description": "노션 과업의 상태(예: 완료, 진행, 대기 등)를 변경합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "노션 페이지 ID (ex: '12d1cc82...')",
+                        "pattern": "^[a-f0-9]{32}$"
+                    },
+                    "new_status": {
+                        "type": "string",
+                        "enum": ["대기", "진행", "리뷰", "완료", "중단"],
+                        "description": "새로운 상태명"
+                    }
                 },
-                "new_status": {
-                    "type": "string",
-                    "enum": ["대기", "진행", "리뷰", "완료", "중단"],
-                    "description": "새로운 상태명"
-                }
-            },
-            "required": ["task_id", "new_status"]
+                "required": ["task_id", "new_status"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_notion_page",
+            "description": "노션 페이지를 조회합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id": {
+                        "type": "string",
+                        "description": "노션 페이지 ID (ex: '12d1cc82...')",
+                        "pattern": "^[a-f0-9]{32}$"
+                    }
+                },
+                "required": ["page_id"]
+            }
         }
     }
 ]
@@ -311,7 +350,8 @@ def app_mention(body, say):
     )
 
     # 메시지에서 사용자 ID를 수집
-    user_ids = set(message["user"] for message in result["messages"] if "user" in message)
+    user_ids = set(message["user"]
+                   for message in result["messages"] if "user" in message)
     user_ids.add(body["event"]["user"])
 
     # 사용자 정보 일괄 조회
@@ -380,52 +420,64 @@ def app_mention(body, say):
 
     notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
 
-    chat_completion = openai_client.chat.completions.create(
-        messages=messages,
-        model="gpt-4o",
-        functions=functions,
-        function_call="auto"
-    )
+    should_terminate = False
+    for _ in range(3):
+        chat_completion = openai_client.chat.completions.create(
+            messages=messages,
+            model="gpt-4o",
+            tools=tools
+        )
 
-    response_message = chat_completion.choices[0].message
+        response_message = chat_completion.choices[0].message
 
-    if response_message.function_call:
-        function_name = response_message.function_call.name
-        arguments = json.loads(response_message.function_call.arguments)
+        if response_message.tool_calls:
+            for tool_call in response_message.tool_calls:
+                function_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments)
 
-        if function_name == "create_notion_task":
-            task_url = create_notion_task(
-                title=arguments.get("title"),
-                task_type=arguments.get("task_type"),
-                component=arguments.get("component"),
-                project=arguments.get("project"),
-                assignee_id=notion_assignee_id,
-                blocks=arguments.get("blocks"),
-                thread_url=slack_thread_url
-            )
-            say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}",
-                thread_ts=thread_ts)
-        elif function_name == "update_notion_task_deadline":
-            # 새로 추가된 로직
-            notion_page_id = arguments.get("task_id")
-            new_deadline = arguments.get("new_deadline")
+                if function_name == "create_notion_task":
+                    task_url = create_notion_task(
+                        title=arguments.get("title"),
+                        task_type=arguments.get("task_type"),
+                        component=arguments.get("component"),
+                        project=arguments.get("project"),
+                        assignee_id=notion_assignee_id,
+                        blocks=arguments.get("blocks"),
+                        thread_url=slack_thread_url
+                    )
+                    say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}",
+                        thread_ts=thread_ts)
+                    should_terminate = True
+                elif function_name == "update_notion_task_deadline":
+                    notion_page_id = arguments.get("task_id")
+                    new_deadline = arguments.get("new_deadline")
 
-            # 실제 Notion 과업의 기한 업데이트
-            update_notion_task_deadline(notion_page_id, new_deadline)
+                    update_notion_task_deadline(notion_page_id, new_deadline)
+                    say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.",
+                        thread_ts=thread_ts)
+                    should_terminate = True
+                elif function_name == "update_notion_task_status":
+                    notion_page_id = arguments.get("task_id")
+                    new_status = arguments.get("new_status")
 
-            # 사용자에게 완료 메시지
-            say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.", thread_ts=thread_ts)
-        elif function_name == "update_notion_task_status":
-            notion_page_id = arguments.get("task_id")
-            new_status = arguments.get("new_status")
+                    update_notion_task_status(notion_page_id, new_status)
+                    say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
+                        thread_ts=thread_ts)
+                    should_terminate = True
+                elif function_name == "get_notion_page":
+                    notion_page_id = arguments.get("page_id")
+                    page_data = get_notion_page(notion_page_id)
+                    messages.append({
+                        "role": "tool",
+                        "content": page_data,
+                        "tool_call_id": tool_call.id
+                    })
+        else:
+            say(response_message.content, thread_ts=thread_ts)
+            should_terminate = True
 
-            # 새로 만든 함수 호출
-            update_notion_task_status(notion_page_id, new_status)
-
-            say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
-                thread_ts=thread_ts)
-    else:
-        say(response_message.content, thread_ts=thread_ts)
+        if should_terminate:
+            break
 
 
 # Start your app

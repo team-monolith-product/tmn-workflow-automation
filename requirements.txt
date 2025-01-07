@@ -5,3 +5,4 @@ notion-client
 md2notionpage
 cachetools
 requests
+notion2md
