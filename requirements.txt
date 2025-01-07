@@ -8,3 +8,4 @@ requests
 notion2md
 langchain-community
 langchain-openai
+langgraph

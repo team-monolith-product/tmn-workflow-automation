@@ -12,6 +12,7 @@ from notion2md.exporter.block import StringExporter
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
@@ -31,76 +32,6 @@ PROJECT_TO_PAGE_ID = {
 }
 
 
-@tool
-def update_notion_task_deadline(
-    page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-    new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"]
-):
-    """
-    기존 노션 페이지의 종료일(date)을 업데이트한다.
-    """
-    # 1) 기존 페이지 정보 조회
-    page_data = notion.pages.retrieve(page_id)
-
-    # 2) 기존 '타임라인'의 start 값 가져오기
-    #    (없는 경우 None 처리 등 분기 필요)
-    old_start = None
-    timeline_property = page_data["properties"].get("타임라인", {})
-    date_value = timeline_property.get("date", {})
-    old_start = date_value.get("start")  # 예: '2024-12-01'
-
-    # 만약 start가 None이라면 end 업데이트가 무의미할 수도 있으므로,
-    # 필요 시 분기 처리(없으면 start == end로 맞춘다던가).
-    if old_start is None:
-        # 예: start가 없던 경우 -> end만 존재하거나?
-        # 사용 용도에 맞춰 처리
-        old_start = new_deadline
-
-    # 3) Notion 페이지 업데이트 (start는 기존값, end만 바꿔치기)
-    notion.pages.update(
-        page_id=page_id,
-        properties={
-            # 예) 속성 이름이 "종료일"인 경우
-            "타임라인": {
-                "date": {
-                    "start": old_start,
-                    "end": new_deadline
-                }
-            }
-        }
-    )
-
-
-@tool
-def update_notion_task_status(
-    page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-    new_status: Annotated[Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"]
-):
-    """
-    기존 노션 페이지의 '상태' 필드를 업데이트한다.
-    """
-    notion.pages.update(
-        page_id=page_id,
-        properties={
-            "상태": {
-                "status": {
-                    "name": new_status
-                }
-            }
-        }
-    )
-
-
-@tool
-def get_notion_page(
-    page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-) -> str:
-    """
-    노션 페이지를 마크 다운 형태로 조회한다.
-    """
-    return StringExporter(block_id=page_id, output_path="test").export()
-
-
 @cached(TTLCache(maxsize=100, ttl=3600))
 def slack_users_list(client: WebClient):
     """
@@ -116,13 +47,6 @@ def notion_users_list(client: NotionClient):
     """
     return client.users.list()
 
-
-# OpenAI 함수 정의
-tools = [
-    update_notion_task_deadline,
-    update_notion_task_status,
-    get_notion_page
-]
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -229,7 +153,7 @@ def app_mention(body, say):
         )]
     ) -> str:
         """
-        노션에 새로운 과업을 생성한다.
+        노션에 새로운 과업 페이지를 생성합니다.
 
         Returns:
             생성된 노션 페이지의 URL
@@ -315,53 +239,97 @@ def app_mention(body, say):
                     children=[block]
                 )
 
+        say(f"노션에 과업 '{title}'이 생성되었습니다.\n링크: {response["url"]}",
+            thread_ts=thread_ts)
+
         return response["url"]
 
-    model = model.bind_tools([
-        create_notion_task
-    ] + tools)
+    @tool
+    def update_notion_task_deadline(
+        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+        new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"]
+    ):
+        """
+        노션 페이지의 타임라인을 변경합니다.
+        """
+        # 1) 기존 페이지 정보 조회
+        page_data = notion.pages.retrieve(page_id)
 
-    should_terminate = False
-    for _ in range(3):
-        response = model.invoke(messages)
-        messages.append(response)
+        # 2) 기존 '타임라인'의 start 값 가져오기
+        #    (없는 경우 None 처리 등 분기 필요)
+        old_start = None
+        timeline_property = page_data["properties"].get("타임라인", {})
+        date_value = timeline_property.get("date", {})
+        old_start = date_value.get("start")  # 예: '2024-12-01'
 
-        if response.tool_calls:
-            for tool_call in response.tool_calls:
-                function_name = tool_call['name']
-                arguments = tool_call['args']
+        # 만약 start가 None이라면 end 업데이트가 무의미할 수도 있으므로,
+        # 필요 시 분기 처리(없으면 start == end로 맞춘다던가).
+        if old_start is None:
+            # 예: start가 없던 경우 -> end만 존재하거나?
+            # 사용 용도에 맞춰 처리
+            old_start = new_deadline
 
-                if function_name == "create_notion_task":
-                    task_url = create_notion_task.invoke(arguments)
-                    say(f"노션에 과업 '{arguments.get('title')}'이 생성되었습니다.\n링크: {task_url}",
-                        thread_ts=thread_ts)
-                    should_terminate = True
-                elif function_name == "update_notion_task_deadline":
-                    new_deadline = arguments.get("new_deadline")
+        # 3) Notion 페이지 업데이트 (start는 기존값, end만 바꿔치기)
+        notion.pages.update(
+            page_id=page_id,
+            properties={
+                # 예) 속성 이름이 "종료일"인 경우
+                "타임라인": {
+                    "date": {
+                        "start": old_start,
+                        "end": new_deadline
+                    }
+                }
+            }
+        )
 
-                    update_notion_task_deadline.invoke(arguments)
-                    say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.",
-                        thread_ts=thread_ts)
-                    should_terminate = True
-                elif function_name == "update_notion_task_status":
-                    new_status = arguments.get("new_status")
+        say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.",
+            thread_ts=thread_ts)
 
-                    update_notion_task_status.invoke(arguments)
-                    say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
-                        thread_ts=thread_ts)
-                    should_terminate = True
-                elif function_name == "get_notion_page":
-                    page_data = get_notion_page.invoke(arguments)
-                    messages.append(ToolMessage(
-                        content=page_data,
-                        tool_call_id=tool_call['id']
-                    ))
-        else:
-            say(response.content, thread_ts=thread_ts)
-            should_terminate = True
+    @tool
+    def update_notion_task_status(
+        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+        new_status: Annotated[Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"]
+    ):
+        """
+        노션 페이지의 상태를 변경합니다.
+        """
+        notion.pages.update(
+            page_id=page_id,
+            properties={
+                "상태": {
+                    "status": {
+                        "name": new_status
+                    }
+                }
+            }
+        )
 
-        if should_terminate:
-            break
+        say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
+            thread_ts=thread_ts)
+
+    @tool
+    def get_notion_page(
+        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+    ) -> str:
+        """
+        노션 페이지를 마크다운 형태로 조회합니다.
+        """
+
+        say(f"노션 페이지를 조회했습니다.", thread_ts=thread_ts)
+
+        return StringExporter(block_id=page_id, output_path="test").export()
+
+    agent_executor = create_react_agent(model, [
+        create_notion_task,
+        update_notion_task_deadline,
+        update_notion_task_status,
+        get_notion_page
+    ])
+    response = agent_executor.invoke({"messages": messages})
+    messages = response["messages"]
+
+    say(messages[-1].content, thread_ts=thread_ts)
 
 
 # Start your app
