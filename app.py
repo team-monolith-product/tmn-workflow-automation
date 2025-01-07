@@ -22,7 +22,7 @@ load_dotenv()
 openai_client = OpenAI()
 
 # 노션 클라이언트 초기화
-notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
+notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
 DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
 PROJECT_TO_PAGE_ID = {
     "유지보수": "16f1cc820da68045a972c1da9a72f335",
