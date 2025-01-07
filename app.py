@@ -429,6 +429,11 @@ def app_mention(body, say):
         )
 
         response_message = chat_completion.choices[0].message
+        messages.append({
+            "role": "assistant",
+            "content": response_message.content,
+            "tool_calls": response_message.tool_calls
+        })
 
         if response_message.tool_calls:
             for tool_call in response_message.tool_calls:
