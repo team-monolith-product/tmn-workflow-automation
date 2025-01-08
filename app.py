@@ -386,7 +386,14 @@ def answer(thread_ts, channel, user, text, say):
     )
     messages = response["messages"]
 
-    say(messages[-1].content, thread_ts=thread_ts)
+    say({
+        "blocks": [
+            {
+                "type": "mrkdwn",
+                "text": messages[-1].content
+            }
+        ]
+    }, thread_ts=thread_ts)
 
 
 @app.event("app_mention")
