@@ -389,8 +389,13 @@ def answer(thread_ts, channel, user, text, say):
     say({
         "blocks": [
             {
-                "type": "mrkdwn",
-                "text": messages[-1].content
+                "type": "rich_text",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": messages[-1].content
+                    }
+                ]
             }
         ]
     }, thread_ts=thread_ts)
@@ -428,7 +433,8 @@ def respond_in_assistant_thread(
     """
     Respond to a user message in the assistant thread.
     """
-    answer(context.thread_ts, context.channel_id, context.user_id, payload["text"], say)
+    answer(context.thread_ts, context.channel_id,
+           context.user_id, payload["text"], say)
 
 
 # Start your app
