@@ -10,9 +10,9 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
-from langchain_core.tools import Tool, tool
+from langchain_core.tools import tool
 from langchain_community.agent_toolkits import SlackToolkit
-from langchain_google_community import GoogleSearchAPIWrapper
+from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from slack_bolt import App
@@ -56,13 +56,17 @@ app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
 # SlackToolkit이 요구함.
 os.environ["SLACK_USER_TOKEN"] = os.environ.get("SLACK_BOT_TOKEN")
 
-
-search = GoogleSearchAPIWrapper()
-
-search_tool = Tool(
-    name="google_search",
-    description="Search Google for recent results.",
-    func=search.run,
+search_tool = TavilySearchResults(
+    max_results=10,
+    search_depth="advanced",
+    include_answer=True,
+    include_raw_content=True,
+    include_images=False,
+    # include_domains=[...],
+    # exclude_domains=[...],
+    # name="...",            # overwrite default tool name
+    # description="...",     # overwrite default tool description
+    # args_schema=...,       # overwrite default args_schema: BaseModel
 )
 
 @app.event("app_mention")
