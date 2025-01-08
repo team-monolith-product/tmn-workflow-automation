@@ -423,4 +423,5 @@ def respond_in_assistant_thread(
 
 # Start your app
 if __name__ == "__main__":
+    app.use(assistant)
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()
