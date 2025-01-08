@@ -11,3 +11,4 @@ langchain-openai
 langgraph
 langchain-google-community
 tavily-python
+beautifulsoup4

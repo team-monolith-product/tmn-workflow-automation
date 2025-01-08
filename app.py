@@ -13,6 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain_community.agent_toolkits import SlackToolkit
+from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -70,6 +71,16 @@ search_tool = TavilySearchResults(
     # args_schema=...,       # overwrite default args_schema: BaseModel
 )
 
+@tool
+def get_web_page_from_url(
+    url: Annotated[str, "웹 페이지 URL"],
+):
+    """
+    주어진 URL에서 웹 페이지를 로드하여 문서로 반환합니다.
+    """
+    loader = WebBaseLoader(url)
+    documents = loader.load()
+    return documents
 
 @app.event("app_mention")
 def app_mention(body, say):
@@ -332,7 +343,8 @@ def app_mention(body, say):
         update_notion_task_deadline,
         update_notion_task_status,
         get_notion_page,
-        search_tool
+        search_tool,
+        get_web_page_from_url
     ] + SlackToolkit().get_tools())
 
     class SayHandler(BaseCallbackHandler):
