@@ -71,6 +71,7 @@ search_tool = TavilySearchResults(
     # args_schema=...,       # overwrite default args_schema: BaseModel
 )
 
+
 @tool
 def get_web_page_from_url(
     url: Annotated[str, "웹 페이지 URL"],
@@ -82,11 +83,8 @@ def get_web_page_from_url(
     documents = loader.load()
     return documents
 
-@app.event("app_mention")
-def app_mention(body, say):
-    """
-    슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
-    """
+
+def answer(body, say):
     thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
     channel = body["event"]["channel"]
 
@@ -389,6 +387,21 @@ def app_mention(body, say):
 
     say(messages[-1].content, thread_ts=thread_ts)
 
+
+@app.event("app_mention")
+def app_mention(body, say):
+    """
+    슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
+    """
+    answer(body, say)
+
+
+@app.message("")
+def app_message(body, say):
+    """
+    로봇에게 직접 채팅하면 시작되는 이벤트트
+    """
+    answer(body, say)
 
 # Start your app
 if __name__ == "__main__":
