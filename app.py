@@ -419,7 +419,7 @@ def respond_in_assistant_thread(
     """
     Respond to a user message in the assistant thread.
     """
-    print(payload)
+    logger.info(payload)
     answer(context.thread_ts, context.channel_id, context.user_id, payload, say)
 
 
