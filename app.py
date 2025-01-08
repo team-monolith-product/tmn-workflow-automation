@@ -2,6 +2,7 @@
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 과업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
 from datetime import datetime
+import logging
 import os
 from typing import Annotated, Literal
 
@@ -17,7 +18,7 @@ from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from slack_bolt import App
+from slack_bolt import App, Assistant, BoltContext, SetStatus, Say
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 from md2notionpage.core import parse_md
@@ -54,6 +55,7 @@ def notion_users_list(client: NotionClient):
 
 # Initializes your app with your bot token and socket mode handler
 app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+assistant = Assistant()
 
 # SlackToolkit이 요구함.
 os.environ["SLACK_USER_TOKEN"] = os.environ.get("SLACK_BOT_TOKEN")
@@ -396,12 +398,28 @@ def app_mention(body, say):
     answer(body, say)
 
 
-# @app.message("")
-# def app_message(body, say):
-#     """
-#     로봇에게 직접 채팅하면 시작되는 이벤트트
-#     """
-#     answer(body, say)
+@assistant.thread_started
+def start_assistant_thread(say, _set_suggested_prompts):
+    """
+    Assistant thread started
+    """
+    say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
+
+
+@assistant.user_message
+def respond_in_assistant_thread(
+    payload: dict,
+    _logger: logging.Logger,
+    _context: BoltContext,
+    _set_status: SetStatus,
+    _client: WebClient,
+    say: Say,
+):
+    """
+    Respond to a user message in the assistant thread.
+    """
+    answer(payload, say)
+
 
 # Start your app
 if __name__ == "__main__":
