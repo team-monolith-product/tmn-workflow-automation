@@ -396,12 +396,12 @@ def app_mention(body, say):
     answer(body, say)
 
 
-@app.message("")
-def app_message(body, say):
-    """
-    로봇에게 직접 채팅하면 시작되는 이벤트트
-    """
-    answer(body, say)
+# @app.message("")
+# def app_message(body, say):
+#     """
+#     로봇에게 직접 채팅하면 시작되는 이벤트트
+#     """
+#     answer(body, say)
 
 # Start your app
 if __name__ == "__main__":
