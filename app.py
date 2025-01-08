@@ -80,6 +80,7 @@ def get_web_page_from_url(
 ):
     """
     주어진 URL에서 웹 페이지를 로드하여 문서로 반환합니다.
+    www.notion.so에 대한 링크는 이 도구를 사용하지 않고 get_notion_page 도구를 사용합니다.
     """
     loader = WebBaseLoader(url)
     documents = loader.load()
@@ -332,6 +333,7 @@ def answer(thread_ts, channel, user, text, say):
     ) -> str:
         """
         노션 페이지를 마크다운 형태로 조회합니다.
+        www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
         return StringExporter(block_id=page_id, output_path="test").export()
 
