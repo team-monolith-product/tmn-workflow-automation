@@ -9,6 +9,7 @@ from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain_community.agent_toolkits import SlackToolkit
@@ -68,6 +69,7 @@ search_tool = TavilySearchResults(
     # description="...",     # overwrite default tool description
     # args_schema=...,       # overwrite default args_schema: BaseModel
 )
+
 
 @app.event("app_mention")
 def app_mention(body, say):
@@ -256,9 +258,6 @@ def app_mention(body, say):
                     children=[block]
                 )
 
-        say(f"노션에 과업 '{title}'이 생성되었습니다.\n링크: {response['url']}",
-            thread_ts=thread_ts)
-
         return response["url"]
 
     @tool
@@ -300,9 +299,6 @@ def app_mention(body, say):
             }
         )
 
-        say(f"과업의 기한을 {new_deadline}로 업데이트했습니다.",
-            thread_ts=thread_ts)
-
     @tool
     def update_notion_task_status(
         page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
@@ -322,9 +318,6 @@ def app_mention(body, say):
             }
         )
 
-        say(f"과업의 상태를 '{new_status}'(으)로 변경했습니다.",
-            thread_ts=thread_ts)
-
     @tool
     def get_notion_page(
         page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
@@ -332,9 +325,6 @@ def app_mention(body, say):
         """
         노션 페이지를 마크다운 형태로 조회합니다.
         """
-
-        say("노션 페이지를 조회했습니다.", thread_ts=thread_ts)
-
         return StringExporter(block_id=page_id, output_path="test").export()
 
     agent_executor = create_react_agent(model, [
@@ -344,7 +334,45 @@ def app_mention(body, say):
         get_notion_page,
         search_tool
     ] + SlackToolkit().get_tools())
-    response = agent_executor.invoke({"messages": messages})
+
+    class SayHandler(BaseCallbackHandler):
+        """
+        Agent Handler That Slack-Says the Tool Call
+        """
+
+        def on_tool_start(
+            self,
+            serialized,
+            input_str,
+            *,
+            run_id,
+            parent_run_id=None,
+            tags=None,
+            metadata=None,
+            inputs=None,
+            **kwargs,
+        ):
+            say(
+                {
+                    "blocks": [
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    "type": "plain_text",
+                                    "text": f"{serialized['name']}({input_str}) 실행 중...",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                thread_ts=thread_ts
+            )
+
+    response = agent_executor.invoke(
+        {"messages": messages},
+        {"callbacks": [SayHandler()]}
+    )
     messages = response["messages"]
 
     say(messages[-1].content, thread_ts=thread_ts)
