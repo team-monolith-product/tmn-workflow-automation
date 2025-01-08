@@ -86,10 +86,7 @@ def get_web_page_from_url(
     return documents
 
 
-def answer(body, say):
-    thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
-    channel = body["event"]["channel"]
-
+def answer(thread_ts, channel, user, text, say):
     # 스레드의 모든 메시지를 가져옴
     result = app.client.conversations_replies(
         channel=channel,
@@ -99,7 +96,7 @@ def answer(body, say):
     # 메시지에서 사용자 ID를 수집
     user_ids = set(message["user"]
                    for message in result["messages"] if "user" in message)
-    user_ids.add(body["event"]["user"])
+    user_ids.add(user)
 
     # 사용자 정보 일괄 조회
     user_info_list = slack_users_list(app.client)
@@ -130,7 +127,7 @@ def answer(body, say):
         threads.append(f"{user_real_name}:\n{text}")
 
     # 최종 질의한 사용자 정보
-    slack_user_id = body["event"]["user"]
+    slack_user_id = user
     user_profile = user_dict.get(slack_user_id, {})
     user_real_name = user_profile.get("real_name", "Unknown")
 
@@ -139,7 +136,7 @@ def answer(body, say):
         content=(
             f"{threads_joined}\n"
             f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
-            f"{body['event']['text']}\n"
+            f"{text}\n"
         )
     ))
 
@@ -395,7 +392,11 @@ def app_mention(body, say):
     """
     슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
     """
-    answer(body, say)
+    thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
+    channel = body["event"]["channel"]
+    user = body["event"]["user"]
+    text = body["event"]["text"]
+    answer(thread_ts, channel, user, text, say)
 
 
 @assistant.thread_started
@@ -409,16 +410,17 @@ def start_assistant_thread(say, _set_suggested_prompts):
 @assistant.user_message
 def respond_in_assistant_thread(
     payload: dict,
-    _logger: logging.Logger,
-    _context: BoltContext,
-    _set_status: SetStatus,
-    _client: WebClient,
+    logger: logging.Logger,
+    context: BoltContext,
+    set_status: SetStatus,
+    client: WebClient,
     say: Say,
 ):
     """
     Respond to a user message in the assistant thread.
     """
-    answer(payload, say)
+    print(payload)
+    answer(context.thread_ts, context.channel_id, context.user_id, payload, say)
 
 
 # Start your app
