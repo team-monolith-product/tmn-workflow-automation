@@ -389,13 +389,12 @@ def answer(thread_ts, channel, user, text, say):
     say({
         "blocks": [
             {
-                "type": "rich_text",
-                "elements": [
-                    {
+                "type": "section",
+                "text": {
                         "type": "mrkdwn",
                         "text": messages[-1].content
-                    }
-                ]
+                }
+
             }
         ]
     }, thread_ts=thread_ts)
