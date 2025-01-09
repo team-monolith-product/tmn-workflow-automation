@@ -1,7 +1,7 @@
 """
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 과업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 from typing import Annotated, Literal
@@ -410,6 +410,82 @@ def app_mention(body, say):
     user = body["event"]["user"]
     text = body["event"]["text"]
     answer(thread_ts, channel, user, text, say)
+
+
+SLACK_DAILY_SCRUM_CHANNEL_ID = 'C02JX95U7AP'
+SLACK_DAILY_SCRUM_CANVAS_ID = 'F05S8Q78CGZ'
+
+USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
+
+@app.event("user_huddle_changed")
+def user_huddle_changed(body, say):
+    """
+    사용자가 huddle을 변경할 때 호출되는 이벤트
+    """
+    event_ts = body.get("event", {}).get("event_ts")
+    response = app.client.conversations_history(
+        channel=SLACK_DAILY_SCRUM_CHANNEL_ID, latest=event_ts, limit=1)
+
+    print(response)
+
+    messages = response.data.get("messages")
+    if not messages:
+        return
+
+    print(messages)
+
+    message = messages[0]
+    if not message:
+        return
+
+    print(message)
+
+    room = message.get("room")
+    if not room:
+        return
+
+    print(room)
+
+    participants = room.get("participants")
+    if not participants:
+        return
+
+    print(participants)
+
+    # 사용자 정보 일괄 조회
+    user_info_list = slack_users_list(app.client)
+    user_dict = {
+        user["id"]: user for user in user_info_list["members"]
+    }
+    for participant in participants:
+        # 최근 허들 참여 시간 업데이트를 했다면 절차를 생략함.
+        # 30분
+        last_joined_at = USER_ID_TO_LAST_HUDDLE_JOINED_AT.get(participant)
+        if last_joined_at and (datetime.now() - last_joined_at) < timedelta(minutes=30):
+            # 30분 이내에 허들에 참여한 이력이 있다면 생략
+            continue
+        USER_ID_TO_LAST_HUDDLE_JOINED_AT[participant] = datetime.now()
+
+        user_name = user_dict[participant]["real_name"]
+
+        sections = app.client.canvases_sections_lookup(
+            canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
+            criteria={
+                "contains_text": user_dict[participant]["real_name"]
+            }
+        )["sections"]
+        for section in sections:
+            app.client.canvases_edit(
+                canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
+                changes=[{
+                    'operation': 'replace',
+                    'section_id': section['id'],
+                    'document_content': {
+                        "type": "markdown",
+                        "markdown": f"- [x] {user_name}\n"
+                    }
+                }]
+            )
 
 
 @assistant.thread_started
