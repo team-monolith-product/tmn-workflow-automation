@@ -424,13 +424,13 @@ def alert_no_후속_작업(
         if slack_user_id:
             text = (
                 f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
-                "아직 **후속 작업**이 등록되어 있지 않습니다.\n"
+                "아직 후속 작업이 등록되어 있지 않습니다.\n"
                 f"<@{slack_user_id}> 확인 부탁드립니다."
             )
         else:
             text = (
                 f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
-                "담당자를 확인할 수 없고 **후속 작업**도 등록되어 있지 않습니다.\n"
+                "담당자를 확인할 수 없고 후속 작업도 등록되어 있지 않습니다.\n"
                 "Notion에서 담당자/후속 작업 정보를 업데이트 부탁드립니다."
             )
         slack_client.chat_postMessage(channel=channel_id, text=text)
