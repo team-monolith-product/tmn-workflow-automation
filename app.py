@@ -87,7 +87,16 @@ def get_web_page_from_url(
     return documents
 
 
-def answer(thread_ts, channel, user, text, say):
+def answer(
+    thread_ts,
+    channel, 
+    user, 
+    text, 
+    say
+):
+    """
+    
+    """
     # 스레드의 모든 메시지를 가져옴
     result = app.client.conversations_replies(
         channel=channel,
@@ -108,7 +117,12 @@ def answer(thread_ts, channel, user, text, say):
 
     today_str = datetime.now().strftime('%Y-%m-%d(%A)')
 
-    model = ChatOpenAI(model="gpt-4o")
+    if text.startswith("o1"):
+        model = "o1"
+    else:
+        model = "gpt-4o"
+
+    chat_model = ChatOpenAI(model=model)
 
     messages: list[BaseMessage] = [SystemMessage(content=(
         f"You are a helpful assistant who is integrated in Slack. "
@@ -124,8 +138,7 @@ def answer(thread_ts, channel, user, text, say):
             user_real_name = user_profile.get("real_name", "Unknown")
         else:
             user_real_name = "Bot"
-        text = message["text"]
-        threads.append(f"{user_real_name}:\n{text}")
+        threads.append(f"{user_real_name}:\n{message['text']}")
 
     # 최종 질의한 사용자 정보
     slack_user_id = user
@@ -366,7 +379,8 @@ def answer(thread_ts, channel, user, text, say):
         parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][0]["name"]
 
         if parent_title.endswith(f" - {parent_component}"):
-            title = parent_title.replace(f" - {parent_component}", f" - {component}")
+            title = parent_title.replace(
+                f" - {parent_component}", f" - {component}")
         else:
             title = f"{parent_title} - {component}"
 
@@ -418,7 +432,30 @@ def answer(thread_ts, channel, user, text, say):
 
         return response["url"]
 
-    agent_executor = create_react_agent(model, [
+    @tool
+    def search_slack_messsages(
+        query: Annotated[str, "검색어"]
+    ) -> list[str]:
+        """
+        슬랙 메시지를 검색합니다.
+        이 도구는 슬랙에 저장될 만 한 사내 지식을 검색할 때 유용합니다.
+
+        Returns:
+            검색 결과 메시지의 리스트
+        """
+        response = app.client.search_messages(
+            query=query,
+            sort="timestamp",
+            sort_dir="desc",
+        )
+
+        # 로봇 메시지는 제외
+        return [
+            message["text"] for message in response["messages"]["matches"]
+            if message.get("user", None)
+        ]
+
+    agent_executor = create_react_agent(chat_model, [
         create_notion_task,
         update_notion_task_deadline,
         update_notion_task_status,
