@@ -345,26 +345,32 @@ def answer(thread_ts, channel, user, text, say):
     def create_notion_follow_up_task(
         parent_page_id: Annotated[str, "선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
         component: Annotated[Literal["디자인", "프론트", "백", "인프라", "데이터", "AI"], "후속 작업의 구성요소"],
-    ):
+    ) -> str:
         """
         선행 작업(parent_page_id)에 대하여 후속 작업을 생성합니다.
         특정 구성 요소에 대해서 생성될 수 있습니다.
 
         후속 작업 생성이 요청되면 create_notion_task 대신 반드시 이 도구를 사용합니다.
+
+        Returns:
+            생성된 노션 페이지의 URL
         """
         parent_page_data = notion.pages.retrieve(parent_page_id)
 
         # 선행 작업의 제목에서 구성 요소 명을 치환하여 후속 작업 제목을 생성
         # 예)
         # "블록 코딩 에디터 디자인 개선 - 디자인" -> "블록 코딩 에디터 디자인 개선 - 프론트"
-        # 
-        # 주로 "- {구성요소}" 형태로 되어 있을 것이라 가정
+        #
+        # 주로 "- {구성요소}" 로 끝나는 제목을 가정하고 작성
         parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"]["content"]
         parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][0]["name"]
 
-        title = parent_title.replace(f" - {parent_component}", f" - {component}")
+        if parent_title.endswith(f" - {parent_component}"):
+            title = parent_title.replace(f" - {parent_component}", f" - {component}")
+        else:
+            title = f"{parent_title} - {component}"
 
-        notion.pages.create(
+        response = notion.pages.create(
             parent={"database_id": DATABASE_ID},
             properties={
                 "제목": {
@@ -409,6 +415,8 @@ def answer(thread_ts, channel, user, text, say):
                 }
             }
         )
+
+        return response["url"]
 
     agent_executor = create_react_agent(model, [
         create_notion_task,
@@ -490,6 +498,7 @@ SLACK_DAILY_SCRUM_CHANNEL_ID = 'C02JX95U7AP'
 SLACK_DAILY_SCRUM_CANVAS_ID = 'F05S8Q78CGZ'
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
+
 
 @app.event("user_huddle_changed")
 def user_huddle_changed(body, say):
