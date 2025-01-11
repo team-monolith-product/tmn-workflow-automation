@@ -471,9 +471,9 @@ def answer(
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
-        async_browser = create_sync_playwright_browser()
+        sync_browser = create_sync_playwright_browser()
         toolkit = PlayWrightBrowserToolkit.from_browser(
-            async_browser=async_browser)
+            sync_browser=sync_browser)
         tools += toolkit.get_tools()
 
     agent_executor = create_react_agent(chat_model, tools)
