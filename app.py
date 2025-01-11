@@ -122,6 +122,7 @@ def answer(
     else:
         model = "gpt-4o"
 
+    print(f"Using model: {model}")
     chat_model = ChatOpenAI(model=model)
 
     messages: list[BaseMessage] = [SystemMessage(content=(
