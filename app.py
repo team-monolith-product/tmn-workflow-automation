@@ -17,8 +17,7 @@ from langchain_community.agent_toolkits import SlackToolkit, PlayWrightBrowserTo
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_community.tools.playwright.utils import (
-    # A synchronous browser is available, though it isn't compatible with jupyter.\n",	  },
-    create_async_playwright_browser,
+    create_sync_playwright_browser,
 )
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -472,7 +471,7 @@ def answer(
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
-        async_browser = create_async_playwright_browser()
+        async_browser = create_sync_playwright_browser()
         toolkit = PlayWrightBrowserToolkit.from_browser(
             async_browser=async_browser)
         tools += toolkit.get_tools()
