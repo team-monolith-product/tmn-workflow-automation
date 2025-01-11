@@ -472,7 +472,7 @@ def answer(
     if "browser" in text:
         async_browser = create_async_playwright_browser()
         toolkit = PlayWrightBrowserToolkit.from_browser(
-            sync_browser=async_browser)
+            async_browser=async_browser)
         tools += toolkit.get_tools()
 
     agent_executor = create_react_agent(chat_model, tools)
