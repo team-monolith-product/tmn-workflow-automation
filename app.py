@@ -466,7 +466,7 @@ def answer(
         get_web_page_from_url
     ] + SlackToolkit().get_tools()
 
-    if text.contains("browser"):
+    if "browser" in text:
         tools += PlayWrightBrowserToolkit().get_tools()
 
     agent_executor = create_react_agent(chat_model, tools)
