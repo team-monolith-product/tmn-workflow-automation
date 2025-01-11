@@ -16,12 +16,17 @@ from langchain_core.tools import tool
 from langchain_community.agent_toolkits import SlackToolkit, PlayWrightBrowserToolkit
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
+from langchain_community.tools.playwright.utils import (
+    # A synchronous browser is available, though it isn't compatible with jupyter.\n",	  },
+    create_async_playwright_browser,
+)
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from slack_bolt import App, Assistant, BoltContext, SetStatus, Say
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 from md2notionpage.core import parse_md
+
 
 # 환경 변수 로드
 load_dotenv()
@@ -89,13 +94,13 @@ def get_web_page_from_url(
 
 def answer(
     thread_ts,
-    channel, 
-    user, 
-    text, 
+    channel,
+    user,
+    text,
     say
 ):
     """
-    
+
     """
     # 스레드의 모든 메시지를 가져옴
     result = app.client.conversations_replies(
@@ -467,7 +472,10 @@ def answer(
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
-        tools += PlayWrightBrowserToolkit().get_tools()
+        async_browser = create_async_playwright_browser()
+        toolkit = PlayWrightBrowserToolkit.from_browser(
+            async_browser=async_browser)
+        tools += toolkit.get_tools()
 
     agent_executor = create_react_agent(chat_model, tools)
 
