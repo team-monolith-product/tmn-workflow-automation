@@ -13,7 +13,7 @@ CHANNEL_ID: str = 'C087PDC9VG8'
 
 
 def main():
-    notion = NotionClient(auth=os.environ.get("NOTION_API_KEY"))
+    notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     email_to_slack_id = get_slack_user_map(slack_client)
@@ -34,6 +34,13 @@ def main():
         email_to_slack_id
     )
     alert_no_tasks(
+        notion,
+        slack_client,
+        DATABASE_ID,
+        CHANNEL_ID,
+        email_to_slack_id
+    )
+    alert_no_후속_작업(
         notion,
         slack_client,
         DATABASE_ID,
@@ -333,6 +340,100 @@ def alert_no_tasks(
             )
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
+def alert_no_후속_작업(
+    notion: NotionClient,
+    slack_client: WebClient,
+    database_id: str,
+    channel_id: str,
+    email_to_slack_id: dict,
+):
+    """
+    후속 작업이 마땅히 예상 되나 후속 작업이 등록되지 않은 경우 알림.
+    - '구성요소' 다중 선택 속성에 Plan 또는 Design이 들어있는 경우
+    - '상태' 속성이 '완료'인 경우
+    - '후속 작업'(관계형) 속성이 비어 있는 경우
+    - '작성일시'(생성 일시)가 2025년 1월 1일 이후인 경우
+    
+    Args:
+        notion (NotionClient): Notion
+        slack_client (WebClient): Slack
+        database_id (str): Notion database id
+        channel_id (str): Slack channel id
+        email_to_slack_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+
+    Returns:
+        None
+    """
+    query_filter = {
+        "and": [
+            {
+                "property": "작성일시",
+                "created_time": {
+                    "on_or_after": "2025-01-01T00:00:00.000Z"
+                }
+            },
+            {
+                "property": "상태",
+                "status": {
+                    "equals": "완료"
+                }
+            },
+            {
+                "or": [
+                    {
+                        "property": "구성요소",
+                        "multi_select": {
+                            "contains": "Plan"
+                        }
+                    },
+                    {
+                        "property": "구성요소",
+                        "multi_select": {
+                            "contains": "Design"
+                        }
+                    }
+                ]
+            },
+            {
+                "property": "후속 작업",
+                "relation": {
+                    "is_empty": True
+                }
+            }
+        ]
+    }
+
+    results = notion.databases.query(
+        **{
+            "database_id": database_id,
+            "filter": query_filter
+        }
+    )
+
+    for result in results.get("results", []):
+        task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        page_url = result["url"]
+
+        people = result["properties"]["담당자"]["people"]
+        if people:
+            assignee_email = people[0]["person"]["email"]
+            slack_user_id = email_to_slack_id.get(assignee_email)
+        else:
+            slack_user_id = None
+
+        if slack_user_id:
+            text = (
+                f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
+                "아직 **후속 작업**이 등록되어 있지 않습니다.\n"
+                f"<@{slack_user_id}> 확인 부탁드립니다."
+            )
+        else:
+            text = (
+                f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
+                "담당자를 확인할 수 없고 **후속 작업**도 등록되어 있지 않습니다.\n"
+                "Notion에서 담당자/후속 작업 정보를 업데이트 부탁드립니다."
+            )
+        slack_client.chat_postMessage(channel=channel_id, text=text)
 
 if __name__ == "__main__":
     main()
