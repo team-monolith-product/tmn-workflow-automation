@@ -13,7 +13,7 @@ from notion2md.exporter.block import StringExporter
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain_community.agent_toolkits import SlackToolkit
+from langchain_community.agent_toolkits import SlackToolkit, PlayWrightBrowserToolkit
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
@@ -456,7 +456,7 @@ def answer(
             if message.get("user", None)
         ]
 
-    agent_executor = create_react_agent(chat_model, [
+    tools = [
         create_notion_task,
         update_notion_task_deadline,
         update_notion_task_status,
@@ -464,7 +464,12 @@ def answer(
         get_notion_page,
         search_tool,
         get_web_page_from_url
-    ] + SlackToolkit().get_tools())
+    ] + SlackToolkit().get_tools()
+
+    if text.contains("browser"):
+        tools += PlayWrightBrowserToolkit().get_tools()
+
+    agent_executor = create_react_agent(chat_model, tools)
 
     class SayHandler(BaseCallbackHandler):
         """
