@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Annotated, List, Literal, Optional
 
+from browser_use import Agent
 from cachetools import TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
@@ -112,6 +113,7 @@ async def my_create_playwright_browser(
     browser = await playwright.chromium.launch(headless=headless, args=args)
     return browser
 
+
 async def answer(
     thread_ts: str,
     channel: str,
@@ -141,13 +143,6 @@ async def answer(
     }
 
     today_str = datetime.now().strftime('%Y-%m-%d(%A)')
-
-    if text.startswith("o1"):
-        model = "o1"
-    else:
-        model = "gpt-4o"
-
-    chat_model = ChatOpenAI(model=model)
 
     messages: list[BaseMessage] = [SystemMessage(content=(
         f"You are a helpful assistant who is integrated in Slack. "
@@ -491,53 +486,66 @@ async def answer(
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
-        async_browser = await my_create_playwright_browser()
-        toolkit = PlayWrightBrowserToolkit.from_browser(
-            async_browser=async_browser)
-        tools += toolkit.get_tools()
+        # async_browser = await my_create_playwright_browser()
+        # toolkit = PlayWrightBrowserToolkit.from_browser(
+        #     async_browser=async_browser)
+        # tools += toolkit.get_tools()
+        llm = ChatOpenAI(model="gpt-4o")
+        agent = Agent(
+            task="\n".join([message.content for message in messages]),
+            llm=llm,
+        )
+        agent_answer = await agent.run()
+    else:
+        if text.startswith("o1"):
+            model = "o1"
+        else:
+            model = "gpt-4o"
 
-    agent_executor = create_react_agent(chat_model, tools, debug=True)
+        chat_model = ChatOpenAI(model=model)
 
-    class SayHandler(BaseCallbackHandler):
-        """
-        Agent Handler That Slack-Says the Tool Call
-        """
+        agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-        async def on_tool_start(
-            self,
-            serialized,
-            input_str,
-            *,
-            run_id,
-            parent_run_id=None,
-            tags=None,
-            metadata=None,
-            inputs=None,
-            **kwargs,
-        ):
-            await say(
-                {
-                    "blocks": [
-                        {
-                            "type": "context",
-                            "elements": [
-                                {
-                                    "type": "plain_text",
-                                    "text": f"{serialized['name']}({input_str}) 실행 중...",
-                                }
-                            ],
-                        }
-                    ]
-                },
-                thread_ts=thread_ts
-            )
+        class SayHandler(BaseCallbackHandler):
+            """
+            Agent Handler That Slack-Says the Tool Call
+            """
 
-    response = await agent_executor.ainvoke(
-        {"messages": messages},
-        {"callbacks": [SayHandler()]}
-    )
+            async def on_tool_start(
+                self,
+                serialized,
+                input_str,
+                *,
+                run_id,
+                parent_run_id=None,
+                tags=None,
+                metadata=None,
+                inputs=None,
+                **kwargs,
+            ):
+                await say(
+                    {
+                        "blocks": [
+                            {
+                                "type": "context",
+                                "elements": [
+                                    {
+                                        "type": "plain_text",
+                                        "text": f"{serialized['name']}({input_str}) 실행 중...",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    thread_ts=thread_ts
+                )
 
-    messages = response["messages"]
+        response = await agent_executor.ainvoke(
+            {"messages": messages},
+            {"callbacks": [SayHandler()]}
+        )
+
+        agent_answer = response["messages"][-1].content
 
     await say({
         "blocks": [
@@ -545,7 +553,7 @@ async def answer(
                 "type": "section",
                 "text": {
                         "type": "mrkdwn",
-                        "text": messages[-1].content
+                        "text": agent_answer
                 }
 
             }
