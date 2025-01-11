@@ -1,12 +1,13 @@
 """
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 작업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
+import asyncio
 from datetime import datetime, timedelta
 import logging
 import os
-from typing import Annotated, Literal
+from typing import Annotated, List, Literal, Optional
 
-from cachetools import cached, TTLCache
+from cachetools import TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from notion2md.exporter.block import StringExporter
@@ -16,14 +17,15 @@ from langchain_core.tools import tool
 from langchain_community.agent_toolkits import SlackToolkit, PlayWrightBrowserToolkit
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
-from langchain_community.tools.playwright.utils import (
-    create_async_playwright_browser,
-)
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from slack_bolt import App, Assistant, BoltContext, SetStatus, Say
-from slack_bolt.adapter.socket_mode import SocketModeHandler
-from slack_sdk import WebClient
+from playwright.async_api import async_playwright
+from slack_bolt import SetStatus
+from slack_bolt.async_app import AsyncApp
+from slack_bolt.async_app import AsyncAssistant
+from slack_bolt.context.async_context import AsyncBoltContext
+from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
+from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
 
@@ -40,29 +42,41 @@ PROJECT_TO_PAGE_ID = {
     "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
 }
 
-
-@cached(TTLCache(maxsize=100, ttl=3600))
-def slack_users_list(client: WebClient):
-    """
-    슬랙 사용자 목록을 조회한다.
-    """
-    return client.users_list()
-
-
-@cached(TTLCache(maxsize=100, ttl=3600))
-def notion_users_list(client: NotionClient):
-    """
-    노션 사용자 목록을 조회한다.
-    """
-    return client.users.list()
-
-
-# Initializes your app with your bot token and socket mode handler
-app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
-assistant = Assistant()
+app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
+assistant = AsyncAssistant()
 
 # SlackToolkit이 요구함.
 os.environ["SLACK_USER_TOKEN"] = os.environ.get("SLACK_BOT_TOKEN")
+
+_cache_slack_users = TTLCache(maxsize=100, ttl=3600)
+
+
+async def slack_users_list(client: AsyncWebClient):
+    """
+    슬랙 사용자 목록을 조회한다.
+    """
+    if "slack_users_list" in _cache_slack_users:
+        return _cache_slack_users["slack_users_list"]
+
+    resp = await client.users_list()
+    _cache_slack_users["slack_users_list"] = resp
+    return resp
+
+
+_cache_notion_users = TTLCache(maxsize=100, ttl=3600)
+
+
+async def notion_users_list(client: NotionClient):
+    """
+    노션 사용자 목록을 조회한다.
+    """
+    # TODO: 동기로 API를 호출하므로 AIOMainThread 에선 blocking
+    if "notion_users_list" in _cache_notion_users:
+        return _cache_notion_users["notion_users_list"]
+
+    resp = client.users.list()
+    _cache_notion_users["notion_users_list"] = resp
+    return resp
 
 search_tool = TavilySearchResults(
     max_results=10,
@@ -91,18 +105,25 @@ def get_web_page_from_url(
     return documents
 
 
-def answer(
-    thread_ts,
-    channel,
-    user,
-    text,
-    say
+async def my_create_playwright_browser(
+    headless: bool = True, args: Optional[List[str]] = None
+):
+    playwright = await async_playwright().start()
+    browser = await playwright.chromium.launch(headless=headless, args=args)
+    return browser
+
+async def answer(
+    thread_ts: str,
+    channel: str,
+    user: str,
+    text: str,
+    say,
 ):
     """
 
     """
     # 스레드의 모든 메시지를 가져옴
-    result = app.client.conversations_replies(
+    result = await app.client.conversations_replies(
         channel=channel,
         ts=thread_ts
     )
@@ -113,7 +134,7 @@ def answer(
     user_ids.add(user)
 
     # 사용자 정보 일괄 조회
-    user_info_list = slack_users_list(app.client)
+    user_info_list = await slack_users_list(app.client)
     user_dict = {
         user["id"]: user for user in user_info_list["members"]
         if user["id"] in user_ids
@@ -135,7 +156,7 @@ def answer(
     ))]
 
     threads = []
-    for message in result["messages"]:
+    for message in result["messages"][:-1]:
         slack_user_id = message.get("user", None)
         if slack_user_id:
             user_profile = user_dict.get(slack_user_id, {})
@@ -168,7 +189,7 @@ def answer(
 
     user_email = user_profile.get("profile", {}).get("email")
 
-    notion_users = notion_users_list(notion)
+    notion_users = await notion_users_list(notion)
 
     # 이메일이 slack_email인 Notion 사용자 찾기
     matched_notion_user = next(
@@ -437,7 +458,7 @@ def answer(
         return response["url"]
 
     @tool
-    def search_slack_messsages(
+    async def search_slack_messsages(
         query: Annotated[str, "검색어"]
     ) -> list[str]:
         """
@@ -447,7 +468,7 @@ def answer(
         Returns:
             검색 결과 메시지의 리스트
         """
-        response = app.client.search_messages(
+        response = await app.client.search_messages(
             query=query,
             sort="timestamp",
             sort_dir="desc",
@@ -470,19 +491,19 @@ def answer(
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
-        async_browser = create_async_playwright_browser()
+        async_browser = await my_create_playwright_browser()
         toolkit = PlayWrightBrowserToolkit.from_browser(
             async_browser=async_browser)
         tools += toolkit.get_tools()
 
-    agent_executor = create_react_agent(chat_model, tools)
+    agent_executor = create_react_agent(chat_model, tools, debug=True)
 
     class SayHandler(BaseCallbackHandler):
         """
         Agent Handler That Slack-Says the Tool Call
         """
 
-        def on_tool_start(
+        async def on_tool_start(
             self,
             serialized,
             input_str,
@@ -494,7 +515,7 @@ def answer(
             inputs=None,
             **kwargs,
         ):
-            say(
+            await say(
                 {
                     "blocks": [
                         {
@@ -511,13 +532,14 @@ def answer(
                 thread_ts=thread_ts
             )
 
-    response = agent_executor.invoke(
+    response = await agent_executor.ainvoke(
         {"messages": messages},
         {"callbacks": [SayHandler()]}
     )
+
     messages = response["messages"]
 
-    say({
+    await say({
         "blocks": [
             {
                 "type": "section",
@@ -532,7 +554,7 @@ def answer(
 
 
 @app.event("app_mention")
-def app_mention(body, say):
+async def app_mention(body, say):
     """
     슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
     """
@@ -540,7 +562,7 @@ def app_mention(body, say):
     channel = body["event"]["channel"]
     user = body["event"]["user"]
     text = body["event"]["text"]
-    answer(thread_ts, channel, user, text, say)
+    await answer(thread_ts, channel, user, text, say)
 
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = 'C02JX95U7AP'
@@ -550,12 +572,12 @@ USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
 
 @app.event("user_huddle_changed")
-def user_huddle_changed(body, say):
+async def user_huddle_changed(body, say):
     """
     사용자가 huddle을 변경할 때 호출되는 이벤트
     """
     event_ts = body.get("event", {}).get("event_ts")
-    response = app.client.conversations_history(
+    response = await app.client.conversations_history(
         channel=SLACK_DAILY_SCRUM_CHANNEL_ID, latest=event_ts, limit=1)
 
     print(response)
@@ -585,7 +607,7 @@ def user_huddle_changed(body, say):
     print(participants)
 
     # 사용자 정보 일괄 조회
-    user_info_list = slack_users_list(app.client)
+    user_info_list = await slack_users_list(app.client)
     user_dict = {
         user["id"]: user for user in user_info_list["members"]
     }
@@ -600,14 +622,15 @@ def user_huddle_changed(body, say):
 
         user_name = user_dict[participant]["real_name"]
 
-        sections = app.client.canvases_sections_lookup(
+        sections_resp = await app.client.canvases_sections_lookup(
             canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
             criteria={
                 "contains_text": user_dict[participant]["real_name"]
             }
-        )["sections"]
+        )
+        sections = sections_resp["sections"]
         for section in sections:
-            app.client.canvases_edit(
+            await app.client.canvases_edit(
                 canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
                 changes=[{
                     'operation': 'replace',
@@ -621,30 +644,36 @@ def user_huddle_changed(body, say):
 
 
 @assistant.thread_started
-def start_assistant_thread(say, _set_suggested_prompts):
+async def start_assistant_thread(say, _set_suggested_prompts):
     """
     Assistant thread started
     """
-    say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
+    await say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
 
 
 @assistant.user_message
-def respond_in_assistant_thread(
+async def respond_in_assistant_thread(
     payload: dict,
     logger: logging.Logger,
-    context: BoltContext,
+    context: AsyncBoltContext,
     set_status: SetStatus,
-    client: WebClient,
-    say: Say,
+    client: AsyncWebClient,
+    say,
 ):
     """
     Respond to a user message in the assistant thread.
     """
-    answer(context.thread_ts, context.channel_id,
-           context.user_id, payload["text"], say)
+    await answer(context.thread_ts, context.channel_id, context.user_id, payload["text"], say)
 
 
-# Start your app
-if __name__ == "__main__":
+# https://github.com/slackapi/bolt-python/blob/main/examples/socket_mode_async.py#L120
+async def main():
+    # Assistant 등록
     app.use(assistant)
-    SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()
+
+    # Async Socket Mode Handler
+    handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+    await handler.start_async()
+
+if __name__ == "__main__":
+    asyncio.run(main())
