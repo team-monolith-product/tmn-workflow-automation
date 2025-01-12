@@ -122,7 +122,17 @@ async def answer(
     say,
 ):
     """
+    슬랙에서 질문을 받아 답변을 생성하여 슬랙에 전송한다.
 
+    Args:
+        thread_ts: 스레드 타임스탬프
+        channel: 채널 ID
+        user: 사용자 ID. 워크플로우가 생성한 메세지면 None.
+        text: 질문 내용
+        say: 메시지 전송 함수
+
+    Returns:
+        None
     """
     # 스레드의 모든 메시지를 가져옴
     result = await app.client.conversations_replies(
@@ -571,7 +581,7 @@ async def app_mention(body, say):
 
     if event is None:
         return
-    
+
     thread_ts = event.get("thread_ts") or body["event"]["ts"]
     channel = event["channel"]
     user = event.get("user")
