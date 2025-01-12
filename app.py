@@ -117,7 +117,7 @@ async def my_create_playwright_browser(
 async def answer(
     thread_ts: str,
     channel: str,
-    user: str,
+    user: str | None,
     text: str,
     say,
 ):
@@ -133,7 +133,8 @@ async def answer(
     # 메시지에서 사용자 ID를 수집
     user_ids = set(message["user"]
                    for message in result["messages"] if "user" in message)
-    user_ids.add(user)
+    if user:
+        user_ids.add(user)
 
     # 사용자 정보 일괄 조회
     user_info_list = await slack_users_list(app.client)
@@ -566,10 +567,15 @@ async def app_mention(body, say):
     """
     슬랙에서 로봇을 멘션하여 대화를 시작하면 호출되는 이벤트
     """
-    thread_ts = body.get("event", {}).get("thread_ts") or body["event"]["ts"]
-    channel = body["event"]["channel"]
-    user = body["event"]["user"]
-    text = body["event"]["text"]
+    event = body.get("event")
+
+    if event is None:
+        return
+    
+    thread_ts = event.get("thread_ts") or body["event"]["ts"]
+    channel = event["channel"]
+    user = event.get("user")
+    text = event["text"]
     await answer(thread_ts, channel, user, text, say)
 
 
