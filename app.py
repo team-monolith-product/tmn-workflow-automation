@@ -2,6 +2,7 @@
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 작업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 import os
@@ -15,7 +16,7 @@ from notion2md.exporter.block import StringExporter
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain_community.agent_toolkits import SlackToolkit, PlayWrightBrowserToolkit
+from langchain_community.agent_toolkits import SlackToolkit
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
@@ -463,16 +464,26 @@ async def answer(
 
         return response["url"]
 
+    @dataclass
+    class SearchSlackMessagesResultItem:
+        text: str
+        channel: str
+        ts: str
+
     @tool
     async def search_slack_messsages(
         query: Annotated[str, "검색어"]
-    ) -> list[str]:
+    ) -> list[SearchSlackMessagesResultItem]:
         """
         슬랙 메시지를 검색합니다.
-        이 도구는 슬랙에 저장될 만 한 사내 지식을 검색할 때 유용합니다.
+        이 도구는 슬랙에 저장되어 있는 사내 지식을 검색할 때 유용합니다.
+        더 구체적인 정보를 얻으려면 slack_conversations_replies 도구를 추가로 사용할 수 있습니다.
 
         Returns:
-            검색 결과 메시지의 리스트
+            list[SearchSlackMessagesResultItem]
+            - text: 메시지 내용
+            - channel: 채널 ID
+            - ts: 타임스탬프
         """
         response = await app.client.search_messages(
             query=query,
@@ -482,10 +493,31 @@ async def answer(
 
         # 로봇 메시지는 제외
         return [
-            message["text"] for message in response["messages"]["matches"]
+            SearchSlackMessagesResultItem(
+                text=message["text"],
+                channel=message["channel"]["id"],
+                ts=message["ts"]
+            ) for message in response["messages"]["matches"]
             if message.get("user", None)
         ]
 
+    @tool
+    async def slack_conversations_replies(
+        channel: Annotated[str, "채널 ID"],
+        thread_ts: Annotated[str, "스레드 타임스탬프"]
+    ) -> list[str]:
+        """
+        전달된 채널의 스레드에서 모든 메시지를 조회합니다.
+
+        Returns:
+            list[str]: 메시지 내용
+        """
+        response = await app.client.conversations_replies(
+            channel=channel,
+            ts=thread_ts,
+        )
+
+        return [message["text"] for message in response["messages"]]
     tools = [
         create_notion_task,
         update_notion_task_deadline,
@@ -493,7 +525,9 @@ async def answer(
         create_notion_follow_up_task,
         get_notion_page,
         search_tool,
-        get_web_page_from_url
+        get_web_page_from_url,
+        slack_conversations_replies,
+        search_slack_messsages,
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
