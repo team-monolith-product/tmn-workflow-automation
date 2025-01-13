@@ -3,7 +3,7 @@ name: Manage Tasks Daily
 
 on:
   schedule:
-    - cron: '23 45 * * 0-4'  # 9시(UTC+9)에 실행
+    - cron: '45 23 * * 0-4'  # 9시(UTC+9)에 실행
   workflow_dispatch:
 
 jobs:
