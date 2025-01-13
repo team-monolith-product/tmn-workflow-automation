@@ -443,7 +443,9 @@ async def answer(
                 "프로젝트": {
                     "relation": [
                         {
-                            "id": parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]
+                            "id": (parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]
+                                   if parent_page_data["properties"]["프로젝트"]["relation"]
+                                   else None)
                         }
                     ]
                 },
