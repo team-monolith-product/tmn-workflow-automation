@@ -416,9 +416,7 @@ async def answer(
         else:
             title = f"{parent_title} - {component}"
 
-        response = notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties={
+        properties = {
                 "제목": {
                     "title": [
                         {
@@ -440,15 +438,6 @@ async def answer(
                         }
                     ]
                 },
-                "프로젝트": {
-                    "relation": [
-                        {
-                            "id": (parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]
-                                   if parent_page_data["properties"]["프로젝트"]["relation"]
-                                   else None)
-                        }
-                    ]
-                },
                 "상태": {
                     "status": {
                         "name": "대기"
@@ -462,6 +451,19 @@ async def answer(
                     ]
                 }
             }
+
+        if parent_page_data["properties"]["프로젝트"]["relation"]:
+            properties["프로젝트"] = {
+                "relation": [
+                    {
+                        "id": parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]
+                    }
+                ]
+            }
+
+        response = notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=properties
         )
 
         return response["url"]
