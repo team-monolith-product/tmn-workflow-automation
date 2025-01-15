@@ -699,7 +699,8 @@ async def user_huddle_changed(body, say):
                     'section_id': section['id'],
                     'document_content': {
                         "type": "markdown",
-                        "markdown": f"- [x] {user_name}\n"
+                        # 매일 삭제할 때 공백을 검색하여 삭제합니다. 따라서 공백을 넣습니다.
+                        "markdown": f"- [x] {user_name} \n"
                     }
                 }]
             )
