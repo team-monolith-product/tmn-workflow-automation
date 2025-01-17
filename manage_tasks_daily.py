@@ -99,7 +99,7 @@ def alert_overdue_tasks(
     email_to_slack_id: dict,
 ):
     """
-    진행 중인 과업 중 종료일이 지난 과업을 슬랙으로 알림
+    대기 및 진행 중인 과업 중 종료일이 지난 과업을 슬랙으로 알림
 
     Args:
         notion (NotionClient): Notion
@@ -113,7 +113,7 @@ def alert_overdue_tasks(
     """
     today = datetime.now().date()
 
-    # '진행' 상태이면서 타임라인 종료일이 today보다 과거인 페이지 검색
+    # 대기 또는 진행 상태이면서 타임라인 종료일이 today보다 과거인 페이지 검색
     results = notion.databases.query(
         **{
             "database_id": database_id,
@@ -121,6 +121,12 @@ def alert_overdue_tasks(
                 "and": [
                     {
                         "or": [
+                            {
+                                "property": "상태",
+                                "status": {
+                                    "equals": "대기"
+                                }
+                            },
                             {
                                 "property": "상태",
                                 "status": {
