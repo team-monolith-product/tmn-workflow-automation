@@ -304,8 +304,8 @@ async def answer(
 
             # 템플릿의 나머지 영역을 블록으로 추가
             template = """# 작업 내용
-
-    # 검증
+- 
+# 검증
 
             """
             for block in parse_md(template):
