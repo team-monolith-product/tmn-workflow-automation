@@ -157,8 +157,12 @@ def alert_overdue_tasks(
         page_url = result["url"]
         people = result["properties"]["담당자"]["people"]
         if people:
-            assignee_email = people[0]["person"]["email"]
-            slack_user_id = email_to_slack_id.get(assignee_email)
+            person = people[0].get("person")
+            if person:
+                assignee_email = person["email"]
+                slack_user_id = email_to_slack_id.get(assignee_email)
+            else:
+                slack_user_id = None
         else:
             slack_user_id = None
 
@@ -228,8 +232,12 @@ def alert_no_due_tasks(
         page_url = result["url"]
         people = result["properties"]["담당자"]["people"]
         if people:
-            assignee_email = people[0]["person"]["email"]
-            slack_user_id = email_to_slack_id.get(assignee_email)
+            person = people[0].get("person")
+            if person:
+                assignee_email = person["email"]
+                slack_user_id = email_to_slack_id.get(assignee_email)
+            else:
+                slack_user_id = None
         else:
             slack_user_id = None
 
@@ -422,8 +430,12 @@ def alert_no_후속_작업(
 
         people = result["properties"]["담당자"]["people"]
         if people:
-            assignee_email = people[0]["person"]["email"]
-            slack_user_id = email_to_slack_id.get(assignee_email)
+            person = people[0].get("person")
+            if person:
+                assignee_email = person["email"]
+                slack_user_id = email_to_slack_id.get(assignee_email)
+            else:
+                slack_user_id = None
         else:
             slack_user_id = None
 
