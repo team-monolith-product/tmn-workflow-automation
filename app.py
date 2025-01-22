@@ -333,14 +333,18 @@ async def answer(
         old_start = None
         timeline_property = page_data["properties"].get("타임라인", {})
         date_value = timeline_property.get("date", {})
-        old_start = date_value.get("start")  # 예: '2024-12-01'
 
-        # 만약 start가 None이라면 end 업데이트가 무의미할 수도 있으므로,
-        # 필요 시 분기 처리(없으면 start == end로 맞춘다던가).
-        if old_start is None:
-            # 예: start가 없던 경우 -> end만 존재하거나?
-            # 사용 용도에 맞춰 처리
-            old_start = new_deadline
+        if date_value:
+            old_start = date_value.get("start")  # 예: '2024-12-01'
+
+            if old_start:
+                new_start = old_start
+            else:
+                new_start = new_deadline
+        else:
+            new_start = new_deadline
+
+        new_end = new_deadline
 
         # 3) Notion 페이지 업데이트 (start는 기존값, end만 바꿔치기)
         notion.pages.update(
@@ -349,8 +353,8 @@ async def answer(
                 # 예) 속성 이름이 "종료일"인 경우
                 "타임라인": {
                     "date": {
-                        "start": old_start,
-                        "end": new_deadline
+                        "start": new_start,
+                        "end": new_end
                     }
                 }
             }
@@ -417,40 +421,40 @@ async def answer(
             title = f"{parent_title} - {component}"
 
         properties = {
-                "제목": {
-                    "title": [
-                        {
-                            "text": {
-                                "content": title
-                            }
+            "제목": {
+                "title": [
+                    {
+                        "text": {
+                            "content": title
                         }
-                    ]
-                },
-                "유형": {
-                    "select": {
-                        "name": "작업 🔨"
                     }
-                },
-                "구성요소": {
-                    "multi_select": [
-                        {
-                            "name": component
-                        }
-                    ]
-                },
-                "상태": {
-                    "status": {
-                        "name": "대기"
-                    }
-                },
-                "선행 작업": {
-                    "relation": [
-                        {
-                            "id": parent_page_id
-                        }
-                    ]
+                ]
+            },
+            "유형": {
+                "select": {
+                    "name": "작업 🔨"
                 }
+            },
+            "구성요소": {
+                "multi_select": [
+                    {
+                        "name": component
+                    }
+                ]
+            },
+            "상태": {
+                "status": {
+                    "name": "대기"
+                }
+            },
+            "선행 작업": {
+                "relation": [
+                    {
+                        "id": parent_page_id
+                    }
+                ]
             }
+        }
 
         if parent_page_data["properties"]["프로젝트"]["relation"]:
             properties["프로젝트"] = {
