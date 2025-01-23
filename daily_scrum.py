@@ -62,14 +62,7 @@ def daily_scrum():
         criteria={
             "contains_text": " "
         }
-    )["sections"] + slack_client.canvases_sections_lookup(
-        canvas_id=SLACK_CANVAS_ID,
-        criteria={
-            "contains_text": ":heart:"
-        }
     )["sections"]
-
-
 
     # 캔버스 내용 지우기
     for section in sections:
