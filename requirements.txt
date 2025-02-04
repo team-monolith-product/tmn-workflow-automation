@@ -16,3 +16,5 @@ playwright
 lxml
 aiohttp
 browser-use
+markdown
+pypandoc_binary
