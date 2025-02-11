@@ -233,50 +233,54 @@ async def answer(
         Returns:
             생성된 노션 페이지의 URL
         """
-        response = notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties={
-                "제목": {
-                    "title": [
-                        {
-                            "text": {
-                                "content": title
-                            }
+        properties = {
+            "제목": {
+                "title": [
+                    {
+                        "text": {
+                            "content": title
                         }
-                    ]
-                },
-                "유형": {
-                    "select": {
-                        "name": task_type
                     }
-                },
-                "구성요소": {
-                    "multi_select": [
-                        {
-                            "name": component
-                        }
-                    ]
-                },
-                "프로젝트": {
-                    "relation": [
-                        {
-                            "id": PROJECT_TO_PAGE_ID[project]
-                        }
-                    ]
-                },
-                "상태": {
-                    "status": {
-                        "name": "대기"
+                ]
+            },
+            "유형": {
+                "select": {
+                    "name": task_type
+                }
+            },
+            "구성요소": {
+                "multi_select": [
+                    {
+                        "name": component
                     }
-                },
-                "담당자": {
-                    "people": [
-                        {
-                            "id": notion_assignee_id
-                        }
-                    ]
+                ]
+            },
+            "프로젝트": {
+                "relation": [
+                    {
+                        "id": PROJECT_TO_PAGE_ID[project]
+                    }
+                ]
+            },
+            "상태": {
+                "status": {
+                    "name": "대기"
                 }
             }
+        }
+
+        if notion_assignee_id:
+            properties["담당자"] = {
+                "people": [
+                    {
+                        "id": notion_assignee_id
+                    }
+                ]
+            }
+
+        response = notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=properties
         )
 
         page_id = response["id"]
@@ -633,6 +637,7 @@ async def app_mention(body, say):
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = 'C02JX95U7AP'
 SLACK_DAILY_SCRUM_CANVAS_ID = 'F05S8Q78CGZ'
+SLACK_BUG_REPORT_CHANNEL_ID = 'C07A5HVG6UR'
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
@@ -707,6 +712,33 @@ async def user_huddle_changed(body, say):
                     }
                 }]
             )
+
+
+@app.event("message")
+async def message(body, say):
+    """
+    버그 신고 채널에 올라오는 메시지를 LLM으로 분석하여
+    Notion에 버그 작업을 생성하고, 시급한 경우 담당 그룹을 태그합니다.
+    """
+    event = body.get("event", {})
+    channel = event.get("channel")
+    if channel != SLACK_BUG_REPORT_CHANNEL_ID:
+        return
+
+    # TODO: 스레드 답글도 판단해서 답변.
+    thread_ts = event.get("thread_ts")
+    ts = event.get("ts")
+    if thread_ts and thread_ts != ts:
+        # 이 메시지는 스레드의 답글이므로 무시합니다.
+        return
+
+    text = event.get("text", "")
+    # 위 신고 내용에서 다음과 같은 정보를 추출합니다.
+    # - 버그 유발 환경 / 조건 / 재현 절차 등
+    # - 신고자가 기대한 결과
+    # - 신고자가 경험한 결과
+    # - 시급도 (보통, 당일 대응, 즉시 대응)
+    # - 관련 그룹 (백, 프론트, 인프라)
 
 
 @assistant.thread_started
