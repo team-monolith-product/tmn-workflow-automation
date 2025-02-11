@@ -108,7 +108,7 @@ def replace_images_in_md(md_text: str) -> str:
             else:
                 print(f"   => Failed to download (HTTP {resp.status_code})")
         except Exception as e:
-            print(f"   => Error: {e}")
+            raise e
 
     return replaced_md
 
@@ -434,7 +434,7 @@ def upload_to_update_system(
             "crctRsnCd": "R2",
             "crctRvwRqstrSeCd": "R201",
             "rvwRqstrRmrk": "",
-            "rfltYmd": "20250205",
+            "rfltYmd": "20250214",
             "autCnsltnFileId": atch_file_group_id,
             "mdspRegYmd": "",
             "mdspRegUid": "",
@@ -463,13 +463,23 @@ def upload_to_update_system(
     return resp.json()
 
 
-def list_update(session):
+def list_update(session, title):
     url = "https://mi.aidtbook.kr:8443/amdnmg/ame/mdfMng/selectMdfcnSplmntList.do"
     headers = {
         "content-type": "application/json; charset=UTF-8",
     }
-    payload = {"curPage": "2", "pageSize": "40", "totalCnt": "1", "sSchlvSeCd": "", "sSchlvSbjtgrpSeCd": "정보",
-               "sSbjctNm": "", "sAutNm": "", "sTxbkMnchNm": "", "sTxbkMdchNm": "", "sKywdCn": ""}
+    payload = {
+        "curPage": "1",
+        "pageSize": "40",
+        "totalCnt": "1",
+        "sSchlvSeCd": "",
+        "sSchlvSbjtgrpSeCd": "정보",
+        "sSbjctNm": "",
+        "sAutNm": "",
+        "sTxbkMnchNm": "",
+        "sTxbkMdchNm": "",
+        "sKywdCn": title
+    }
     resp = session.post(url, json=payload, headers=headers)
     resp.raise_for_status()
 
@@ -561,7 +571,7 @@ def main():
         print(f"'{title}' 건이 수정/보완 시스템에 업로드되었습니다.")
 
         print(f"'{title}' 건을 수정/보완 시스템에서 검색합니다...")
-        update_list = list_update(session)
+        update_list = list_update(session, title)
 
         print(update_list)
 
