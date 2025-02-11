@@ -367,6 +367,7 @@ def alert_no_후속_작업(
     - '상태' 속성이 '완료'인 경우
     - '후속 작업'(관계형) 속성이 비어 있는 경우
     - '작성일시'(생성 일시)가 2025년 1월 1일 이후인 경우
+    - 단, 제목에 '후속 작업 없음'이 포함된 경우는 제외
     
     Args:
         notion (NotionClient): Notion
@@ -412,6 +413,12 @@ def alert_no_후속_작업(
                 "property": "후속 작업",
                 "relation": {
                     "is_empty": True
+                }
+            },
+            {
+                "property": "제목",
+                "title": {
+                    "does_not_contain": "후속 작업 없음"
                 }
             }
         ]
