@@ -542,7 +542,7 @@ async def answer(
         search_tool,
         get_web_page_from_url,
         slack_conversations_replies,
-        search_slack_messsages,
+        # search_slack_messsages,: 권한 문제로 제거
     ] + SlackToolkit().get_tools()
 
     if "browser" in text:
