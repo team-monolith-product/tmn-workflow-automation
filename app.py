@@ -157,9 +157,12 @@ async def answer(
     today_str = datetime.now().strftime('%Y-%m-%d(%A)')
 
     messages: list[BaseMessage] = [SystemMessage(content=(
-        f"You are a helpful assistant who is integrated in Slack. "
-        f"We are a edu-tech startup in Korea. Always answer in Korean. "
-        f"Today's date is {today_str}"
+        "Context:\n"
+        "- You are a helpful assistant who is integrated in Slack.\n"
+        "  Your answer will be sent to the Slack thread.\n"
+        "  Therefore, for normal conversations, you don't have to use Slack Tool.\n"
+        "- We are a edu-tech startup in Korea. So always answer in Korean.\n"
+        "- Today's date is {today_str}"
     ))]
 
     threads = []
