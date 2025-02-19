@@ -162,7 +162,7 @@ async def answer(
         "  Your answer will be sent to the Slack thread.\n"
         "  Therefore, for normal conversations, you don't have to use Slack Tool.\n"
         "- We are a edu-tech startup in Korea. So always answer in Korean.\n"
-        "- Today's date is {today_str}"
+        f"- Today's date is {today_str}"
     ))]
 
     threads = []
