@@ -1,0 +1,29 @@
+
+name: Notify Worktime Left
+
+on:
+  schedule:
+    - cron: '45 23 * * 0-4'  # 9시(UTC+9)에 실행
+  workflow_dispatch:
+
+jobs:
+  notify_worktime_left:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run notify_worktime_left.py
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          WANTEDSPACE_API_KEY: ${{ secrets.WANTEDSPACE_API_KEY }}
+          WANTEDSPACE_API_SECRET: ${{ secrets.WANTEDSPACE_API_SECRET }}
+          DATA_GO_KR_SPECIAL_DAY_KEY: ${{ secrets.DATA_GO_KR_SPECIAL_DAY_KEY }}
+        run: |
+          python notify_worktime_left.py
