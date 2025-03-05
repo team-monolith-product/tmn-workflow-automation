@@ -3,7 +3,7 @@ name: Notify Worktime Left
 
 on:
   schedule:
-    - cron: '45 23 * * 0-4'  # 9시(UTC+9)에 실행
+    - cron: '30 0 * * 1-5'  # 9시 30분(UTC+9)에 실행
   workflow_dispatch:
 
 jobs:
