@@ -18,3 +18,4 @@ aiohttp
 browser-use
 markdown
 pypandoc_binary
+tabulate

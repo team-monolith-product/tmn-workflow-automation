@@ -1,12 +1,13 @@
+import calendar
 import os
+import argparse
 from datetime import datetime
 
 import requests
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
-
-import calendar
+from tabulate import tabulate
 
 # 환경 변수 로드
 load_dotenv()
@@ -15,6 +16,17 @@ CHANNEL_ID: str = 'C08EUJJSZF1'
 
 
 def main():
+    """
+    --dry-run
+      옵션이 주어지는 경우 실제 메시지를 전송하지 않고,
+      대신 콘솔에 출력합니다.
+    """
+    # 명령행 인자 파싱
+    parser = argparse.ArgumentParser(description="근무 시간 알림 스크립트")
+    parser.add_argument('--dry-run', action='store_true',
+                        help='메시지를 Slack에 전송하지 않고 콘솔에 출력합니다.')
+    args = parser.parse_args()
+
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     email_to_slack_id = get_slack_user_map(slack_client)
@@ -62,7 +74,7 @@ def main():
 
     # 각 사용자에 대해 (누적 근무시간 / 총 요구 근무시간)과
     # 남은 영업일 동안 평균적으로 요구되는 근무시간을 계산하여 메시지 병합
-    messages = []
+    table = []
     for email, slack_id in email_to_slack_id.items():
         actual_worktime = email_to_worktime.get(email, 0)
         if slack_id:
@@ -83,16 +95,30 @@ def main():
             avg_required = (
                 remaining_required / remaining_business_days) if remaining_business_days > 0 else 0
 
-            messages.append(
-                f"{real_name} : 잔여 일평균 근로 시간: {avg_required/60:.1f} 시간 "
-                f"({actual_worktime/60:.1f} 시간 / {adjusted_required/60:.1f} 시간), 휴가: {vacation_days:.2f}일"
+            table.append(
+                [
+                    real_name,
+                    f"{avg_required/60:.1f} 시간",
+                    f"{actual_worktime/60:.1f} 시간",
+                    f"{adjusted_required/60:.1f} 시간",
+                    f"{vacation_days:.2f} 일"
+                ]
             )
 
-    # 메시지를 병합하여 한 번의 API 요청으로 전송
-    messages.sort(key=lambda msg: msg.split(" : ")[0])
-    if messages:
-        full_message = "\n".join(messages)
-        slack_client.chat_postMessage(channel=CHANNEL_ID, text=full_message)
+    # 표 형태로 출력
+    table.sort(key=lambda row: row[0])
+    if table:
+        full_message = tabulate(table, headers=["성명","잔여 시간", "수행 시간", "전체 시간", "휴가"])
+        if args.dry_run:
+            print("=== DRY RUN MODE (메시지는 실제로 전송되지 않습니다) ===")
+            print(f"채널: {CHANNEL_ID}")
+            print(f"메시지 내용:\n{full_message}")
+            print("===============================================")
+        else:
+            slack_client.chat_postMessage(
+                channel=CHANNEL_ID,
+                text=f"```{full_message}```"
+            )
 
 
 def get_wantedspace_worktime(date: str):
@@ -245,8 +271,17 @@ def get_vacation_days(email: str, year: int, month: int) -> float:
     total_days = 0.0
     try:
         results = data.get("results", [])
+
+        encountered_pairs = set()
         for event in results:
-            # event["wk_counted_days"]는 사용한 휴가 일수를 나타낸다.
+            # 2일 이상의 휴가는 배열에 여러 번 나타납니다.
+            # 시작일과 종료일이 같은 경우 중복을 피하기 위해 짝을 만들어서 중복을 체크합니다.
+            start = event.get("wk_start_date")
+            end = event.get("wk_end_date")
+            pair = (start, end)
+            if pair in encountered_pairs:
+                continue
+            encountered_pairs.add(pair)
             total_days += float(event.get("wk_counted_days", 0))
     except Exception as e:
         print("Error parsing vacation info for", email, e)
