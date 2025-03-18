@@ -7,6 +7,7 @@ import requests
 
 from dotenv import load_dotenv
 from notion2md.exporter.block import StringExporter
+from notion2md.convertor.block import BLOCK_TYPES
 from markdown import markdown
 from notion_client import Client as NotionClient
 import pypandoc
@@ -19,6 +20,7 @@ RAILS_BASE_URL = os.environ.get("RAILS_BASE_URL", "https://class.codle.io")
 DIRECT_UPLOAD_PATH = "/api/v1/direct_uploads"
 RAILS_BEARER_TOKEN = os.environ.get("RAILS_BEARER_TOKEN")
 
+PARTNER_ID = os.environ.get("PARTNER_ID")
 
 def get_notion_md(page_id: str) -> str:
     """노션 페이지를 notion2md로 마크다운 문자열 추출."""
@@ -343,6 +345,7 @@ def upload_to_update_system(
     after_html: str,
     keyword: str,
     access_path_explain: str,
+    deployment_date: str,
 ):
     """
     fetch("https://mi.aidtbook.kr:8443/amdnmg/ame/mdfMng/saveMdfcnSplmntComm.do", {
@@ -420,7 +423,7 @@ def upload_to_update_system(
         {
             "mdspSn": "",
             "mdspDmndNo": "",
-            "prtnrId": "9502d72f-0970-50fc-9370-212ba9a0e9e0",
+            "prtnrId": PARTNER_ID,
             "txbkMnchNm": "[기술] 기능 개선",
             "txbkMdchNm": "서비스 개선",
             "acsUrlAddr": "",
@@ -434,7 +437,7 @@ def upload_to_update_system(
             "crctRsnCd": "R2",
             "crctRvwRqstrSeCd": "R201",
             "rvwRqstrRmrk": "",
-            "rfltYmd": "20250214",
+            "rfltYmd": deployment_date,
             "autCnsltnFileId": atch_file_group_id,
             "mdspRegYmd": "",
             "mdspRegUid": "",
@@ -485,6 +488,34 @@ def list_update(session, title):
 
     return resp.json()
 
+def video(info: dict):
+    file_name = info['file_name']
+    url = info['url']
+
+    # file_name이 mp4 등 비디오 파일이라면
+    if file_name.endswith('.mp4') or file_name.endswith('.mov'):
+        print(f"[INFO] Download & upload video: {url}")
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            file_bytes = resp.content
+            # 파일명 / content-type 추정
+            content_type_guess = resp.headers.get(
+                "Content-Type", "application/octet-stream")
+
+            # 업로드 후 새 URL
+            new_url = direct_upload_to_rails(
+                file_bytes, file_name, content_type_guess)
+            return f"<video width=\"600\" controls><source src=\"{new_url}\"/>"
+        else:
+            # raise 가 무시되는 듯 함.
+            # raise ValueError(f"Failed to download (HTTP {resp.status_code})")
+            print(f"[ERROR] Failed to download video (HTTP {resp.status_code})")
+    else:
+        # raise 가 무시되는 듯 함.
+        # raise ValueError(f"Unsupported video format: {file_name}")
+        print(f"[ERROR] Unsupported video format: {file_name}")
+
+BLOCK_TYPES['video'] = video
 
 def main():
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
@@ -511,6 +542,7 @@ def main():
         print("로그인에 실패했습니다.")
         return
 
+    deployment_date = input("배포 일자를 입력하세요 (YYYYMMDD): ")
     for item in response["results"]:
         title = item["properties"]["제목"]["title"][0]["plain_text"]
         print(f"'{title}' 문서에 대해 처리를 시작합니다.")
@@ -560,13 +592,15 @@ def main():
 
         # 수정/보완 시스템에 업로드
         print(f"'{title}' 건을 수정/보완 시스템에 업로드합니다...")
+        
         upload_to_update_system(
             session,
             atch_file_group_id,
             before_html,
             after_html,
             title,
-            access_path_explain
+            access_path_explain,
+            deployment_date
         )
         print(f"'{title}' 건이 수정/보완 시스템에 업로드되었습니다.")
 
