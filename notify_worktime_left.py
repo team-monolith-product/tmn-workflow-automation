@@ -89,7 +89,7 @@ def main():
             # 해당 사용자의 휴가 일수를 조회 (휴가 당 하루 근무시간 만큼 차감)
             vacation_days = get_vacation_days(email, year, month)
             # API Rate Limit을 고려하여 4초 대기
-            time.sleep(4)
+            time.sleep(5)
 
             # 각 사용자의 조정된 요구 근무시간: 기본 요구 근무시간에서 (휴가일수 × 하루 근무시간)을 차감
             adjusted_required = max(
