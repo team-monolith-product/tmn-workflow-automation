@@ -2,6 +2,7 @@ import calendar
 import os
 import argparse
 from datetime import datetime
+import time
 
 import requests
 
@@ -87,6 +88,8 @@ def main():
 
             # 해당 사용자의 휴가 일수를 조회 (휴가 당 하루 근무시간 만큼 차감)
             vacation_days = get_vacation_days(email, year, month)
+            # API Rate Limit을 고려하여 4초 대기
+            time.sleep(4)
 
             # 각 사용자의 조정된 요구 근무시간: 기본 요구 근무시간에서 (휴가일수 × 하루 근무시간)을 차감
             adjusted_required = max(
@@ -270,15 +273,16 @@ def get_vacation_days(email: str, year: int, month: int) -> float:
     data = response.json()
     total_days = 0.0
     try:
-        results = data.get("results", [])
+        results = data["results"]
 
         encountered_pairs = set()
         for event in results:
             # 2일 이상의 휴가는 배열에 여러 번 나타납니다.
             # 시작일과 종료일이 같은 경우 중복을 피하기 위해 짝을 만들어서 중복을 체크합니다.
+            event_name = event.get("wk_event_name")
             start = event.get("wk_start_date")
             end = event.get("wk_end_date")
-            pair = (start, end)
+            pair = (event_name, start, end)
             if pair in encountered_pairs:
                 continue
             encountered_pairs.add(pair)
