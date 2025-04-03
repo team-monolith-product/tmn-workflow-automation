@@ -8,8 +8,8 @@ from slack_sdk import WebClient
 # 환경 변수 로드
 load_dotenv()
 
-DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
-CHANNEL_ID: str = 'C087PDC9VG8'
+DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+CHANNEL_ID: str = "C087PDC9VG8"
 
 
 def main():
@@ -20,33 +20,11 @@ def main():
 
     send_intro_message(slack_client, CHANNEL_ID)
     alert_overdue_tasks(
-        notion,
-        slack_client,
-        DATABASE_ID,
-        CHANNEL_ID,
-        email_to_slack_id
+        notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id
     )
-    alert_no_due_tasks(
-        notion,
-        slack_client,
-        DATABASE_ID,
-        CHANNEL_ID,
-        email_to_slack_id
-    )
-    alert_no_tasks(
-        notion,
-        slack_client,
-        DATABASE_ID,
-        CHANNEL_ID,
-        email_to_slack_id
-    )
-    alert_no_후속_작업(
-        notion,
-        slack_client,
-        DATABASE_ID,
-        CHANNEL_ID,
-        email_to_slack_id
-    )
+    alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
+    alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
+    alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
 
 
 def get_slack_user_map(slack_client: WebClient):
@@ -91,6 +69,7 @@ def send_intro_message(
     )
     slack_client.chat_postMessage(channel=channel_id, text=intro_message)
 
+
 def alert_overdue_tasks(
     notion: NotionClient,
     slack_client: WebClient,
@@ -121,34 +100,14 @@ def alert_overdue_tasks(
                 "and": [
                     {
                         "or": [
-                            {
-                                "property": "상태",
-                                "status": {
-                                    "equals": "대기"
-                                }
-                            },
-                            {
-                                "property": "상태",
-                                "status": {
-                                    "equals": "진행"
-                                }
-                            },
-                            {
-                                "property": "상태",
-                                "status": {
-                                    "equals": "리뷰"
-                                }
-                            }
+                            {"property": "상태", "status": {"equals": "대기"}},
+                            {"property": "상태", "status": {"equals": "진행"}},
+                            {"property": "상태", "status": {"equals": "리뷰"}},
                         ]
                     },
-                    {
-                        "property": "종료일",
-                        "date": {
-                            "before": today.isoformat()
-                        }
-                    }
+                    {"property": "종료일", "date": {"before": today.isoformat()}},
                 ]
-            }
+            },
         }
     )
 
@@ -202,28 +161,13 @@ def alert_no_due_tasks(
                 "and": [
                     {
                         "or": [
-                            {
-                                "property": "상태",
-                                "status": {
-                                    "equals": "진행"
-                                }
-                            },
-                            {
-                                "property": "상태",
-                                "status": {
-                                    "equals": "리뷰"
-                                }
-                            }
+                            {"property": "상태", "status": {"equals": "진행"}},
+                            {"property": "상태", "status": {"equals": "리뷰"}},
                         ]
                     },
-                    {
-                        "property": "타임라인",
-                        "date": {
-                            "is_empty": True
-                        }
-                    }
+                    {"property": "타임라인", "date": {"is_empty": True}},
                 ]
-            }
+            },
         }
     )
 
@@ -277,20 +221,10 @@ def alert_no_tasks(
             "database_id": database_id,
             "filter": {
                 "or": [
-                    {
-                        "property": "상태",
-                        "status": {
-                            "equals": "진행"
-                        }
-                    },
-                    {
-                        "property": "상태",
-                        "status": {
-                            "equals": "리뷰"
-                        }
-                    }
+                    {"property": "상태", "status": {"equals": "진행"}},
+                    {"property": "상태", "status": {"equals": "리뷰"}},
                 ]
-            }
+            },
         }
     )
 
@@ -315,12 +249,11 @@ def alert_no_tasks(
     if usergroup_id is None:
         slack_client.chat_postMessage(
             channel=channel_id,
-            text="엔지니어 그룹 @e를 찾을 수 없습니다. 확인부탁드립니다."
+            text="엔지니어 그룹 @e를 찾을 수 없습니다. 확인부탁드립니다.",
         )
         return
 
-    e_group_users_response = slack_client.usergroups_users_list(
-        usergroup=usergroup_id)
+    e_group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
     e_user_ids = e_group_users_response.get("users", [])
 
     # 4. email_to_slack_id는 "email -> slack user id" 매핑이므로,
@@ -354,6 +287,7 @@ def alert_no_tasks(
             )
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
+
 def alert_no_후속_작업(
     notion: NotionClient,
     slack_client: WebClient,
@@ -368,7 +302,7 @@ def alert_no_후속_작업(
     - '후속 작업'(관계형) 속성이 비어 있는 경우
     - '작성일시'(생성 일시)가 2025년 1월 1일 이후인 경우
     - 단, 제목에 '후속 작업 없음'이 포함된 경우는 제외
-    
+
     Args:
         notion (NotionClient): Notion
         slack_client (WebClient): Slack
@@ -383,52 +317,22 @@ def alert_no_후속_작업(
         "and": [
             {
                 "property": "작성일시",
-                "created_time": {
-                    "on_or_after": "2025-01-01T00:00:00.000Z"
-                }
+                "created_time": {"on_or_after": "2025-01-01T00:00:00.000Z"},
             },
-            {
-                "property": "상태",
-                "status": {
-                    "equals": "완료"
-                }
-            },
+            {"property": "상태", "status": {"equals": "완료"}},
             {
                 "or": [
-                    {
-                        "property": "구성요소",
-                        "multi_select": {
-                            "contains": "기획"
-                        }
-                    },
-                    {
-                        "property": "구성요소",
-                        "multi_select": {
-                            "contains": "디자인"
-                        }
-                    }
+                    {"property": "구성요소", "multi_select": {"contains": "기획"}},
+                    {"property": "구성요소", "multi_select": {"contains": "디자인"}},
                 ]
             },
-            {
-                "property": "후속 작업",
-                "relation": {
-                    "is_empty": True
-                }
-            },
-            {
-                "property": "제목",
-                "title": {
-                    "does_not_contain": "후속 작업 없음"
-                }
-            }
+            {"property": "후속 작업", "relation": {"is_empty": True}},
+            {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
         ]
     }
 
     results = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": query_filter
-        }
+        **{"database_id": database_id, "filter": query_filter}
     )
 
     for result in results.get("results", []):
@@ -459,6 +363,7 @@ def alert_no_후속_작업(
                 "Notion에서 담당자/후속 작업 정보를 업데이트 부탁드립니다."
             )
         slack_client.chat_postMessage(channel=channel_id, text=text)
+
 
 if __name__ == "__main__":
     main()

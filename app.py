@@ -1,6 +1,7 @@
 """
 슬랙에서 로봇을 멘션하여 답변을 얻고, 노션에 작업을 생성하거나 업데이트하는 기능을 제공하는 슬랙 봇입니다.
 """
+
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -36,12 +37,12 @@ load_dotenv()
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
-DATABASE_ID: str = 'a9de18b3877c453a8e163c2ee1ff4137'
+DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
 PROJECT_TO_PAGE_ID = {
     "유지보수": "16f1cc820da68045a972c1da9a72f335",
     "기술개선": "16f1cc820da680c99d35dde36ad2f7f2",
     "경험개선": "16f1cc820da6809fb2d3dc7f91401c1d",
-    "오픈소스": "2a17626c85574a958fb584f2fb2eda08"
+    "오픈소스": "2a17626c85574a958fb584f2fb2eda08",
 }
 
 app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -79,6 +80,7 @@ async def notion_users_list(client: NotionClient):
     resp = client.users.list()
     _cache_notion_users["notion_users_list"] = resp
     return resp
+
 
 search_tool = TavilySearchResults(
     max_results=10,
@@ -136,34 +138,35 @@ async def answer(
         None
     """
     # 스레드의 모든 메시지를 가져옴
-    result = await app.client.conversations_replies(
-        channel=channel,
-        ts=thread_ts
-    )
+    result = await app.client.conversations_replies(channel=channel, ts=thread_ts)
 
     # 메시지에서 사용자 ID를 수집
-    user_ids = set(message["user"]
-                   for message in result["messages"] if "user" in message)
+    user_ids = set(
+        message["user"] for message in result["messages"] if "user" in message
+    )
     if user:
         user_ids.add(user)
 
     # 사용자 정보 일괄 조회
     user_info_list = await slack_users_list(app.client)
     user_dict = {
-        user["id"]: user for user in user_info_list["members"]
-        if user["id"] in user_ids
+        user["id"]: user for user in user_info_list["members"] if user["id"] in user_ids
     }
 
-    today_str = datetime.now().strftime('%Y-%m-%d(%A)')
+    today_str = datetime.now().strftime("%Y-%m-%d(%A)")
 
-    messages: list[BaseMessage] = [SystemMessage(content=(
-        "Context:\n"
-        "- You are a helpful assistant who is integrated in Slack.\n"
-        "  Your answer will be sent to the Slack thread.\n"
-        "  Therefore, for normal conversations, you don't have to use Slack Tool.\n"
-        "- We are a edu-tech startup in Korea. So always answer in Korean.\n"
-        f"- Today's date is {today_str}"
-    ))]
+    messages: list[BaseMessage] = [
+        SystemMessage(
+            content=(
+                "Context:\n"
+                "- You are a helpful assistant who is integrated in Slack.\n"
+                "  Your answer will be sent to the Slack thread.\n"
+                "  Therefore, for normal conversations, you don't have to use Slack Tool.\n"
+                "- We are a edu-tech startup in Korea. So always answer in Korean.\n"
+                f"- Today's date is {today_str}"
+            )
+        )
+    ]
 
     threads = []
     for message in result["messages"][:-1]:
@@ -181,21 +184,25 @@ async def answer(
     user_real_name = user_profile.get("real_name", "Unknown")
 
     threads_joined = "\n\n".join(threads)
-    messages.append(HumanMessage(
-        content=(
-            f"{threads_joined}\n"
-            f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
-            f"{text}\n"
+    messages.append(
+        HumanMessage(
+            content=(
+                f"{threads_joined}\n"
+                f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
+                f"{text}\n"
+            )
         )
-    ))
+    )
 
     # Slack 스레드 링크 만들기
     # Slack 메시지 링크 형식: https://<workspace>.slack.com/archives/<channel_id>/p<message_ts>
     # thread_ts는 보통 소수점 형태 ex) 1690891234.123456이므로 '.' 제거
     slack_workspace = "monolith-keb2010"  # 실제 워크스페이스 도메인으로 변경 필요
-    thread_ts_for_link = thread_ts.replace('.', '')
-    slack_thread_url = (f"https://{slack_workspace}.slack.com"
-                        f"/archives/{channel}/p{thread_ts_for_link}")
+    thread_ts_for_link = thread_ts.replace(".", "")
+    slack_thread_url = (
+        f"https://{slack_workspace}.slack.com"
+        f"/archives/{channel}/p{thread_ts_for_link}"
+    )
 
     user_email = user_profile.get("profile", {}).get("email")
 
@@ -204,10 +211,11 @@ async def answer(
     # 이메일이 slack_email인 Notion 사용자 찾기
     matched_notion_user = next(
         (
-            user for user in notion_users["results"]
+            user
+            for user in notion_users["results"]
             if user["type"] == "person" and user["person"]["email"] == user_email
         ),
-        None
+        None,
     )
 
     notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
@@ -216,17 +224,26 @@ async def answer(
     def create_notion_task(
         title: Annotated[str, "작업의 제목"],
         task_type: Annotated[Literal["작업 🔨", "버그 🐞"], "작업의 유형"],
-        component: Annotated[Literal["기획", "디자인", "프론트", "백", "인프라", "데이터", "AI"], "작업의 구성요소"],
-        project: Annotated[Literal["유지보수", "기술개선", "경험개선", "오픈소스"], "작업이 속한 프로젝트"],
-        blocks: Annotated[str | None, (
-            "작업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
-            "# 슬랙 대화 요약\n"
-            "_슬랙 대화 내용을 요약하여 작성한다._\n"
-            "# 기획\n"
-            "_작업 배경, 요구 사항 등을 정리하여 작성한다._\n"
-            "# 의견\n"
-            "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 작업을 해결하기 위한 기술적 방향을 제시._\n"
-        )]
+        component: Annotated[
+            Literal["기획", "디자인", "프론트", "백", "인프라", "데이터", "AI"],
+            "작업의 구성요소",
+        ],
+        project: Annotated[
+            Literal["유지보수", "기술개선", "경험개선", "오픈소스"],
+            "작업이 속한 프로젝트",
+        ],
+        blocks: Annotated[
+            str | None,
+            (
+                "작업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
+                "# 슬랙 대화 요약\n"
+                "_슬랙 대화 내용을 요약하여 작성한다._\n"
+                "# 기획\n"
+                "_작업 배경, 요구 사항 등을 정리하여 작성한다._\n"
+                "# 의견\n"
+                "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 작업을 해결하기 위한 기술적 방향을 제시._\n"
+            ),
+        ],
     ) -> str:
         """
         노션에 새로운 작업 페이지를 생성합니다.
@@ -237,53 +254,18 @@ async def answer(
             생성된 노션 페이지의 URL
         """
         properties = {
-            "제목": {
-                "title": [
-                    {
-                        "text": {
-                            "content": title
-                        }
-                    }
-                ]
-            },
-            "유형": {
-                "select": {
-                    "name": task_type
-                }
-            },
-            "구성요소": {
-                "multi_select": [
-                    {
-                        "name": component
-                    }
-                ]
-            },
-            "프로젝트": {
-                "relation": [
-                    {
-                        "id": PROJECT_TO_PAGE_ID[project]
-                    }
-                ]
-            },
-            "상태": {
-                "status": {
-                    "name": "대기"
-                }
-            }
+            "제목": {"title": [{"text": {"content": title}}]},
+            "유형": {"select": {"name": task_type}},
+            "구성요소": {"multi_select": [{"name": component}]},
+            "프로젝트": {"relation": [{"id": PROJECT_TO_PAGE_ID[project]}]},
+            "상태": {"status": {"name": "대기"}},
         }
 
         if notion_assignee_id:
-            properties["담당자"] = {
-                "people": [
-                    {
-                        "id": notion_assignee_id
-                    }
-                ]
-            }
+            properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
 
         response = notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties=properties
+            parent={"database_id": DATABASE_ID}, properties=properties
         )
 
         page_id = response["id"]
@@ -292,22 +274,12 @@ async def answer(
         if slack_thread_url:
             notion.blocks.children.append(
                 block_id=page_id,
-                children=[
-                    {
-                        "type": "bookmark",
-                        "bookmark": {
-                            "url": slack_thread_url
-                        }
-                    }
-                ]
+                children=[{"type": "bookmark", "bookmark": {"url": slack_thread_url}}],
             )
 
         if blocks:
             for block in parse_md(blocks):
-                notion.blocks.children.append(
-                    page_id,
-                    children=[block]
-                )
+                notion.blocks.children.append(page_id, children=[block])
 
             # 템플릿의 나머지 영역을 블록으로 추가
             template = """# 작업 내용
@@ -316,17 +288,16 @@ async def answer(
 
             """
             for block in parse_md(template):
-                notion.blocks.children.append(
-                    page_id,
-                    children=[block]
-                )
+                notion.blocks.children.append(page_id, children=[block])
 
         return response["url"]
 
     @tool
     def update_notion_task_deadline(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-        new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"]
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
+        new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"],
     ):
         """
         노션 작업의 타임라인을 변경합니다.
@@ -358,38 +329,32 @@ async def answer(
             page_id=page_id,
             properties={
                 # 예) 속성 이름이 "종료일"인 경우
-                "타임라인": {
-                    "date": {
-                        "start": new_start,
-                        "end": new_end
-                    }
-                }
-            }
+                "타임라인": {"date": {"start": new_start, "end": new_end}}
+            },
         )
 
     @tool
     def update_notion_task_status(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-        new_status: Annotated[Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"]
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
+        new_status: Annotated[
+            Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"
+        ],
     ):
         """
         노션 작업의 상태를 변경합니다.
         주로 노션 작업을 진행 중, 완료, 중단 등으로 변경할 때 쓰입니다.
         """
         notion.pages.update(
-            page_id=page_id,
-            properties={
-                "상태": {
-                    "status": {
-                        "name": new_status
-                    }
-                }
-            }
+            page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
         )
 
     @tool
     def get_notion_page(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
     ) -> str:
         """
         노션 페이지를 마크다운 형태로 조회합니다.
@@ -399,8 +364,13 @@ async def answer(
 
     @tool
     def create_notion_follow_up_task(
-        parent_page_id: Annotated[str, "선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-        component: Annotated[Literal["디자인", "프론트", "백", "인프라", "데이터", "AI"], "후속 작업의 구성요소"],
+        parent_page_id: Annotated[
+            str, "선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
+        component: Annotated[
+            Literal["디자인", "프론트", "백", "인프라", "데이터", "AI"],
+            "후속 작업의 구성요소",
+        ],
     ) -> str:
         """
         선행 작업(parent_page_id)에 대하여 후속 작업을 생성합니다.
@@ -418,63 +388,39 @@ async def answer(
         # "블록 코딩 에디터 디자인 개선 - 디자인" -> "블록 코딩 에디터 디자인 개선 - 프론트"
         #
         # 주로 "- {구성요소}" 로 끝나는 제목을 가정하고 작성
-        parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"]["content"]
-        parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][0]["name"]
+        parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"][
+            "content"
+        ]
+        parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][
+            0
+        ]["name"]
 
         if parent_title.endswith(f" - {parent_component}"):
-            title = parent_title.replace(
-                f" - {parent_component}", f" - {component}")
+            title = parent_title.replace(f" - {parent_component}", f" - {component}")
         else:
             title = f"{parent_title} - {component}"
 
         properties = {
-            "제목": {
-                "title": [
-                    {
-                        "text": {
-                            "content": title
-                        }
-                    }
-                ]
-            },
-            "유형": {
-                "select": {
-                    "name": "작업 🔨"
-                }
-            },
-            "구성요소": {
-                "multi_select": [
-                    {
-                        "name": component
-                    }
-                ]
-            },
-            "상태": {
-                "status": {
-                    "name": "대기"
-                }
-            },
-            "선행 작업": {
-                "relation": [
-                    {
-                        "id": parent_page_id
-                    }
-                ]
-            }
+            "제목": {"title": [{"text": {"content": title}}]},
+            "유형": {"select": {"name": "작업 🔨"}},
+            "구성요소": {"multi_select": [{"name": component}]},
+            "상태": {"status": {"name": "대기"}},
+            "선행 작업": {"relation": [{"id": parent_page_id}]},
         }
 
         if parent_page_data["properties"]["프로젝트"]["relation"]:
             properties["프로젝트"] = {
                 "relation": [
                     {
-                        "id": parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]
+                        "id": parent_page_data["properties"]["프로젝트"]["relation"][0][
+                            "id"
+                        ]
                     }
                 ]
             }
 
         response = notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties=properties
+            parent={"database_id": DATABASE_ID}, properties=properties
         )
 
         return response["url"]
@@ -487,7 +433,7 @@ async def answer(
 
     @tool
     async def search_slack_messsages(
-        query: Annotated[str, "검색어"]
+        query: Annotated[str, "검색어"],
     ) -> list[SearchSlackMessagesResultItem]:
         """
         슬랙 메시지를 검색합니다.
@@ -509,17 +455,16 @@ async def answer(
         # 로봇 메시지는 제외
         return [
             SearchSlackMessagesResultItem(
-                text=message["text"],
-                channel=message["channel"]["id"],
-                ts=message["ts"]
-            ) for message in response["messages"]["matches"]
+                text=message["text"], channel=message["channel"]["id"], ts=message["ts"]
+            )
+            for message in response["messages"]["matches"]
             if message.get("user", None)
         ]
 
     @tool
     async def slack_conversations_replies(
         channel: Annotated[str, "채널 ID"],
-        thread_ts: Annotated[str, "스레드 타임스탬프"]
+        thread_ts: Annotated[str, "스레드 타임스탬프"],
     ) -> list[str]:
         """
         전달된 채널의 스레드에서 모든 메시지를 조회합니다.
@@ -533,6 +478,7 @@ async def answer(
         )
 
         return [message["text"] for message in response["messages"]]
+
     tools = [
         create_notion_task,
         update_notion_task_deadline,
@@ -597,28 +543,23 @@ async def answer(
                             }
                         ]
                     },
-                    thread_ts=thread_ts
+                    thread_ts=thread_ts,
                 )
 
         response = await agent_executor.ainvoke(
-            {"messages": messages},
-            {"callbacks": [SayHandler()]}
+            {"messages": messages}, {"callbacks": [SayHandler()]}
         )
 
         agent_answer = response["messages"][-1].content
 
-    await say({
-        "blocks": [
-            {
-                "type": "section",
-                "text": {
-                        "type": "mrkdwn",
-                        "text": agent_answer
-                }
-
-            }
-        ]
-    }, thread_ts=thread_ts)
+    await say(
+        {
+            "blocks": [
+                {"type": "section", "text": {"type": "mrkdwn", "text": agent_answer}}
+            ]
+        },
+        thread_ts=thread_ts,
+    )
 
 
 @app.event("app_mention")
@@ -638,9 +579,9 @@ async def app_mention(body, say):
     await answer(thread_ts, channel, user, text, say)
 
 
-SLACK_DAILY_SCRUM_CHANNEL_ID = 'C02JX95U7AP'
-SLACK_DAILY_SCRUM_CANVAS_ID = 'F05S8Q78CGZ'
-SLACK_BUG_REPORT_CHANNEL_ID = 'C07A5HVG6UR'
+SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
+SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
+SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
@@ -652,7 +593,8 @@ async def user_huddle_changed(body, say):
     """
     event_ts = body.get("event", {}).get("event_ts")
     response = await app.client.conversations_history(
-        channel=SLACK_DAILY_SCRUM_CHANNEL_ID, latest=event_ts, limit=1)
+        channel=SLACK_DAILY_SCRUM_CHANNEL_ID, latest=event_ts, limit=1
+    )
 
     print(response)
 
@@ -682,9 +624,7 @@ async def user_huddle_changed(body, say):
 
     # 사용자 정보 일괄 조회
     user_info_list = await slack_users_list(app.client)
-    user_dict = {
-        user["id"]: user for user in user_info_list["members"]
-    }
+    user_dict = {user["id"]: user for user in user_info_list["members"]}
     for participant in participants:
         # 최근 허들 참여 시간 업데이트를 했다면 절차를 생략함.
         # 30분
@@ -698,22 +638,22 @@ async def user_huddle_changed(body, say):
 
         sections_resp = await app.client.canvases_sections_lookup(
             canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
-            criteria={
-                "contains_text": user_dict[participant]["real_name"]
-            }
+            criteria={"contains_text": user_dict[participant]["real_name"]},
         )
         sections = sections_resp["sections"]
         for section in sections:
             await app.client.canvases_edit(
                 canvas_id=SLACK_DAILY_SCRUM_CANVAS_ID,
-                changes=[{
-                    'operation': 'replace',
-                    'section_id': section['id'],
-                    'document_content': {
-                        "type": "markdown",
-                        "markdown": f"- [x] {user_name} :heart:\n"
+                changes=[
+                    {
+                        "operation": "replace",
+                        "section_id": section["id"],
+                        "document_content": {
+                            "type": "markdown",
+                            "markdown": f"- [x] {user_name} :heart:\n",
+                        },
                     }
-                }]
+                ],
             )
 
 
@@ -764,7 +704,9 @@ async def respond_in_assistant_thread(
     """
     Respond to a user message in the assistant thread.
     """
-    await answer(context.thread_ts, context.channel_id, context.user_id, payload["text"], say)
+    await answer(
+        context.thread_ts, context.channel_id, context.user_id, payload["text"], say
+    )
 
 
 # https://github.com/slackapi/bolt-python/blob/main/examples/socket_mode_async.py#L120
@@ -775,6 +717,7 @@ async def main():
     # Async Socket Mode Handler
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     await handler.start_async()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

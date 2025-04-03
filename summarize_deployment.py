@@ -23,6 +23,7 @@
 - 팀원들에게 오늘의 배포 과업에 대해 알리기 위한 워크플로우를 자동화하기 위해 개발되었습니다.
 - 수작업을 줄이고 팀 내 의사소통 효율성을 향상시키는 것을 목표로 합니다.
 """
+
 import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Set, Tuple
@@ -59,38 +60,41 @@ def get_slack_user_map(slack_client: WebClient) -> Dict[str, str]:
 
     return email_to_slack_id
 
-def get_pr_links(notion: NotionClient, pr_relations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+def get_pr_links(
+    notion: NotionClient, pr_relations: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
     pr_links_info: List[Dict[str, Any]] = []
     for relation in pr_relations:
-        pr_page_id: str = relation['id']
+        pr_page_id: str = relation["id"]
         pr_page: Dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
-        properties: Dict[str, Any] = pr_page['properties']
+        properties: Dict[str, Any] = pr_page["properties"]
 
-        url_property: Dict[str, Any] = properties.get('_external_object_url', {})
-        if 'url' in url_property and url_property['url']:
-            pr_url: str = url_property['url']
+        url_property: Dict[str, Any] = properties.get("_external_object_url", {})
+        if "url" in url_property and url_property["url"]:
+            pr_url: str = url_property["url"]
             # 'Merged At' 필드에서 병합 여부 추출
-            merged_at_property: Dict[str, Any] = properties.get('Merged At', {})
+            merged_at_property: Dict[str, Any] = properties.get("Merged At", {})
             is_merged: bool = False
-            if merged_at_property.get('date') and merged_at_property['date'].get('start'):
+            if merged_at_property.get("date") and merged_at_property["date"].get(
+                "start"
+            ):
                 is_merged = True
-            pr_links_info.append({
-                'url': pr_url,
-                'merged': is_merged
-            })
+            pr_links_info.append({"url": pr_url, "merged": is_merged})
         else:
             # URL 속성이 없는 경우 처리 로직을 추가할 수 있습니다.
             pass
     return pr_links_info
 
+
 def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
     """PR 링크를 포맷하고 레포지토리 이름을 추출하며 병합 상태에 따라 이모지를 추가합니다."""
-    pr_url: str = pr_info['url']
-    is_merged: bool = pr_info['merged']
+    pr_url: str = pr_info["url"]
+    is_merged: bool = pr_info["merged"]
     parsed_url = urlparse(pr_url)
-    path_parts = parsed_url.path.strip('/').split('/')
-    if len(path_parts) >= 4 and path_parts[2] == 'pull':
+    path_parts = parsed_url.path.strip("/").split("/")
+    if len(path_parts) >= 4 and path_parts[2] == "pull":
         repo_name: str = path_parts[1]
         pr_number: str = path_parts[3]
         display_text: str = f"{repo_name}#{pr_number}"
@@ -123,12 +127,7 @@ def main_deploy_script():
     query_result = notion.databases.query(
         **{
             "database_id": NOTION_DATABASE_ID,
-            "filter": {
-                "property": "배포 예정 날짜",
-                "date": {
-                    "equals": today_str
-                }
-            },
+            "filter": {"property": "배포 예정 날짜", "date": {"equals": today_str}},
         }
     )
 
@@ -137,7 +136,7 @@ def main_deploy_script():
         # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?"
+            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?",
         )
         print("No tasks scheduled for deployment today.")
         return
@@ -178,8 +177,8 @@ def main_deploy_script():
         task_title_link = f"<{notion_page_url}|{task_title}>"
 
         # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
-        pr_link_property: Dict[str, Any] = props.get('GitHub 풀 리퀘스트', {})
-        pr_relations: List[Dict[str, Any]] = pr_link_property.get('relation', [])
+        pr_link_property: Dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
+        pr_relations: List[Dict[str, Any]] = pr_link_property.get("relation", [])
         pr_links_info: List[Dict[str, Any]] = get_pr_links(notion, pr_relations)
 
         # PR 링크 포맷 및 레포지토리 이름 수집
@@ -190,7 +189,9 @@ def main_deploy_script():
             if repo_name:
                 repos_to_deploy.add(repo_name)
 
-        pr_links_str: str = ', '.join(formatted_pr_links) if formatted_pr_links else "No PR Link"
+        pr_links_str: str = (
+            ", ".join(formatted_pr_links) if formatted_pr_links else "No PR Link"
+        )
 
         # 메시지 구성
         message_line: str = f"{assignee_mention} {task_title_link} ({pr_links_str})\n"

@@ -17,35 +17,33 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Notion API credentials
-NOTION_API_KEY = os.getenv('NOTION_API_KEY')
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+
 
 def search_databases():
-    url = 'https://api.notion.com/v1/search'
+    url = "https://api.notion.com/v1/search"
     headers = {
-        'Authorization': f'Bearer {NOTION_API_KEY}',
-        'Notion-Version': '2022-06-28',
-        'Content-Type': 'application/json'
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
     }
-    payload = {
-        "filter": {
-            "value": "database",
-            "property": "object"
-        }
-    }
+    payload = {"filter": {"value": "database", "property": "object"}}
     response = requests.post(url, json=payload, headers=headers)
     response.raise_for_status()
     data = response.json()
     print(data)
-    return data['results']
+    return data["results"]
+
 
 def main():
     databases = search_databases()
     for db in databases:
-        db_id = db['id']
-        db_title = db['title'][0]['plain_text'] if db['title'] else 'Untitled'
+        db_id = db["id"]
+        db_title = db["title"][0]["plain_text"] if db["title"] else "Untitled"
         print(f"Database Title: {db_title}")
         print(f"Database ID: {db_id}")
-        print('-' * 40)
+        print("-" * 40)
+
 
 if __name__ == "__main__":
     main()
