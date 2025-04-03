@@ -1,3 +1,4 @@
+black
 python-dotenv
 slack-bolt
 openai
