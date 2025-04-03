@@ -4,6 +4,7 @@
 
 import datetime
 import os
+import time
 from typing import Literal
 
 import requests
@@ -58,7 +59,7 @@ def get_workevent(
     if email:
         query["email"] = email
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    response = requests.get(url, params=query, headers=headers, timeout=10)
+    response = requests_get_with_retry(url, params=query, headers=headers)
     return response.json()
 
 
@@ -121,5 +122,27 @@ def get_worktime(date: str):
     url = "https://api.wantedspace.ai/tools/openapi/worktime/"
     query = {"date": date, "key": os.environ.get("WANTEDSPACE_API_KEY")}
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    response = requests.get(url, params=query, headers=headers, timeout=10)
+    response = requests_get_with_retry(url, params=query, headers=headers)
     return response.json()
+
+
+def requests_get_with_retry(
+    url: str, params=None, headers=None, max_retries=3, initial_backoff=5
+) -> requests.Response:
+    """
+    requests.get에 대한 재시도 로직.
+    - HTTP 429(Too Many Requests) 등에 대응
+
+    원티드스페이스는 429 응답을 반환함.
+    """
+    backoff = initial_backoff
+    for _ in range(1, max_retries + 1):
+        response = requests.get(
+            url, params=params, headers=headers, timeout=10)
+
+        if response.status_code == 429:
+            time.sleep(backoff)
+            backoff *= 2
+
+        return response
+    return requests.get(url, params=params, headers=headers, timeout=10)
