@@ -13,7 +13,7 @@ from tabulate import tabulate
 # 환경 변수 로드
 load_dotenv()
 
-CHANNEL_ID: str = 'C08EUJJSZF1'
+CHANNEL_ID: str = "C08EUJJSZF1"
 
 
 def main():
@@ -24,8 +24,11 @@ def main():
     """
     # 명령행 인자 파싱
     parser = argparse.ArgumentParser(description="근무 시간 알림 스크립트")
-    parser.add_argument('--dry-run', action='store_true',
-                        help='메시지를 Slack에 전송하지 않고 콘솔에 출력합니다.')
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="메시지를 Slack에 전송하지 않고 콘솔에 출력합니다.",
+    )
     args = parser.parse_args()
 
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -37,13 +40,14 @@ def main():
     email_to_worktime = {}
     today = datetime.today()
     for i in range(1, today.day):
-        date = today.replace(day=i).strftime('%Y-%m-%d')
+        date = today.replace(day=i).strftime("%Y-%m-%d")
         worktime = get_wantedspace_worktime(date)
-        for result in worktime.get('results', []):
-            email = result.get('email')
+        for result in worktime.get("results", []):
+            email = result.get("email")
             if email:
-                email_to_worktime[email] = email_to_worktime.get(
-                    email, 0) + result.get('wk_time', 0)
+                email_to_worktime[email] = email_to_worktime.get(email, 0) + result.get(
+                    "wk_time", 0
+                )
 
     # 해당 월에 개인이 근무해야 하는 총 시간을 계산합니다.
     # 예를 들어, 평일(월~금)에 8시간씩 근무한다고 가정합니다.
@@ -57,19 +61,20 @@ def main():
     total_required_worktime = 0
     for day in range(1, last_day + 1):
         date_obj = today.replace(day=day)
-        date_str = date_obj.strftime('%Y-%m-%d')
+        date_str = date_obj.strftime("%Y-%m-%d")
         if date_obj.weekday() < 5 and date_str not in holidays:
             total_required_worktime += required_daily_minutes
 
     slack_id_to_user_info = {
-        slack_id: slack_client.users_info(user=slack_id)['user'] for slack_id in email_to_slack_id.values()
+        slack_id: slack_client.users_info(user=slack_id)["user"]
+        for slack_id in email_to_slack_id.values()
     }
 
     # 오늘을 포함한 남은 영업일(평일) 수 계산
     remaining_business_days = 0
     for day in range(today.day, last_day + 1):
         date_obj = today.replace(day=day)
-        date_str = date_obj.strftime('%Y-%m-%d')
+        date_str = date_obj.strftime("%Y-%m-%d")
         if date_obj.weekday() < 5 and date_str not in holidays:
             remaining_business_days += 1
 
@@ -80,7 +85,7 @@ def main():
         actual_worktime = email_to_worktime.get(email, 0)
         if slack_id:
             user_info = slack_id_to_user_info.get(slack_id, {})
-            real_name = user_info.get('real_name')
+            real_name = user_info.get("real_name")
 
             if not real_name:
                 # 이름이 조회되지 않는 경우는 비활성화된 사용자로 간주
@@ -93,10 +98,14 @@ def main():
 
             # 각 사용자의 조정된 요구 근무시간: 기본 요구 근무시간에서 (휴가일수 × 하루 근무시간)을 차감
             adjusted_required = max(
-                total_required_worktime - (vacation_days * required_daily_minutes), 0)
+                total_required_worktime - (vacation_days * required_daily_minutes), 0
+            )
             remaining_required = max(adjusted_required - actual_worktime, 0)
             avg_required = (
-                remaining_required / remaining_business_days) if remaining_business_days > 0 else 0
+                (remaining_required / remaining_business_days)
+                if remaining_business_days > 0
+                else 0
+            )
 
             table.append(
                 [
@@ -104,14 +113,16 @@ def main():
                     f"{avg_required/60:.1f} 시간",
                     f"{actual_worktime/60:.1f} 시간",
                     f"{adjusted_required/60:.1f} 시간",
-                    f"{vacation_days:.2f} 일"
+                    f"{vacation_days:.2f} 일",
                 ]
             )
 
     # 표 형태로 출력
     table.sort(key=lambda row: row[0])
     if table:
-        full_message = tabulate(table, headers=["성명","잔여 시간", "수행 시간", "전체 시간", "휴가"])
+        full_message = tabulate(
+            table, headers=["성명", "잔여 시간", "수행 시간", "전체 시간", "휴가"]
+        )
         if args.dry_run:
             print("=== DRY RUN MODE (메시지는 실제로 전송되지 않습니다) ===")
             print(f"채널: {CHANNEL_ID}")
@@ -119,8 +130,7 @@ def main():
             print("===============================================")
         else:
             slack_client.chat_postMessage(
-                channel=CHANNEL_ID,
-                text=f"```{full_message}```"
+                channel=CHANNEL_ID, text=f"```{full_message}```"
             )
 
 
@@ -180,14 +190,9 @@ def get_wantedspace_worktime(date: str):
             ]
         }
     """
-    url = 'https://api.wantedspace.ai/tools/openapi/worktime/'
-    query = {
-        'date': date,
-        'key': os.environ.get('WANTEDSPACE_API_KEY')
-    }
-    headers = {
-        'Authorization': os.environ.get('WANTEDSPACE_API_SECRET')
-    }
+    url = "https://api.wantedspace.ai/tools/openapi/worktime/"
+    query = {"date": date, "key": os.environ.get("WANTEDSPACE_API_KEY")}
+    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests.get(url, params=query, headers=headers, timeout=10)
     return response.json()
 
@@ -219,31 +224,33 @@ def get_public_holidays(year: int, month: int):
     해당 연도, 월의 공휴일 정보를 getRestDeInfo API를 통해 조회하고,
     공휴일(공공기관 휴일여부가 'Y')인 날짜를 'YYYY-MM-DD' 형식의 문자열 집합으로 반환한다.
     """
-    url = "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    url = (
+        "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    )
     params = {
         "solYear": str(year),
         "solMonth": f"{month:02d}",
-        "ServiceKey": os.environ.get('DATA_GO_KR_SPECIAL_DAY_KEY'),
+        "ServiceKey": os.environ.get("DATA_GO_KR_SPECIAL_DAY_KEY"),
         "_type": "json",
-        "numOfRows": "100"
+        "numOfRows": "100",
     }
     response = requests.get(url, params=params, timeout=10)
     data = response.json()
     holidays = set()
     try:
-        items = data['response']['body']['items']
-        if 'item' in items:
-            item = items['item']
+        items = data["response"]["body"]["items"]
+        if "item" in items:
+            item = items["item"]
             # 결과가 리스트인 경우
             if isinstance(item, list):
                 for holiday in item:
-                    if holiday.get('isHoliday') == "Y":
-                        locdate = str(holiday.get('locdate'))
+                    if holiday.get("isHoliday") == "Y":
+                        locdate = str(holiday.get("locdate"))
                         date_str = f"{locdate[:4]}-{locdate[4:6]}-{locdate[6:]}"
                         holidays.add(date_str)
             else:  # 단일 결과인 경우
-                if item.get('isHoliday') == "Y":
-                    locdate = str(item.get('locdate'))
+                if item.get("isHoliday") == "Y":
+                    locdate = str(item.get("locdate"))
                     date_str = f"{locdate[:4]}-{locdate[4:6]}-{locdate[6:]}"
                     holidays.add(date_str)
     except Exception as e:
@@ -266,9 +273,7 @@ def get_vacation_days(email: str, year: int, month: int) -> float:
         "type": "month",
         "email": email,
     }
-    headers = {
-        "Authorization": os.environ.get("WANTEDSPACE_API_SECRET")
-    }
+    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests.get(url, params=query, headers=headers, timeout=10)
     data = response.json()
     total_days = 0.0
