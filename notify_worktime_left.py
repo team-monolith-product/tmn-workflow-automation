@@ -4,10 +4,8 @@ import argparse
 from datetime import datetime, timedelta
 import time
 
-from requests import Response
 from dotenv import load_dotenv
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 import tabulate
 from tabulate import tabulate
 
@@ -361,42 +359,6 @@ def get_daily_vacation_map(email: str, year: int, month: int):
         print("Response data:", data)
 
     return day_to_vac
-
-
-def requests_get_with_retry(
-    url: str, params=None, headers=None, max_retries=3, initial_backoff=5
-) -> Response | None:
-    """
-    requests.get에 대한 재시도 로직.
-    - HTTP 429(Too Many Requests) 등에 대응
-    """
-    backoff = initial_backoff
-    for attempt in range(1, max_retries + 1):
-        try:
-            r = requests.get(url, params=params, headers=headers, timeout=10)
-        except Exception as e:
-            print(f"[WARN] requests.get exception on attempt={attempt}: {e}")
-            if attempt == max_retries:
-                return None
-            time.sleep(backoff)
-            backoff *= 2
-            continue
-
-        if r.status_code == 429:
-            print(f"[WARN] HTTP 429 Too Many Requests, attempt={attempt}")
-            if attempt == max_retries:
-                return None
-            time.sleep(backoff)
-            backoff *= 2
-        elif not r.ok:
-            print(f"[WARN] HTTP {r.status_code}, attempt={attempt}, reason={r.reason}")
-            if attempt == max_retries:
-                return None
-            time.sleep(backoff)
-            backoff *= 2
-        else:
-            return r
-    return None
 
 
 def slack_call_with_retry(slack_method, max_retries=3, initial_backoff=5, **kwargs):
