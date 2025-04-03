@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from tabulate import tabulate
 
+from service.slack import get_email_to_slack_id
+
 # 환경 변수 로드
 load_dotenv()
 
@@ -33,7 +35,7 @@ def main():
 
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-    email_to_slack_id = get_slack_user_map(slack_client)
+    email_to_slack_id = get_email_to_slack_id(slack_client)
 
     # 당월 1일부터 전날까지 날짜에 대해
     # 각 사용자의 근무 시간을 조회합니다.
@@ -195,27 +197,6 @@ def get_wantedspace_worktime(date: str):
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests.get(url, params=query, headers=headers, timeout=10)
     return response.json()
-
-
-def get_slack_user_map(slack_client: WebClient):
-    email_to_slack_id = {}
-    cursor = None
-
-    while True:
-        response = slack_client.users_list(cursor=cursor)
-        members = response["members"]
-
-        for member in members:
-            profile = member.get("profile", {})
-            email = profile.get("email")
-            if email:
-                email_to_slack_id[email] = member["id"]
-
-        cursor = response.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-
-    return email_to_slack_id
 
 
 def get_public_holidays(year: int, month: int):

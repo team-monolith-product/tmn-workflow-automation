@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
+from service.slack import get_email_to_slack_id
+
 # 환경 변수 로드
 load_dotenv()
 
@@ -16,7 +18,7 @@ def main():
     notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-    email_to_slack_id = get_slack_user_map(slack_client)
+    email_to_slack_id = get_email_to_slack_id(slack_client)
 
     send_intro_message(slack_client, CHANNEL_ID)
     alert_overdue_tasks(
@@ -25,27 +27,6 @@ def main():
     alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
     alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
     alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
-
-
-def get_slack_user_map(slack_client: WebClient):
-    email_to_slack_id = {}
-    cursor = None
-
-    while True:
-        response = slack_client.users_list(cursor=cursor)
-        members = response["members"]
-
-        for member in members:
-            profile = member.get("profile", {})
-            email = profile.get("email")
-            if email:
-                email_to_slack_id[email] = member["id"]
-
-        cursor = response.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-
-    return email_to_slack_id
 
 
 def send_intro_message(
