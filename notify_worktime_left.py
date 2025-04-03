@@ -7,7 +7,6 @@ import time
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 import tabulate
-from tabulate import tabulate
 
 from api.wantedspace import get_workevent, get_worktime
 from api.data_go_kr import get_rest_de_info
@@ -161,7 +160,7 @@ def main():
 
     # 표 헤더를 최대한 짧게
     headers = ["이름", "잔여", "오늘", "예정"]
-    basic_table = tabulate(table_data, headers=headers, tablefmt="simple")
+    basic_table = tabulate.tabulate(table_data, headers=headers, tablefmt="simple")
 
     # 세로줄 없이, 각 행 뒤에 가로줄 추가
     ascii_table = insert_horizontal_lines(basic_table)
