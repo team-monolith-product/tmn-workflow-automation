@@ -4,7 +4,6 @@ import argparse
 from datetime import datetime, timedelta
 import time
 
-import requests
 from requests import Response
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -13,6 +12,7 @@ import tabulate
 from tabulate import tabulate
 
 from api.wantedspace import get_workevent, get_worktime
+from api.data_go_kr import get_rest_de_info
 from service.slack import get_email_to_slack_id
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
@@ -218,21 +218,7 @@ def get_public_holidays(year: int, month: int):
     """
     공공데이터포털 API로 해당 연/월의 공휴일(YYYY-MM-DD) 집합을 조회
     """
-    url = (
-        "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
-    )
-    params = {
-        "solYear": str(year),
-        "solMonth": f"{month:02d}",
-        "ServiceKey": os.environ.get("DATA_GO_KR_SPECIAL_DAY_KEY"),
-        "_type": "json",
-        "numOfRows": "100",
-    }
-    r = requests_get_with_retry(url, params=params)
-    if not r:
-        return set()
-
-    data = r.json()
+    data = get_rest_de_info(year, month)
     holidays = set()
     try:
         items = data["response"]["body"]["items"]
