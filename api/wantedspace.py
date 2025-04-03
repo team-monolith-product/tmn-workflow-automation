@@ -137,8 +137,7 @@ def requests_get_with_retry(
     """
     backoff = initial_backoff
     for _ in range(1, max_retries + 1):
-        response = requests.get(
-            url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=10)
 
         if response.status_code == 429:
             time.sleep(backoff)
