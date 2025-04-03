@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from tabulate import tabulate
 
+from api.wantedspace import get_workevent
 from service.slack import get_email_to_slack_id
 
 # 환경 변수 로드
@@ -43,7 +44,7 @@ def main():
     today = datetime.today()
     for i in range(1, today.day):
         date = today.replace(day=i).strftime("%Y-%m-%d")
-        worktime = get_wantedspace_worktime(date)
+        worktime = get_worktime(date)
         for result in worktime.get("results", []):
             email = result.get("email")
             if email:
@@ -136,69 +137,6 @@ def main():
             )
 
 
-def get_wantedspace_worktime(date: str):
-    """
-    Args:
-        date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
-
-    Returns:
-        {
-            "next": null,
-            "previous": null,
-            "count": 2,
-            "results": [
-                {
-                    "username": "김샘",
-                    "email": "a25@abc.com",
-                    "team_name": "AI팀",
-                    "eid": "",
-                    "wk_date": "2022-06-09",
-                    "wk_start_time": "2022-06-09T09:00:00+09:00",
-                    "wk_end_time": "2022-06-09T18:00:00+09:00",
-                    "wk_start_time_sch": "2022-06-09T09:00:00+09:00",
-                    "wk_end_time_sch": "2022-06-09T19:30:00+09:00",
-                    "wk_time_except": 0,
-                    "wk_time_except_legal": 60,
-                    "wk_time": 480,
-                    "wk_time_today": 480,
-                    "memo": "",
-                    "wk_approved": "APV_IN/APV_OUT",
-                    "work_except": []
-                },
-                {
-                    "username": "복봄",
-                    "email": "a26@abc.com",
-                    "team_name": "CEO",
-                    "eid": "",
-                    "wk_date": "2022-06-09",
-                    "wk_start_time": "2022-06-09T09:00:00+09:00",
-                    "wk_end_time": "2022-06-09T18:00:00+09:00",
-                    "wk_start_time_sch": "2022-06-09T09:00:00+09:00",
-                    "wk_end_time_sch": "2022-06-09T19:30:00+09:00",
-                    "wk_time_except": 0,
-                    "wk_time_except_legal": 65,
-                    "wk_time": 475,
-                    "wk_time_today": 475,
-                    "memo": "",
-                    "wk_approved": "APV_IN/APV_OUT",
-                    "work_except": [
-                        {
-                            "wk_except_start_time": "2022-06-09T18:19:22.137414+09:00",
-                            "wk_except_end_time": "2022-06-09T18:42:24.425192+09:00",
-                            "wk_except_time_min": 23
-                        }
-                    ]
-                },
-            ]
-        }
-    """
-    url = "https://api.wantedspace.ai/tools/openapi/worktime/"
-    query = {"date": date, "key": os.environ.get("WANTEDSPACE_API_KEY")}
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    response = requests.get(url, params=query, headers=headers, timeout=10)
-    return response.json()
-
-
 def get_public_holidays(year: int, month: int):
     """
     DATA_GO_KR_SPECIAL_DAY_KEY 환경 변수에 등록된 서비스키를 사용하여,
@@ -247,16 +185,7 @@ def get_vacation_days(email: str, year: int, month: int) -> float:
 
     날짜는 해당 월의 첫째 날을 기준으로 조회하며, API 파라미터 type은 'month'를 사용한다.
     """
-    url = "https://api.wantedspace.ai/tools/openapi/workevent/"
-    query = {
-        "key": os.environ.get("WANTEDSPACE_API_KEY"),
-        "date": f"{year}-{month:02d}-01",
-        "type": "month",
-        "email": email,
-    }
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    response = requests.get(url, params=query, headers=headers, timeout=10)
-    data = response.json()
+    data = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
     total_days = 0.0
     try:
         results = data["results"]
