@@ -77,8 +77,7 @@ def main():
     for slack_id in email_to_slack_id.values():
         time.sleep(2)
         try:
-            resp = slack_call_with_retry(
-                slack_client.users_info, user=slack_id)
+            resp = slack_call_with_retry(slack_client.users_info, user=slack_id)
             slack_id_to_user_info[slack_id] = resp["user"]
         except Exception as e:
             print(f"[WARN] Slack users_info failed for {slack_id}: {e}")
@@ -265,8 +264,7 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
     - future_days (앞으로)
     """
 
-    data = get_workevent(
-        date=f"{year}-{month:02d}-01", type="month", email=email)
+    data = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
 
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     _, last_day = calendar.monthrange(year, month)
@@ -337,8 +335,7 @@ def get_daily_vacation_map(email: str, year: int, month: int):
     """
     일자별 휴가 fraction -> { 1: 0.5, 2:1.0, ...}
     """
-    data = get_workevent(
-        date=f"{year}-{month:02d}-01", type="month", email=email)
+    data = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
     _, last_day = calendar.monthrange(year, month)
     day_to_vac = {d: 0.0 for d in range(1, last_day + 1)}
 
@@ -406,8 +403,7 @@ def requests_get_with_retry(
             time.sleep(backoff)
             backoff *= 2
         elif not r.ok:
-            print(
-                f"[WARN] HTTP {r.status_code}, attempt={attempt}, reason={r.reason}")
+            print(f"[WARN] HTTP {r.status_code}, attempt={attempt}, reason={r.reason}")
             if attempt == max_retries:
                 return None
             time.sleep(backoff)
