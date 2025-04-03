@@ -10,7 +10,7 @@ import tabulate
 
 from api.wantedspace import get_workevent, get_worktime
 from api.data_go_kr import get_rest_de_info
-from service.slack import get_email_to_slack_id
+from service.slack import get_email_to_user_id, get_user_id_to_user_info
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
 tabulate.WIDE_CHARS_MODE = True
@@ -42,7 +42,7 @@ def main():
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     # 1) Slack 이메일→사용자ID 매핑
-    email_to_slack_id = get_email_to_slack_id(slack_client)
+    email_to_user_id = get_email_to_user_id(slack_client)
 
     # 오늘(시분초=0)
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -70,22 +70,14 @@ def main():
             total_required_worktime += REQUIRED_DAILY_MINUTES
 
     # 4) Slack 사용자 상세정보
-    slack_id_to_user_info = {}
-    for slack_id in email_to_slack_id.values():
-        time.sleep(2)
-        try:
-            resp = slack_call_with_retry(slack_client.users_info, user=slack_id)
-            slack_id_to_user_info[slack_id] = resp["user"]
-        except Exception as e:
-            print(f"[WARN] Slack users_info failed for {slack_id}: {e}")
-            slack_id_to_user_info[slack_id] = {}
+    user_id_to_user_info = get_user_id_to_user_info(slack_client, list(email_to_user_id.values()))
 
     # 5) 사용자별 로직 → ASCII 테이블
     table_data = []
-    for email, slack_id in email_to_slack_id.items():
-        if not slack_id:
+    for email, user_id in email_to_user_id.items():
+        if not user_id:
             continue
-        user_info = slack_id_to_user_info.get(slack_id, {})
+        user_info = user_id_to_user_info.get(user_id, {})
         real_name = user_info.get("real_name", "")
         if not real_name:
             continue
