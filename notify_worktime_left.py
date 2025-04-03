@@ -23,6 +23,7 @@ load_dotenv()
 CHANNEL_ID: str = "C08EUJJSZF1"
 REQUIRED_DAILY_MINUTES = 8 * 60  # 하루 근무시간(480분)
 
+
 def main():
     """
     --dry-run 옵션이 주어지면 실제 메시지 전송 없이 콘솔에만 출력합니다.
@@ -33,8 +34,11 @@ def main():
     """
 
     parser = argparse.ArgumentParser(description="근무 시간 알림 스크립트")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="메시지를 Slack에 전송하지 않고 콘솔에만 출력합니다.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="메시지를 Slack에 전송하지 않고 콘솔에만 출력합니다.",
+    )
     args = parser.parse_args()
 
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -100,7 +104,9 @@ def main():
         all_vac_days = used_vac + today_vac + future_vac
 
         # (월 요구시간) - (휴가×8h)
-        adjusted_required_time = total_required_worktime - (all_vac_days * REQUIRED_DAILY_MINUTES)
+        adjusted_required_time = total_required_worktime - (
+            all_vac_days * REQUIRED_DAILY_MINUTES
+        )
         if adjusted_required_time < 0:
             adjusted_required_time = 0
 
@@ -119,7 +125,7 @@ def main():
                 vac_fraction = daily_vac_map.get(d, 0.0)
                 if vac_fraction > 1.0:
                     vac_fraction = 1.0
-                leftover_business_days += (1.0 - vac_fraction)
+                leftover_business_days += 1.0 - vac_fraction
 
         avg_required_hours = 0.0
         if leftover_business_days > 0:
@@ -142,12 +148,14 @@ def main():
         else:
             future_vac_str = f"{future_vac:.1f} 일"
 
-        table_data.append([
-            real_name,
-            f"{avg_required_hours:.1f}h",  # "잔여" 열을 더 짧게 표기( 3.5h )
-            today_vac_str,
-            future_vac_str
-        ])
+        table_data.append(
+            [
+                real_name,
+                f"{avg_required_hours:.1f}h",  # "잔여" 열을 더 짧게 표기( 3.5h )
+                today_vac_str,
+                future_vac_str,
+            ]
+        )
 
     # 이름 순 정렬
     table_data.sort(key=lambda row: row[0])
@@ -175,9 +183,9 @@ def main():
                     blocks=[
                         {
                             "type": "section",
-                            "text": {"type": "mrkdwn", "text": code_block}
+                            "text": {"type": "mrkdwn", "text": code_block},
                         }
-                    ]
+                    ],
                 )
                 print("Slack 메시지 전송 완료.")
             except Exception as e:
@@ -221,13 +229,15 @@ def get_public_holidays(year: int, month: int):
     """
     공공데이터포털 API로 해당 연/월의 공휴일(YYYY-MM-DD) 집합을 조회
     """
-    url = "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    url = (
+        "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    )
     params = {
         "solYear": str(year),
         "solMonth": f"{month:02d}",
         "ServiceKey": os.environ.get("DATA_GO_KR_SPECIAL_DAY_KEY"),
         "_type": "json",
-        "numOfRows": "100"
+        "numOfRows": "100",
     }
     r = requests_get_with_retry(url, params=params)
     if not r:
@@ -340,7 +350,7 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
     return {
         "used_days": used_days,
         "today_days": today_days,
-        "future_days": future_days
+        "future_days": future_days,
     }
 
 
@@ -432,14 +442,15 @@ def get_slack_user_map(slack_client: WebClient):
     return email_to_slack_id
 
 
-def requests_get_with_retry(url: str, params=None, headers=None,
-                            max_retries=3, initial_backoff=5) -> Response | None:
+def requests_get_with_retry(
+    url: str, params=None, headers=None, max_retries=3, initial_backoff=5
+) -> Response | None:
     """
     requests.get에 대한 재시도 로직.
     - HTTP 429(Too Many Requests) 등에 대응
     """
     backoff = initial_backoff
-    for attempt in range(1, max_retries+1):
+    for attempt in range(1, max_retries + 1):
         try:
             r = requests.get(url, params=params, headers=headers, timeout=10)
         except Exception as e:
@@ -472,8 +483,9 @@ def slack_call_with_retry(slack_method, max_retries=3, initial_backoff=5, **kwar
     Slack SDK 메서드(users_info, chat_postMessage 등) 재시도 로직
     """
     from slack_sdk.errors import SlackApiError
+
     backoff = initial_backoff
-    for attempt in range(1, max_retries+1):
+    for attempt in range(1, max_retries + 1):
         try:
             return slack_method(**kwargs)
         except SlackApiError as e:
