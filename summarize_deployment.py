@@ -32,33 +32,11 @@ from urllib.parse import urlparse
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
+from service.slack import get_email_to_slack_id
+
 
 NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
 SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
-
-
-def get_slack_user_map(slack_client: WebClient) -> Dict[str, str]:
-    """
-    Slack의 사용자 목록을 가져와서 이메일 -> Slack user_id 매핑 딕셔너리를 반환합니다.
-    """
-    email_to_slack_id = {}
-    cursor = None
-
-    while True:
-        response = slack_client.users_list(cursor=cursor)
-        members = response.get("members", [])
-
-        for member in members:
-            profile = member.get("profile", {})
-            email = profile.get("email")
-            if email:
-                email_to_slack_id[email.lower()] = member["id"]
-
-        cursor = response.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-
-    return email_to_slack_id
 
 
 def get_pr_links(
@@ -118,7 +96,7 @@ def main_deploy_script():
     """
     notion = NotionClient(auth=os.environ["NOTION_API_KEY"])
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    email_to_slack_id = get_slack_user_map(slack_client)
+    email_to_slack_id = get_email_to_slack_id(slack_client)
 
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 

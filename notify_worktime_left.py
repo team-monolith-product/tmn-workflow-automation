@@ -9,10 +9,10 @@ from requests import Response
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-
-# tabulate + widechars
 import tabulate
 from tabulate import tabulate
+
+from service.slack import get_email_to_slack_id
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
 tabulate.WIDE_CHARS_MODE = True
@@ -44,7 +44,7 @@ def main():
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     # 1) Slack 이메일→사용자ID 매핑
-    email_to_slack_id = get_slack_user_map(slack_client)
+    email_to_slack_id = get_email_to_slack_id(slack_client)
 
     # 오늘(시분초=0)
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
