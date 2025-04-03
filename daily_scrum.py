@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import requests
 from slack_sdk import WebClient
 
+from api.wantedspace import get_workevent
+
 # 환경 변수 로드
 load_dotenv()
 
@@ -70,7 +72,7 @@ def daily_scrum():
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     # 1) 원티드스페이스에서 오늘자 WorkEvent(휴가/외근)를 받아옵니다.
-    work_events = get_wantedspace_workevent().get("results", [])
+    work_events = get_workevent().get("results", [])
     email_to_event = {}
     for event in work_events:
         email = event.get("email")
@@ -139,49 +141,6 @@ def daily_scrum():
                 }
             ],
         )
-
-
-def get_wantedspace_workevent():
-    """
-    Args:
-        None
-
-    Returns:
-        {
-            "next": None,
-            "previous": None,
-            "count": 3,
-            "results": [
-                {
-                    "wk_start_date": "2025-01-03",
-                    "wk_end_date": "2025-01-03",
-                    "event_name": "연차(오후)",
-                    "wk_counted_days": 0.5,
-                    "wk_alter_days": 0.0,
-                    "wk_comp_days": 0.0,
-                    "status": "INFORMED",
-                    "wk_location": "",
-                    "wk_comment": "",
-                    "username": "김바바",
-                    "email": "kpapa@team-mono.com",
-                    "eid": "",
-                    "evt_start_time": "13:00:00",
-                    "evt_end_time": "17:00:00",
-                    "wk_event": "WNS_VACATION_PM",
-                    "applied_days": 1
-                },
-                ...
-            ]
-        }
-    """
-    url = "https://api.wantedspace.ai/tools/openapi/workevent/"
-    query = {
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "key": os.environ.get("WANTEDSPACE_API_KEY"),
-    }
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    response = requests.get(url, params=query, headers=headers, timeout=10)
-    return response.json()
 
 
 def shuffle(

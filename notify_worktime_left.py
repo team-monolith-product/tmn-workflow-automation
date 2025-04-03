@@ -12,6 +12,7 @@ from slack_sdk.errors import SlackApiError
 import tabulate
 from tabulate import tabulate
 
+from api.wantedspace import get_workevent, get_worktime
 from service.slack import get_email_to_slack_id
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
@@ -54,7 +55,7 @@ def main():
     for day in range(1, today.day):
         date_str = today.replace(day=day).strftime("%Y-%m-%d")
         time.sleep(2)  # rate-limit 대비
-        worktime_data = get_wantedspace_worktime(date_str)
+        worktime_data = get_worktime(date_str)
         for result in worktime_data.get("results", []):
             email = result.get("email")
             if email:
@@ -76,7 +77,8 @@ def main():
     for slack_id in email_to_slack_id.values():
         time.sleep(2)
         try:
-            resp = slack_call_with_retry(slack_client.users_info, user=slack_id)
+            resp = slack_call_with_retry(
+                slack_client.users_info, user=slack_id)
             slack_id_to_user_info[slack_id] = resp["user"]
         except Exception as e:
             print(f"[WARN] Slack users_info failed for {slack_id}: {e}")
@@ -213,18 +215,6 @@ def insert_horizontal_lines(table_str: str) -> str:
     return "\n".join(new_lines)
 
 
-def get_wantedspace_worktime(date: str):
-    """
-    특정 날짜(YYYY-MM-DD)에 대한 출퇴근(WorkTime) 조회.
-    """
-    url = "https://api.wantedspace.ai/tools/openapi/worktime/"
-    query = {"date": date, "key": os.environ.get("WANTEDSPACE_API_KEY")}
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-
-    r = requests_get_with_retry(url, params=query, headers=headers)
-    return r.json() if r else {}
-
-
 def get_public_holidays(year: int, month: int):
     """
     공공데이터포털 API로 해당 연/월의 공휴일(YYYY-MM-DD) 집합을 조회
@@ -274,20 +264,9 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
     - today_days (오늘)
     - future_days (앞으로)
     """
-    url = "https://api.wantedspace.ai/tools/openapi/workevent/"
-    query = {
-        "key": os.environ.get("WANTEDSPACE_API_KEY"),
-        "date": f"{year}-{month:02d}-01",
-        "type": "month",
-        "email": email,
-    }
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
 
-    r = requests_get_with_retry(url, params=query, headers=headers)
-    if not r:
-        return {"used_days": 0.0, "today_days": 0.0, "future_days": 0.0}
-
-    data = r.json()
+    data = get_workevent(
+        date=f"{year}-{month:02d}-01", type="month", email=email)
 
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     _, last_day = calendar.monthrange(year, month)
@@ -423,7 +402,8 @@ def get_slack_user_map(slack_client: WebClient):
     while True:
         time.sleep(2)
         try:
-            resp = slack_call_with_retry(slack_client.users_list, cursor=cursor)
+            resp = slack_call_with_retry(
+                slack_client.users_list, cursor=cursor)
         except Exception as e:
             print(f"[ERROR] Slack users_list failed: {e}")
             break
@@ -468,7 +448,8 @@ def requests_get_with_retry(
             time.sleep(backoff)
             backoff *= 2
         elif not r.ok:
-            print(f"[WARN] HTTP {r.status_code}, attempt={attempt}, reason={r.reason}")
+            print(
+                f"[WARN] HTTP {r.status_code}, attempt={attempt}, reason={r.reason}")
             if attempt == max_retries:
                 return None
             time.sleep(backoff)
