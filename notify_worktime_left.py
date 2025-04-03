@@ -86,8 +86,8 @@ def main():
         actual_worktime = email_to_worktime.get(email, 0)
 
         # 휴가 (이미 사용, 오늘, 미래)
-        time.sleep(2)
-        vac_info = get_monthly_vacation_breakdown(email, year, month)
+        workevent = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
+        vac_info = get_monthly_vacation_breakdown(year, month, workevent)
         used_vac = vac_info["used_days"]
         today_vac = vac_info["today_days"]
         future_vac = vac_info["future_days"]
@@ -106,8 +106,7 @@ def main():
             remaining_time = 0
 
         # partial 휴가 → 남은 영업일
-        time.sleep(2)
-        daily_vac_map = get_daily_vacation_map(email, year, month)
+        daily_vac_map = get_daily_vacation_map(year, month, workevent)
         leftover_business_days = 0.0
         for d in range(today.day, last_day + 1):
             dt = today.replace(day=d)
@@ -231,16 +230,13 @@ def get_public_holidays(year: int, month: int):
     return holidays
 
 
-def get_monthly_vacation_breakdown(email: str, year: int, month: int):
+def get_monthly_vacation_breakdown(year: int, month: int, workevent):
     """
     이달의 휴가(연차·반차 등)
     - used_days (이미 사용)
     - today_days (오늘)
     - future_days (앞으로)
     """
-
-    data = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
-
     today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     _, last_day = calendar.monthrange(year, month)
     first_day_dt = datetime(year, month, 1)
@@ -249,7 +245,7 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
     day_to_vac_fraction = {d: 0.0 for d in range(1, last_day + 1)}
 
     try:
-        results = data.get("results", [])
+        results = workevent.get("results", [])
         for ev in results:
             s_str = ev.get("wk_start_date")
             e_str = ev.get("wk_end_date")
@@ -280,7 +276,7 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
 
     except Exception as e:
         print("[ERROR] Parsing vacation info:", e)
-        print("Response data:", data)
+        print("workevent:", workevent)
 
     used_days = 0.0
     today_days = 0.0
@@ -306,16 +302,15 @@ def get_monthly_vacation_breakdown(email: str, year: int, month: int):
     }
 
 
-def get_daily_vacation_map(email: str, year: int, month: int):
+def get_daily_vacation_map(year: int, month: int, workevent):
     """
     일자별 휴가 fraction -> { 1: 0.5, 2:1.0, ...}
     """
-    data = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
     _, last_day = calendar.monthrange(year, month)
     day_to_vac = {d: 0.0 for d in range(1, last_day + 1)}
 
     try:
-        results = data.get("results", [])
+        results = workevent.get("results", [])
         for ev in results:
             s_str = ev.get("wk_start_date")
             e_str = ev.get("wk_end_date")
@@ -347,7 +342,7 @@ def get_daily_vacation_map(email: str, year: int, month: int):
 
     except Exception as e:
         print("[ERROR] in get_daily_vacation_map:", e)
-        print("Response data:", data)
+        print("workevent:", workevent)
 
     return day_to_vac
 
