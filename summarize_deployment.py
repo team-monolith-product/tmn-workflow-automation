@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
-from service.slack import get_email_to_slack_id
+from service.slack import get_email_to_user_id
 
 
 NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
@@ -96,7 +96,7 @@ def main_deploy_script():
     """
     notion = NotionClient(auth=os.environ["NOTION_API_KEY"])
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    email_to_slack_id = get_email_to_slack_id(slack_client)
+    email_to_user_id = get_email_to_user_id(slack_client)
 
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 
@@ -133,7 +133,7 @@ def main_deploy_script():
         if assignees:
             notion_email = assignees[0].get("person", {}).get("email")
             if notion_email:
-                slack_user_id = email_to_slack_id.get(notion_email)
+                slack_user_id = email_to_user_id.get(notion_email)
                 if slack_user_id:
                     assignee_mention = f"<@{slack_user_id}>"
                 else:

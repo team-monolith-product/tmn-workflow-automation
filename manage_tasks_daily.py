@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
-from service.slack import get_email_to_slack_id
+from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
 load_dotenv()
@@ -18,15 +18,15 @@ def main():
     notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-    email_to_slack_id = get_email_to_slack_id(slack_client)
+    email_to_user_id = get_email_to_user_id(slack_client)
 
     send_intro_message(slack_client, CHANNEL_ID)
     alert_overdue_tasks(
-        notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id
+        notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id
     )
-    alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
-    alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
-    alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_slack_id)
+    alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
+    alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
+    alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
 
 
 def send_intro_message(
@@ -56,7 +56,7 @@ def alert_overdue_tasks(
     slack_client: WebClient,
     database_id: str,
     channel_id: str,
-    email_to_slack_id: dict,
+    email_to_user_id: dict,
 ):
     """
     대기 및 진행 중인 과업 중 종료일이 지난 과업을 슬랙으로 알림
@@ -66,7 +66,7 @@ def alert_overdue_tasks(
         slack_client (WebClient): Slack
         database_id (str): Notion database id
         channel_id (str): Slack channel id
-        email_to_slack_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
     Returns:
         None
@@ -100,7 +100,7 @@ def alert_overdue_tasks(
             person = people[0].get("person")
             if person:
                 assignee_email = person["email"]
-                slack_user_id = email_to_slack_id.get(assignee_email)
+                slack_user_id = email_to_user_id.get(assignee_email)
             else:
                 slack_user_id = None
         else:
@@ -118,7 +118,7 @@ def alert_no_due_tasks(
     slack_client: WebClient,
     database_id: str,
     channel_id: str,
-    email_to_slack_id: dict,
+    email_to_user_id: dict,
 ):
     """
     기간 산정 없이 진행 중인 과업을 슬랙으로 알림
@@ -128,7 +128,7 @@ def alert_no_due_tasks(
         slack_client (WebClient): Slack
         database_id (str): Notion database id
         channel_id (str): Slack channel id
-        email_to_slack_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
     Returns:
         None
@@ -160,7 +160,7 @@ def alert_no_due_tasks(
             person = people[0].get("person")
             if person:
                 assignee_email = person["email"]
-                slack_user_id = email_to_slack_id.get(assignee_email)
+                slack_user_id = email_to_user_id.get(assignee_email)
             else:
                 slack_user_id = None
         else:
@@ -181,7 +181,7 @@ def alert_no_tasks(
     slack_client: WebClient,
     database_id: str,
     channel_id: str,
-    email_to_slack_id: dict,
+    email_to_user_id: dict,
 ):
     """
     아무 과업도 진행 중이지 않은 작업자를 슬랙으로 알림 (단, @e 그룹에 속한 멤버만 대상)
@@ -191,7 +191,7 @@ def alert_no_tasks(
         slack_client (WebClient): Slack
         database_id (str): Notion database id
         channel_id (str): Slack channel id
-        email_to_slack_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
     Returns:
         None
@@ -237,14 +237,14 @@ def alert_no_tasks(
     e_group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
     e_user_ids = e_group_users_response.get("users", [])
 
-    # 4. email_to_slack_id는 "email -> slack user id" 매핑이므로,
+    # 4. email_to_user_id는 "email -> slack user id" 매핑이므로,
     #    그 반대("slack user id -> email") 매핑을 쉽게 얻기 위해 역으로 변환합니다.
-    slack_id_to_email = {v: k for k, v in email_to_slack_id.items()}
+    user_id_to_email = {v: k for k, v in email_to_user_id.items()}
 
     # 5. @e 그룹에 실제 등록된 멤버의 이메일 목록
     team_e_emails = []
     for user_id in e_user_ids:
-        email = slack_id_to_email.get(user_id)
+        email = user_id_to_email.get(user_id)
         if email:
             team_e_emails.append(email)
 
@@ -253,14 +253,14 @@ def alert_no_tasks(
 
     # 7. unassigned_emails에 속한 멤버들에게 알림 보내기
     for email in unassigned_emails:
-        slack_user_id = email_to_slack_id.get(email)
+        slack_user_id = email_to_user_id.get(email)
         if slack_user_id:
             text = (
                 f"<@{slack_user_id}> 현재 진행중인 과업이 없습니다. "
                 "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다."
             )
         else:
-            # 혹시라도 email_to_slack_id에 매핑되어 있지 않은 경우 처리
+            # 혹시라도 email_to_user_id에 매핑되어 있지 않은 경우 처리
             text = (
                 f"{email}님께서 현재 진행중인 과업이 없습니다. "
                 "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다."
@@ -274,7 +274,7 @@ def alert_no_후속_작업(
     slack_client: WebClient,
     database_id: str,
     channel_id: str,
-    email_to_slack_id: dict,
+    email_to_user_id: dict,
 ):
     """
     후속 작업이 마땅히 예상 되나 후속 작업이 등록되지 않은 경우 알림.
@@ -289,7 +289,7 @@ def alert_no_후속_작업(
         slack_client (WebClient): Slack
         database_id (str): Notion database id
         channel_id (str): Slack channel id
-        email_to_slack_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
     Returns:
         None
@@ -325,7 +325,7 @@ def alert_no_후속_작업(
             person = people[0].get("person")
             if person:
                 assignee_email = person["email"]
-                slack_user_id = email_to_slack_id.get(assignee_email)
+                slack_user_id = email_to_user_id.get(assignee_email)
             else:
                 slack_user_id = None
         else:

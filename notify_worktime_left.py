@@ -9,8 +9,8 @@ from slack_sdk import WebClient
 from tabulate import tabulate
 
 from api.data_go_kr import get_rest_de_info
-from api.wantedspace import get_workevent
-from service.slack import get_email_to_slack_id
+from api.wantedspace import get_workevent, get_worktime
+from service.slack import get_email_to_user_id, get_user_id_to_user_info
 
 # 환경 변수 로드
 load_dotenv()
@@ -35,7 +35,7 @@ def main():
 
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-    email_to_slack_id = get_email_to_slack_id(slack_client)
+    email_to_user_id = get_email_to_user_id(slack_client)
 
     # 당월 1일부터 전날까지 날짜에 대해
     # 각 사용자의 근무 시간을 조회합니다.
@@ -67,10 +67,7 @@ def main():
         if date_obj.weekday() < 5 and date_str not in holidays:
             total_required_worktime += required_daily_minutes
 
-    slack_id_to_user_info = {
-        slack_id: slack_client.users_info(user=slack_id)["user"]
-        for slack_id in email_to_slack_id.values()
-    }
+    user_id_to_user_info = get_user_id_to_user_info(slack_client, list(email_to_user_id.values()))
 
     # 오늘을 포함한 남은 영업일(평일) 수 계산
     remaining_business_days = 0
@@ -83,10 +80,10 @@ def main():
     # 각 사용자에 대해 (누적 근무시간 / 총 요구 근무시간)과
     # 남은 영업일 동안 평균적으로 요구되는 근무시간을 계산하여 메시지 병합
     table = []
-    for email, slack_id in email_to_slack_id.items():
+    for email, user_id in email_to_user_id.items():
         actual_worktime = email_to_worktime.get(email, 0)
-        if slack_id:
-            user_info = slack_id_to_user_info.get(slack_id, {})
+        if user_id:
+            user_info = user_id_to_user_info.get(user_id, {})
             real_name = user_info.get("real_name")
 
             if not real_name:
