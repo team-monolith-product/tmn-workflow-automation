@@ -380,36 +380,6 @@ def get_daily_vacation_map(email: str, year: int, month: int):
     return day_to_vac
 
 
-def get_slack_user_map(slack_client: WebClient):
-    """
-    Slack 워크스페이스 전체 사용자를 조회한 뒤,
-    이메일->Slack ID 매핑 딕셔너리를 반환
-    """
-    email_to_slack_id = {}
-    cursor = None
-    while True:
-        time.sleep(2)
-        try:
-            resp = slack_call_with_retry(
-                slack_client.users_list, cursor=cursor)
-        except Exception as e:
-            print(f"[ERROR] Slack users_list failed: {e}")
-            break
-
-        members = resp["members"]
-        for m in members:
-            profile = m.get("profile", {})
-            email = profile.get("email")
-            if email:
-                email_to_slack_id[email] = m["id"]
-
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-
-    return email_to_slack_id
-
-
 def requests_get_with_retry(
     url: str, params=None, headers=None, max_retries=3, initial_backoff=5
 ) -> Response | None:
