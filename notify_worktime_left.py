@@ -337,20 +337,8 @@ def get_daily_vacation_map(email: str, year: int, month: int):
     """
     일자별 휴가 fraction -> { 1: 0.5, 2:1.0, ...}
     """
-    url = "https://api.wantedspace.ai/tools/openapi/workevent/"
-    query = {
-        "key": os.environ.get("WANTEDSPACE_API_KEY"),
-        "date": f"{year}-{month:02d}-01",
-        "type": "month",
-        "email": email,
-    }
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-
-    r = requests_get_with_retry(url, params=query, headers=headers)
-    if not r:
-        return {}
-
-    data = r.json()
+    data = get_workevent(
+        date=f"{year}-{month:02d}-01", type="month", email=email)
     _, last_day = calendar.monthrange(year, month)
     day_to_vac = {d: 0.0 for d in range(1, last_day + 1)}
 
