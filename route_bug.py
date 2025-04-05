@@ -289,7 +289,7 @@ async def send_slack_response(
         # f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.\n"
         f"선택 사유: {reason_text}\n\n"
         "만약 이 담당자가 적절하지 않다면, 아래 정보에 기반하여 적절히 담당자를 선택해주세요.\n"
-        "\n".join(
+        + "\n".join(
             [
                 f"- [{team}]{email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count.get(email, 0)}회"
                 for team, emails in team_to_emails.items()
