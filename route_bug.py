@@ -39,12 +39,12 @@ async def route_bug(
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
     email_to_bug_count = get_email_to_bug_count()
-    assignee_email = select_assignee_email(
+    reason_text, assignee_email = select_assignee_email(
         team, priority, working_emails, team_to_emails, email_to_bug_count
     )
     update_bug_count(assignee_email)
     await send_slack_response(
-        slack_client, channel_id, thread_ts, assignee_email, email_to_user_id
+        slack_client, channel_id, thread_ts, assignee_email, email_to_user_id, reason_text
     )
 
 
@@ -138,7 +138,7 @@ def select_assignee_email(
     working_emails: list[str],
     team_to_emails: dict[Literal["ie", "fe", "be"], list[str]],
     email_to_bug_count: dict[str, int],
-) -> str:
+) -> tuple[str, str]:
     """주어진 조건에 따라 최적의 담당자 선택"""
     team_emails: list[str] = team_to_emails.get(team, [])
     all_emails: list[str] = [
@@ -151,26 +151,33 @@ def select_assignee_email(
         email for email in all_emails if email in working_emails
     ]
 
+    reasons = [f"{team}팀 버그 신고.", f"우선순위: {priority}"]
     candidate_emails: list[str] = []
 
     if priority == "긴급":
-        # 1순위: 해당 팀에서 출근한 사람
+        reasons.append("긴급. 업무 여부 고려.")
+
+        # 1순위: 관련 팀에서 출근한 사람
         if working_team_emails:
             candidate_emails = working_team_emails
+            reasons.append("관련 팀 내 업무 중 인원 선택.")
         # 2순위: 다른 팀이라도 출근한 사람
         elif all_working_emails:
             candidate_emails = all_working_emails
+            reasons.append("관련 팀 내 업무 중 인원 없음. 다른 팀 업무 중 인원 선택.")
         # 3순위: 해당 팀 구성원
         else:
             candidate_emails = team_emails
+            reasons.append("개발팀 전체 업무 중 인원 없음. 관련 팀 전체 인원 선택.")
     else:  # "보통" 또는 "높음"
         # 관련 팀 구성원 (출근 여부 상관없음)
+        reasons.append("긴급 아님. 업무 여부 상관 없음. 관련 팀 전체 인원 선택.")
         candidate_emails = team_emails
 
     # 후보가 없는 경우
     if not candidate_emails:
         # CTO
-        return "lch@team-mono.com"
+        return "예외 상황.", "lch@team-mono.com"
 
     # 각 후보의 버그 건수를 가져옴 (없으면 0으로 간주)
     email_bug_count_pairs: list[tuple[str, int]] = [
@@ -186,10 +193,12 @@ def select_assignee_email(
     ]
 
     if not min_bug_emails:
-        return "lch@team-mono.com"
+        return "예외 상황.", "lch@team-mono.com"
+
+    reasons.append(f"버그 할당 건수가 최소({min_bug_count})인 인원 {len(min_bug_emails)}명 중 무작위 추첨.")
 
     # 동일한 버그 건수를 가진 후보가 여러 명이면 무작위로 선택
-    return random.choice(min_bug_emails)
+    return " ".join(reasons), random.choice(min_bug_emails)
 
 
 async def send_slack_response(
@@ -198,6 +207,7 @@ async def send_slack_response(
     thread_ts: str,
     assignee_email: str,
     email_to_user_id: dict[str, str],
+    reason_text: str,
 ) -> None:
     """
     슬랙에 담당자 지정 메시지를 전송합니다.
@@ -210,7 +220,9 @@ async def send_slack_response(
     """
     await slack_client.chat_postMessage(
         channel=channel_id,
-        text=f"버그 신고가 접수되었습니다. 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.",
+        # text=f"버그 신고가 접수되었습니다. 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.",
+        # 테스트 과정 중은 dry-run
+        text=f"버그 신고가 접수되었습니다. 담당자는 {assignee_email}입니다.\n선택 사유: {reason_text}",
         thread_ts=thread_ts,
     )
 
