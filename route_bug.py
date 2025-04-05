@@ -109,7 +109,7 @@ def extract_team_and_priority_from_report_text(
                             "description": "버그의 우선순위",
                         },
                     },
-                    "required": ["name", "priority"],
+                    "required": ["team", "priority"],
                     "additionalProperties": False,
                 },
                 "strict": True,
