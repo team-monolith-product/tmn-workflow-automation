@@ -43,7 +43,7 @@ async def route_bug(
         team, priority, working_emails, team_to_emails, email_to_bug_count
     )
     update_bug_count(assignee_email)
-    send_slack_response(
+    await send_slack_response(
         slack_client, channel_id, thread_ts, assignee_email, email_to_user_id
     )
 
