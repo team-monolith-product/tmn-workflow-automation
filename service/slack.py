@@ -4,6 +4,7 @@ Slack API를 활용하는 Service Layer입니다.
 
 from typing import Any, Dict, List
 from slack_sdk import WebClient
+from slack_sdk.web.async_client import AsyncWebClient
 
 
 def get_email_to_user_id(
@@ -20,6 +21,35 @@ def get_email_to_user_id(
 
     while True:
         response = slack_client.users_list(cursor=cursor)
+        members = response["members"]
+
+        for member in members:
+            profile = member.get("profile", {})
+            email = profile.get("email")
+            if email:
+                email_to_user_id[email] = member["id"]
+
+        cursor = response.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
+
+    return email_to_user_id
+
+
+async def get_email_to_user_id_async(
+    slack_client: AsyncWebClient
+) -> Dict[str, str]:
+    """
+    Args:
+        slack_client (WebClient): Slack WebClient
+    Returns:
+        Dict[str, str]: 이메일과 Slack User ID 매핑
+    """
+    email_to_user_id = {}
+    cursor = None
+
+    while True:
+        response = await slack_client.users_list(cursor=cursor)
         members = response["members"]
 
         for member in members:

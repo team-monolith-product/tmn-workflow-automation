@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 import os
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Literal
 
-from browser_use import Agent
 from cachetools import TTLCache
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
@@ -22,7 +21,6 @@ from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from playwright.async_api import async_playwright
 from slack_bolt import SetStatus
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.async_app import AsyncAssistant
@@ -30,6 +28,8 @@ from slack_bolt.context.async_context import AsyncBoltContext
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
+
+import route_bug
 
 
 # 환경 변수 로드
@@ -107,14 +107,6 @@ def get_web_page_from_url(
     loader = WebBaseLoader(url)
     documents = loader.load()
     return documents
-
-
-async def my_create_playwright_browser(
-    headless: bool = True, args: Optional[List[str]] = None
-):
-    playwright = await async_playwright().start()
-    browser = await playwright.chromium.launch(headless=headless, args=args)
-    return browser
 
 
 async def answer(
@@ -491,66 +483,54 @@ async def answer(
         # search_slack_messsages,: 권한 문제로 제거
     ] + SlackToolkit().get_tools()
 
-    if "browser" in text:
-        # async_browser = await my_create_playwright_browser()
-        # toolkit = PlayWrightBrowserToolkit.from_browser(
-        #     async_browser=async_browser)
-        # tools += toolkit.get_tools()
-        llm = ChatOpenAI(model="gpt-4o")
-        agent = Agent(
-            task="\n".join([message.content for message in messages]),
-            llm=llm,
-        )
-        agent_answer = await agent.run()
+    if text.startswith("o1"):
+        model = "o1"
     else:
-        if text.startswith("o1"):
-            model = "o1"
-        else:
-            model = "gpt-4o"
+        model = "gpt-4o"
 
-        chat_model = ChatOpenAI(model=model)
+    chat_model = ChatOpenAI(model=model)
 
-        agent_executor = create_react_agent(chat_model, tools, debug=True)
+    agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-        class SayHandler(BaseCallbackHandler):
-            """
-            Agent Handler That Slack-Says the Tool Call
-            """
+    class SayHandler(BaseCallbackHandler):
+        """
+        Agent Handler That Slack-Says the Tool Call
+        """
 
-            async def on_tool_start(
-                self,
-                serialized,
-                input_str,
-                *,
-                run_id,
-                parent_run_id=None,
-                tags=None,
-                metadata=None,
-                inputs=None,
-                **kwargs,
-            ):
-                await say(
-                    {
-                        "blocks": [
-                            {
-                                "type": "context",
-                                "elements": [
-                                    {
-                                        "type": "plain_text",
-                                        "text": f"{serialized['name']}({input_str}) 실행 중...",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                    thread_ts=thread_ts,
-                )
+        async def on_tool_start(
+            self,
+            serialized,
+            input_str,
+            *,
+            run_id,
+            parent_run_id=None,
+            tags=None,
+            metadata=None,
+            inputs=None,
+            **kwargs,
+        ):
+            await say(
+                {
+                    "blocks": [
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    "type": "plain_text",
+                                    "text": f"{serialized['name']}({input_str}) 실행 중...",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                thread_ts=thread_ts,
+            )
 
-        response = await agent_executor.ainvoke(
-            {"messages": messages}, {"callbacks": [SayHandler()]}
-        )
+    response = await agent_executor.ainvoke(
+        {"messages": messages}, {"callbacks": [SayHandler()]}
+    )
 
-        agent_answer = response["messages"][-1].content
+    agent_answer = response["messages"][-1].content
 
     await say(
         {
@@ -667,21 +647,8 @@ async def message(body, say):
     channel = event.get("channel")
     if channel != SLACK_BUG_REPORT_CHANNEL_ID:
         return
-
-    # TODO: 스레드 답글도 판단해서 답변.
-    thread_ts = event.get("thread_ts")
-    ts = event.get("ts")
-    if thread_ts and thread_ts != ts:
-        # 이 메시지는 스레드의 답글이므로 무시합니다.
-        return
-
-    text = event.get("text", "")
-    # 위 신고 내용에서 다음과 같은 정보를 추출합니다.
-    # - 버그 유발 환경 / 조건 / 재현 절차 등
-    # - 신고자가 기대한 결과
-    # - 신고자가 경험한 결과
-    # - 시급도 (보통, 당일 대응, 즉시 대응)
-    # - 관련 그룹 (백, 프론트, 인프라)
+    
+    await route_bug.route_bug(app.client, body)
 
 
 @assistant.thread_started

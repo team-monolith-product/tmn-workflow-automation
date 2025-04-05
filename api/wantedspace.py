@@ -65,10 +65,14 @@ def get_workevent(
 
 def get_worktime(date: str):
     """
+    https://wantedplus.notion.site/API-a71d3186deca4cd9b9774dde57798e7a
+
     Args:
         date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
 
     Returns:
+        출근한 사람만 반환됩니다.
+        wk_end_time 는 null 일 수 있습니다.
         {
             "next": null,
             "previous": null,
