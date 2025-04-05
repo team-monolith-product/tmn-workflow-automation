@@ -291,7 +291,7 @@ async def send_slack_response(
         "만약 이 담당자가 적절하지 않다면, 아래 정보에 기반하여 적절히 담당자를 선택해주세요.\n"
         "\n".join(
             [
-                f"- [{team}]{email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count[email]}회"
+                f"- [{team}]{email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count.get(email, 0)}회"
                 for team, emails in team_to_emails.items()
                 for email in emails
             ]
