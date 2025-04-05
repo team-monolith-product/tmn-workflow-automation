@@ -648,7 +648,10 @@ async def message(body, say):
     if channel != SLACK_BUG_REPORT_CHANNEL_ID:
         return
 
-    await route_bug.route_bug(app.client, body)
+    thread_ts = event.get("thread_ts")
+    message_ts = event.get("ts")
+    if thread_ts is None or thread_ts == message_ts:
+        await route_bug.route_bug(app.client, body)
 
 
 @assistant.thread_started
