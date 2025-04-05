@@ -13,11 +13,18 @@ import json
 import random
 from typing import Literal
 import datetime
+import os
+import time
+
+import redis
 from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
 
 from api.wantedspace import get_worktime
 from service.slack import get_email_to_user_id_async
+
+REDIS_KEY_PATTERN = "workflow_automation/bug_assigment_time_list"
+ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
 
 
 async def route_bug(
@@ -34,15 +41,25 @@ async def route_bug(
     channel_id = body.get("event", {}).get("channel")
     thread_ts = body.get("event", {}).get("ts")
 
+    # Redis 연결 설정
+    redis_client = redis.Redis(
+        host=os.environ.get("REDIS_HOST", "localhost"),
+        password=os.environ.get("REDIS_PASSWORD", ""),
+        decode_responses=True,
+    )
+
     team, priority = extract_team_and_priority_from_report_text(message_text)
     working_emails = get_working_emails()
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
-    email_to_bug_count = get_email_to_bug_count()
+    all_emails = list(
+        set([email for emails in team_to_emails.values() for email in emails])
+    )
+    email_to_bug_count = get_email_to_bug_count(redis_client, all_emails)
     reason_text, assignee_email = select_assignee_email(
         team, priority, working_emails, team_to_emails, email_to_bug_count
     )
-    update_bug_count(assignee_email)
+    update_bug_count(redis_client, assignee_email)
     await send_slack_response(
         slack_client,
         channel_id,
@@ -129,12 +146,30 @@ def extract_team_and_priority_from_report_text(
     )
 
 
-def get_email_to_bug_count() -> dict[str, int]:
+def get_email_to_bug_count(
+    redis_client: redis.Redis, emails: list[str]
+) -> dict[str, int]:
     """최근 버그 할당 이력을 조회하여 사용자별 담당 건수 반환"""
-    # 최근 일주일 간의 버그 할당 이력 조회
-    # 간단하면서 영속적인 저장소 필요
-    # TODO: 구현
-    return {"lch@team-mono.com": 0}
+    one_week_ago = time.time() - ASSIGNMENT_COUNT_SECONDS
+    email_to_bug_count: dict[str, int] = {}
+
+    for email in emails:
+        key = f"{REDIS_KEY_PATTERN}/{email}"
+        assignment_times_str = redis_client.get(key)
+        if not assignment_times_str:
+            continue
+
+        # JSON 형태로 저장된 할당 시간 목록 파싱
+        assignment_times = json.loads(assignment_times_str)
+
+        # 최근 1주일 내 할당 건수 계산
+        recent_count = sum(
+            1 for timestamp in assignment_times if timestamp > one_week_ago
+        )
+
+        email_to_bug_count[email] = recent_count
+
+    return email_to_bug_count
 
 
 def select_assignee_email(
@@ -261,19 +296,44 @@ async def get_team_to_emails(
     }
 
 
-def update_bug_count(assignee_email: str) -> None:
+def update_bug_count(redis_client: redis.Redis, assignee_email: str) -> None:
     """
     버그 할당 이력을 업데이트합니다.
 
     Args:
         assignee_email: 버그가 할당된 사용자의 이메일
     """
-    pass
+    # 현재 시간
+    current_time = time.time()
+
+    # 사용자의 기존 할당 이력 조회
+    key = f"{REDIS_KEY_PATTERN}/{assignee_email}"
+    assignment_times_str = redis_client.get(key)
+
+    if assignment_times_str:
+        try:
+            # 기존 할당 시간 목록에 현재 시간 추가
+            assignment_times = json.loads(assignment_times_str)
+            assignment_times.append(current_time)
+
+            # 2주일 이상 지난 기록은 삭제 (데이터 정리)
+            two_weeks_ago = current_time - 2 * ASSIGNMENT_COUNT_SECONDS
+            assignment_times = [t for t in assignment_times if t > two_weeks_ago]
+        except json.JSONDecodeError:
+            # 기존 데이터가 손상된 경우 초기화
+            assignment_times = [current_time]
+    else:
+        # 새로운 할당 기록 생성
+        assignment_times = [current_time]
+
+    # 업데이트된 데이터 저장
+    redis_client.set(key, json.dumps(assignment_times))
+
+    redis_client.expire(key, 4 * ASSIGNMENT_COUNT_SECONDS)
 
 
 if __name__ == "__main__":
     # 테스트
-    import os
     import dotenv
     import asyncio
 
@@ -281,12 +341,21 @@ if __name__ == "__main__":
 
     async def main():
         slack_client = AsyncWebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+        # Redis 연결 설정
+        redis_client = redis.Redis(
+            host=os.environ.get("REDIS_HOST", "localhost"),
+            password=os.environ.get("REDIS_PASSWORD", ""),
+            decode_responses=True,
+        )
         message_text = "버그 신고 내용입니다."
         team, priority = extract_team_and_priority_from_report_text(message_text)
         working_emails = get_working_emails()
         email_to_user_id = await get_email_to_user_id_async(slack_client)
         team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
-        email_to_bug_count = get_email_to_bug_count()
+        all_emails = list(
+            set([email for emails in team_to_emails.values() for email in emails])
+        )
+        email_to_bug_count = get_email_to_bug_count(redis_client, all_emails)
         assignee_email = select_assignee_email(
             team, priority, working_emails, team_to_emails, email_to_bug_count
         )
