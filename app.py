@@ -647,7 +647,7 @@ async def message(body, say):
     channel = event.get("channel")
     if channel != SLACK_BUG_REPORT_CHANNEL_ID:
         return
-    
+
     await route_bug.route_bug(app.client, body)
 
 
