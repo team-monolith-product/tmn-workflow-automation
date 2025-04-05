@@ -195,7 +195,7 @@ def select_assignee_email(
         email for email in all_emails if email in working_emails
     ]
 
-    reasons = [f"{team}팀 담당 영역.", f"우선순위: {priority}."]
+    reasons = [f"{team}팀 담당 영역.", f"우선순위 {priority}."]
     candidate_emails: list[str] = []
 
     if priority == "긴급":
@@ -285,8 +285,8 @@ async def send_slack_response(
         for user_info in user_id_to_user_info.values()
     }
     text = (
-        f"버그 신고가 접수되었습니다. 초기 담당자는 {assignee_email}입니다.\n"
-        # f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.\n"
+        # f"버그 신고가 접수되었습니다. 초기 담당자는 {assignee_email}입니다.\n"
+        f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id[assignee_email]}>입니다.\n"
         f"선택 사유: {reason_text}\n\n"
         "만약 이 담당자가 적절하지 않다면, 아래 정보에 기반하여 적절히 담당자를 선택해주세요.\n"
         + "\n".join(
