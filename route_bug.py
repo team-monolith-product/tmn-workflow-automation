@@ -44,7 +44,12 @@ async def route_bug(
     )
     update_bug_count(assignee_email)
     await send_slack_response(
-        slack_client, channel_id, thread_ts, assignee_email, email_to_user_id, reason_text
+        slack_client,
+        channel_id,
+        thread_ts,
+        assignee_email,
+        email_to_user_id,
+        reason_text,
     )
 
 
@@ -151,11 +156,11 @@ def select_assignee_email(
         email for email in all_emails if email in working_emails
     ]
 
-    reasons = [f"{team}팀 버그 신고.", f"우선순위: {priority}"]
+    reasons = [f"{team}팀 담당 영역.", f"우선순위: {priority}."]
     candidate_emails: list[str] = []
 
     if priority == "긴급":
-        reasons.append("긴급. 업무 여부 고려.")
+        reasons.append("긴급이므로 업무 여부 고려.")
 
         # 1순위: 관련 팀에서 출근한 사람
         if working_team_emails:
@@ -171,7 +176,7 @@ def select_assignee_email(
             reasons.append("개발팀 전체 업무 중 인원 없음. 관련 팀 전체 인원 선택.")
     else:  # "보통" 또는 "높음"
         # 관련 팀 구성원 (출근 여부 상관없음)
-        reasons.append("긴급 아님. 업무 여부 상관 없음. 관련 팀 전체 인원 선택.")
+        reasons.append("긴급 아니므로 업무 여부 상관 없음. 관련 팀 전체 인원 선택.")
         candidate_emails = team_emails
 
     # 후보가 없는 경우
@@ -195,7 +200,9 @@ def select_assignee_email(
     if not min_bug_emails:
         return "예외 상황.", "lch@team-mono.com"
 
-    reasons.append(f"버그 할당 건수가 최소({min_bug_count})인 인원 {len(min_bug_emails)}명 중 무작위 추첨.")
+    reasons.append(
+        f"버그 할당 건수가 최소({min_bug_count})인 인원 {len(min_bug_emails)}명 중 무작위 추첨."
+    )
 
     # 동일한 버그 건수를 가진 후보가 여러 명이면 무작위로 선택
     return " ".join(reasons), random.choice(min_bug_emails)
@@ -220,9 +227,9 @@ async def send_slack_response(
     """
     await slack_client.chat_postMessage(
         channel=channel_id,
-        # text=f"버그 신고가 접수되었습니다. 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.",
+        # text=f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.\n선택 사유: {reason_text}",
         # 테스트 과정 중은 dry-run
-        text=f"버그 신고가 접수되었습니다. 담당자는 {assignee_email}입니다.\n선택 사유: {reason_text}",
+        text=f"버그 신고가 접수되었습니다. 초기 담당자는 {assignee_email}입니다.\n선택 사유: {reason_text}",
         thread_ts=thread_ts,
     )
 
