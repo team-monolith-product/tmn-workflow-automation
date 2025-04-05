@@ -79,3 +79,18 @@ def get_user_id_to_user_info(
     return {
         user_id: slack_client.users_info(user=user_id)["user"] for user_id in user_ids
     }
+
+async def get_user_id_to_user_info_async(
+    slack_client: AsyncWebClient,
+    user_ids: List[str],
+) -> Dict[str, Any]:
+    """
+    Args:
+        slack_client (AsyncWebClient): Slack WebClient
+        user_ids (List[str]): 사용자 ID 목록
+    Returns:
+        Dict[str, Any]: 사용자 ID와 사용자 정보 매핑
+    """
+    return {
+        user_id: (await slack_client.users_info(user=user_id))["user"] for user_id in user_ids
+    }

@@ -21,7 +21,7 @@ from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
 
 from api.wantedspace import get_worktime
-from service.slack import get_email_to_user_id_async
+from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 
 REDIS_KEY_PATTERN = "workflow_automation/bug_assigment_time_list"
 ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
@@ -60,13 +60,17 @@ async def route_bug(
         team, priority, working_emails, team_to_emails, email_to_bug_count
     )
     update_bug_count(redis_client, assignee_email)
+
     await send_slack_response(
         slack_client,
         channel_id,
         thread_ts,
+        reason_text,
         assignee_email,
         email_to_user_id,
-        reason_text,
+        team_to_emails,
+        working_emails,
+        email_to_bug_count,
     )
 
 
@@ -247,9 +251,12 @@ async def send_slack_response(
     slack_client: AsyncWebClient,
     channel_id: str,
     thread_ts: str,
+    reason_text: str,
     assignee_email: str,
     email_to_user_id: dict[str, str],
-    reason_text: str,
+    team_to_emails: dict[Literal["ie", "fe", "be"], list[str]],
+    working_emails: list[str],
+    email_to_bug_count: dict[str, int],
 ) -> None:
     """
     슬랙에 담당자 지정 메시지를 전송합니다.
@@ -258,13 +265,41 @@ async def send_slack_response(
         slack_client: 슬랙 클라이언트
         channel_id: 응답을 보낼 슬랙 채널 ID
         thread_ts: 응답할 스레드의 타임스탬프
-        assignee_email: 할당된 담당자 이메일 (없을 경우 None)
+        reason_text: 담당자 선택 이유
+        assignee_email: 할당된 담당자 이메일
+        email_to_user_id: 이메일과 Slack 사용자 ID 매핑
+        team_to_emails: 팀별 구성원 이메일 목록
+        working_emails: 출근한 사용자 이메일 목록
+        email_to_bug_count: 사용자별 버그 담당 건수
     """
+
+    user_ids = [
+        email_to_user_id[email]
+        for emails in team_to_emails.values()
+        for email in emails
+        if email in email_to_user_id
+    ]
+    user_id_to_user_info = await get_user_id_to_user_info_async(slack_client, user_ids)
+    email_to_name = {
+        user_info["email"]: user_info["real_name"]
+        for user_info in user_id_to_user_info.values()
+    }
+    text = (
+        f"버그 신고가 접수되었습니다. 초기 담당자는 {assignee_email}입니다.\n"
+        # f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.\n"
+        f"선택 사유: {email_to_name[reason_text]}\n\n"
+        "만약 이 담당자가 적절하지 않다면, 아래 정보에 기반하여 적절히 담당자를 선택해주세요.\n"
+        "\n".join(
+            [
+                f"- [{team}]{email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count[email]}회"
+                for team, emails in team_to_emails.items()
+                for email in emails
+            ]
+        )
+    )
     await slack_client.chat_postMessage(
         channel=channel_id,
-        # text=f"버그 신고가 접수되었습니다. 초기 담당자는 <@{email_to_user_id.get(assignee_email)}>입니다.\n선택 사유: {reason_text}",
-        # 테스트 과정 중은 dry-run
-        text=f"버그 신고가 접수되었습니다. 초기 담당자는 {assignee_email}입니다.\n선택 사유: {reason_text}",
+        text=text,
         thread_ts=thread_ts,
     )
 
