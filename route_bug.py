@@ -281,7 +281,7 @@ async def send_slack_response(
     ]
     user_id_to_user_info = await get_user_id_to_user_info_async(slack_client, user_ids)
     email_to_name = {
-        user_info["email"]: user_info["real_name"]
+        user_info["profile"]["email"]: user_info["real_name"]
         for user_info in user_id_to_user_info.values()
     }
     text = (
