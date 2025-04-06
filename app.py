@@ -680,10 +680,11 @@ async def respond_in_assistant_thread(
 
 
 @app.command("/summarize-deployment")
-async def on_summarize_deployment(_ack, _body, _say):
+async def on_summarize_deployment(ack, _body, _say):
     """
     /summarize-deployment 명령어를 처리하는 핸들러
     """
+    await ack()
     summarize_deployment.summarize_deployment()
 
 
