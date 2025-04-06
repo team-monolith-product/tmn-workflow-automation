@@ -94,7 +94,7 @@ def summarize_deployment():
     3) GitHub PR 링크 파싱
     4) 한 번에 정리된 메시지를 Slack에 전송
     """
-    notion = NotionClient(auth=os.environ["NOTION_API_KEY"])
+    notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     email_to_user_id = get_email_to_user_id(slack_client)
 
