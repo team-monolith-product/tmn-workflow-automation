@@ -30,7 +30,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
 import route_bug
-
+import summarize_deployment
 
 # 환경 변수 로드
 load_dotenv()
@@ -677,6 +677,14 @@ async def respond_in_assistant_thread(
     await answer(
         context.thread_ts, context.channel_id, context.user_id, payload["text"], say
     )
+
+
+@app.command("/summarize-deployment")
+async def on_summarize_deployment(_ack, _body, _say):
+    """
+    /summarize-deployment 명령어를 처리하는 핸들러
+    """
+    summarize_deployment.summarize_deployment()
 
 
 # https://github.com/slackapi/bolt-python/blob/main/examples/socket_mode_async.py#L120

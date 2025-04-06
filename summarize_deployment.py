@@ -87,7 +87,7 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         return pr_url, None
 
 
-def main_deploy_script():
+def summarize_deployment():
     """
     1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업을 가져오고
     2) 담당자를 이메일로 매핑해서 Slack 멘션
@@ -187,4 +187,4 @@ def main_deploy_script():
 
 
 if __name__ == "__main__":
-    main_deploy_script()
+    summarize_deployment()
