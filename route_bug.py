@@ -37,6 +37,10 @@ async def route_bug(
     Args:
         body: Slack 이벤트 페이로드 딕셔너리
     """
+    # 디버그 문구 삽입
+    print("[route_bug]")
+    print(f"body:\n{body}")
+
     message_text = body.get("event", {}).get("text", "")
     channel_id = body.get("event", {}).get("channel")
     thread_ts = body.get("event", {}).get("ts")
