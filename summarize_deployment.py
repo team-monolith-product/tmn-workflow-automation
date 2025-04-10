@@ -31,8 +31,11 @@ from urllib.parse import urlparse
 
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
+import dotenv
 
 from service.slack import get_email_to_user_id
+
+dotenv.load_dotenv()
 
 
 NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
@@ -89,7 +92,7 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
 
 def summarize_deployment():
     """
-    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업을 가져오고
+    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업 또는 '종료일'이 오늘인 과업을 가져오고
     2) 담당자를 이메일로 매핑해서 Slack 멘션
     3) GitHub PR 링크 파싱
     4) 한 번에 정리된 메시지를 Slack에 전송
@@ -101,11 +104,17 @@ def summarize_deployment():
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 
     # 1) 오늘 배포할 과업 목록 조회
-    #    여기서는 예시로 '배포 예정 날짜'라는 Date 속성이 있고, 여기에 오늘 날짜가 'equals'로 설정된 경우를 가져온다고 가정
+    #    - '배포 예정 날짜'가 오늘인 경우
+    #    - '종료일'이 오늘인 경우
     query_result = notion.databases.query(
         **{
             "database_id": NOTION_DATABASE_ID,
-            "filter": {"property": "배포 예정 날짜", "date": {"equals": today_str}},
+            "filter": {
+                "or": [
+                    {"property": "배포 예정 날짜", "date": {"equals": today_str}},
+                    {"property": "종료일", "date": {"equals": today_str}},
+                ]
+            },
         }
     )
 
