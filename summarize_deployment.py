@@ -110,9 +110,19 @@ def summarize_deployment():
         **{
             "database_id": NOTION_DATABASE_ID,
             "filter": {
-                "or": [
-                    {"property": "배포 예정 날짜", "date": {"equals": today_str}},
-                    {"property": "종료일", "date": {"equals": today_str}},
+                "and": [
+                    {
+                        "or": [
+                            {"property": "배포 예정 날짜", "date": {"equals": today_str}},
+                            {"property": "종료일", "date": {"equals": today_str}},
+                        ]
+                    },
+                    {
+                        "and": [
+                            {"property": "구성요소", "multi_select": {"does_not_contain": "기획"}},
+                            {"property": "구성요소", "multi_select": {"does_not_contain": "디자인"}},
+                        ]
+                    }
                 ]
             },
         }
