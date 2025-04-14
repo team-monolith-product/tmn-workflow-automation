@@ -648,6 +648,11 @@ async def message(body, say):
     if channel != SLACK_BUG_REPORT_CHANNEL_ID:
         return
 
+    # 메시지 편집 이벤트 필터링
+    subtype = event.get("subtype")
+    if subtype != "bot_message":
+        return
+
     thread_ts = event.get("thread_ts")
     message_ts = event.get("ts")
     if thread_ts is None or thread_ts == message_ts:
