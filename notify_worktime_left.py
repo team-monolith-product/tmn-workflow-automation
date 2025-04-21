@@ -67,7 +67,9 @@ def main():
         if date_obj.weekday() < 5 and date_str not in holidays:
             total_required_worktime += required_daily_minutes
 
-    user_id_to_user_info = get_user_id_to_user_info(slack_client, list(email_to_user_id.values()))
+    user_id_to_user_info = get_user_id_to_user_info(
+        slack_client, list(email_to_user_id.values())
+    )
 
     # 오늘을 포함한 남은 영업일(평일) 수 계산
     remaining_business_days = 0

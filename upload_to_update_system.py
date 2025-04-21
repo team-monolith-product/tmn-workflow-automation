@@ -123,7 +123,7 @@ def convert_md_to_html(md_text: str) -> str:
     """
     Python의 markdown 라이브러리로 MD -> HTML 변환
     """
-    return markdown(md_text, extensions=['tables'])
+    return markdown(md_text, extensions=["tables"])
 
 
 def split_markdown_into_two_parts(
@@ -529,8 +529,10 @@ def new_table_row(info: list) -> list:
     # \n를 <br/>로 치환
     return [o.replace("\n", "<br/>") for o in old]
 
+
 BLOCK_TYPES["video"] = video
 BLOCK_TYPES["table_row"] = new_table_row
+
 
 def main():
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
