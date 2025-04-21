@@ -685,13 +685,11 @@ async def respond_in_assistant_thread(
 
 
 @app.command("/summarize-deployment")
-async def on_summarize_deployment(ack, body, _say):
+async def on_summarize_deployment(ack, body):
     """
     /summarize-deployment 명령어를 처리하는 핸들러
     """
     await ack()
-    print("/summarize-deployment command received")
-    print(body)
     summarize_deployment.summarize_deployment(
         caller_slack_user_id=body.get("user_id"),
     )
