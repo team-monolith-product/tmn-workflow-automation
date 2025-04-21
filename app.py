@@ -685,12 +685,14 @@ async def respond_in_assistant_thread(
 
 
 @app.command("/summarize-deployment")
-async def on_summarize_deployment(ack, _body, _say):
+async def on_summarize_deployment(ack, body, _say):
     """
     /summarize-deployment 명령어를 처리하는 핸들러
     """
     await ack()
-    summarize_deployment.summarize_deployment()
+    summarize_deployment.summarize_deployment(
+        caller_slack_user_id=body.get("user_id"),
+    )
 
 
 # https://github.com/slackapi/bolt-python/blob/main/examples/socket_mode_async.py#L120

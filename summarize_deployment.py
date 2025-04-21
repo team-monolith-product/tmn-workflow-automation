@@ -90,7 +90,9 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         return pr_url, None
 
 
-def summarize_deployment():
+def summarize_deployment(
+    caller_slack_user_id: Optional[str] = None,
+):
     """
     1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업 또는 '종료일'이 오늘인 과업을 가져오고
     2) 담당자를 이메일로 매핑해서 Slack 멘션
@@ -141,8 +143,8 @@ def summarize_deployment():
     # 여러 PR에서 뽑은 레포지토리들
     repos_to_deploy: Set[str] = set()
 
-    # 메시지 헤더
-    message = "오늘 배포 예정 과업!\n"
+    # 메시지 헤더 & 호출자 멘션
+    message = f"오늘 배포 예정 과업! (by <@{caller_slack_user_id}>)\n"
 
     for task in tasks:
         props = task["properties"]
