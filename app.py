@@ -690,6 +690,8 @@ async def on_summarize_deployment(ack, body, _say):
     /summarize-deployment 명령어를 처리하는 핸들러
     """
     await ack()
+    print("/summarize-deployment command received")
+    print(body)
     summarize_deployment.summarize_deployment(
         caller_slack_user_id=body.get("user_id"),
     )
