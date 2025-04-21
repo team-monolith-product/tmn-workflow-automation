@@ -689,8 +689,15 @@ async def on_summarize_deployment(ack, body):
     """
     /summarize-deployment 명령어를 처리하는 핸들러
     """
-    await ack()
-    summarize_deployment.summarize_deployment(
+    await ack(text="⏳ 배포 요약을 작성 중입니다…")
+
+    # summarize_deployment 가 Blocking IO 이므로
+    # asyncio.to_thread 를 사용하여 비동기적으로 실행
+    # 그렇지 않으면 ack 응답이 3초안에 날아가지 않아
+    # dispatch_failed 오류가 발생함.
+    # https://chatgpt.com/share/6805f405-36b0-8002-a298-ac2cefb12b0b
+    await asyncio.to_thread(
+        summarize_deployment.summarize_deployment,
         caller_slack_user_id=body.get("user_id"),
     )
 
