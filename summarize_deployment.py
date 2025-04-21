@@ -153,7 +153,10 @@ def summarize_deployment(
     repos_to_deploy: Set[str] = set()
 
     # 메시지 헤더 & 호출자 멘션
-    message = f"오늘 배포 예정 과업! (by <@{caller_slack_user_id}>)\n"
+    if caller_slack_user_id:
+        message = f"오늘 배포 예정 과업! (by <@{caller_slack_user_id}>)\n"
+    else:
+        message = "오늘 배포 예정 과업!\n"
 
     for task in tasks:
         props = task["properties"]
