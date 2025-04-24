@@ -12,10 +12,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Code Style Guidelines
 - **Formatting**: Use Black for code formatting
 - **Imports**: Group in order: stdlib, third-party, local modules
-- **Types**: Use comprehensive type hints, including Annotated and Literal types
-- **Naming**: snake_case for functions/variables, UPPER_SNAKE_CASE for constants
+- **Types**: 
+  - Use comprehensive type hints, including Annotated and Literal types
+  - Use lowercase generics (list, dict, set) instead of importing List, Dict, Set
+- **Naming**: 
+  - snake_case for functions/variables, UPPER_SNAKE_CASE for constants
+  - File names should use verb_noun.py format (e.g., collect_review_stats.py, notify_worktime_left.py)
+- **Logging & Error Handling**: 
+  - Keep it simple, use print() statements for scripts
+  - Avoid complex logging configuration for these internal tools
+  - Minimal error handling - avoid excessive try/except blocks for obvious errors
 - **Docstrings**: Use triple quotes with description, Args, Returns sections
 - **Language**: Code structure in English, comments/docstrings in Korean
 - **Environment**: Use python-dotenv for environment variables
 - **Tools**: Use LangChain-style tool decorators for AI agent functions
 - **Architecture**: Follow service layer pattern for separation of concerns
+
+## Automated Workflows
+- GitHub Actions are used for running scripts on schedule
+- Workflow files are stored in `.github/workflows/` directory
+- Each workflow corresponds to a script in the root directory
