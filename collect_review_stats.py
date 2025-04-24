@@ -115,8 +115,6 @@ def get_pr_timeline_events(pr: PullRequest) -> list:
     # 모든 타임라인 이벤트 수집
     events = []
 
-    # 타임라인 이벤트 목록
-
     for event in timeline:
         # 이벤트 속성 확인
         event_type = event.event
@@ -143,9 +141,7 @@ def get_pr_timeline_events(pr: PullRequest) -> list:
             reviewer = event.raw_data["user"]["login"]
             event_time = datetime.strptime(
                 event.raw_data["submitted_at"], "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(
-                tzinfo=timezone.utc
-            )
+            ).replace(tzinfo=timezone.utc)
 
             events.append(
                 {
@@ -163,17 +159,6 @@ def get_pr_timeline_events(pr: PullRequest) -> list:
                     "time": event_time,
                 }
             )
-
-    # PR 생성 이벤트 추가 (항상 첫 번째)
-    # TODO: 불필요한 코드 제거
-    events.insert(
-        0,
-        {
-            "type": "created",
-            "time": pr.created_at,
-            "author": pr.user.login if pr.user else "unknown",
-        },
-    )
 
     # 시간순 정렬
     events.sort(key=lambda e: e["time"])
@@ -208,21 +193,6 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
     # 리뷰어별 상태 추적
     reviewer_status = {}  # 리뷰어 -> 상태 ('미요청', '요청됨', '응답함')
     reviewer_request_time = {}  # 리뷰어 -> 가장 최근 요청 시간
-    reviewer_last_request_time = (
-        {}
-    )  # 리뷰어 -> 마지막으로 요청된 시간 (요청 제거되어도 유지)
-
-    # PR 메타데이터 저장 - 디버깅에 유용
-    pr_metadata = {
-        "number": pr.number,
-        "title": pr.title,
-        "url": pr.html_url,
-        "created_at": pr.created_at,
-        "updated_at": pr.updated_at,
-        "merged_at": pr.merged_at if hasattr(pr, "merged") and pr.merged else None,
-        "reviewer_requests": {},  # 리뷰어별 요청/제거 이벤트 기록
-        "reviews": {},  # 리뷰어별 리뷰 제출 기록
-    }
 
     # 결과 저장용
     response_times = {}  # 리뷰어 -> [응답 시간 목록]
@@ -234,7 +204,6 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
         for reviewer in initial_reviewers:
             reviewer_status[reviewer] = "요청됨"
             reviewer_request_time[reviewer] = ready_time  # Ready 시간부터 계산
-            reviewer_last_request_time[reviewer] = ready_time  # 마지막 요청 시간 기록
 
     # 이벤트 처리
     for event in events:
@@ -242,49 +211,24 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
         event_time = event["time"]
 
         # 리뷰 요청 이벤트
-        if event_type == "review_requested" and "reviewer" in event:
+        if event_type == "review_requested":
             reviewer = event["reviewer"]
             if reviewer:  # 유효한 리뷰어 확인
                 # 요청 상태를 요청됨으로 설정하고 요청 시간 업데이트
                 reviewer_status[reviewer] = "요청됨"
                 reviewer_request_time[reviewer] = event_time
-                reviewer_last_request_time[reviewer] = (
-                    event_time  # 마지막 요청 시간 업데이트
-                )
-
-                # PR의 메타데이터 저장 (디버깅용)
-                if reviewer not in pr_metadata["reviewer_requests"]:
-                    pr_metadata["reviewer_requests"][reviewer] = []
-                pr_metadata["reviewer_requests"][reviewer].append(
-                    {
-                        "action": "requested",
-                        "time": str(event_time),
-                    }
-                )
 
         # 리뷰 요청 제거 이벤트
-        elif event_type == "review_request_removed" and "reviewer" in event:
+        elif event_type == "review_request_removed":
             reviewer = event["reviewer"]
             if reviewer:  # 유효한 리뷰어 확인
-                old_status = reviewer_status.get(reviewer, "알 수 없음")
                 reviewer_status[reviewer] = "미요청"
-
-                # PR의 메타데이터 저장 (디버깅용)
-                if reviewer not in pr_metadata["reviewer_requests"]:
-                    pr_metadata["reviewer_requests"][reviewer] = []
-                pr_metadata["reviewer_requests"][reviewer].append(
-                    {
-                        "action": "removed",
-                        "time": str(event_time),
-                        "previous_status": old_status,
-                    }
-                )
 
                 if reviewer in reviewer_request_time:
                     del reviewer_request_time[reviewer]
 
         # 리뷰 제출 이벤트
-        elif event_type == "reviewed" and "reviewer" in event:
+        elif event_type == "reviewed":
             reviewer = event["reviewer"]
 
             if not reviewer:  # 유효하지 않은 리뷰어 건너뛰기
@@ -294,38 +238,12 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
             if pr.user and reviewer == pr.user.login:
                 continue
 
-            # PR 메타데이터에 리뷰 정보 저장 (디버깅용)
-            if reviewer not in pr_metadata["reviews"]:
-                pr_metadata["reviews"][reviewer] = []
-            pr_metadata["reviews"][reviewer].append(
-                {
-                    "time": str(event_time),
-                    "status": reviewer_status.get(reviewer, "알 수 없음"),
-                    "last_request": (
-                        str(reviewer_last_request_time.get(reviewer, None))
-                        if reviewer in reviewer_last_request_time
-                        else None
-                    ),
-                    "current_request": (
-                        str(reviewer_request_time.get(reviewer, None))
-                        if reviewer in reviewer_request_time
-                        else None
-                    ),
-                }
-            )
-
             # 리뷰어가 요청 상태인 경우
-            if (
-                reviewer_status.get(reviewer) == "요청됨"
-                and reviewer in reviewer_request_time
-            ):
+            if reviewer_status.get(reviewer) == "요청됨":
                 request_time = reviewer_request_time[reviewer]
-                time_diff = (
+                response_time = (
                     event_time - request_time
                 ).total_seconds() / 3600  # 시간 단위
-
-                # 실제 계산된 시간 그대로 사용
-                response_time = time_diff
 
                 # 응답 시간 기록
                 if reviewer not in response_times:
@@ -343,28 +261,6 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
             ):
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
-                # # 이전에 요청된 적이 있는지 확인
-                # if reviewer in reviewer_last_request_time:
-                #     # 마지막 요청 시간부터 계산 (리뷰 요청이 제거된 경우)
-                #     request_time = reviewer_last_request_time[reviewer]
-                # else:
-                #     # 한 번도 요청된 적이 없는 경우 Ready 시간부터 계산
-                #     request_time = ready_time
-
-                # # 응답 시간 계산
-                # time_diff = (
-                #     event_time - request_time
-                # ).total_seconds() / 3600  # 시간 단위
-
-                # # Ready 시간보다 빠른 이벤트 발생(마이너스 시간)은 데이터 불일치 문제일 수 있음
-
-                # # 모든 경우에 실제 계산된 시간 그대로 사용
-                # response_time = time_diff
-
-                # # 응답 시간 기록
-                # if reviewer not in response_times:
-                #     response_times[reviewer] = []
-                # response_times[reviewer].append(response_time)
 
     # 최종 응답 시간 결과
 
