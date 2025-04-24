@@ -92,6 +92,52 @@ def get_pr_reviews(pr: PullRequest) -> list[dict[str, Any]]:
     return filtered_reviews
 
 
+def get_pr_ready_time(pr: PullRequest) -> datetime:
+    """
+    PR이 Draft에서 Ready로 변경된 시간을 가져옵니다.
+    모든 PR의 타임라인을 검사하여 Ready 이벤트를 찾습니다.
+    Ready 이벤트가 없으면 PR 생성 시간을 반환합니다.
+    
+    Args:
+        pr: 풀 리퀘스트 객체
+        
+    Returns:
+        PR이 Ready로 변경된 시간 또는 PR 생성 시간
+    """
+    # 캐시 적중률 추적을 위한 전역 변수
+    if not hasattr(get_pr_ready_time, 'ready_time_cache_hits'):
+        get_pr_ready_time.ready_time_cache_hits = 0
+        get_pr_ready_time.ready_time_cache_misses = 0
+    
+    # PR에 ready_time 속성이 이미 있는지 확인 (캐싱)
+    if hasattr(pr, '_ready_time'):
+        get_pr_ready_time.ready_time_cache_hits += 1
+        return pr._ready_time
+    
+    get_pr_ready_time.ready_time_cache_misses += 1
+    
+    # PR을 Issue로 변환하여 타임라인에 접근
+    try:
+        issue = pr.as_issue()
+        timeline = issue.get_timeline()
+        
+        # ready_for_review 이벤트 찾기
+        for event in timeline:
+            if hasattr(event, 'event') and event.event == 'ready_for_review':
+                # 결과 캐싱
+                pr._ready_time = event.created_at
+                return event.created_at
+        
+        # 이벤트를 찾지 못했다면 PR 생성 시간 반환
+        # (Draft로 생성된 적이 없거나, 타임라인에 이벤트가 없는 경우)
+        pr._ready_time = pr.created_at
+        return pr.created_at
+        
+    except Exception as e:
+        pr._ready_time = pr.created_at
+        return pr.created_at
+
+
 def process_pr_reviews(
     pr: PullRequest, author_stats: dict
 ) -> tuple[dict, list, dict, int, bool]:
@@ -147,10 +193,13 @@ def process_pr_reviews(
         local_reviewer_stats[reviewer]["review_count"] += 1
         local_reviewer_stats[reviewer]["prs_reviewed"].add(pr.number)
 
-        # 응답 시간 계산 (PR 생성 시간부터 리뷰 제출 시간까지)
-        if pr.created_at and submitted_at:
+        # PR의 Ready 시간 조회 (Draft -> Ready 변경 시간 또는 PR 생성 시간)
+        ready_time = get_pr_ready_time(pr)
+        
+        # 응답 시간 계산 (PR Ready 시간부터 리뷰 제출 시간까지)
+        if ready_time and submitted_at:
             response_time = (
-                submitted_at - pr.created_at
+                submitted_at - ready_time
             ).total_seconds() / 3600  # 시간 단위
             local_reviewer_stats[reviewer]["response_times"].append(response_time)
 
@@ -283,6 +332,14 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
     reviews_fetch_end = datetime.now()
     reviews_fetch_duration = (reviews_fetch_end - reviews_fetch_start).total_seconds()
     print(f"리뷰 데이터 병렬 조회 완료: {reviews_count}개 (소요 시간: {reviews_fetch_duration:.2f}초)")
+    
+    # 캐시 적중률 통계 출력
+    if hasattr(get_pr_ready_time, 'ready_time_cache_hits'):
+        hits = get_pr_ready_time.ready_time_cache_hits
+        misses = get_pr_ready_time.ready_time_cache_misses
+        total = hits + misses
+        hit_rate = (hits / total * 100) if total > 0 else 0
+        print(f"Ready 시간 캐시 통계: 적중 {hits}회, 실패 {misses}회, 적중률 {hit_rate:.1f}%")
 
     # 대기 중인 리뷰 요청 수 업데이트
     for reviewer, pr_numbers in reviewer_to_requested_prs.items():
