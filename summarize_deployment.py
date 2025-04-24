@@ -26,7 +26,7 @@
 
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from notion_client import Client as NotionClient
@@ -43,20 +43,20 @@ SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 
 
 def get_pr_links(
-    notion: NotionClient, pr_relations: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    notion: NotionClient, pr_relations: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
-    pr_links_info: List[Dict[str, Any]] = []
+    pr_links_info: list[dict[str, Any]] = []
     for relation in pr_relations:
         pr_page_id: str = relation["id"]
-        pr_page: Dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
-        properties: Dict[str, Any] = pr_page["properties"]
+        pr_page: dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
+        properties: dict[str, Any] = pr_page["properties"]
 
-        url_property: Dict[str, Any] = properties.get("_external_object_url", {})
+        url_property: dict[str, Any] = properties.get("_external_object_url", {})
         if "url" in url_property and url_property["url"]:
             pr_url: str = url_property["url"]
             # 'Merged At' 필드에서 병합 여부 추출
-            merged_at_property: Dict[str, Any] = properties.get("Merged At", {})
+            merged_at_property: dict[str, Any] = properties.get("Merged At", {})
             is_merged: bool = False
             if merged_at_property.get("date") and merged_at_property["date"].get(
                 "start"
@@ -69,7 +69,7 @@ def get_pr_links(
     return pr_links_info
 
 
-def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+def format_pr_link(pr_info: dict[str, Any]) -> tuple[str, str | None]:
     """PR 링크를 포맷하고 레포지토리 이름을 추출하며 병합 상태에 따라 이모지를 추가합니다."""
     pr_url: str = pr_info["url"]
     is_merged: bool = pr_info["merged"]
@@ -91,7 +91,7 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
 
 
 def summarize_deployment(
-    caller_slack_user_id: Optional[str] = None,
+    caller_slack_user_id: str | None = None,
 ):
     """
     1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업 또는 '종료일'이 오늘인 과업을 가져오고
@@ -150,7 +150,7 @@ def summarize_deployment(
         return
 
     # 여러 PR에서 뽑은 레포지토리들
-    repos_to_deploy: Set[str] = set()
+    repos_to_deploy: set[str] = set()
 
     # 메시지 헤더 & 호출자 멘션
     if caller_slack_user_id:
@@ -188,12 +188,12 @@ def summarize_deployment(
         task_title_link = f"<{notion_page_url}|{task_title}>"
 
         # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
-        pr_link_property: Dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
-        pr_relations: List[Dict[str, Any]] = pr_link_property.get("relation", [])
-        pr_links_info: List[Dict[str, Any]] = get_pr_links(notion, pr_relations)
+        pr_link_property: dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
+        pr_relations: list[dict[str, Any]] = pr_link_property.get("relation", [])
+        pr_links_info: list[dict[str, Any]] = get_pr_links(notion, pr_relations)
 
         # PR 링크 포맷 및 레포지토리 이름 수집
-        formatted_pr_links: List[str] = []
+        formatted_pr_links: list[str] = []
         for pr_info in pr_links_info:
             formatted_link, repo_name = format_pr_link(pr_info)
             formatted_pr_links.append(formatted_link)

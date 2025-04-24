@@ -3,10 +3,8 @@ import argparse
 import os
 import random
 from datetime import datetime
-from typing import Dict, List
 from dotenv import load_dotenv
 
-import requests
 from slack_sdk import WebClient
 
 from api.wantedspace import get_workevent
@@ -145,18 +143,18 @@ def daily_scrum():
 
 def shuffle(
     slack_client: WebClient,
-    user_ids: List[str],
-) -> List[str]:
+    user_ids: list[str],
+) -> list[str]:
     """
     최적의 스크럼 효율을 위해 참여자의 순서를 조작합니다.
     - 기본적으로 무작위로 배치하여 매일 앞 사람의 발표에 집중하게 합니다.
     - 같은 팀 구성원들은 서로 가까이 배치하여 듣는 사람의 이해를 돕습니다.
 
     Args:
-        user_ids (List[str]): 사용자 ID 목록
+        user_ids (list[str]): 사용자 ID 목록
 
     Returns:
-        List[str]: 무작위로 섞인 사용자 ID 목록
+        list[str]: 무작위로 섞인 사용자 ID 목록
     """
 
     team_id_to_user_ids = get_team_id_to_user_ids(slack_client, user_ids)
@@ -174,18 +172,18 @@ def shuffle(
 
 def get_team_id_to_user_ids(
     slack_client: WebClient,
-    user_ids: List[str],
-) -> Dict[str | None, List[str]]:
+    user_ids: list[str],
+) -> dict[str | None, list[str]]:
     """
     Slack SDK를 사용하여 사용자 ID와 팀(사용자 그룹)을 매핑합니다.
     한 사용자가 여러 사용자 그룹에 속한다면,
     그 중 가장 작은 규모의 사용자 그룹을 선택합니다.
 
     Args:
-        user_ids (List[str]): 사용자 ID 목록
+        user_ids (list[str]): 사용자 ID 목록
 
     Returns:
-        Dict: 사용자 ID와 팀 매핑
+        dict: 사용자 ID와 팀 매핑
     """
     team_id_to_user_ids = {}
     usergroups_response = slack_client.usergroups_list()
