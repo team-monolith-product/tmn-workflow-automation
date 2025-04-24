@@ -417,7 +417,7 @@ def send_to_slack(
             repo_block = f"*분석된 저장소:*\n{repo_list}"
 
     # 추가 설명
-    explanation = "• *평균응답*: 리뷰 요청부터 응답까지 평균 소요 시간\n• *24h초과*: 24시간 이상 소요된 리뷰 비율\n• *완료*: 완료한 리뷰 수\n• *대기*: 리뷰 요청 받았으나 아직 응답하지 않은 수"
+    explanation = "• *평균응답*: 리뷰 요청부터 응답까지 평균 소요 시간\n• *24h초과*: 24시간 이상 소요된 리뷰 비율\n• *완료*: 완료한 리뷰 수"
 
     # 슬랙 메시지 블록 구성
     blocks = [
@@ -471,15 +471,12 @@ def get_active_repos(
 
     for repo in all_repos:
 
-        # 보관처리된 저장소는 제외
         if repo.archived:
             continue
-
         # fork된 저장소는 제외
         if repo.fork:
             continue
 
-        # private 저장소만 포함 (선택적)
         if not repo.private:
             continue
 
@@ -525,15 +522,12 @@ def main():
     # 저장소 병렬 처리를 위한 설정
     REPO_MAX_WORKERS = min(30, len(repositories))  # 저장소 수에 따라 동적으로 조정
 
-    # ThreadPoolExecutor를 사용한 병렬 처리
     with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
-        # 모든 저장소에 대해 병렬로 PR 조회 시작
         futures = [
             executor.submit(fetch_repo_prs, repo_full_name, DAYS)
             for repo_full_name in repositories
         ]
 
-        # 결과 수집
         for future in concurrent.futures.as_completed(futures):
             repo_full_name, repo_prs = future.result()
             if repo_prs:  # 결과가 있는 경우만 추가
@@ -543,13 +537,9 @@ def main():
     if not all_pull_requests:
         return
 
-    # 통계 계산
     stats = calculate_stats(all_pull_requests)
-
-    # 리뷰어 통계 표시
     reviewer_table = format_reviewer_table(stats)
 
-    # 저장소별 통계
     repo_activity = "\n".join(
         [f"• {repo}: {count}개 PR" for repo, count in repo_stats.items() if count > 0]
     )
@@ -562,9 +552,6 @@ def main():
         print(repo_activity)
         print("=====================")
     else:
-        # Slack에 전송
-        # 저장소별 통계도 함께 전송
-        stats["repo_stats"] = repo_stats
         send_to_slack(slack_client, SLACK_CHANNEL_ID, stats, repo_stats, DAYS)
 
 
