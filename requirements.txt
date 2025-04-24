@@ -13,11 +13,10 @@ langgraph
 langchain-google-community
 tavily-python
 beautifulsoup4
-playwright
 lxml
 aiohttp
 browser-use
 markdown
 pypandoc_binary
-tabulate
 tabulate[widechars]
+redis

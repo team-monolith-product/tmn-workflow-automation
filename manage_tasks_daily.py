@@ -21,9 +21,7 @@ def main():
     email_to_user_id = get_email_to_user_id(slack_client)
 
     send_intro_message(slack_client, CHANNEL_ID)
-    alert_overdue_tasks(
-        notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id
-    )
+    alert_overdue_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
     alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
     alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
     alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)

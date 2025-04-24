@@ -2,8 +2,6 @@ name: Summarize Deployment
 
 on:
   schedule:
-    - cron: '0 0 * * 1-5'     # 매일 오전 9시 실행 (UTC 0시)
-    - cron: '30 2 * * 1-5'    # 매일 오전 11시 30분 실행 (UTC 2시 30분)
     - cron: '30 7 * * 1-5'    # 매일 오후 4시 30분 실행 (UTC 7시 30분)
   workflow_dispatch:        # 수동 트리거 (디버그 목적)
 
@@ -22,7 +20,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run script
         env:
-          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}

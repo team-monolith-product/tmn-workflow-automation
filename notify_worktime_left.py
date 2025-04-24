@@ -70,7 +70,9 @@ def main():
             total_required_worktime += REQUIRED_DAILY_MINUTES
 
     # 4) Slack 사용자 상세정보
-    user_id_to_user_info = get_user_id_to_user_info(slack_client, list(email_to_user_id.values()))
+    user_id_to_user_info = get_user_id_to_user_info(
+        slack_client, list(email_to_user_id.values())
+    )
 
     # 5) 사용자별 로직 → ASCII 테이블
     table_data = []
@@ -86,7 +88,9 @@ def main():
         actual_worktime = email_to_worktime.get(email, 0)
 
         # 휴가 (이미 사용, 오늘, 미래)
-        workevent = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
+        workevent = get_workevent(
+            date=f"{year}-{month:02d}-01", type="month", email=email
+        )
         vac_info = get_monthly_vacation_breakdown(year, month, workevent)
         used_vac = vac_info["used_days"]
         today_vac = vac_info["today_days"]
