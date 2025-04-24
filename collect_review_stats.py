@@ -2,7 +2,6 @@ import os
 import argparse
 from datetime import datetime, timezone, timedelta
 from typing import Any
-from collections import defaultdict
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
@@ -68,29 +67,6 @@ def fetch_pull_requests(
             break
 
     return all_pulls
-
-
-def get_pr_reviews(pr: PullRequest) -> list[dict[str, Any]]:
-    """
-    PR의 리뷰를 가져오고, 사람이 작성한 리뷰만 필터링합니다.
-    """
-    reviews = pr.get_reviews()
-
-    # 봇이 작성한 리뷰 제외
-    filtered_reviews = []
-    for review in reviews:
-        if review.user and review.user.type != "Bot":
-            filtered_reviews.append(
-                {
-                    "id": review.id,
-                    "user": review.user.login,
-                    "state": review.state,
-                    "submitted_at": review.submitted_at,
-                    "body": review.body,
-                }
-            )
-
-    return filtered_reviews
 
 
 def get_pr_timeline_events(pr: PullRequest) -> list:
@@ -168,7 +144,7 @@ def get_pr_timeline_events(pr: PullRequest) -> list:
     return events
 
 
-def calculate_review_response_times(pr: PullRequest) -> dict:
+def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
     """
     PR의 타임라인 이벤트를 분석하여 리뷰어별 응답 시간을 계산합니다.
 
@@ -183,27 +159,12 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
     # 타임라인 이벤트 가져오기
     events = get_pr_timeline_events(pr)
 
-    # PR이 Ready 상태가 된 시간 (기본값)
-    ready_time = pr.created_at
-    for event in events:
-        if event["type"] == "ready_for_review":
-            ready_time = event["time"]
-            break
-
     # 리뷰어별 상태 추적
     reviewer_status = {}  # 리뷰어 -> 상태 ('미요청', '요청됨', '응답함')
     reviewer_request_time = {}  # 리뷰어 -> 가장 최근 요청 시간
 
     # 결과 저장용
     response_times = {}  # 리뷰어 -> [응답 시간 목록]
-
-    # 초기 리뷰어 설정 (PR 생성 시 지정된 리뷰어)
-    requests = pr.get_review_requests()
-    if requests and len(requests) > 0:
-        initial_reviewers = [r.login for r in requests[0] if hasattr(r, "login")]
-        for reviewer in initial_reviewers:
-            reviewer_status[reviewer] = "요청됨"
-            reviewer_request_time[reviewer] = ready_time  # Ready 시간부터 계산
 
     # 이벤트 처리
     for event in events:
@@ -267,7 +228,7 @@ def calculate_review_response_times(pr: PullRequest) -> dict:
     return response_times
 
 
-def process_pr_reviews(pr: PullRequest) -> tuple[dict, PullRequest, dict, int, bool]:
+def process_pr_reviews(pr: PullRequest) -> dict:
     """
     단일 PR의 리뷰를 병렬로 처리하기 위한 함수입니다.
 
@@ -275,34 +236,12 @@ def process_pr_reviews(pr: PullRequest) -> tuple[dict, PullRequest, dict, int, b
 
     Args:
         pr: 풀 리퀘스트 객체
-        author_stats: 저자 통계 정보
 
     Returns:
-        tuple[dict, PullRequest, dict, int, bool]:
-            (리뷰어별 통계, PR, 요청된 리뷰어 정보, 리뷰 수, 리뷰 존재 여부)
+        dict: 리뷰어별 통계
     """
-    if not pr.user:
-        return {}, None, {}, 0, False
-
     author = pr.user.login
     local_reviewer_stats = {}
-    open_pr = None
-    local_reviewer_to_requested_prs = {}
-
-    # 열린 PR인 경우
-    if pr.state == "open":
-        open_pr = pr
-
-        # 현재 요청된 리뷰어 찾기
-        requested_reviewers = pr.get_review_requests()
-        if requested_reviewers and len(requested_reviewers) > 0:
-            for user in requested_reviewers[0]:  # [0]은 사용자 목록, [1]은 팀 목록
-                if hasattr(user, "login"):
-                    local_reviewer_to_requested_prs[user.login] = pr.number
-
-    # 리뷰 정보 수집
-    reviews = get_pr_reviews(pr)
-    has_reviews = len(reviews) > 0
 
     # 시계열 기반 리뷰 요청-응답 시간 계산
     reviewer_response_times = calculate_review_response_times(pr)
@@ -321,7 +260,6 @@ def process_pr_reviews(pr: PullRequest) -> tuple[dict, PullRequest, dict, int, b
                 "avg_response_time": 0,
                 "prs_reviewed": set(),
                 "overdue_count": 0,  # 24시간 초과 리뷰 수
-                "pending_reviews": 0,  # 대기 중인 리뷰 요청 수
             }
 
         # 리뷰 수 증가
@@ -336,13 +274,7 @@ def process_pr_reviews(pr: PullRequest) -> tuple[dict, PullRequest, dict, int, b
             if response_time > 24:
                 local_reviewer_stats[reviewer]["overdue_count"] += 1
 
-    return (
-        local_reviewer_stats,
-        open_pr,
-        local_reviewer_to_requested_prs,
-        len(reviews),
-        has_reviews,
-    )
+    return local_reviewer_stats
 
 
 def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any]]:
@@ -357,30 +289,6 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
     # 리뷰어 통계
     reviewer_stats = {}
 
-    # PR 작성자 통계 (받은 리뷰 수, 대기 중인 PR 등)
-    author_stats = {}
-
-    # 리뷰 요청된 PR 목록 (reviewer -> PR set)
-    reviewer_to_requested_prs = defaultdict(set)
-
-    # 열린 PR 목록을 추적
-    open_prs = []
-
-    # 초기화 - 모든 PR 작성자의 통계
-    for pr in pull_requests:
-        if pr.user:
-            author = pr.user.login
-            if author not in author_stats:
-                author_stats[author] = {
-                    "total_prs": 0,
-                    "open_prs": 0,
-                    "reviewed_prs": 0,
-                    "waiting_for_review": 0,
-                }
-            author_stats[author]["total_prs"] += 1
-
-    reviews_count = 0
-
     # 병렬 실행을 위한 설정 - 더 많은 동시 요청으로 성능 향상
     MAX_WORKERS = min(
         50, len(pull_requests)
@@ -389,36 +297,11 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
     # ThreadPoolExecutor를 사용한 병렬 처리
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # 모든 PR에 대해 병렬로 리뷰 데이터 수집 작업 시작
-        futures = {
-            executor.submit(process_pr_reviews, pr): (
-                pr_index,
-                pr,
-            )
-            for pr_index, pr in enumerate(pull_requests, 1)
-        }
+        futures = [executor.submit(process_pr_reviews, pr) for pr in pull_requests]
 
         for future in concurrent.futures.as_completed(futures):
-            pr_index, pr = futures[future]
             # 결과 처리
-            (
-                local_reviewer_stats,
-                open_pr,
-                local_requested_reviewers,
-                review_count,
-                has_reviews,
-            ) = future.result()
-
-            reviews_count += review_count
-
-            # 열린 PR 추가
-            if open_pr:
-                open_prs.append(open_pr)
-                author = open_pr.user.login
-                author_stats[author]["open_prs"] += 1
-
-            # 리뷰어별 요청 PR 추가
-            for reviewer, pr_number in local_requested_reviewers.items():
-                reviewer_to_requested_prs[reviewer].add(pr_number)
+            local_reviewer_stats = future.result()
 
             # 리뷰어별 통계 결과 병합
             for reviewer, stats in local_reviewer_stats.items():
@@ -429,7 +312,6 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
                         "avg_response_time": 0,
                         "prs_reviewed": set(),
                         "overdue_count": 0,
-                        "pending_reviews": 0,
                     }
 
                 # 통계 병합
@@ -439,32 +321,6 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
                 )
                 reviewer_stats[reviewer]["prs_reviewed"].update(stats["prs_reviewed"])
                 reviewer_stats[reviewer]["overdue_count"] += stats["overdue_count"]
-
-            # 작성자 통계에 리뷰 받은 PR 수 업데이트
-            if has_reviews and pr.user:
-                author = pr.user.login
-                author_stats[author]["reviewed_prs"] += 1
-
-    # 대기 중인 리뷰 요청 수 업데이트
-    for reviewer, pr_numbers in reviewer_to_requested_prs.items():
-        if reviewer in reviewer_stats:
-            reviewer_stats[reviewer]["pending_reviews"] = len(pr_numbers)
-        else:
-            reviewer_stats[reviewer] = {
-                "review_count": 0,
-                "avg_response_time": 0,
-                "prs_reviewed": set(),
-                "overdue_count": 0,
-                "pending_reviews": len(pr_numbers),
-            }
-
-    # 대기 중인 PR 수 업데이트
-    for author in author_stats:
-        waiting_count = 0
-        for pr in open_prs:
-            if pr.user and pr.user.login == author:
-                waiting_count += 1
-        author_stats[author]["waiting_for_review"] = waiting_count
 
     # 평균 응답 시간 및 초과 비율 계산
     for reviewer, data in reviewer_stats.items():
@@ -482,11 +338,7 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
         # set을 길이로 변환 (JSON 직렬화를 위해)
         data["prs_reviewed"] = len(data["prs_reviewed"])
 
-        # details 필드 제거 (JSON 직렬화를 위해)
-        if "response_times_details" in data:
-            del data["response_times_details"]
-
-    return {"reviewers": reviewer_stats, "authors": author_stats}
+    return reviewer_stats
 
 
 def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
@@ -499,7 +351,6 @@ def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
         avg_time = data.get("avg_response_time", 0)
         overdue_percentage = data.get("overdue_percentage", 0)
         review_count = data.get("review_count", 0)
-        pending_reviews = data.get("pending_reviews", 0)
 
         # 24시간 초과 비율에 따른 표시
         status = "✅"
@@ -515,7 +366,6 @@ def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
                 f"{avg_time:.1f}h",
                 f"{overdue_percentage:.1f}%",
                 review_count,
-                pending_reviews,
                 status,
             ]
         )
@@ -524,7 +374,7 @@ def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
     table_data.sort(key=lambda x: float(x[1].replace("h", "")))
 
     # 표 헤더
-    headers = ["리뷰어", "평균응답", "24h초과", "완료", "대기", "상태"]
+    headers = ["리뷰어", "평균응답", "24h초과", "완료", "상태"]
 
     # 표 생성
     return tabulate.tabulate(table_data, headers=headers, tablefmt="simple")
@@ -533,14 +383,13 @@ def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
 def send_to_slack(
     slack_client: WebClient,
     channel_id: str,
-    stats: dict[str, dict[str, Any]],
+    reviewer_stats: dict[str, dict[str, Any]],
+    repo_stats: dict[str, int],
     days: int,
 ) -> None:
     """
     통계 결과를 Slack에 전송합니다.
     """
-    reviewer_stats = stats.get("reviewers", {})
-    repo_stats = stats.get("repo_stats", {})
 
     # 리뷰어 통계 표 생성
     reviewer_table = format_reviewer_table(reviewer_stats)
@@ -656,21 +505,18 @@ def main():
 
     args = parser.parse_args()
 
-    # GitHub API 초기화
     github_client = Github(GITHUB_TOKEN)
-
-    # Slack API 초기화
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
     # 조직의 활성 저장소 조회
-    repositories = get_active_repos(github_client, ORG_NAME)
+    repositories = get_active_repos(github_client, ORG_NAME, DAYS)
 
     # 병렬로 각 저장소의 PR을 가져옴
     all_pull_requests = []
     repo_stats = {}  # 저장소별 PR 수 추적
 
     # 저장소 PR 병렬 조회를 위한 함수
-    def fetch_repo_prs(repo_index, repo_full_name, days):
+    def fetch_repo_prs(repo_full_name, days):
         repo_owner, repo_name = repo_full_name.split("/")
 
         repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, days)
@@ -682,12 +528,10 @@ def main():
     # ThreadPoolExecutor를 사용한 병렬 처리
     with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
         # 모든 저장소에 대해 병렬로 PR 조회 시작
-        futures = {
-            executor.submit(
-                fetch_repo_prs, repo_index, repo_full_name, DAYS
-            ): repo_index
-            for repo_index, repo_full_name in enumerate(repositories, 1)
-        }
+        futures = [
+            executor.submit(fetch_repo_prs, repo_full_name, DAYS)
+            for repo_full_name in repositories
+        ]
 
         # 결과 수집
         for future in concurrent.futures.as_completed(futures):
@@ -703,7 +547,7 @@ def main():
     stats = calculate_stats(all_pull_requests)
 
     # 리뷰어 통계 표시
-    reviewer_table = format_reviewer_table(stats["reviewers"])
+    reviewer_table = format_reviewer_table(stats)
 
     # 저장소별 통계
     repo_activity = "\n".join(
@@ -721,7 +565,7 @@ def main():
         # Slack에 전송
         # 저장소별 통계도 함께 전송
         stats["repo_stats"] = repo_stats
-        send_to_slack(slack_client, SLACK_CHANNEL_ID, stats, DAYS)
+        send_to_slack(slack_client, SLACK_CHANNEL_ID, stats, repo_stats, DAYS)
 
 
 if __name__ == "__main__":
