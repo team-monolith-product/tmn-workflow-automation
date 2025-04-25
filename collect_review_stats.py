@@ -73,9 +73,11 @@ def get_pr_timeline_events(pr: PullRequest) -> list:
     """
     PR의 타임라인 이벤트를 가져옵니다.
 
+    PR 객체에 타임라인 이벤트가 캐싱되어 있으면 추가 API 호출 없이 반환합니다.
+    그렇지 않으면 GitHub API를 호출하여 타임라인 이벤트를 가져옵니다.
+
     Args:
         pr: 풀 리퀘스트 객체
-        debug: 디버그 메시지 출력 여부
 
     Returns:
         타임라인 이벤트 목록
@@ -289,48 +291,38 @@ def process_pr_reviews(pr: PullRequest) -> dict:
     return local_reviewer_stats
 
 
-def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any]]:
+def calculate_weekly_stats(
+    pull_requests: list[PullRequest],
+) -> dict[str, dict[str, Any]]:
     """
-    PR 리뷰 통계를 계산합니다.
+    주간 PR 리뷰 통계를 계산합니다.
     - 사용자별 리뷰 수
     - 평균 응답 시간
     - 24시간 초과 리뷰 비율
-
-    ThreadPoolExecutor를 사용하여 PR 리뷰 데이터 수집을 병렬화합니다.
     """
     # 리뷰어 통계
     reviewer_stats = {}
 
-    # 병렬 실행을 위한 설정 - 더 많은 동시 요청으로 성능 향상
-    MAX_WORKERS = min(50, len(pull_requests))  # GitHub 2차 레이트 제한 고려하면서 충분히 높게 설정
+    # 각 PR의 리뷰 데이터 처리
+    for pr in pull_requests:
+        local_reviewer_stats = process_pr_reviews(pr)
 
-    # ThreadPoolExecutor를 사용한 병렬 처리
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # 모든 PR에 대해 병렬로 리뷰 데이터 수집 작업 시작
-        futures = [executor.submit(process_pr_reviews, pr) for pr in pull_requests]
+        # 리뷰어별 통계 결과 병합
+        for reviewer, stats in local_reviewer_stats.items():
+            if reviewer not in reviewer_stats:
+                reviewer_stats[reviewer] = {
+                    "review_count": 0,
+                    "response_times": [],
+                    "avg_response_time": 0,
+                    "prs_reviewed": set(),
+                    "overdue_count": 0,
+                }
 
-        for future in concurrent.futures.as_completed(futures):
-            # 결과 처리
-            local_reviewer_stats = future.result()
-
-            # 리뷰어별 통계 결과 병합
-            for reviewer, stats in local_reviewer_stats.items():
-                if reviewer not in reviewer_stats:
-                    reviewer_stats[reviewer] = {
-                        "review_count": 0,
-                        "response_times": [],
-                        "avg_response_time": 0,
-                        "prs_reviewed": set(),
-                        "overdue_count": 0,
-                    }
-
-                # 통계 병합
-                reviewer_stats[reviewer]["review_count"] += stats["review_count"]
-                reviewer_stats[reviewer]["response_times"].extend(
-                    stats["response_times"]
-                )
-                reviewer_stats[reviewer]["prs_reviewed"].update(stats["prs_reviewed"])
-                reviewer_stats[reviewer]["overdue_count"] += stats["overdue_count"]
+            # 통계 병합
+            reviewer_stats[reviewer]["review_count"] += stats["review_count"]
+            reviewer_stats[reviewer]["response_times"].extend(stats["response_times"])
+            reviewer_stats[reviewer]["prs_reviewed"].update(stats["prs_reviewed"])
+            reviewer_stats[reviewer]["overdue_count"] += stats["overdue_count"]
 
     # 평균 응답 시간 및 초과 비율 계산
     for reviewer, data in reviewer_stats.items():
@@ -349,6 +341,58 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
         data["prs_reviewed"] = len(data["prs_reviewed"])
 
     return reviewer_stats
+
+
+def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
+    """
+    어제 발생한 리뷰에 대한 개발자별 응답 시간 통계를 계산합니다.
+
+    Args:
+        pull_requests: 전체 PR 목록
+
+    Returns:
+        개발자별 응답 시간 통계
+    """
+    # 어제 날짜 계산
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # 어제 리뷰된 PR만 필터링
+    filtered_prs = []
+    for pr in pull_requests:
+        # 타임라인 이벤트 가져오기
+        events = get_pr_timeline_events(pr)
+
+        # 어제 발생한 리뷰 이벤트가 있는지 확인
+        has_yesterday_review = any(
+            event["type"] == "reviewed"
+            and yesterday_start <= event["time"] <= yesterday_end
+            for event in events
+        )
+
+        if has_yesterday_review:
+            filtered_prs.append(pr)
+
+    # 선별된 PR에 대한 리뷰 응답 시간 계산
+    reviewer_data = {}
+    for pr in filtered_prs:
+        response_times = calculate_review_response_times(pr)
+
+        # 저장소 이름 추출
+        repo_name = pr.base.repo.full_name
+
+        for reviewer, times in response_times.items():
+            if reviewer not in reviewer_data:
+                reviewer_data[reviewer] = []
+
+            # 리뷰 시간과 PR 정보 저장
+            for time in times:
+                reviewer_data[reviewer].append(
+                    {"repo": repo_name, "pr_number": pr.number, "response_time": time}
+                )
+
+    return reviewer_data
 
 
 def format_reviewer_table(reviewer_stats: dict[str, dict[str, Any]]) -> str:
@@ -463,129 +507,6 @@ def send_to_slack(
     )
 
 
-def get_active_repos(
-    github_client: Github, org_name: str, min_activity_days: int = 30
-) -> list:
-    """
-    주어진 조직에서 최근 활동이 있는 저장소 목록을 가져옵니다.
-
-    Args:
-        github_client: GitHub API 클라이언트
-        org_name: 조직 이름
-        min_activity_days: 최근 활동 기간 (일)
-
-    Returns:
-        활성 저장소 목록 (owner/name 형식)
-    """
-    # 최소 활동 기간 계산
-    min_activity_date = datetime.now(timezone.utc) - timedelta(days=min_activity_days)
-
-    # 조직의 모든 저장소 가져오기
-    org = github_client.get_organization(org_name)
-    all_repos = list(org.get_repos())  # 페이지네이션 완료를 위해 리스트로 변환
-
-    # 최근 활동이 있는 저장소만 필터링
-    active_repos = []
-
-    for repo in all_repos:
-        if repo.archived:
-            continue
-        # fork된 저장소는 제외
-        if repo.fork:
-            continue
-
-        if not repo.private:
-            continue
-
-        # 최근 업데이트 확인
-        if repo.updated_at >= min_activity_date or repo.pushed_at >= min_activity_date:
-            active_repos.append(f"{org_name}/{repo.name}")
-
-    return active_repos
-
-
-def get_daily_review_stats(github_client: Github, slack_client: WebClient) -> dict:
-    """
-    어제 발생한 리뷰에 대한 개발자별 응답 시간 통계를 계산합니다.
-
-    Args:
-        github_client: GitHub API 클라이언트
-        slack_client: Slack API 클라이언트
-
-    Returns:
-        개발자별 응답 시간 통계
-    """
-    # 어제 날짜 계산
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-    # 활성 저장소 조회
-    repositories = get_active_repos(github_client, ORG_NAME, 30)  # 최근 30일 활성 저장소
-
-    # 병렬로 각 저장소의 PR을 가져옴
-    all_pull_requests = []
-
-    # 저장소 PR 병렬 조회를 위한 함수
-    def fetch_repo_prs(repo_full_name):
-        repo_owner, repo_name = repo_full_name.split("/")
-        # 1일치만 가져오도록 설정
-        repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, 1)
-        return repo_full_name, repo_prs
-
-    # 저장소 병렬 처리
-    REPO_MAX_WORKERS = min(30, len(repositories))
-    with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(fetch_repo_prs, repo_full_name)
-            for repo_full_name in repositories
-        ]
-
-        for future in concurrent.futures.as_completed(futures):
-            repo_full_name, repo_prs = future.result()
-            if repo_prs:
-                all_pull_requests.extend(repo_prs)
-
-    if not all_pull_requests:
-        return {}
-
-    # 어제 리뷰된 PR만 필터링
-    filtered_prs = []
-    for pr in all_pull_requests:
-        # 타임라인 이벤트 가져오기
-        events = get_pr_timeline_events(pr)
-
-        # 어제 발생한 리뷰 이벤트가 있는지 확인
-        has_yesterday_review = any(
-            event["type"] == "reviewed"
-            and yesterday_start <= event["time"] <= yesterday_end
-            for event in events
-        )
-
-        if has_yesterday_review:
-            filtered_prs.append(pr)
-
-    # 선별된 PR에 대한 리뷰 응답 시간 계산
-    reviewer_data = {}
-    for pr in filtered_prs:
-        response_times = calculate_review_response_times(pr)
-
-        # 저장소 이름 추출
-        repo_name = pr.base.repo.full_name
-
-        for reviewer, times in response_times.items():
-            if reviewer not in reviewer_data:
-                reviewer_data[reviewer] = []
-
-            # 리뷰 시간과 PR 정보 저장
-            for time in times:
-                reviewer_data[reviewer].append(
-                    {"repo": repo_name, "pr_number": pr.number, "response_time": time}
-                )
-
-    return reviewer_data
-
-
 def format_daily_review_message(reviewer_data: dict) -> str:
     """
     일간 리뷰 피드백 메시지를 포맷팅합니다.
@@ -635,6 +556,97 @@ def send_daily_review_feedback(
     )
 
 
+def get_active_repos(
+    github_client: Github, org_name: str, min_activity_days: int = 30
+) -> list:
+    """
+    주어진 조직에서 최근 활동이 있는 저장소 목록을 가져옵니다.
+
+    Args:
+        github_client: GitHub API 클라이언트
+        org_name: 조직 이름
+        min_activity_days: 최근 활동 기간 (일)
+
+    Returns:
+        활성 저장소 목록 (owner/name 형식)
+    """
+    # 최소 활동 기간 계산
+    min_activity_date = datetime.now(timezone.utc) - timedelta(days=min_activity_days)
+
+    # 조직의 모든 저장소 가져오기
+    org = github_client.get_organization(org_name)
+    all_repos = list(org.get_repos())  # 페이지네이션 완료를 위해 리스트로 변환
+
+    # 최근 활동이 있는 저장소만 필터링
+    active_repos = []
+
+    for repo in all_repos:
+        if repo.archived:
+            continue
+        # fork된 저장소는 제외
+        if repo.fork:
+            continue
+
+        if not repo.private:
+            continue
+
+        # 최근 업데이트 확인
+        if repo.updated_at >= min_activity_date or repo.pushed_at >= min_activity_date:
+            active_repos.append(f"{org_name}/{repo.name}")
+
+    return active_repos
+
+
+def fetch_all_pr_data(
+    github_client: Github, days: int
+) -> tuple[list[PullRequest], dict[str, int]]:
+    """
+    모든 PR 데이터를 병렬로 한 번에 가져옵니다.
+    각 PR에 대한 타임라인 이벤트도 함께 사전 로드합니다.
+
+    Args:
+        github_client: GitHub API 클라이언트
+        days: 조회할 데이터 기간 (일)
+
+    Returns:
+        (모든 PR 목록, 저장소별 PR 수 통계)
+    """
+    # 조직의 활성 저장소 조회
+    repositories = get_active_repos(github_client, ORG_NAME, days)
+
+    # 병렬로 각 저장소의 PR을 가져옴
+    all_pull_requests = []
+    repo_stats = {}  # 저장소별 PR 수 추적
+
+    # 저장소 PR 병렬 조회를 위한 함수
+    def fetch_repo_prs(repo_full_name, days):
+        repo_owner, repo_name = repo_full_name.split("/")
+        repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, days)
+        return repo_full_name, repo_prs
+
+    # 저장소 병렬 처리를 위한 설정
+    REPO_MAX_WORKERS = min(30, len(repositories))  # 저장소 수에 따라 동적으로 조정
+
+    with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
+        futures = [
+            executor.submit(fetch_repo_prs, repo_full_name, days)
+            for repo_full_name in repositories
+        ]
+
+        for future in concurrent.futures.as_completed(futures):
+            repo_full_name, repo_prs = future.result()
+            if repo_prs:  # 결과가 있는 경우만 추가
+                all_pull_requests.extend(repo_prs)
+                repo_stats[repo_full_name] = len(repo_prs)
+
+    # 모든 PR의 타임라인 이벤트 사전 로드 (병렬 처리)
+    with ThreadPoolExecutor(max_workers=min(50, len(all_pull_requests))) as executor:
+        # 모든 PR에 대해 병렬로 타임라인 이벤트 로드
+        list(executor.map(get_pr_timeline_events, all_pull_requests))
+
+    return all_pull_requests, repo_stats
+
+
 def main():
     """
     GitHub PR 리뷰 통계를 수집하고 Slack에 전송합니다.
@@ -653,48 +665,23 @@ def main():
     github_client = Github(GITHUB_TOKEN)
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
-    # 조직의 활성 저장소 조회
-    repositories = get_active_repos(github_client, ORG_NAME, DAYS)
-
-    # 병렬로 각 저장소의 PR을 가져옴
-    all_pull_requests = []
-    repo_stats = {}  # 저장소별 PR 수 추적
-
-    # 저장소 PR 병렬 조회를 위한 함수
-    def fetch_repo_prs(repo_full_name, days):
-        repo_owner, repo_name = repo_full_name.split("/")
-
-        repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, days)
-        return repo_full_name, repo_prs
-
-    # 저장소 병렬 처리를 위한 설정
-    REPO_MAX_WORKERS = min(30, len(repositories))  # 저장소 수에 따라 동적으로 조정
-
-    with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(fetch_repo_prs, repo_full_name, DAYS)
-            for repo_full_name in repositories
-        ]
-
-        for future in concurrent.futures.as_completed(futures):
-            repo_full_name, repo_prs = future.result()
-            if repo_prs:  # 결과가 있는 경우만 추가
-                all_pull_requests.extend(repo_prs)
-                repo_stats[repo_full_name] = len(repo_prs)
+    # 1. 모든 PR 데이터를, 타임라인 이벤트와 함께 한 번만 가져옵니다
+    all_pull_requests, repo_stats = fetch_all_pr_data(github_client, DAYS)
 
     if not all_pull_requests:
         return
 
-    stats = calculate_stats(all_pull_requests)
-    reviewer_table = format_reviewer_table(stats)
+    # 2. 한 번 가져온 데이터를 사용하여 주간 통계와 일간 통계를 모두 계산합니다
+    weekly_stats = calculate_weekly_stats(all_pull_requests)
+    daily_stats = calculate_daily_stats(all_pull_requests)
+
+    # 결과 포맷팅
+    reviewer_table = format_reviewer_table(weekly_stats)
+    daily_message = format_daily_review_message(daily_stats)
 
     repo_activity = "\n".join(
         [f"• {repo}: {count}개 PR" for repo, count in repo_stats.items() if count > 0]
     )
-
-    # 일간 리뷰 피드백 생성
-    daily_stats = get_daily_review_stats(github_client, slack_client)
-    daily_message = format_daily_review_message(daily_stats)
 
     if args.dry_run:
         print("=== DRY RUN MODE ===")
@@ -710,7 +697,7 @@ def main():
     else:
         # 주간 통계 메시지 전송
         response = send_to_slack(
-            slack_client, SLACK_CHANNEL_ID, stats, repo_stats, DAYS
+            slack_client, SLACK_CHANNEL_ID, weekly_stats, repo_stats, DAYS
         )
 
         # 일간 리뷰 피드백을 주간 통계의 스레드로 추가
