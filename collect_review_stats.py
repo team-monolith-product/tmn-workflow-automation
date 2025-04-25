@@ -102,7 +102,9 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
                     del reviewer_request_time[reviewer]
 
             # 리뷰어가 요청 상태가 아닌 경우 (비요청 리뷰)
-            elif reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨":
+            elif (
+                reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨"
+            ):
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
 
@@ -344,7 +346,9 @@ def send_to_slack(
 
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
-    subtitle = f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
+    subtitle = (
+        f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
+    )
 
     # 코드 블록으로 표 감싸기
     code_block = f"```\n{reviewer_table}\n```"
@@ -579,7 +583,9 @@ def fetch_all_pr_data(
     for pr in all_pull_requests:
         # 모든 PR에 대해 타임라인 이벤트가 있어야 함을 강제
         if pr.id not in pr_id_to_events:
-            raise ValueError(f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다")
+            raise ValueError(
+                f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다"
+            )
 
         # 정상적인 경우 캐싱 진행
         events = []

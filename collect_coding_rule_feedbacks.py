@@ -19,7 +19,9 @@ load_dotenv()
 # 기본 설정
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C08PTUQFDPV")  # 피드백을 보낼 채널 ID
+SLACK_CHANNEL_ID = os.environ.get(
+    "SLACK_CHANNEL_ID", "C08PTUQFDPV"
+)  # 피드백을 보낼 채널 ID
 ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
 DAYS = 7  # 조회할 데이터 기간 (일)
 BAD_REVIEW_REACTIONS = ["👎", "-1", "confused"]  # 나쁜 리뷰로 판단할 반응들
