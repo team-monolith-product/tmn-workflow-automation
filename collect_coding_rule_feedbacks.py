@@ -5,8 +5,6 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from github import Github
 from github.PullRequest import PullRequest
-from github.PullRequestComment import PullRequestComment
-from github.Reaction import Reaction
 from slack_sdk import WebClient
 
 from service.github import (
@@ -21,9 +19,7 @@ load_dotenv()
 # 기본 설정
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_CHANNEL_ID = os.environ.get(
-    "SLACK_CHANNEL_ID", "C086HAVUFR8"
-)  # 피드백을 보낼 채널 ID
+SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C08PTUQFDPV")  # 피드백을 보낼 채널 ID
 ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
 DAYS = 7  # 조회할 데이터 기간 (일)
 BAD_REVIEW_REACTIONS = ["👎", "-1", "confused"]  # 나쁜 리뷰로 판단할 반응들
@@ -82,7 +78,7 @@ def fetch_all_pr_data(
         days: 조회할 데이터 기간 (일)
 
     Returns:
-        (PR 목록, 저장소별 PR 수 통계, PR ID와 리뷰 댓글을 연결하는 딕셔너리, 
+        (PR 목록, 저장소별 PR 수 통계, PR ID와 리뷰 댓글을 연결하는 딕셔너리,
          댓글 ID와 반응을 연결하는 딕셔너리)
     """
     # 조직의 활성 저장소 조회
@@ -109,17 +105,18 @@ def fetch_all_pr_data(
     # PR 리뷰 댓글 병렬 로드
     print(f"PR {len(all_pull_requests)}개의 리뷰 댓글을 병렬로 로드합니다...")
     pr_id_to_comments = fetch_pr_review_comments_parallel(all_pull_requests)
-    
+
     # 모든 댓글 추출
     all_comments = []
     for comments in pr_id_to_comments.values():
         all_comments.extend(comments)
-    
+
     # 댓글 반응 정보 병렬 로드
     print(f"댓글 {len(all_comments)}개의 반응 정보를 병렬로 로드합니다...")
     comment_id_to_reactions = fetch_comment_reactions_parallel(all_comments)
 
     return all_pull_requests, repo_stats, pr_id_to_comments, comment_id_to_reactions
+
 
 def filter_bad_review_comments(comments) -> list[dict]:
     """
@@ -138,7 +135,7 @@ def filter_bad_review_comments(comments) -> list[dict]:
     for comment_data in comments:
         # 부정적 반응이 있는 경우만 필터링
         has_negative_reaction = any(
-            comment_data["reactions"].get(reaction, 0) > 0
+            len(comment_data["reaction_users"].get(reaction, [])) > 0
             for reaction in BAD_REVIEW_REACTIONS
         )
 
@@ -219,10 +216,10 @@ def format_slack_message(bad_reviews: list[dict]) -> list[dict]:
                 f"<{review['html_url']}|{review['repo_name']}#{review['pr_number']}>"
             )
 
-            # 반응 이모지 표시
+            # 반응 이모지와 생성자 표시
             reactions = []
-            for reaction_type, count in review["reactions"].items():
-                if count > 0 and reaction_type in [
+            for reaction_type, users in review["reaction_users"].items():
+                if users and reaction_type in [
                     "+1",
                     "-1",
                     "confused",
@@ -250,7 +247,8 @@ def format_slack_message(bad_reviews: list[dict]) -> list[dict]:
                     elif reaction_type == "eyes":
                         emoji = "👀"
 
-                    reactions.append(f"{emoji}{count}")
+                    for user in users:
+                        reactions.append(f"{emoji} ({user})")
 
             reactions_text = " ".join(reactions)
 
@@ -339,21 +337,24 @@ def main():
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
     # 1. 병렬 처리로 PR 데이터와 리뷰 댓글 한 번에 가져오기
-    all_pull_requests, repo_stats, pr_id_to_comments, comment_id_to_reactions = fetch_all_pr_data(
-        github_client, days
-    )
+    (
+        all_pull_requests,
+        repo_stats,
+        pr_id_to_comments,
+        comment_id_to_reactions,
+    ) = fetch_all_pr_data(github_client, days)
     print(
         f"활성 저장소 {len(repo_stats)}개에서 최근 {days}일간 PR {len(all_pull_requests)}개를 가져왔습니다."
     )
 
     # 2. 리뷰 댓글 데이터 통합 및 반응 정보 연결
     all_review_comments = []
-    
+
     # 모든 댓글 정보 순회
     for pr in all_pull_requests:
         if pr.id not in pr_id_to_comments:
             continue
-            
+
         for comment in pr_id_to_comments[pr.id]:
             # 기본 댓글 정보 구성
             comment_data = {
@@ -366,25 +367,30 @@ def main():
                 "pr_title": pr.title,
                 "repo_name": pr.base.repo.full_name,
                 "html_url": comment.html_url,
-                "reactions": {}
             }
-            
-            # 댓글 반응 정보 처리
-            reaction_counts = {
-                "+1": 0, "-1": 0, "confused": 0, "heart": 0,
-                "laugh": 0, "hooray": 0, "rocket": 0, "eyes": 0
+
+            # 반응 생성자 저장용 사전
+            reaction_users = {
+                "+1": [],
+                "-1": [],
+                "confused": [],
+                "heart": [],
+                "laugh": [],
+                "hooray": [],
+                "rocket": [],
+                "eyes": [],
             }
-            
+
             # 반응 정보 가져오기
             if comment.id in comment_id_to_reactions:
                 reactions = comment_id_to_reactions[comment.id]
-                # 각 반응 유형별로 카운트
+                # 각 반응별 생성자 정보 추가
                 for reaction in reactions:
                     reaction_type = reaction.content
-                    if reaction_type in reaction_counts:
-                        reaction_counts[reaction_type] += 1
-            
-            comment_data["reactions"] = reaction_counts
+                    if reaction_type in reaction_users:
+                        reaction_users[reaction_type].append(reaction.user.login)
+
+            comment_data["reaction_users"] = reaction_users
             all_review_comments.append(comment_data)
 
     print(f"리뷰 댓글 {len(all_review_comments)}개를 찾았습니다.")

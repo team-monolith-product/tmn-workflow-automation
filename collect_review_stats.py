@@ -23,7 +23,7 @@ load_dotenv()
 # 기본 설정
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_CHANNEL_ID = "C086HAVUFR8"  # 리뷰 통계를 보낼 채널 ID
+SLACK_CHANNEL_ID = "C08PU6D0K6G"  # 리뷰 통계를 보낼 채널 ID
 ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
 DAYS = 7  # 조회할 데이터 기간 (일)
 
