@@ -6,12 +6,14 @@ GitHub API 요청의 병렬 처리와 최적화를 담당합니다.
 import concurrent.futures
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Any
 
 # PyGithub 라이브러리에서 필요한 클래스 임포트
 from github import Github
 from github.PullRequest import PullRequest
 from github.TimelineEvent import TimelineEvent
 from github.PullRequestComment import PullRequestComment
+from github.Reaction import Reaction
 
 
 def fetch_pull_requests_parallel(
@@ -137,3 +139,36 @@ def fetch_pr_review_comments_parallel(
             pr_id_to_comments[pr_id] = comments
 
     return pr_id_to_comments
+
+
+def fetch_comment_reactions_parallel(
+    comments: list[PullRequestComment],
+) -> dict[int, list[Reaction]]:
+    """
+    여러 PR 리뷰 댓글의 반응(Reaction)을 병렬로 가져옵니다.
+    PullRequestComment 클래스의 get_reactions() 메서드를 활용합니다.
+
+    Args:
+        comments: PullRequestComment 객체 목록
+
+    Returns:
+        dict[int, list[Reaction]]: 댓글 ID와 반응 객체 목록을 매핑한 딕셔너리
+    """
+    MAX_WORKERS = min(50, len(comments))
+
+    def fetch_comment_reaction(comment):
+        reactions = list(comment.get_reactions())
+        return comment.id, reactions
+
+    # 병렬 처리
+    comment_id_to_reactions = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [
+            executor.submit(fetch_comment_reaction, comment) for comment in comments
+        ]
+
+        for future in concurrent.futures.as_completed(futures):
+            comment_id, reactions = future.result()
+            comment_id_to_reactions[comment_id] = reactions
+
+    return comment_id_to_reactions
