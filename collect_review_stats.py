@@ -223,8 +223,22 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
 
-    # 최종 응답 시간 결과
+    # PR이 병합됐을 때 리뷰가 요청된 상태인 경우 처리
+    if pr.merged_at:
+        for reviewer, status in reviewer_status.items():
+            if status == "요청됨" and reviewer in reviewer_request_time:
+                # 리뷰 요청 시간부터 PR 병합 시간까지의 시간 계산
+                request_time = reviewer_request_time[reviewer]
+                response_time = (
+                    pr.merged_at - request_time
+                ).total_seconds() / 3600  # 시간 단위
 
+                # 응답 시간 기록
+                if reviewer not in response_times:
+                    response_times[reviewer] = []
+                response_times[reviewer].append(response_time)
+
+    # 최종 응답 시간 결과
     return response_times
 
 
