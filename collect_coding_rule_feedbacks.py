@@ -5,11 +5,14 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from github import Github
 from github.PullRequest import PullRequest
+from github.PullRequestComment import PullRequestComment
+from github.Reaction import Reaction
 from slack_sdk import WebClient
 
 from service.github import (
     fetch_pull_requests_parallel,
     fetch_pr_review_comments_parallel,
+    fetch_comment_reactions_parallel,
 )
 
 # 환경 변수 로드
@@ -69,17 +72,18 @@ def get_active_repos(
 
 def fetch_all_pr_data(
     github_client: Github, days: int
-) -> tuple[list[PullRequest], dict, dict]:
+) -> tuple[list[PullRequest], dict, dict, dict]:
     """
     모든 PR 데이터를 병렬로 한 번에 가져오고,
-    각 PR에 대한 리뷰 댓글까지 함께 사전 로드합니다.
+    각 PR에 대한 리뷰 댓글과 반응 정보까지 함께 사전 로드합니다.
 
     Args:
         github_client: GitHub API 클라이언트
         days: 조회할 데이터 기간 (일)
 
     Returns:
-        (PR 목록, 저장소별 PR 수 통계, PR ID와 리뷰 댓글을 연결하는 딕셔너리)
+        (PR 목록, 저장소별 PR 수 통계, PR ID와 리뷰 댓글을 연결하는 딕셔너리, 
+         댓글 ID와 반응을 연결하는 딕셔너리)
     """
     # 조직의 활성 저장소 조회
     repositories = get_active_repos(github_client, ORG_NAME, days)
@@ -88,6 +92,7 @@ def fetch_all_pr_data(
     since_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     # service/github의 fetch_pull_requests_parallel 함수 사용
+    print(f"저장소 {len(repositories)}개의 PR을 병렬로 로드합니다...")
     repository_to_pull_requests = fetch_pull_requests_parallel(
         github_client, repositories, since_date
     )
@@ -104,82 +109,17 @@ def fetch_all_pr_data(
     # PR 리뷰 댓글 병렬 로드
     print(f"PR {len(all_pull_requests)}개의 리뷰 댓글을 병렬로 로드합니다...")
     pr_id_to_comments = fetch_pr_review_comments_parallel(all_pull_requests)
+    
+    # 모든 댓글 추출
+    all_comments = []
+    for comments in pr_id_to_comments.values():
+        all_comments.extend(comments)
+    
+    # 댓글 반응 정보 병렬 로드
+    print(f"댓글 {len(all_comments)}개의 반응 정보를 병렬로 로드합니다...")
+    comment_id_to_reactions = fetch_comment_reactions_parallel(all_comments)
 
-    return all_pull_requests, repo_stats, pr_id_to_comments
-
-
-def get_comment_data(comment_obj, pr_id_map=None) -> dict:
-    """
-    PullRequestComment 객체를 사전 형태로 변환합니다.
-
-    Args:
-        comment_obj: GitHub PullRequestComment 객체
-        pr_id_map: PR ID와 PR 객체를 매핑하는 선택적 사전
-
-    Returns:
-        댓글 정보를 담은 사전
-    """
-    # 반응 정보 설정 (API 속도 문제로 단순화)
-    reactions = {
-        "+1": 0,
-        "-1": 0,
-        "confused": 0,
-        "heart": 0,
-        "laugh": 0,
-        "hooray": 0,
-        "rocket": 0,
-        "eyes": 0,
-    }
-
-    # 간단한 방식으로 반응 확인 (실제로는 적절한 API 호출 필요)
-    if hasattr(comment_obj, "body") and "👎" in comment_obj.body:
-        reactions["-1"] = 1
-    if hasattr(comment_obj, "body") and "confused" in comment_obj.body.lower():
-        reactions["confused"] = 1
-
-    try:
-        # PR 정보 가져오기
-        return {
-            "id": comment_obj.id,
-            "body": comment_obj.body,
-            "user": comment_obj.user.login,
-            "created_at": comment_obj.created_at,
-            "updated_at": comment_obj.updated_at,
-            "reactions": reactions,
-            "pr_number": (
-                comment_obj.pull_request_url.split("/")[-1]
-                if hasattr(comment_obj, "pull_request_url")
-                else 0
-            ),
-            "pr_title": "PR 제목 정보 없음",
-            "repo_name": (
-                "/".join(comment_obj.html_url.split("/")[3:5])
-                if hasattr(comment_obj, "html_url")
-                else ""
-            ),
-            "html_url": (
-                comment_obj.html_url if hasattr(comment_obj, "html_url") else ""
-            ),
-        }
-    except AttributeError:
-        # 정보를 가져올 수 없을 경우 최소한의 정보로 구성
-        return {
-            "id": getattr(comment_obj, "id", 0),
-            "body": getattr(comment_obj, "body", ""),
-            "user": (
-                getattr(comment_obj, "user", {}).login
-                if hasattr(comment_obj, "user")
-                else "unknown"
-            ),
-            "created_at": getattr(comment_obj, "created_at", datetime.now()),
-            "updated_at": getattr(comment_obj, "updated_at", datetime.now()),
-            "reactions": reactions,
-            "pr_number": 0,
-            "pr_title": "PR 제목 정보 없음",
-            "repo_name": "",
-            "html_url": getattr(comment_obj, "html_url", ""),
-        }
-
+    return all_pull_requests, repo_stats, pr_id_to_comments, comment_id_to_reactions
 
 def filter_bad_review_comments(comments) -> list[dict]:
     """
@@ -188,10 +128,10 @@ def filter_bad_review_comments(comments) -> list[dict]:
     GitHub Reaction만을 기준으로 나쁜 리뷰를 식별합니다.
 
     Args:
-        comments: 댓글 데이터 사전 목록 (이미 변환됨)
+        comments: 댓글 데이터 사전 목록
 
     Returns:
-        나쁜 리뷰로 표시된 댓글 목록 (사전 형태)
+        나쁜 리뷰로 표시된 댓글 목록
     """
     bad_reviews = []
 
@@ -202,11 +142,7 @@ def filter_bad_review_comments(comments) -> list[dict]:
             for reaction in BAD_REVIEW_REACTIONS
         )
 
-        # 내용에 기반한 부정적 리뷰 추가 감지 (예시)
-        body = comment_data.get("body", "").lower()
-        has_negative_text = "이 코드는 안좋습니다" in body or "좋지 않은 구현" in body
-
-        if has_negative_reaction or has_negative_text:
+        if has_negative_reaction:
             bad_reviews.append(comment_data)
 
     return bad_reviews
@@ -403,29 +339,53 @@ def main():
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
     # 1. 병렬 처리로 PR 데이터와 리뷰 댓글 한 번에 가져오기
-    all_pull_requests, repo_stats, pr_id_to_comments = fetch_all_pr_data(
+    all_pull_requests, repo_stats, pr_id_to_comments, comment_id_to_reactions = fetch_all_pr_data(
         github_client, days
     )
     print(
         f"활성 저장소 {len(repo_stats)}개에서 최근 {days}일간 PR {len(all_pull_requests)}개를 가져왔습니다."
     )
 
-    # 2. 리뷰 댓글 데이터 통합 및 변환 (PullRequestComment 객체를 사전으로 변환)
+    # 2. 리뷰 댓글 데이터 통합 및 반응 정보 연결
     all_review_comments = []
-    # PR ID와 PR 객체를 매핑하는 사전 생성
-    pr_map = {pr.id: pr for pr in all_pull_requests}
-
+    
+    # 모든 댓글 정보 순회
     for pr in all_pull_requests:
-        # 병렬로 가져온 댓글 데이터가 있으면 처리
-        if pr.id in pr_id_to_comments:
-            # 각 댓글을 사전 형태로 변환하여 추가
-            for comment in pr_id_to_comments[pr.id]:
-                comment_data = get_comment_data(comment, pr_map)
-                # PR 정보 추가 보강
-                comment_data["pr_number"] = pr.number
-                comment_data["pr_title"] = pr.title
-                comment_data["repo_name"] = pr.base.repo.full_name
-                all_review_comments.append(comment_data)
+        if pr.id not in pr_id_to_comments:
+            continue
+            
+        for comment in pr_id_to_comments[pr.id]:
+            # 기본 댓글 정보 구성
+            comment_data = {
+                "id": comment.id,
+                "body": comment.body,
+                "user": comment.user.login,
+                "created_at": comment.created_at,
+                "updated_at": comment.updated_at,
+                "pr_number": pr.number,
+                "pr_title": pr.title,
+                "repo_name": pr.base.repo.full_name,
+                "html_url": comment.html_url,
+                "reactions": {}
+            }
+            
+            # 댓글 반응 정보 처리
+            reaction_counts = {
+                "+1": 0, "-1": 0, "confused": 0, "heart": 0,
+                "laugh": 0, "hooray": 0, "rocket": 0, "eyes": 0
+            }
+            
+            # 반응 정보 가져오기
+            if comment.id in comment_id_to_reactions:
+                reactions = comment_id_to_reactions[comment.id]
+                # 각 반응 유형별로 카운트
+                for reaction in reactions:
+                    reaction_type = reaction.content
+                    if reaction_type in reaction_counts:
+                        reaction_counts[reaction_type] += 1
+            
+            comment_data["reactions"] = reaction_counts
+            all_review_comments.append(comment_data)
 
     print(f"리뷰 댓글 {len(all_review_comments)}개를 찾았습니다.")
 
