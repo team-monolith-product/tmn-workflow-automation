@@ -217,9 +217,7 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
                     del reviewer_request_time[reviewer]
 
             # 리뷰어가 요청 상태가 아닌 경우 (비요청 리뷰)
-            elif (
-                reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨"
-            ):
+            elif reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨":
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
 
@@ -304,9 +302,7 @@ def calculate_stats(pull_requests: list[PullRequest]) -> dict[str, dict[str, Any
     reviewer_stats = {}
 
     # 병렬 실행을 위한 설정 - 더 많은 동시 요청으로 성능 향상
-    MAX_WORKERS = min(
-        50, len(pull_requests)
-    )  # GitHub 2차 레이트 제한 고려하면서 충분히 높게 설정
+    MAX_WORKERS = min(50, len(pull_requests))  # GitHub 2차 레이트 제한 고려하면서 충분히 높게 설정
 
     # ThreadPoolExecutor를 사용한 병렬 처리
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -400,9 +396,19 @@ def send_to_slack(
     reviewer_stats: dict[str, dict[str, Any]],
     repo_stats: dict[str, int],
     days: int,
-) -> None:
+) -> dict:
     """
     통계 결과를 Slack에 전송합니다.
+
+    Args:
+        slack_client: Slack API 클라이언트
+        channel_id: 슬랙 채널 ID
+        reviewer_stats: 리뷰어 통계
+        repo_stats: 저장소별 PR 수
+        days: 데이터 기간 (일)
+
+    Returns:
+        전송된 메시지의 응답 정보
     """
 
     # 리뷰어 통계 표 생성
@@ -410,9 +416,7 @@ def send_to_slack(
 
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
-    subtitle = (
-        f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
-    )
+    subtitle = f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
 
     # 코드 블록으로 표 감싸기
     code_block = f"```\n{reviewer_table}\n```"
@@ -452,7 +456,7 @@ def send_to_slack(
         )
 
     # 슬랙 메시지 전송
-    slack_client.chat_postMessage(
+    return slack_client.chat_postMessage(
         channel=channel_id,
         text=title,
         blocks=blocks,
@@ -484,7 +488,6 @@ def get_active_repos(
     active_repos = []
 
     for repo in all_repos:
-
         if repo.archived:
             continue
         # fork된 저장소는 제외
@@ -499,6 +502,137 @@ def get_active_repos(
             active_repos.append(f"{org_name}/{repo.name}")
 
     return active_repos
+
+
+def get_daily_review_stats(github_client: Github, slack_client: WebClient) -> dict:
+    """
+    어제 발생한 리뷰에 대한 개발자별 응답 시간 통계를 계산합니다.
+
+    Args:
+        github_client: GitHub API 클라이언트
+        slack_client: Slack API 클라이언트
+
+    Returns:
+        개발자별 응답 시간 통계
+    """
+    # 어제 날짜 계산
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # 활성 저장소 조회
+    repositories = get_active_repos(github_client, ORG_NAME, 30)  # 최근 30일 활성 저장소
+
+    # 병렬로 각 저장소의 PR을 가져옴
+    all_pull_requests = []
+
+    # 저장소 PR 병렬 조회를 위한 함수
+    def fetch_repo_prs(repo_full_name):
+        repo_owner, repo_name = repo_full_name.split("/")
+        # 1일치만 가져오도록 설정
+        repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, 1)
+        return repo_full_name, repo_prs
+
+    # 저장소 병렬 처리
+    REPO_MAX_WORKERS = min(30, len(repositories))
+    with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
+        futures = [
+            executor.submit(fetch_repo_prs, repo_full_name)
+            for repo_full_name in repositories
+        ]
+
+        for future in concurrent.futures.as_completed(futures):
+            repo_full_name, repo_prs = future.result()
+            if repo_prs:
+                all_pull_requests.extend(repo_prs)
+
+    if not all_pull_requests:
+        return {}
+
+    # 어제 리뷰된 PR만 필터링
+    filtered_prs = []
+    for pr in all_pull_requests:
+        # 타임라인 이벤트 가져오기
+        events = get_pr_timeline_events(pr)
+
+        # 어제 발생한 리뷰 이벤트가 있는지 확인
+        has_yesterday_review = any(
+            event["type"] == "reviewed"
+            and yesterday_start <= event["time"] <= yesterday_end
+            for event in events
+        )
+
+        if has_yesterday_review:
+            filtered_prs.append(pr)
+
+    # 선별된 PR에 대한 리뷰 응답 시간 계산
+    reviewer_data = {}
+    for pr in filtered_prs:
+        response_times = calculate_review_response_times(pr)
+
+        # 저장소 이름 추출
+        repo_name = pr.base.repo.full_name
+
+        for reviewer, times in response_times.items():
+            if reviewer not in reviewer_data:
+                reviewer_data[reviewer] = []
+
+            # 리뷰 시간과 PR 정보 저장
+            for time in times:
+                reviewer_data[reviewer].append(
+                    {"repo": repo_name, "pr_number": pr.number, "response_time": time}
+                )
+
+    return reviewer_data
+
+
+def format_daily_review_message(reviewer_data: dict) -> str:
+    """
+    일간 리뷰 피드백 메시지를 포맷팅합니다.
+
+    Args:
+        reviewer_data: 개발자별 리뷰 응답 시간 데이터
+
+    Returns:
+        포맷팅된 메시지
+    """
+    if not reviewer_data:
+        return "어제 발생한 리뷰가 없습니다."
+
+    message_parts = []
+
+    for reviewer, reviews in reviewer_data.items():
+        reviewer_lines = [f"{reviewer} 님"]
+
+        for review in reviews:
+            repo = review["repo"].split("/")[1]  # 조직명 제외하고 저장소명만 추출
+            pr_number = review["pr_number"]
+            response_time = review["response_time"]
+
+            # 시간 포맷팅 (소수점 첫째 자리까지)
+            formatted_time = f"{response_time:.1f}"
+
+            reviewer_lines.append(f"- {repo}#{pr_number} {formatted_time} 시간")
+
+        message_parts.append("\n".join(reviewer_lines))
+
+    return "\n\n".join(message_parts)
+
+
+def send_daily_review_feedback(
+    slack_client: WebClient, thread_ts: str, message: str
+) -> None:
+    """
+    일간 리뷰 피드백을 주간 통계 스레드에 전송합니다.
+
+    Args:
+        slack_client: Slack API 클라이언트
+        thread_ts: 스레드 타임스탬프
+        message: 전송할 메시지
+    """
+    slack_client.chat_postMessage(
+        channel=SLACK_CHANNEL_ID, text=message, thread_ts=thread_ts
+    )
 
 
 def main():
@@ -558,6 +692,10 @@ def main():
         [f"• {repo}: {count}개 PR" for repo, count in repo_stats.items() if count > 0]
     )
 
+    # 일간 리뷰 피드백 생성
+    daily_stats = get_daily_review_stats(github_client, slack_client)
+    daily_message = format_daily_review_message(daily_stats)
+
     if args.dry_run:
         print("=== DRY RUN MODE ===")
         print("코드 리뷰 통계 (리뷰어):")
@@ -565,8 +703,19 @@ def main():
         print("\n저장소별 PR 수:")
         print(repo_activity)
         print("=====================")
+
+        print("\n=== 일간 리뷰 피드백 ===")
+        print(daily_message)
+        print("=====================")
     else:
-        send_to_slack(slack_client, SLACK_CHANNEL_ID, stats, repo_stats, DAYS)
+        # 주간 통계 메시지 전송
+        response = send_to_slack(
+            slack_client, SLACK_CHANNEL_ID, stats, repo_stats, DAYS
+        )
+
+        # 일간 리뷰 피드백을 주간 통계의 스레드로 추가
+        thread_ts = response["ts"]
+        send_daily_review_feedback(slack_client, thread_ts, daily_message)
 
 
 if __name__ == "__main__":
