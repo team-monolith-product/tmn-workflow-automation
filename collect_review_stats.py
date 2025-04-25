@@ -509,7 +509,7 @@ def send_to_slack(
 
 def format_daily_review_message(reviewer_data: dict) -> str:
     """
-    일간 리뷰 피드백 메시지를 포맷팅합니다.
+    일간 리뷰 피드백 메시지를 슬랙에 보기 좋게 포맷팅합니다.
 
     Args:
         reviewer_data: 개발자별 리뷰 응답 시간 데이터
@@ -518,14 +518,32 @@ def format_daily_review_message(reviewer_data: dict) -> str:
         포맷팅된 메시지
     """
     if not reviewer_data:
-        return "어제 발생한 리뷰가 없습니다."
+        return "*어제 발생한 리뷰가 없습니다.*"
 
-    message_parts = []
+    message_parts = ["*어제의 리뷰 응답 시간 (개발자별)*"]
 
-    for reviewer, reviews in reviewer_data.items():
-        reviewer_lines = [f"{reviewer} 님"]
+    # 응답 시간에 따른 아이콘 표시
+    def get_time_emoji(time: float) -> str:
+        if time < 1:
+            return ":zap:"  # 번개 (1시간 미만: 매우 빠름)
+        elif time < 4:
+            return ":white_check_mark:"  # 체크마크 (4시간 미만: 양호)
+        elif time < 8:
+            return ":hourglass_flowing_sand:"  # 모래시계 (8시간 미만: 보통)
+        elif time < 24:
+            return ":turtle:"  # 거북이 (24시간 미만: 느림)
+        else:
+            return ":snail:"  # 달팽이 (24시간 이상: 매우 느림)
 
-        for review in reviews:
+    # 리뷰어별로 정렬 (알파벳 순)
+    for reviewer in sorted(reviewer_data.keys()):
+        reviews = reviewer_data[reviewer]
+        # 리뷰 시간별로 정렬 (빠른 응답 시간 순)
+        sorted_reviews = sorted(reviews, key=lambda x: x["response_time"])
+
+        reviewer_section = [f"*{reviewer}* 님"]
+
+        for review in sorted_reviews:
             repo = review["repo"].split("/")[1]  # 조직명 제외하고 저장소명만 추출
             pr_number = review["pr_number"]
             response_time = review["response_time"]
@@ -533,9 +551,15 @@ def format_daily_review_message(reviewer_data: dict) -> str:
             # 시간 포맷팅 (소수점 첫째 자리까지)
             formatted_time = f"{response_time:.1f}"
 
-            reviewer_lines.append(f"- {repo}#{pr_number} {formatted_time} 시간")
+            # 응답 시간에 따른 아이콘
+            time_emoji = get_time_emoji(response_time)
 
-        message_parts.append("\n".join(reviewer_lines))
+            # PR 링크 생성
+            pr_link = f"<https://github.com/team-monolith-product/{repo}/pull/{pr_number}|{repo}#{pr_number}>"
+
+            reviewer_section.append(f"{time_emoji} {pr_link}: *{formatted_time}* 시간")
+
+        message_parts.append("\n".join(reviewer_section))
 
     return "\n\n".join(message_parts)
 
@@ -545,15 +569,40 @@ def send_daily_review_feedback(
 ) -> None:
     """
     일간 리뷰 피드백을 주간 통계 스레드에 전송합니다.
+    각 개발자마다 별도의 메시지로 전송합니다.
 
     Args:
         slack_client: Slack API 클라이언트
         thread_ts: 스레드 타임스탬프
         message: 전송할 메시지
     """
+    # 메시지 분할 (헤더 부분과 각 개발자별 섹션으로 분리)
+    message_parts = message.split("\n\n")
+    header = message_parts[0]  # 첫 번째 부분은 헤더
+    developer_sections = message_parts[1:]  # 나머지는 개발자별 섹션
+
+    # 헤더 메시지 전송
     slack_client.chat_postMessage(
-        channel=SLACK_CHANNEL_ID, text=message, thread_ts=thread_ts
+        channel=SLACK_CHANNEL_ID,
+        text="어제의 리뷰 응답 시간",
+        thread_ts=thread_ts,
+        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": header}}],
     )
+
+    # 각 개발자별로 별도의 메시지 전송
+    for section in developer_sections:
+        # 개발자별 섹션을 각각 전송
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text=section.split("\n")[0],  # 첫 줄(개발자 이름)을 fallback 텍스트로 사용
+            thread_ts=thread_ts,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": section},
+                }
+            ],
+        )
 
 
 def get_active_repos(
