@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from github import Github
 from github.PullRequest import PullRequest
 from github.TimelineEvent import TimelineEvent
+from github.PullRequestComment import PullRequestComment
 
 
 def fetch_pull_requests_parallel(
@@ -34,7 +35,7 @@ def fetch_pull_requests_parallel(
     # 단일 저장소의 PR을 가져오는 내부 함수
     def fetch_repo_prs(repo_full_name):
         repo_owner, repo_name = repo_full_name.split("/")
-        
+
         # 저장소 접근
         repo = github_client.get_repo(f"{repo_owner}/{repo_name}")
 
@@ -52,7 +53,7 @@ def fetch_pull_requests_parallel(
 
             # PR을 결과 목록에 추가
             all_pulls.append(pr)
-            
+
         return repo_full_name, all_pulls
 
     # 병렬 처리
@@ -71,7 +72,7 @@ def fetch_pull_requests_parallel(
 
 
 def fetch_pr_timeline_events_parallel(
-    pull_requests: list[PullRequest]
+    pull_requests: list[PullRequest],
 ) -> dict[int, list[TimelineEvent]]:
     """
     여러 PR의 타임라인 이벤트를 병렬로 가져옵니다.
@@ -89,14 +90,14 @@ def fetch_pr_timeline_events_parallel(
     def fetch_pr_timeline(pr):
         # PR의 고유 ID를 키로 사용
         pr_id = pr.id
-        
+
         # PR을 Issue로 변환하여 타임라인에 접근
         issue = pr.as_issue()
         timeline = issue.get_timeline()
 
         # 원본 타임라인 이벤트 객체들을 리스트로 수집
         events = list(timeline)
-        
+
         return pr_id, events
 
     # 병렬 처리
@@ -107,3 +108,32 @@ def fetch_pr_timeline_events_parallel(
             pr_id_to_events[pr_id] = events
 
     return pr_id_to_events
+
+
+def fetch_pr_review_comments_parallel(
+    pull_requests: list[PullRequest],
+) -> dict[int, list[PullRequestComment]]:
+    """
+    여러 PR의 리뷰 댓글을 병렬로 가져옵니다.
+
+    Args:
+        pull_requests: PR 객체 목록
+
+    Returns:
+        dict[int, list[PullRequestComment]]: PR의 고유 ID와 관련 리뷰 댓글을 매핑한 딕셔너리
+    """
+    # 병렬 처리를 위한 최대 워커 수 설정
+    MAX_WORKERS = min(50, len(pull_requests))
+
+    # 각 PR의 리뷰 댓글을 가져오는 함수
+    def fetch_pr_comments(pr):
+        return pr.id, list(pr.get_review_comments())
+
+    # 병렬 처리
+    pr_id_to_comments = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # 모든 PR에 대해 병렬로 리뷰 댓글 로드
+        for pr_id, comments in executor.map(fetch_pr_comments, pull_requests):
+            pr_id_to_comments[pr_id] = comments
+
+    return pr_id_to_comments
