@@ -2,14 +2,17 @@ import os
 import argparse
 from datetime import datetime, timezone, timedelta
 from typing import Any
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
 from github import Github
 from github.PullRequest import PullRequest
 from slack_sdk import WebClient
 import tabulate
+
+from service.github import (
+    fetch_pull_requests_parallel,
+    fetch_pr_timeline_events_parallel,
+)
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
 tabulate.WIDE_CHARS_MODE = True
@@ -25,127 +28,6 @@ ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
 DAYS = 7  # 조회할 데이터 기간 (일)
 
 
-def fetch_pull_requests(
-    github_client: Github, repo_owner: str, repo_name: str, days: int
-) -> list[PullRequest]:
-    """
-    주어진 기간 동안의 PR을 가져옵니다.
-    """
-    # 날짜 계산
-    since_date = datetime.now(timezone.utc) - timedelta(days=days)
-
-    # 저장소 접근
-    repo = github_client.get_repo(f"{repo_owner}/{repo_name}")
-
-    # PR 조회: 모든 상태의 PR을 일괄로 가져옴
-    all_pulls = []
-
-    # 제한 없이 모든 기간 내 PR을 가져옴 (성능 최적화로 인해 제한 제거)
-    MAX_PRS_PER_REPO = 100  # 충분히 높은 값으로 설정
-    pr_count = 0
-
-    # 모든 PR을 업데이트 날짜 기준 내림차순으로 가져옴 (가장 최근 항목부터)
-    # state="all"로 open과 closed PR을 한 번에 가져옴
-    all_prs_iterator = repo.get_pulls(state="all", sort="updated", direction="desc")
-
-    # 필요한 만큼만 가져오기 - 페이지네이션 최소화
-    for pr in all_prs_iterator:
-        # 날짜가 범위를 벗어나면 중단 (업데이트 순으로 정렬되어 있으므로 최적화 가능)
-        if pr.updated_at < since_date and pr.created_at < since_date:
-            break
-
-        # 클로즈된 PR의 경우 머지된 것만 포함
-        if pr.state == "closed" and pr.merged_at is None:
-            continue
-
-        # PR을 결과 목록에 추가
-        all_pulls.append(pr)
-        pr_count += 1
-
-        # 최대 개수에 도달하면 중단
-        if pr_count >= MAX_PRS_PER_REPO:
-            break
-
-    return all_pulls
-
-
-def get_pr_timeline_events(pr: PullRequest) -> list:
-    """
-    PR의 타임라인 이벤트를 가져옵니다.
-
-    PR 객체에 타임라인 이벤트가 캐싱되어 있으면 추가 API 호출 없이 반환합니다.
-    그렇지 않으면 GitHub API를 호출하여 타임라인 이벤트를 가져옵니다.
-
-    Args:
-        pr: 풀 리퀘스트 객체
-
-    Returns:
-        타임라인 이벤트 목록
-    """
-    # PR에 timeline_events 속성이 이미 있는지 확인 (캐싱)
-    if hasattr(pr, "_timeline_events"):
-        return pr._timeline_events
-
-    # PR을 Issue로 변환하여 타임라인에 접근
-    issue = pr.as_issue()
-    timeline = issue.get_timeline()
-
-    # 모든 타임라인 이벤트 수집
-    events = []
-
-    for event in timeline:
-        # 이벤트 속성 확인
-        event_type = event.event
-        event_time = event.created_at
-
-        # 리뷰 요청/제거 이벤트
-        if event_type in ("review_requested", "review_request_removed"):
-            if "requested_reviewer" not in event.raw_data:
-                # Team 이 요청되는 경우 requested_team 만 존재
-                continue
-
-            reviewer = event.raw_data["requested_reviewer"]["login"]
-            events.append(
-                {
-                    "type": event_type,
-                    "time": event_time,
-                    "reviewer": reviewer,
-                }
-            )
-
-        elif event_type in ("reviewed"):
-            # reviewed 이벤트는 다른 이벤트와 규격이 다릅니다.
-            # actor 대신 user를 쓰고, created_at 대신 submitted_at을 사용합니다.
-            reviewer = event.raw_data["user"]["login"]
-            event_time = datetime.strptime(
-                event.raw_data["submitted_at"], "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(tzinfo=timezone.utc)
-
-            events.append(
-                {
-                    "type": event_type,
-                    "time": event_time,
-                    "reviewer": reviewer,
-                }
-            )
-
-        # Ready for review 이벤트
-        elif event_type == "ready_for_review":
-            events.append(
-                {
-                    "type": "ready_for_review",
-                    "time": event_time,
-                }
-            )
-
-    # 시간순 정렬
-    events.sort(key=lambda e: e["time"])
-
-    # 캐싱
-    pr._timeline_events = events
-    return events
-
-
 def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
     """
     PR의 타임라인 이벤트를 분석하여 리뷰어별 응답 시간을 계산합니다.
@@ -158,8 +40,9 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
         리뷰어별 응답 시간 정보 딕셔너리
     """
 
-    # 타임라인 이벤트 가져오기
-    events = get_pr_timeline_events(pr)
+    # 타임라인 이벤트 가져오기 (PR 객체에 캐싱되어 있어야 함)
+    # 캐싱된 타임라인이 없으면 예외를 발생시켜 문제를 명확히 드러냄
+    events = pr._timeline_events
 
     # 리뷰어별 상태 추적
     reviewer_status = {}  # 리뷰어 -> 상태 ('미요청', '요청됨', '응답함')
@@ -361,8 +244,9 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     # 어제 리뷰된 PR만 필터링
     filtered_prs = []
     for pr in pull_requests:
-        # 타임라인 이벤트 가져오기
-        events = get_pr_timeline_events(pr)
+        # 타임라인 이벤트 가져오기 (PR 객체에 캐싱되어 있어야 함)
+        # 캐싱된 타임라인이 없으면 예외를 발생시켜 문제를 명확히 드러냄
+        events = pr._timeline_events
 
         # 어제 발생한 리뷰 이벤트가 있는지 확인
         has_yesterday_review = any(
@@ -663,35 +547,92 @@ def fetch_all_pr_data(
     # 조직의 활성 저장소 조회
     repositories = get_active_repos(github_client, ORG_NAME, days)
 
-    # 병렬로 각 저장소의 PR을 가져옴
+    # 날짜 계산
+    since_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # service/github의 fetch_pull_requests_parallel 함수 사용
+    repository_to_pull_requests = fetch_pull_requests_parallel(
+        github_client, repositories, since_date
+    )
+
+    # 저장소별 PR 수 통계 및 PR 목록 생성
     all_pull_requests = []
-    repo_stats = {}  # 저장소별 PR 수 추적
+    repo_stats = {}
 
-    # 저장소 PR 병렬 조회를 위한 함수
-    def fetch_repo_prs(repo_full_name, days):
-        repo_owner, repo_name = repo_full_name.split("/")
-        repo_prs = fetch_pull_requests(github_client, repo_owner, repo_name, days)
-        return repo_full_name, repo_prs
+    for repo_full_name, prs in repository_to_pull_requests.items():
+        filtered_prs = []
 
-    # 저장소 병렬 처리를 위한 설정
-    REPO_MAX_WORKERS = min(30, len(repositories))  # 저장소 수에 따라 동적으로 조정
+        # closed PR은 머지된 것만 필터링 (원래 로직 유지)
+        for pr in prs:
+            if pr.state == "closed" and pr.merged_at is None:
+                continue
+            filtered_prs.append(pr)
 
-    with ThreadPoolExecutor(max_workers=REPO_MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(fetch_repo_prs, repo_full_name, days)
-            for repo_full_name in repositories
-        ]
+        if filtered_prs:
+            all_pull_requests.extend(filtered_prs)
+            repo_stats[repo_full_name] = len(filtered_prs)
 
-        for future in concurrent.futures.as_completed(futures):
-            repo_full_name, repo_prs = future.result()
-            if repo_prs:  # 결과가 있는 경우만 추가
-                all_pull_requests.extend(repo_prs)
-                repo_stats[repo_full_name] = len(repo_prs)
+    # service/github의 fetch_pr_timeline_events_parallel 함수 사용
+    pr_id_to_events = fetch_pr_timeline_events_parallel(all_pull_requests)
 
-    # 모든 PR의 타임라인 이벤트 사전 로드 (병렬 처리)
-    with ThreadPoolExecutor(max_workers=min(50, len(all_pull_requests))) as executor:
-        # 모든 PR에 대해 병렬로 타임라인 이벤트 로드
-        list(executor.map(get_pr_timeline_events, all_pull_requests))
+    # 각 PR 객체에 타임라인 이벤트 캐싱
+    for pr in all_pull_requests:
+        # 모든 PR에 대해 타임라인 이벤트가 있어야 함을 강제
+        if pr.id not in pr_id_to_events:
+            raise ValueError(f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다")
+
+        # 정상적인 경우 캐싱 진행
+        events = []
+        for event in pr_id_to_events[pr.id]:
+            # 기존 get_pr_timeline_events 함수와 동일한 형식으로 변환
+            event_type = event.event
+            event_time = event.created_at
+
+            # 리뷰 요청/제거 이벤트
+            if event_type in ("review_requested", "review_request_removed"):
+                if "requested_reviewer" not in event.raw_data:
+                    # Team 이 요청되는 경우 requested_team 만 존재
+                    continue
+
+                reviewer = event.raw_data["requested_reviewer"]["login"]
+                events.append(
+                    {
+                        "type": event_type,
+                        "time": event_time,
+                        "reviewer": reviewer,
+                    }
+                )
+
+            elif event_type in ("reviewed"):
+                # reviewed 이벤트는 다른 이벤트와 규격이 다릅니다.
+                # actor 대신 user를 쓰고, created_at 대신 submitted_at을 사용합니다.
+                reviewer = event.raw_data["user"]["login"]
+                event_time = datetime.strptime(
+                    event.raw_data["submitted_at"], "%Y-%m-%dT%H:%M:%SZ"
+                ).replace(tzinfo=timezone.utc)
+
+                events.append(
+                    {
+                        "type": event_type,
+                        "time": event_time,
+                        "reviewer": reviewer,
+                    }
+                )
+
+            # Ready for review 이벤트
+            elif event_type == "ready_for_review":
+                events.append(
+                    {
+                        "type": "ready_for_review",
+                        "time": event_time,
+                    }
+                )
+
+        # 시간순 정렬
+        events.sort(key=lambda e: e["time"])
+
+        # 캐싱
+        pr._timeline_events = events
 
     return all_pull_requests, repo_stats
 
