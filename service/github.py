@@ -30,6 +30,9 @@ def fetch_pull_requests_parallel(
     Returns:
         dict[str, list[PullRequest]]: 저장소별 PR 목록을 담은 딕셔너리 (키: 저장소명, 값: PR 목록)
     """
+    if not repositories:
+        return {}
+
     # 병렬 처리를 위한 최대 워커 수 설정
     REPO_MAX_WORKERS = min(30, len(repositories))
     repository_to_pull_requests = {}  # 저장소별 PR 목록
@@ -85,6 +88,9 @@ def fetch_pr_timeline_events_parallel(
     Returns:
         dict[int, list[TimelineEvent]]: PR의 고유 ID와 관련 타임라인 이벤트 객체 목록을 매핑한 딕셔너리
     """
+    if not pull_requests:
+        return {}
+
     # 병렬 처리를 위한 최대 워커 수 설정 - 수행할 PR 개수와 CPU 코어 기반 최적화
     MAX_WORKERS = min(50, len(pull_requests))
 
@@ -124,6 +130,9 @@ def fetch_pr_review_comments_parallel(
     Returns:
         dict[int, list[PullRequestComment]]: PR의 고유 ID와 관련 리뷰 댓글을 매핑한 딕셔너리
     """
+    if not pull_requests:
+        return {}
+
     # 병렬 처리를 위한 최대 워커 수 설정
     MAX_WORKERS = min(50, len(pull_requests))
 
@@ -154,6 +163,9 @@ def fetch_comment_reactions_parallel(
     Returns:
         dict[int, list[Reaction]]: 댓글 ID와 반응 객체 목록을 매핑한 딕셔너리
     """
+    if not comments:
+        return {}
+
     MAX_WORKERS = min(50, len(comments))
 
     def fetch_comment_reaction(comment):
