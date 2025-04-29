@@ -483,10 +483,10 @@ async def answer(
         # search_slack_messsages,: 권한 문제로 제거
     ]# + SlackToolkit().get_tools() : 잘못된 도구 사용이 잦아 제거
 
-    if text.startswith("o1"):
-        model = "o1"
+    if text.startswith("o3"):
+        model = "o3"
     else:
-        model = "gpt-4o"
+        model = "gpt-4.1"
 
     chat_model = ChatOpenAI(model=model)
 
