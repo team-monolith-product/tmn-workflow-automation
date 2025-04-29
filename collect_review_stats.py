@@ -665,6 +665,7 @@ def main():
     all_pull_requests, repo_stats = fetch_all_pr_data(github_client, DAYS)
 
     if not all_pull_requests:
+        print("활성화된 PR이 없습니다.")
         return
 
     # 2. 한 번 가져온 데이터를 사용하여 주간 통계와 일간 통계를 모두 계산합니다
