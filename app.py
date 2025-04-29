@@ -479,9 +479,9 @@ async def answer(
         get_notion_page,
         search_tool,
         get_web_page_from_url,
-        slack_conversations_replies,
+        # slack_conversations_replies, : 잘못된 도구 사용이 잦아 제거
         # search_slack_messsages,: 권한 문제로 제거
-    ] + SlackToolkit().get_tools()
+    ]# + SlackToolkit().get_tools() : 잘못된 도구 사용이 잦아 제거
 
     if text.startswith("o1"):
         model = "o1"
