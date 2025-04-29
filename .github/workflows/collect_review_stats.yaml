@@ -24,7 +24,6 @@ jobs:
           
       - name: Run collect_review_stats.py
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           python collect_review_stats.py
