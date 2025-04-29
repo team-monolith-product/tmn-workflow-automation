@@ -551,6 +551,10 @@ def fetch_all_pr_data(
     # 조직의 활성 저장소 조회
     repositories = get_active_repos(github_client, ORG_NAME, days)
 
+    if not repositories:
+        print("활성화된 저장소가 없습니다.")
+        return [], {}
+
     # 날짜 계산
     since_date = datetime.now(timezone.utc) - timedelta(days=days)
 
