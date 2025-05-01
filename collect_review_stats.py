@@ -1,8 +1,7 @@
 import os
 import argparse
-from datetime import datetime, timezone, timedelta, tzinfo
+from datetime import datetime, timezone, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo  # Python 3.9+: built-in timezone module
 
 from dotenv import load_dotenv
 from github import Github
@@ -237,8 +236,8 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     Returns:
         개발자별 응답 시간 통계
     """
-    # 한국 시간대(KST) 설정
-    kst = ZoneInfo("Asia/Seoul")
+    # 한국 시간대(KST) 설정 - UTC+9
+    kst = timezone(timedelta(hours=9))
 
     # 어제 날짜 계산 (KST 기준)
     now_kst = datetime.now(kst)
@@ -407,8 +406,8 @@ def send_to_slack(
     # 리뷰어 통계 표 생성
     reviewer_table = format_reviewer_table(reviewer_stats)
 
-    # 한국 시간대(KST) 설정
-    kst = ZoneInfo("Asia/Seoul")
+    # 한국 시간대(KST) 설정 - UTC+9
+    kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
 
     # 메시지 작성
@@ -572,8 +571,8 @@ def get_active_repos(
     Returns:
         활성 저장소 목록 (owner/name 형식)
     """
-    # 한국 시간대(KST) 설정
-    kst = ZoneInfo("Asia/Seoul")
+    # 한국 시간대(KST) 설정 - UTC+9
+    kst = timezone(timedelta(hours=9))
 
     # 최소 활동 기간 계산 (KST 기준)
     now_kst = datetime.now(kst)
@@ -626,8 +625,8 @@ def fetch_all_pr_data(
         print("활성화된 저장소가 없습니다.")
         return [], {}
 
-    # 한국 시간대(KST) 설정
-    kst = ZoneInfo("Asia/Seoul")
+    # 한국 시간대(KST) 설정 - UTC+9
+    kst = timezone(timedelta(hours=9))
 
     # 날짜 계산 (KST 기준)
     now_kst = datetime.now(kst)
