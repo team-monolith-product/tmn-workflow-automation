@@ -508,44 +508,6 @@ def format_daily_review_message(reviewer_data: dict) -> str:
     return "\n\n".join(message_parts)
 
 
-def split_developer_section(section: str, max_length: int = 2900) -> list[str]:
-    """
-    개발자 섹션을 Slack 블록 크기 제한에 맞게 여러 조각으로 분할합니다.
-    
-    Args:
-        section: 개발자 섹션 텍스트
-        max_length: 최대 길이 (기본값 2900, Slack 제한인 3000보다 작게 설정)
-        
-    Returns:
-        분할된 섹션 리스트
-    """
-    lines = section.split("\n")
-    dev_name = lines[0]  # 첫 줄은 개발자 이름
-    review_lines = lines[1:]  # 나머지는 리뷰 항목들
-    
-    # 개발자 이름만 있고 리뷰가 없는 경우
-    if not review_lines:
-        return [section]
-    
-    chunks = []
-    current_chunk = [dev_name]
-    current_length = len(dev_name)
-    
-    for line in review_lines:
-        # 현재 라인 추가 시 길이가 제한을 초과하면 새 청크 시작
-        if current_length + len(line) + 1 > max_length:
-            chunks.append("\n".join(current_chunk))
-            current_chunk = [f"{dev_name} (계속)"]
-            current_length = len(current_chunk[0])
-        
-        current_chunk.append(line)
-        current_length += len(line) + 1  # +1 for newline
-    
-    # 남은 청크 추가
-    if current_chunk:
-        chunks.append("\n".join(current_chunk))
-    
-    return chunks
 
 def send_daily_review_feedback(
     slack_client: WebClient, thread_ts: str, message: str
@@ -574,22 +536,18 @@ def send_daily_review_feedback(
 
     # 각 개발자별로 별도의 메시지 전송
     for section in developer_sections:
-        # 섹션이 너무 크면 분할
-        section_chunks = split_developer_section(section)
-        
-        for chunk in section_chunks:
-            # 개발자별 섹션(또는 분할된 청크)을 각각 전송
-            slack_client.chat_postMessage(
-                channel=SLACK_CHANNEL_ID,
-                text=chunk.split("\n")[0],  # 첫 줄(개발자 이름)을 fallback 텍스트로 사용
-                thread_ts=thread_ts,
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": chunk},
-                    }
-                ],
-            )
+        # 개발자별 섹션을 각각 전송
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text=section.split("\n")[0],  # 첫 줄(개발자 이름)을 fallback 텍스트로 사용
+            thread_ts=thread_ts,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": section},
+                }
+            ],
+        )
 
 
 def get_active_repos(
