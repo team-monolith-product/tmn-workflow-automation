@@ -1,7 +1,8 @@
 import os
 import argparse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo  # Python 3.9+: built-in timezone module
 
 from dotenv import load_dotenv
 from github import Github
@@ -238,10 +239,18 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     Returns:
         개발자별 응답 시간 통계
     """
-    # 어제 날짜 계산
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # 한국 시간대(KST) 설정
+    kst = ZoneInfo('Asia/Seoul')
+    
+    # 어제 날짜 계산 (KST 기준)
+    now_kst = datetime.now(kst)
+    yesterday_kst = now_kst - timedelta(days=1)
+    yesterday_start_kst = yesterday_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end_kst = yesterday_kst.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # KST 시간을 UTC로 변환 (GitHub API 이벤트는 UTC 시간으로 저장됨)
+    yesterday_start = yesterday_start_kst.astimezone(timezone.utc)
+    yesterday_end = yesterday_end_kst.astimezone(timezone.utc)
 
     # 어제 리뷰된 PR만 필터링
     filtered_prs = []
@@ -262,20 +271,63 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
 
     # 선별된 PR에 대한 리뷰 응답 시간 계산
     reviewer_data = {}
+    # 중복 체크를 위한 세트
+    processed_reviewer_pr_pairs = set()
+    
     for pr in filtered_prs:
-        response_times = calculate_review_response_times(pr)
+        # 타임라인 이벤트 가져오기
+        events = pr._timeline_events
 
         # 저장소 이름 추출
         repo_name = pr.base.repo.full_name
-
-        for reviewer, times in response_times.items():
-            if reviewer not in reviewer_data:
-                reviewer_data[reviewer] = []
-
-            # 리뷰 시간과 PR 정보 저장
-            for time in times:
+        
+        # PR별, 리뷰어별로 어제 발생한 마지막 리뷰만 사용
+        reviewer_last_review = {}
+        
+        # 어제 발생한 모든 리뷰 이벤트를 시간 순으로 처리
+        for event in sorted(events, key=lambda e: e["time"]):
+            if (event["type"] == "reviewed" and 
+                yesterday_start <= event["time"] <= yesterday_end):
+                
+                reviewer = event["reviewer"]
+                
+                # 자기 PR에 자신이 리뷰한 경우 제외
+                if pr.user and reviewer == pr.user.login:
+                    continue
+                    
+                # 해당 리뷰어의 가장 최근 리뷰로 업데이트
+                reviewer_last_review[reviewer] = event
+        
+        # 각 리뷰어의 마지막 리뷰에 대해 응답 시간 계산
+        for reviewer, review_event in reviewer_last_review.items():
+            # 중복 체크 (같은 PR에 대한 같은 리뷰어의 응답은 한 번만 포함)
+            reviewer_pr_key = (reviewer, pr.number)
+            if reviewer_pr_key in processed_reviewer_pr_pairs:
+                continue
+                
+            processed_reviewer_pr_pairs.add(reviewer_pr_key)
+            
+            # 해당 리뷰어에 대한 리뷰 요청 시간 찾기
+            # 가장 최근의 리뷰 요청 이벤트 검색
+            request_time = None
+            for event in reversed(events):
+                if (event["type"] == "review_requested" and 
+                    event["reviewer"] == reviewer and 
+                    event["time"] < review_event["time"]):
+                    request_time = event["time"]
+                    break
+            
+            # 리뷰 요청 시간이 있는 경우만 응답 시간 계산
+            if request_time:
+                # 응답 시간 계산 (시간 단위)
+                response_time = (review_event["time"] - request_time).total_seconds() / 3600
+                
+                # 결과 저장
+                if reviewer not in reviewer_data:
+                    reviewer_data[reviewer] = []
+                    
                 reviewer_data[reviewer].append(
-                    {"repo": repo_name, "pr_number": pr.number, "response_time": time}
+                    {"repo": repo_name, "pr_number": pr.number, "response_time": response_time}
                 )
 
     return reviewer_data
@@ -344,10 +396,14 @@ def send_to_slack(
     # 리뷰어 통계 표 생성
     reviewer_table = format_reviewer_table(reviewer_stats)
 
+    # 한국 시간대(KST) 설정
+    kst = ZoneInfo('Asia/Seoul')
+    now_kst = datetime.now(kst)
+    
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
     subtitle = (
-        f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
+        f"지난 {days}일간 리뷰 활동 (기준: {now_kst.strftime('%Y-%m-%d')})"
     )
 
     # 코드 블록으로 표 감싸기
@@ -452,6 +508,45 @@ def format_daily_review_message(reviewer_data: dict) -> str:
     return "\n\n".join(message_parts)
 
 
+def split_developer_section(section: str, max_length: int = 2900) -> list[str]:
+    """
+    개발자 섹션을 Slack 블록 크기 제한에 맞게 여러 조각으로 분할합니다.
+    
+    Args:
+        section: 개발자 섹션 텍스트
+        max_length: 최대 길이 (기본값 2900, Slack 제한인 3000보다 작게 설정)
+        
+    Returns:
+        분할된 섹션 리스트
+    """
+    lines = section.split("\n")
+    dev_name = lines[0]  # 첫 줄은 개발자 이름
+    review_lines = lines[1:]  # 나머지는 리뷰 항목들
+    
+    # 개발자 이름만 있고 리뷰가 없는 경우
+    if not review_lines:
+        return [section]
+    
+    chunks = []
+    current_chunk = [dev_name]
+    current_length = len(dev_name)
+    
+    for line in review_lines:
+        # 현재 라인 추가 시 길이가 제한을 초과하면 새 청크 시작
+        if current_length + len(line) + 1 > max_length:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = [f"{dev_name} (계속)"]
+            current_length = len(current_chunk[0])
+        
+        current_chunk.append(line)
+        current_length += len(line) + 1  # +1 for newline
+    
+    # 남은 청크 추가
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+    
+    return chunks
+
 def send_daily_review_feedback(
     slack_client: WebClient, thread_ts: str, message: str
 ) -> None:
@@ -479,18 +574,22 @@ def send_daily_review_feedback(
 
     # 각 개발자별로 별도의 메시지 전송
     for section in developer_sections:
-        # 개발자별 섹션을 각각 전송
-        slack_client.chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text=section.split("\n")[0],  # 첫 줄(개발자 이름)을 fallback 텍스트로 사용
-            thread_ts=thread_ts,
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": section},
-                }
-            ],
-        )
+        # 섹션이 너무 크면 분할
+        section_chunks = split_developer_section(section)
+        
+        for chunk in section_chunks:
+            # 개발자별 섹션(또는 분할된 청크)을 각각 전송
+            slack_client.chat_postMessage(
+                channel=SLACK_CHANNEL_ID,
+                text=chunk.split("\n")[0],  # 첫 줄(개발자 이름)을 fallback 텍스트로 사용
+                thread_ts=thread_ts,
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": chunk},
+                    }
+                ],
+            )
 
 
 def get_active_repos(
@@ -507,8 +606,12 @@ def get_active_repos(
     Returns:
         활성 저장소 목록 (owner/name 형식)
     """
-    # 최소 활동 기간 계산
-    min_activity_date = datetime.now(timezone.utc) - timedelta(days=min_activity_days)
+    # 한국 시간대(KST) 설정
+    kst = ZoneInfo('Asia/Seoul')
+    
+    # 최소 활동 기간 계산 (KST 기준)
+    now_kst = datetime.now(kst)
+    min_activity_date = now_kst.astimezone(timezone.utc) - timedelta(days=min_activity_days)
 
     # 조직의 모든 저장소 가져오기
     org = github_client.get_organization(org_name)
@@ -555,8 +658,12 @@ def fetch_all_pr_data(
         print("활성화된 저장소가 없습니다.")
         return [], {}
 
-    # 날짜 계산
-    since_date = datetime.now(timezone.utc) - timedelta(days=days)
+    # 한국 시간대(KST) 설정
+    kst = ZoneInfo('Asia/Seoul')
+    
+    # 날짜 계산 (KST 기준)
+    now_kst = datetime.now(kst)
+    since_date = now_kst.astimezone(timezone.utc) - timedelta(days=days)
 
     # service/github의 fetch_pull_requests_parallel 함수 사용
     repository_to_pull_requests = fetch_pull_requests_parallel(
