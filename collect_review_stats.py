@@ -103,9 +103,7 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
                     del reviewer_request_time[reviewer]
 
             # 리뷰어가 요청 상태가 아닌 경우 (비요청 리뷰)
-            elif (
-                reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨"
-            ):
+            elif reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨":
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
 
@@ -240,14 +238,18 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
         개발자별 응답 시간 통계
     """
     # 한국 시간대(KST) 설정
-    kst = ZoneInfo('Asia/Seoul')
-    
+    kst = ZoneInfo("Asia/Seoul")
+
     # 어제 날짜 계산 (KST 기준)
     now_kst = datetime.now(kst)
     yesterday_kst = now_kst - timedelta(days=1)
-    yesterday_start_kst = yesterday_kst.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end_kst = yesterday_kst.replace(hour=23, minute=59, second=59, microsecond=999999)
-    
+    yesterday_start_kst = yesterday_kst.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    yesterday_end_kst = yesterday_kst.replace(
+        hour=23, minute=59, second=59, microsecond=999999
+    )
+
     # KST 시간을 UTC로 변환 (GitHub API 이벤트는 UTC 시간으로 저장됨)
     yesterday_start = yesterday_start_kst.astimezone(timezone.utc)
     yesterday_end = yesterday_end_kst.astimezone(timezone.utc)
@@ -273,61 +275,70 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     reviewer_data = {}
     # 중복 체크를 위한 세트
     processed_reviewer_pr_pairs = set()
-    
+
     for pr in filtered_prs:
         # 타임라인 이벤트 가져오기
         events = pr._timeline_events
 
         # 저장소 이름 추출
         repo_name = pr.base.repo.full_name
-        
+
         # PR별, 리뷰어별로 어제 발생한 마지막 리뷰만 사용
         reviewer_last_review = {}
-        
+
         # 어제 발생한 모든 리뷰 이벤트를 시간 순으로 처리
         for event in sorted(events, key=lambda e: e["time"]):
-            if (event["type"] == "reviewed" and 
-                yesterday_start <= event["time"] <= yesterday_end):
-                
+            if (
+                event["type"] == "reviewed"
+                and yesterday_start <= event["time"] <= yesterday_end
+            ):
                 reviewer = event["reviewer"]
-                
+
                 # 자기 PR에 자신이 리뷰한 경우 제외
                 if pr.user and reviewer == pr.user.login:
                     continue
-                    
+
                 # 해당 리뷰어의 가장 최근 리뷰로 업데이트
                 reviewer_last_review[reviewer] = event
-        
+
         # 각 리뷰어의 마지막 리뷰에 대해 응답 시간 계산
         for reviewer, review_event in reviewer_last_review.items():
             # 중복 체크 (같은 PR에 대한 같은 리뷰어의 응답은 한 번만 포함)
             reviewer_pr_key = (reviewer, pr.number)
             if reviewer_pr_key in processed_reviewer_pr_pairs:
                 continue
-                
+
             processed_reviewer_pr_pairs.add(reviewer_pr_key)
-            
+
             # 해당 리뷰어에 대한 리뷰 요청 시간 찾기
             # 가장 최근의 리뷰 요청 이벤트 검색
             request_time = None
             for event in reversed(events):
-                if (event["type"] == "review_requested" and 
-                    event["reviewer"] == reviewer and 
-                    event["time"] < review_event["time"]):
+                if (
+                    event["type"] == "review_requested"
+                    and event["reviewer"] == reviewer
+                    and event["time"] < review_event["time"]
+                ):
                     request_time = event["time"]
                     break
-            
+
             # 리뷰 요청 시간이 있는 경우만 응답 시간 계산
             if request_time:
                 # 응답 시간 계산 (시간 단위)
-                response_time = (review_event["time"] - request_time).total_seconds() / 3600
-                
+                response_time = (
+                    review_event["time"] - request_time
+                ).total_seconds() / 3600
+
                 # 결과 저장
                 if reviewer not in reviewer_data:
                     reviewer_data[reviewer] = []
-                    
+
                 reviewer_data[reviewer].append(
-                    {"repo": repo_name, "pr_number": pr.number, "response_time": response_time}
+                    {
+                        "repo": repo_name,
+                        "pr_number": pr.number,
+                        "response_time": response_time,
+                    }
                 )
 
     return reviewer_data
@@ -397,14 +408,12 @@ def send_to_slack(
     reviewer_table = format_reviewer_table(reviewer_stats)
 
     # 한국 시간대(KST) 설정
-    kst = ZoneInfo('Asia/Seoul')
+    kst = ZoneInfo("Asia/Seoul")
     now_kst = datetime.now(kst)
-    
+
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
-    subtitle = (
-        f"지난 {days}일간 리뷰 활동 (기준: {now_kst.strftime('%Y-%m-%d')})"
-    )
+    subtitle = f"지난 {days}일간 리뷰 활동 (기준: {now_kst.strftime('%Y-%m-%d')})"
 
     # 코드 블록으로 표 감싸기
     code_block = f"```\n{reviewer_table}\n```"
@@ -508,7 +517,6 @@ def format_daily_review_message(reviewer_data: dict) -> str:
     return "\n\n".join(message_parts)
 
 
-
 def send_daily_review_feedback(
     slack_client: WebClient, thread_ts: str, message: str
 ) -> None:
@@ -565,11 +573,13 @@ def get_active_repos(
         활성 저장소 목록 (owner/name 형식)
     """
     # 한국 시간대(KST) 설정
-    kst = ZoneInfo('Asia/Seoul')
-    
+    kst = ZoneInfo("Asia/Seoul")
+
     # 최소 활동 기간 계산 (KST 기준)
     now_kst = datetime.now(kst)
-    min_activity_date = now_kst.astimezone(timezone.utc) - timedelta(days=min_activity_days)
+    min_activity_date = now_kst.astimezone(timezone.utc) - timedelta(
+        days=min_activity_days
+    )
 
     # 조직의 모든 저장소 가져오기
     org = github_client.get_organization(org_name)
@@ -617,8 +627,8 @@ def fetch_all_pr_data(
         return [], {}
 
     # 한국 시간대(KST) 설정
-    kst = ZoneInfo('Asia/Seoul')
-    
+    kst = ZoneInfo("Asia/Seoul")
+
     # 날짜 계산 (KST 기준)
     now_kst = datetime.now(kst)
     since_date = now_kst.astimezone(timezone.utc) - timedelta(days=days)
@@ -652,9 +662,7 @@ def fetch_all_pr_data(
     for pr in all_pull_requests:
         # 모든 PR에 대해 타임라인 이벤트가 있어야 함을 강제
         if pr.id not in pr_id_to_events:
-            raise ValueError(
-                f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다"
-            )
+            raise ValueError(f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다")
 
         # 정상적인 경우 캐싱 진행
         events = []
