@@ -286,7 +286,9 @@ async def answer(
 
     @tool
     def update_notion_task_deadline(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
         new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"],
     ):
         """
@@ -325,8 +327,12 @@ async def answer(
 
     @tool
     def update_notion_task_status(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
-        new_status: Annotated[Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"],
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
+        new_status: Annotated[
+            Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"
+        ],
     ):
         """
         노션 작업의 상태를 변경합니다.
@@ -338,7 +344,9 @@ async def answer(
 
     @tool
     def get_notion_page(
-        page_id: Annotated[str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"],
+        page_id: Annotated[
+            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        ],
     ) -> str:
         """
         노션 페이지를 마크다운 형태로 조회합니다.
@@ -375,9 +383,9 @@ async def answer(
         parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"][
             "content"
         ]
-        parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][0][
-            "name"
-        ]
+        parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][
+            0
+        ]["name"]
 
         if parent_title.endswith(f" - {parent_component}"):
             title = parent_title.replace(f" - {parent_component}", f" - {component}")
@@ -395,7 +403,11 @@ async def answer(
         if parent_page_data["properties"]["프로젝트"]["relation"]:
             properties["프로젝트"] = {
                 "relation": [
-                    {"id": parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]}
+                    {
+                        "id": parent_page_data["properties"]["프로젝트"]["relation"][0][
+                            "id"
+                        ]
+                    }
                 ]
             }
 
