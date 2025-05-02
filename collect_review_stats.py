@@ -405,10 +405,8 @@ def send_to_slack(
     # 리뷰어 통계 표 생성
     reviewer_table = format_reviewer_table(reviewer_stats)
 
-    # 현재 시간 (UTC 기준)
-    now = datetime.now(timezone.utc)
-    # KST로 날짜 표시 (UTC+9, 즉 9시간 더함)
-    kst_date = (now + timedelta(hours=9)).strftime("%Y-%m-%d")
+    # 현재 한국 시간 기준 날짜 (UTC+9)
+    kst_date = (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
 
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
