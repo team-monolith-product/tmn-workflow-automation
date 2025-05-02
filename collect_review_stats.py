@@ -111,7 +111,9 @@ def calculate_review_response_times(
                     del reviewer_request_time[reviewer]
 
             # 리뷰어가 요청 상태가 아닌 경우 (비요청 리뷰)
-            elif reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨":
+            elif (
+                reviewer not in reviewer_status or reviewer_status[reviewer] != "요청됨"
+            ):
                 # 비요청 리뷰는 통계에 포함하지 않는다.
                 continue
 
@@ -140,9 +142,7 @@ def calculate_review_response_times(
     return response_times
 
 
-def process_pr_reviews(
-    pr: PullRequest, date_start: datetime = None, date_end: datetime = None
-) -> dict:
+def process_pr_reviews(pr: PullRequest) -> dict:
     """
     단일 PR의 리뷰를 병렬로 처리하기 위한 함수입니다.
 
@@ -150,8 +150,6 @@ def process_pr_reviews(
 
     Args:
         pr: 풀 리퀘스트 객체
-        date_start: 시작 날짜/시간 (이 시간 이후의 리뷰만 포함)
-        date_end: 종료 날짜/시간 (이 시간 이전의 리뷰만 포함)
 
     Returns:
         dict: 리뷰어별 통계
@@ -160,10 +158,7 @@ def process_pr_reviews(
     local_reviewer_stats = {}
 
     # 시계열 기반 리뷰 요청-응답 시간 계산
-    # 날짜 범위가 지정된 경우 해당 범위의 리뷰만 포함
-    reviewer_response_times = calculate_review_response_times(
-        pr, date_start=date_start, date_end=date_end
-    )
+    reviewer_response_times = calculate_review_response_times(pr)
 
     # 리뷰어별 통계 구성
     for reviewer, response_times in reviewer_response_times.items():
@@ -198,38 +193,19 @@ def process_pr_reviews(
 
 def calculate_weekly_stats(
     pull_requests: list[PullRequest],
-    date_start: datetime = None,
-    date_end: datetime = None,
 ) -> dict[str, dict[str, Any]]:
     """
-    PR 리뷰 통계를 계산합니다. 기본 값은 주간 통계를 계산하지만,
-    date_start와 date_end로 기간을 지정할 수 있습니다.
-
+    주간 PR 리뷰 통계를 계산합니다.
     - 사용자별 리뷰 수
     - 평균 응답 시간
     - 24시간 초과 리뷰 비율
-
-    Args:
-        pull_requests: 전체 PR 목록
-        date_start: 시작 날짜/시간 (이 시간 이후의 리뷰만 포함)
-        date_end: 종료 날짜/시간 (이 시간 이전의 리뷰만 포함)
-
-    Returns:
-        dict: 리뷰어별 통계
     """
-    # 날짜 범위가 지정되지 않은 경우 기본적으로 최근 7일 기간 사용
-    if date_start is None and date_end is None:
-        date_end = datetime.now(timezone.utc)
-        date_start = date_end - timedelta(days=DAYS)
-
     # 리뷰어 통계
     reviewer_stats = {}
 
     # 각 PR의 리뷰 데이터 처리
     for pr in pull_requests:
-        local_reviewer_stats = process_pr_reviews(
-            pr, date_start=date_start, date_end=date_end
-        )
+        local_reviewer_stats = process_pr_reviews(pr)
 
         # 리뷰어별 통계 결과 병합
         for reviewer, stats in local_reviewer_stats.items():
@@ -267,11 +243,9 @@ def calculate_weekly_stats(
     return reviewer_stats
 
 
-def calculate_daily_stats(
-    pull_requests: list[PullRequest], target_date: datetime = None
-) -> dict:
+def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     """
-    특정 날짜(기본값: 어제)에 발생한 리뷰에 대한 개발자별 응답 시간 통계를 계산합니다.
+    어제 발생한 리뷰에 대한 개발자별 응답 시간 통계를 계산합니다.
 
     Args:
         pull_requests: 전체 PR 목록
@@ -280,8 +254,7 @@ def calculate_daily_stats(
     Returns:
         개발자별 응답 시간 통계
     """
-    # 기준 시간 설정 (기본값: 현재 UTC 시간)
-    now = datetime.now(timezone.utc) if target_date is None else target_date
+    now = datetime.now(timezone.utc)
 
     # 한국 시간(KST)은 UTC+9
     # 목표 날짜의 00:00:00 ~ 23:59:59 KST를 UTC 기준으로 계산
@@ -314,34 +287,22 @@ def calculate_daily_stats(
     reviewer_data = {}
 
     for pr in filtered_prs:
-        # 특정 날짜 범위에 해당하는 리뷰 응답 시간 계산
-        # 새로 확장된 함수 사용
         response_times = calculate_review_response_times(
             pr, date_start=day_start, date_end=day_end
         )
 
-        # 저장소 이름 추출
         repo_name = pr.base.repo.full_name
 
-        # 각 리뷰어별 마지막 응답만 사용하기 위한 처리
-        # 중복 제거를 위한 처리 (PR별, 리뷰어별 하나의 응답만 사용)
-        for reviewer, times_list in response_times.items():
-            # 자기 PR에 자신이 리뷰한 경우 제외 (이미 calculate_review_response_times에서 필터링됨)
-            if pr.user and reviewer == pr.user.login:
-                continue
+        for reviewer, times in response_times.items():
+            if reviewer not in reviewer_data:
+                reviewer_data[reviewer] = []
 
-            if times_list:
-                # 결과 저장 (리뷰 응답 시간 중 가장 마지막 것만 사용)
-                response_time = times_list[-1]  # 가장 마지막 응답 사용
-
-                if reviewer not in reviewer_data:
-                    reviewer_data[reviewer] = []
-
+            for time in times:
                 reviewer_data[reviewer].append(
                     {
                         "repo": repo_name,
                         "pr_number": pr.number,
-                        "response_time": response_time,
+                        "response_time": time,
                     }
                 )
 
@@ -655,7 +616,9 @@ def fetch_all_pr_data(
     for pr in all_pull_requests:
         # 모든 PR에 대해 타임라인 이벤트가 있어야 함을 강제
         if pr.id not in pr_id_to_events:
-            raise ValueError(f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다")
+            raise ValueError(
+                f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다"
+            )
 
         # 정상적인 경우 캐싱 진행
         events = []
