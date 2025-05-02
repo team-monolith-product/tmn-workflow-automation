@@ -176,9 +176,7 @@ def get_before_and_after_html(page_id: str = PAGE_ID):
 
     # 2) "2. 현행 내용" ~ "3. 수정 내용" 으로 문서 분할
     #    (실제 h3 제목에 맞춰 string match)
-    part1_md, part2_md = split_markdown_into_two_parts(
-        original_md, "현행 내용", "수정 내용"
-    )
+    part1_md, part2_md = split_markdown_into_two_parts(original_md, "현행 내용", "수정 내용")
 
     # 만약 "현행 내용" ~ "수정 내용" 구간만 따로 떼어내고, "수정 내용"부터 끝까지도 따로 떼어내고 싶다면
     # 위와 같이 split. part1, part2 각각에 대해 아래 절차 진행.
@@ -604,9 +602,7 @@ def main():
         atch_file_group_id = upload_meeting_minutes_to_update_system(
             session, f"meeting_minutes/{title} 회의록.docx"
         )
-        print(
-            f"DOCX 파일이 수정/보완 시스템에 업로드되었습니다. ID: {atch_file_group_id}"
-        )
+        print(f"DOCX 파일이 수정/보완 시스템에 업로드되었습니다. ID: {atch_file_group_id}")
 
         # 수정/보완 시스템에 업로드
         print(f"'{title}' 건을 수정/보완 시스템에 업로드합니다...")

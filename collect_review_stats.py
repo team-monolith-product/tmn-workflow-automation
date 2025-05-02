@@ -28,13 +28,16 @@ ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
 DAYS = 7  # 조회할 데이터 기간 (일)
 
 
-def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
+def calculate_review_response_times(
+    pr: PullRequest, date_start: datetime = None, date_end: datetime = None
+) -> dict[str, list[float]]:
     """
     PR의 타임라인 이벤트를 분석하여 리뷰어별 응답 시간을 계산합니다.
 
     Args:
         pr: 풀 리퀘스트 객체
-        debug: 디버그 메시지 출력 여부
+        date_start: 시작 날짜/시간 (이 시간 이후의 리뷰만 포함)
+        date_end: 종료 날짜/시간 (이 시간 이전의 리뷰만 포함)
 
     Returns:
         리뷰어별 응답 시간 정보 딕셔너리
@@ -84,6 +87,12 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
             if pr.user and reviewer == pr.user.login:
                 continue
 
+            # 날짜 범위 필터링 - 특정 날짜 범위만 포함
+            if date_start and event_time < date_start:
+                continue
+            if date_end and event_time > date_end:
+                continue
+
             # 리뷰어가 요청 상태인 경우
             if reviewer_status.get(reviewer) == "요청됨":
                 request_time = reviewer_request_time[reviewer]
@@ -117,6 +126,12 @@ def calculate_review_response_times(pr: PullRequest) -> dict[str, list[float]]:
                 response_time = (
                     pr.merged_at - request_time
                 ).total_seconds() / 3600  # 시간 단위
+
+                # 병합 시간이 날짜 범위 내에 있는지 확인
+                if date_start and pr.merged_at < date_start:
+                    continue
+                if date_end and pr.merged_at > date_end:
+                    continue
 
                 # 응답 시간 기록
                 if reviewer not in response_times:
@@ -234,48 +249,61 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
 
     Args:
         pull_requests: 전체 PR 목록
+        target_date: 통계를 계산할 날짜 (기본값: 어제)
 
     Returns:
         개발자별 응답 시간 통계
     """
-    # 어제 날짜 계산
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+    now = datetime.now(timezone.utc)
 
-    # 어제 리뷰된 PR만 필터링
+    # 한국 시간(KST)은 UTC+9
+    # 목표 날짜의 00:00:00 ~ 23:59:59 KST를 UTC 기준으로 계산
+    day_start = now.replace(hour=15, minute=0, second=0, microsecond=0) - timedelta(
+        days=2
+    )  # 전날 00:00 KST = 전전날 15:00 UTC
+    day_end = now.replace(
+        hour=14, minute=59, second=59, microsecond=999999
+    ) - timedelta(
+        days=1
+    )  # 전날 23:59:59 KST = 전날 14:59:59 UTC
+
+    # 해당 날짜에 리뷰된 PR만 필터링
     filtered_prs = []
     for pr in pull_requests:
         # 타임라인 이벤트 가져오기 (PR 객체에 캐싱되어 있어야 함)
         # 캐싱된 타임라인이 없으면 예외를 발생시켜 문제를 명확히 드러냄
         events = pr._timeline_events
 
-        # 어제 발생한 리뷰 이벤트가 있는지 확인
-        has_yesterday_review = any(
-            event["type"] == "reviewed"
-            and yesterday_start <= event["time"] <= yesterday_end
+        # 해당 날짜에 발생한 리뷰 이벤트가 있는지 확인
+        has_daily_review = any(
+            event["type"] == "reviewed" and day_start <= event["time"] <= day_end
             for event in events
         )
 
-        if has_yesterday_review:
+        if has_daily_review:
             filtered_prs.append(pr)
 
     # 선별된 PR에 대한 리뷰 응답 시간 계산
     reviewer_data = {}
-    for pr in filtered_prs:
-        response_times = calculate_review_response_times(pr)
 
-        # 저장소 이름 추출
+    for pr in filtered_prs:
+        response_times = calculate_review_response_times(
+            pr, date_start=day_start, date_end=day_end
+        )
+
         repo_name = pr.base.repo.full_name
 
         for reviewer, times in response_times.items():
             if reviewer not in reviewer_data:
                 reviewer_data[reviewer] = []
 
-            # 리뷰 시간과 PR 정보 저장
             for time in times:
                 reviewer_data[reviewer].append(
-                    {"repo": repo_name, "pr_number": pr.number, "response_time": time}
+                    {
+                        "repo": repo_name,
+                        "pr_number": pr.number,
+                        "response_time": time,
+                    }
                 )
 
     return reviewer_data
@@ -344,11 +372,12 @@ def send_to_slack(
     # 리뷰어 통계 표 생성
     reviewer_table = format_reviewer_table(reviewer_stats)
 
+    # KST로 날짜 표시 (UTC+9, 즉 9시간 더함)
+    kst_date = (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
+
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
-    subtitle = (
-        f"지난 {days}일간 리뷰 활동 (기준: {datetime.now().strftime('%Y-%m-%d')})"
-    )
+    subtitle = f"지난 {days}일간 리뷰 활동 (기준: {kst_date})"
 
     # 코드 블록으로 표 감싸기
     code_block = f"```\n{reviewer_table}\n```"
