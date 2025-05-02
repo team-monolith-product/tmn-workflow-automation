@@ -238,11 +238,19 @@ def calculate_daily_stats(pull_requests: list[PullRequest]) -> dict:
     """
     # 기준 시간 (UTC)
     now = datetime.now(timezone.utc)
-    
+
     # 한국 시간(KST)은 UTC+9
     # 어제 00:00:00 ~ 23:59:59 KST를 UTC 기준으로 계산
-    yesterday_start = now.replace(hour=15, minute=0, second=0, microsecond=0) - timedelta(days=2)  # 전날 00:00 KST = 전전날 15:00 UTC
-    yesterday_end = now.replace(hour=14, minute=59, second=59, microsecond=999999) - timedelta(days=1)  # 전날 23:59:59 KST = 전날 14:59:59 UTC
+    yesterday_start = now.replace(
+        hour=15, minute=0, second=0, microsecond=0
+    ) - timedelta(
+        days=2
+    )  # 전날 00:00 KST = 전전날 15:00 UTC
+    yesterday_end = now.replace(
+        hour=14, minute=59, second=59, microsecond=999999
+    ) - timedelta(
+        days=1
+    )  # 전날 23:59:59 KST = 전날 14:59:59 UTC
 
     # 어제 리뷰된 PR만 필터링
     filtered_prs = []
@@ -400,8 +408,8 @@ def send_to_slack(
     # 현재 시간 (UTC 기준)
     now = datetime.now(timezone.utc)
     # KST로 날짜 표시 (UTC+9, 즉 9시간 더함)
-    kst_date = (now + timedelta(hours=9)).strftime('%Y-%m-%d')
-    
+    kst_date = (now + timedelta(hours=9)).strftime("%Y-%m-%d")
+
     # 메시지 작성
     title = "📊 코드 리뷰 통계 보고서"
     subtitle = f"지난 {days}일간 리뷰 활동 (기준: {kst_date})"
@@ -563,9 +571,8 @@ def get_active_repos(
     Returns:
         활성 저장소 목록 (owner/name 형식)
     """
-    # 최소 활동 기간 계산 (UTC 기준)
-    now = datetime.now(timezone.utc)
-    min_activity_date = now - timedelta(days=min_activity_days)
+    # 최소 활동 기간 계산
+    min_activity_date = datetime.now(timezone.utc) - timedelta(days=min_activity_days)
 
     # 조직의 모든 저장소 가져오기
     org = github_client.get_organization(org_name)
@@ -612,9 +619,8 @@ def fetch_all_pr_data(
         print("활성화된 저장소가 없습니다.")
         return [], {}
 
-    # 날짜 계산 (UTC 기준)
-    now = datetime.now(timezone.utc)
-    since_date = now - timedelta(days=days)
+    # 날짜 계산
+    since_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     # service/github의 fetch_pull_requests_parallel 함수 사용
     repository_to_pull_requests = fetch_pull_requests_parallel(
