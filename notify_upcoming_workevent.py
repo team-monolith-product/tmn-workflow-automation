@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import time
 from collections import defaultdict
@@ -9,9 +10,9 @@ from typing import Dict, List, Set, Tuple
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 from api.wantedspace import get_workevent, requests_get_with_retry
-from service.slack import slack_call_with_retry
 
 # ────────────────────────────── 환경변수 & 상수 ──────────────────────────────
 load_dotenv()
@@ -29,6 +30,33 @@ DEFAULT_LOOKAHEAD_DAYS = 10
 API_BASE = "https://api.wantedspace.ai/tools/openapi"
 HEADERS = {"Authorization": WANTEDSPACE_API_SECRET}
 COMMON_QS = {"key": WANTEDSPACE_API_KEY}
+
+# ──────────────────────────────── Slack util ────────────────────────────────
+
+def slack_call_with_retry(method, max_retries: int = 3, **kwargs):
+    """
+    Slack API 호출 시 429(Rate Limit) 대응 지수 백오프 재시도
+    
+    Args:
+        method: 호출할 Slack API 메서드
+        max_retries (int): 최대 재시도 횟수
+        **kwargs: Slack API 메서드에 전달할 인자
+        
+    Returns:
+        Slack API 호출 결과
+    """
+    backoff = 4
+    for attempt in range(1, max_retries + 1):
+        try:
+            return method(**kwargs)
+        except SlackApiError as e:
+            if e.response.status_code == 429 or "rate_limited" in str(e):
+                if attempt == max_retries:
+                    raise
+                time.sleep(backoff)
+                backoff *= 2
+            else:
+                raise
 
 # ──────────────────────────── WantedSpace util ─────────────────────────────
 
