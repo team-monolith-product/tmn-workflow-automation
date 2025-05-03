@@ -26,13 +26,16 @@
 
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
+import dotenv
 
 from service.slack import get_email_to_user_id
+
+dotenv.load_dotenv()
 
 
 NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
@@ -40,20 +43,20 @@ SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 
 
 def get_pr_links(
-    notion: NotionClient, pr_relations: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    notion: NotionClient, pr_relations: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
-    pr_links_info: List[Dict[str, Any]] = []
+    pr_links_info: list[dict[str, Any]] = []
     for relation in pr_relations:
         pr_page_id: str = relation["id"]
-        pr_page: Dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
-        properties: Dict[str, Any] = pr_page["properties"]
+        pr_page: dict[str, Any] = notion.pages.retrieve(page_id=pr_page_id)
+        properties: dict[str, Any] = pr_page["properties"]
 
-        url_property: Dict[str, Any] = properties.get("_external_object_url", {})
+        url_property: dict[str, Any] = properties.get("_external_object_url", {})
         if "url" in url_property and url_property["url"]:
             pr_url: str = url_property["url"]
             # 'Merged At' 필드에서 병합 여부 추출
-            merged_at_property: Dict[str, Any] = properties.get("Merged At", {})
+            merged_at_property: dict[str, Any] = properties.get("Merged At", {})
             is_merged: bool = False
             if merged_at_property.get("date") and merged_at_property["date"].get(
                 "start"
@@ -66,7 +69,7 @@ def get_pr_links(
     return pr_links_info
 
 
-def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+def format_pr_link(pr_info: dict[str, Any]) -> tuple[str, str | None]:
     """PR 링크를 포맷하고 레포지토리 이름을 추출하며 병합 상태에 따라 이모지를 추가합니다."""
     pr_url: str = pr_info["url"]
     is_merged: bool = pr_info["merged"]
@@ -87,25 +90,52 @@ def format_pr_link(pr_info: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         return pr_url, None
 
 
-def main_deploy_script():
+def summarize_deployment(
+    caller_slack_user_id: str | None = None,
+):
     """
-    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업을 가져오고
+    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업 또는 '종료일'이 오늘인 과업을 가져오고
     2) 담당자를 이메일로 매핑해서 Slack 멘션
     3) GitHub PR 링크 파싱
     4) 한 번에 정리된 메시지를 Slack에 전송
     """
-    notion = NotionClient(auth=os.environ["NOTION_API_KEY"])
+    notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     email_to_user_id = get_email_to_user_id(slack_client)
 
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 
     # 1) 오늘 배포할 과업 목록 조회
-    #    여기서는 예시로 '배포 예정 날짜'라는 Date 속성이 있고, 여기에 오늘 날짜가 'equals'로 설정된 경우를 가져온다고 가정
+    #    - '배포 예정 날짜'가 오늘인 경우
+    #    - '종료일'이 오늘인 경우
     query_result = notion.databases.query(
         **{
             "database_id": NOTION_DATABASE_ID,
-            "filter": {"property": "배포 예정 날짜", "date": {"equals": today_str}},
+            "filter": {
+                "and": [
+                    {
+                        "or": [
+                            {
+                                "property": "배포 예정 날짜",
+                                "date": {"equals": today_str},
+                            },
+                            {"property": "종료일", "date": {"equals": today_str}},
+                        ]
+                    },
+                    {
+                        "and": [
+                            {
+                                "property": "구성요소",
+                                "multi_select": {"does_not_contain": "기획"},
+                            },
+                            {
+                                "property": "구성요소",
+                                "multi_select": {"does_not_contain": "디자인"},
+                            },
+                        ]
+                    },
+                ]
+            },
         }
     )
 
@@ -114,16 +144,19 @@ def main_deploy_script():
         # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?",
+            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
         )
         print("No tasks scheduled for deployment today.")
         return
 
     # 여러 PR에서 뽑은 레포지토리들
-    repos_to_deploy: Set[str] = set()
+    repos_to_deploy: set[str] = set()
 
-    # 메시지 헤더
-    message = "오늘 배포 예정 과업!\n"
+    # 메시지 헤더 & 호출자 멘션
+    if caller_slack_user_id:
+        message = f"오늘 배포 예정 과업! (by <@{caller_slack_user_id}>)\n"
+    else:
+        message = "오늘 배포 예정 과업!\n"
 
     for task in tasks:
         props = task["properties"]
@@ -155,12 +188,12 @@ def main_deploy_script():
         task_title_link = f"<{notion_page_url}|{task_title}>"
 
         # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
-        pr_link_property: Dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
-        pr_relations: List[Dict[str, Any]] = pr_link_property.get("relation", [])
-        pr_links_info: List[Dict[str, Any]] = get_pr_links(notion, pr_relations)
+        pr_link_property: dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
+        pr_relations: list[dict[str, Any]] = pr_link_property.get("relation", [])
+        pr_links_info: list[dict[str, Any]] = get_pr_links(notion, pr_relations)
 
         # PR 링크 포맷 및 레포지토리 이름 수집
-        formatted_pr_links: List[str] = []
+        formatted_pr_links: list[str] = []
         for pr_info in pr_links_info:
             formatted_link, repo_name = format_pr_link(pr_info)
             formatted_pr_links.append(formatted_link)
@@ -181,10 +214,12 @@ def main_deploy_script():
         for repo in sorted(repos_to_deploy):
             message += f"• {repo}\n"
 
+    message += "\n(/summarize-deployment 명령어를 사용해보세요!)\n"
+
     # 최종 메시지 전송
     slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=message)
     print("Message sent to Slack.")
 
 
 if __name__ == "__main__":
-    main_deploy_script()
+    summarize_deployment()

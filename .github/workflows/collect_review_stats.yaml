@@ -1,28 +1,30 @@
-name: Summarize Deployment
+name: Collect Code Review Stats
 
 on:
   schedule:
-    - cron: '30 7 * * 1-5'    # 매일 오후 4시 30분 실행 (UTC 7시 30분)
-  workflow_dispatch:        # 수동 트리거 (디버그 목적)
+    - cron: '0 0 * * 1-5'  # 매주 평일 오전 9시(UTC+9)에 실행
+  workflow_dispatch:  # 수동 실행 가능
 
 jobs:
-  build:
+  collect_review_stats:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # 10분 타임아웃 설정
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run script
+          
+      - name: Run collect_review_stats.py
         env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          GITHUB_TOKEN: ${{ secrets.WORKFLOW_AUTOMATION_GITHUB_TOKEN }}
         run: |
-          python summarize_deployment.py
+          python collect_review_stats.py

@@ -7,7 +7,7 @@ import requests
 
 from dotenv import load_dotenv
 from notion2md.exporter.block import StringExporter
-from notion2md.convertor.block import BLOCK_TYPES
+from notion2md.convertor.block import BLOCK_TYPES, table_row
 from markdown import markdown
 from notion_client import Client as NotionClient
 import pypandoc
@@ -123,7 +123,7 @@ def convert_md_to_html(md_text: str) -> str:
     """
     Python의 markdown 라이브러리로 MD -> HTML 변환
     """
-    return markdown(md_text)
+    return markdown(md_text, extensions=["tables"])
 
 
 def split_markdown_into_two_parts(
@@ -524,7 +524,14 @@ def video(info: dict):
         print(f"[ERROR] Unsupported video format: {file_name}")
 
 
+def new_table_row(info: list) -> list:
+    old = table_row(info)
+    # \n를 <br/>로 치환
+    return [o.replace("\n", "<br/>") for o in old]
+
+
 BLOCK_TYPES["video"] = video
+BLOCK_TYPES["table_row"] = new_table_row
 
 
 def main():

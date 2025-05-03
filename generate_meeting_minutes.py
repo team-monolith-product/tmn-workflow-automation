@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Dict, Any
+from typing import Any
 
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
@@ -84,7 +84,7 @@ def main():
 
 def transform_notion_page(
     notion: NotionClient, page_id: str, visited=None
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     주어진 Notion 페이지 ID에 대해:
     1) 제목, 본문, 타임라인, 슬랙 링크 등을 파싱
@@ -166,7 +166,7 @@ def transform_notion_page(
 
 def transform_slack_conversation(
     slack_client: WebClient, channel_id: str, ts: str
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Slack 대화를 불러와서 다음과 같은 형태의 리스트를 반환한다고 가정:
     [
@@ -287,8 +287,8 @@ Example:
 
 
 def generate_prompt(
-    related_pages: List[Dict[str, Any]],
-    slack_conversations: List[List[Dict[str, Any]]],
+    related_pages: list[dict[str, Any]],
+    slack_conversations: list[list[dict[str, Any]]],
 ) -> str:
     """
     다음 형식을 만족하는 프롬프트를 생성한다.
@@ -376,7 +376,7 @@ def create_meeting_minutes_page(
 # --------------------------
 
 
-def extract_page_title(page_data: Dict[str, Any]) -> str:
+def extract_page_title(page_data: dict[str, Any]) -> str:
     """
     노션 API로 가져온 page 데이터에서 제목을 추출.
     노션의 title property(예: "Name" 또는 "title")를 찾아 반환.
@@ -400,7 +400,7 @@ def extract_page_title(page_data: Dict[str, Any]) -> str:
     return text_val.strip()
 
 
-def extract_timeline_property(page_data: Dict[str, Any]) -> Dict[str, str]:
+def extract_timeline_property(page_data: dict[str, Any]) -> dict[str, str]:
     """
     Notion의 date 프로퍼티(예: '타임라인')가 date range일 경우, start/end 추출
     반환 형식: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
@@ -419,7 +419,7 @@ def extract_timeline_property(page_data: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def parse_slack_links_from_body(md_text: str) -> List[Dict[str, str]]:
+def parse_slack_links_from_body(md_text: str) -> list[dict[str, str]]:
     """
     본문(Markdown) 내 슬랙 링크를 찾아,
     대화 조회에 필요한 channel, ts 정보를 추출한다.

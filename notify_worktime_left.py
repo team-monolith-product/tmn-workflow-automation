@@ -70,7 +70,9 @@ def main():
             total_required_worktime += REQUIRED_DAILY_MINUTES
 
     # 4) Slack 사용자 상세정보
-    user_id_to_user_info = get_user_id_to_user_info(slack_client, list(email_to_user_id.values()))
+    user_id_to_user_info = get_user_id_to_user_info(
+        slack_client, list(email_to_user_id.values())
+    )
 
     # 5) 사용자별 로직 → ASCII 테이블
     table_data = []
@@ -86,7 +88,9 @@ def main():
         actual_worktime = email_to_worktime.get(email, 0)
 
         # 휴가 (이미 사용, 오늘, 미래)
-        workevent = get_workevent(date=f"{year}-{month:02d}-01", type="month", email=email)
+        workevent = get_workevent(
+            date=f"{year}-{month:02d}-01", type="month", email=email
+        )
         vac_info = get_monthly_vacation_breakdown(year, month, workevent)
         used_vac = vac_info["used_days"]
         today_vac = vac_info["today_days"]
@@ -164,21 +168,16 @@ def main():
             print("==========================================")
         else:
             code_block = f"```{ascii_table}```"
-            try:
-                slack_call_with_retry(
-                    slack_client.chat_postMessage,
-                    channel=CHANNEL_ID,
-                    text="근무 현황(간소화)",
-                    blocks=[
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": code_block},
-                        }
-                    ],
-                )
-                print("Slack 메시지 전송 완료.")
-            except Exception as e:
-                print("[ERROR] Slack post failed:", e)
+            slack_client.chat_postMessage(
+                channel=CHANNEL_ID,
+                text="근무 현황(간소화)",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": code_block},
+                    }
+                ],
+            )
     else:
         print("No data to display.")
 
@@ -345,34 +344,6 @@ def get_daily_vacation_map(year: int, month: int, workevent):
         print("workevent:", workevent)
 
     return day_to_vac
-
-
-def slack_call_with_retry(slack_method, max_retries=3, initial_backoff=5, **kwargs):
-    """
-    Slack SDK 메서드(users_info, chat_postMessage 등) 재시도 로직
-    """
-    from slack_sdk.errors import SlackApiError
-
-    backoff = initial_backoff
-    for attempt in range(1, max_retries + 1):
-        try:
-            return slack_method(**kwargs)
-        except SlackApiError as e:
-            if "rate_limited" in str(e) or "429" in str(e):
-                print(f"[WARN] Slack Rate Limit, attempt={attempt}, error={e}")
-                if attempt == max_retries:
-                    raise
-                time.sleep(backoff)
-                backoff *= 2
-            else:
-                raise
-        except Exception as ex:
-            print(f"[WARN] Slack call exception on attempt={attempt}: {ex}")
-            if attempt == max_retries:
-                raise
-            time.sleep(backoff)
-            backoff *= 5
-    return None
 
 
 if __name__ == "__main__":
