@@ -137,8 +137,9 @@ def summarize_deployment(
         ],
     ]
 
-    # Notion API에서 Compoount filter confitions 를 최대 2 Depth로 지원하므로
-    # 구성요소 필터링을 분배법칙으로 OR 의 각 operand에 적용합니다.
+    # Notion API에서 Compound filter confitions 를 최대 2 Levels deep으로 지원합니다.
+    # 이에 따라, 구성요소 필터링을 분배법칙으로 OR 연산의 operand 각각에 적용합니다.
+    # 참조: https://developers.notion.com/reference/post-database-query-filter#compound-filter-conditions
     or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
 
     query_result = notion.databases.query(
