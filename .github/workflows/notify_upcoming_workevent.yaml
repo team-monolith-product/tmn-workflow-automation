@@ -1,0 +1,27 @@
+name: Notify Upcoming Workevent
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'  # 매일 평일(월-금) UTC 0시 = 한국 시간 오전 9시에 실행
+  workflow_dispatch:
+
+jobs:
+  notify_upcoming_workevent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run notify_upcoming_workevent.py
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          WANTEDSPACE_API_KEY: ${{ secrets.WANTEDSPACE_API_KEY }}
+          WANTEDSPACE_API_SECRET: ${{ secrets.WANTEDSPACE_API_SECRET }}
+        run: |
+          python notify_upcoming_workevent.py
