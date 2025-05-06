@@ -215,9 +215,11 @@ def get_slack_user_map(slack_client: WebClient):
 
 def get_public_holidays(year: int, month: int):
     """
-    DATA_GO_KR_SPECIAL_DAY_KEY 환경 변수에 등록된 서비스키를 사용하여,
-    해당 연도, 월의 공휴일 정보를 getRestDeInfo API를 통해 조회하고,
-    공휴일(공공기관 휴일여부가 'Y')인 날짜를 'YYYY-MM-DD' 형식의 문자열 집합으로 반환한다.
+    공공데이터포털 API로 해당 연/월의 공휴일(YYYY-MM-DD) 집합을 조회
+    
+    공공데이터 포털 API에서 누락된 휴일들이 있어 수동으로 추가:
+    - 근로자의 날 (5월 1일)
+    - 2025년 5월 6일 (어린이날 대체공휴일)
     """
     url = "http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
     params = {
@@ -249,6 +251,16 @@ def get_public_holidays(year: int, month: int):
     except Exception as e:
         print("Error parsing holiday info:", e)
         print("Response data:", data)
+    
+    # 수동으로 특정 휴일 추가
+    if month == 5:
+        # 근로자의 날 추가 (5월 1일)
+        holidays.add(f"{year}-05-01")
+        
+        # 2025년 5월 6일 (어린이날 대체공휴일) 추가
+        if year == 2025:
+            holidays.add(f"{year}-05-06")
+    
     return holidays
 
 
