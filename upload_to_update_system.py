@@ -7,7 +7,7 @@ import requests
 
 from dotenv import load_dotenv
 from notion2md.exporter.block import StringExporter
-from notion2md.convertor.block import BLOCK_TYPES
+from notion2md.convertor.block import BLOCK_TYPES, table_row
 from markdown import markdown
 from notion_client import Client as NotionClient
 import pypandoc
@@ -22,6 +22,7 @@ RAILS_BEARER_TOKEN = os.environ.get("RAILS_BEARER_TOKEN")
 
 PARTNER_ID = os.environ.get("PARTNER_ID")
 
+
 def get_notion_md(page_id: str) -> str:
     """노션 페이지를 notion2md로 마크다운 문자열 추출."""
     return StringExporter(block_id=page_id, output_path="dummy").export()
@@ -31,7 +32,7 @@ def extract_image_urls(markdown_text: str) -> list:
     """
     마크다운에서 `![...](URL)` 형태의 이미지 링크를 전부 추출.
     """
-    pattern = r'!\[.*?\]\((.*?)\)'
+    pattern = r"!\[.*?\]\((.*?)\)"
     return re.findall(pattern, markdown_text)
 
 
@@ -54,12 +55,12 @@ def direct_upload_to_rails(file_bytes: bytes, filename: str, content_type: str) 
             "byte_size": byte_size,
             "checksum": base64_checksum,
             "content_type": content_type,
-            "metadata": {}
+            "metadata": {},
         }
     }
     headers = {
         "Authorization": f"Bearer {RAILS_BEARER_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     resp = requests.post(create_blob_url, json=payload, headers=headers)
@@ -72,12 +73,13 @@ def direct_upload_to_rails(file_bytes: bytes, filename: str, content_type: str) 
     signed_id = data["signed_id"]
 
     # 2) PUT 업로드
-    put_resp = requests.put(upload_url, data=file_bytes,
-                            headers=upload_headers)
+    put_resp = requests.put(upload_url, data=file_bytes, headers=upload_headers)
     put_resp.raise_for_status()
 
     # 3) 최종 Blob 접근 경로
-    blob_url = f"{RAILS_BASE_URL}/rails/active_storage/blobs/redirect/{signed_id}/{filename}"
+    blob_url = (
+        f"{RAILS_BASE_URL}/rails/active_storage/blobs/redirect/{signed_id}/{filename}"
+    )
     return blob_url
 
 
@@ -100,11 +102,13 @@ def replace_images_in_md(md_text: str) -> str:
                 # 파일명 / content-type 추정
                 filename_guess = "image.png"
                 content_type_guess = resp.headers.get(
-                    "Content-Type", "application/octet-stream")
+                    "Content-Type", "application/octet-stream"
+                )
 
                 # 업로드 후 새 URL
                 new_url = direct_upload_to_rails(
-                    file_bytes, filename_guess, content_type_guess)
+                    file_bytes, filename_guess, content_type_guess
+                )
                 replaced_md = replaced_md.replace(url, new_url)
                 print(f"   => Replaced with {new_url}")
             else:
@@ -119,13 +123,11 @@ def convert_md_to_html(md_text: str) -> str:
     """
     Python의 markdown 라이브러리로 MD -> HTML 변환
     """
-    return markdown(md_text)
+    return markdown(md_text, extensions=["tables"])
 
 
 def split_markdown_into_two_parts(
-    md_text: str,
-    start_heading: str,
-    next_heading: str
+    md_text: str, start_heading: str, next_heading: str
 ) -> tuple[str, str]:
     """
     'start_heading'가 들어간 줄부터
@@ -153,15 +155,14 @@ def split_markdown_into_two_parts(
 
     if start_idx is None:
         # "start_heading" 문구를 못 찾으면, 오류 발생
-        raise ValueError(
-            f"Cannot find '{start_heading}' in the markdown text.")
+        raise ValueError(f"Cannot find '{start_heading}' in the markdown text.")
 
     # "next_heading"를 못 찾으면 오류 발생생
     if next_idx is None:
         raise ValueError(f"Cannot find '{next_heading}' in the markdown text.")
     else:
-        part1_lines = lines[start_idx+1:next_idx]
-        part2_lines = lines[next_idx+1:]
+        part1_lines = lines[start_idx + 1 : next_idx]
+        part2_lines = lines[next_idx + 1 :]
 
     part1 = "\n".join(part1_lines).strip()
     part2 = "\n".join(part2_lines).strip()
@@ -176,9 +177,7 @@ def get_before_and_after_html(page_id: str = PAGE_ID):
     # 2) "2. 현행 내용" ~ "3. 수정 내용" 으로 문서 분할
     #    (실제 h3 제목에 맞춰 string match)
     part1_md, part2_md = split_markdown_into_two_parts(
-        original_md,
-        "현행 내용",
-        "수정 내용"
+        original_md, "현행 내용", "수정 내용"
     )
 
     # 만약 "현행 내용" ~ "수정 내용" 구간만 따로 떼어내고, "수정 내용"부터 끝까지도 따로 떼어내고 싶다면
@@ -217,16 +216,18 @@ def sign_in_to_update_system():
         "uid": update_system_id,
         "bfEcrpPswd": update_system_password,
         "userId": "",
-        "userPw": ""
+        "userPw": "",
     }
     headers = {
         "Content-Type": "application/json; charset=UTF-8",
     }
 
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    })
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
+    )
     resp = session.post(login_url, json=payload, headers=headers)
     resp.raise_for_status()
 
@@ -310,25 +311,31 @@ def upload_meeting_minutes_to_update_system(session, file_path: str):
         "menuid": "AME000104",
     }
     files = {
-        "files": (file_name, open(file_path, "rb"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        "files": (
+            file_name,
+            open(file_path, "rb"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
     }
     # fileInfo -> multipart의 텍스트 파트 (JSON 문자열로 넘겨주는 게 안전)
-    file_info_value = json.dumps([{
-        "atchFileGroupId": "",
-        "atchFileSn": 0,
-        "sysSeCd": "AME",
-        "docTypeCd": "",
-        "fileNm": file_name,
-        "fileUrlAddr": "",
-        "imgYn": "",
-        "sysStrgFileNm": "",
-        "fileCpcty": file_size,
-        "fileExpln": "",
-        "sts": "i"
-    }])
-    data = {
-        "fileInfo": file_info_value
-    }
+    file_info_value = json.dumps(
+        [
+            {
+                "atchFileGroupId": "",
+                "atchFileSn": 0,
+                "sysSeCd": "AME",
+                "docTypeCd": "",
+                "fileNm": file_name,
+                "fileUrlAddr": "",
+                "imgYn": "",
+                "sysStrgFileNm": "",
+                "fileCpcty": file_size,
+                "fileExpln": "",
+                "sts": "i",
+            }
+        ]
+    )
+    data = {"fileInfo": file_info_value}
 
     resp = session.post(upload_url, headers=headers, files=files, data=data)
     resp.raise_for_status()
@@ -456,7 +463,7 @@ def upload_to_update_system(
             "schlvSeCd": "3",
             "schlvSbjtgrpSeCd": "303",
             "sMulYn": "",
-            "sts": "i"
+            "sts": "i",
         }
     ]
 
@@ -481,31 +488,32 @@ def list_update(session, title):
         "sAutNm": "",
         "sTxbkMnchNm": "",
         "sTxbkMdchNm": "",
-        "sKywdCn": title
+        "sKywdCn": title,
     }
     resp = session.post(url, json=payload, headers=headers)
     resp.raise_for_status()
 
     return resp.json()
 
+
 def video(info: dict):
-    file_name = info['file_name']
-    url = info['url']
+    file_name = info["file_name"]
+    url = info["url"]
 
     # file_name이 mp4 등 비디오 파일이라면
-    if file_name.endswith('.mp4') or file_name.endswith('.mov'):
+    if file_name.endswith(".mp4") or file_name.endswith(".mov"):
         print(f"[INFO] Download & upload video: {url}")
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
             file_bytes = resp.content
             # 파일명 / content-type 추정
             content_type_guess = resp.headers.get(
-                "Content-Type", "application/octet-stream")
+                "Content-Type", "application/octet-stream"
+            )
 
             # 업로드 후 새 URL
-            new_url = direct_upload_to_rails(
-                file_bytes, file_name, content_type_guess)
-            return f"<video width=\"600\" controls><source src=\"{new_url}\"/>"
+            new_url = direct_upload_to_rails(file_bytes, file_name, content_type_guess)
+            return f'<video width="600" controls><source src="{new_url}"/>'
         else:
             # raise 가 무시되는 듯 함.
             # raise ValueError(f"Failed to download (HTTP {resp.status_code})")
@@ -515,7 +523,16 @@ def video(info: dict):
         # raise ValueError(f"Unsupported video format: {file_name}")
         print(f"[ERROR] Unsupported video format: {file_name}")
 
-BLOCK_TYPES['video'] = video
+
+def new_table_row(info: list) -> list:
+    old = table_row(info)
+    # \n를 <br/>로 치환
+    return [o.replace("\n", "<br/>") for o in old]
+
+
+BLOCK_TYPES["video"] = video
+BLOCK_TYPES["table_row"] = new_table_row
+
 
 def main():
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
@@ -526,12 +543,7 @@ def main():
     response = notion.databases.query(
         **{
             "database_id": database_id,
-            "filter": {
-                "property": "mdspSn",
-                "rich_text": {
-                    "is_empty": True
-                }
-            }
+            "filter": {"property": "mdspSn", "rich_text": {"is_empty": True}},
         }
     )
 
@@ -547,19 +559,22 @@ def main():
         title = item["properties"]["제목"]["title"][0]["plain_text"]
         print(f"'{title}' 문서에 대해 처리를 시작합니다.")
 
-        access_path_explain = item["properties"]["상세 위치 (⚠️필수)"]["rich_text"][0]["plain_text"]
+        access_path_explain = item["properties"]["상세 위치 (⚠️필수)"]["rich_text"][0][
+            "plain_text"
+        ]
 
         # 2. 회의록을 DOCX로 변환환
         os.makedirs("meeting_minutes", exist_ok=True)
 
         meeting_minutes_id = item["properties"]["회의록"]["relation"][0]["id"]
         meeting_minutes_md = StringExporter(
-            block_id=meeting_minutes_id, output_path="dummy").export()
+            block_id=meeting_minutes_id, output_path="dummy"
+        ).export()
         pypandoc.convert_text(
-            meeting_minutes_md,           # 변환할 원본(문자열)
-            "docx",            # 목표 포맷
-            format="md",       # 원본의 포맷(Markdown)
-            outputfile=f"meeting_minutes/{title} 회의록.docx"
+            meeting_minutes_md,  # 변환할 원본(문자열)
+            "docx",  # 목표 포맷
+            format="md",  # 원본의 포맷(Markdown)
+            outputfile=f"meeting_minutes/{title} 회의록.docx",
         )
         print(f"DOCX 파일이 생성되었습니다: meeting_minutes/{title} 회의록.docx")
 
@@ -587,12 +602,15 @@ def main():
         # DOCX 파일을 업로드하고, 파일 ID를 획득
         print("DOCX 파일을 수정/보완 시스템에 업로드합니다...")
         atch_file_group_id = upload_meeting_minutes_to_update_system(
-            session, f"meeting_minutes/{title} 회의록.docx")
-        print(f"DOCX 파일이 수정/보완 시스템에 업로드되었습니다. ID: {atch_file_group_id}")
+            session, f"meeting_minutes/{title} 회의록.docx"
+        )
+        print(
+            f"DOCX 파일이 수정/보완 시스템에 업로드되었습니다. ID: {atch_file_group_id}"
+        )
 
         # 수정/보완 시스템에 업로드
         print(f"'{title}' 건을 수정/보완 시스템에 업로드합니다...")
-        
+
         upload_to_update_system(
             session,
             atch_file_group_id,
@@ -600,7 +618,7 @@ def main():
             after_html,
             title,
             access_path_explain,
-            deployment_date
+            deployment_date,
         )
         print(f"'{title}' 건이 수정/보완 시스템에 업로드되었습니다.")
 
@@ -619,15 +637,10 @@ def main():
                     properties={
                         "mdspSn": {
                             "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {
-                                        "content": i["mdspSn"]
-                                    }
-                                }
+                                {"type": "text", "text": {"content": i["mdspSn"]}}
                             ]
                         }
-                    }
+                    },
                 )
                 found = True
                 break

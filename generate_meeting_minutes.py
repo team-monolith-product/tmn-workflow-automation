@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Dict, Any
+from typing import Any
 
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
@@ -14,7 +14,8 @@ from md2notionpage.core import parse_md
 # 환경 변수 로드
 load_dotenv()
 
-AIDT_UPDATE_DATABASE = '15a1cc820da68092af44fa0d2975cba4'
+AIDT_UPDATE_DATABASE = "15a1cc820da68092af44fa0d2975cba4"
+
 
 def main():
     """
@@ -31,12 +32,7 @@ def main():
     # 1) 데이터베이스에서 '회의록'이 없는 페이지를 찾아서 처리
     response = notion.databases.query(
         database_id=AIDT_UPDATE_DATABASE,
-        filter={
-            "property": "회의록",
-            "relation": {
-                "is_empty": True
-            }
-        }
+        filter={"property": "회의록", "relation": {"is_empty": True}},
     )
 
     for root_page_id in [page["id"] for page in response["results"]]:
@@ -53,7 +49,8 @@ def main():
                 if channel_id and thread_ts:
                     slack_conversations.append(
                         transform_slack_conversation(
-                            slack_client, channel_id, thread_ts)
+                            slack_client, channel_id, thread_ts
+                        )
                     )
 
         print("=== 관련 페이지 정보 ===")
@@ -76,7 +73,7 @@ def main():
         print("회의록 초안:\n", meeting_minutes)
 
         confirm = input("회의록 초안을 생성하시겠습니까? (y/n): ")
-        
+
         if confirm.lower() != "y":
             print("생성을 취소합니다.")
             continue
@@ -84,11 +81,10 @@ def main():
         # 6) OpenAI API를 통해 생성된 회의록 초안을 Notion 페이지에 업데이트
         create_meeting_minutes_page(notion, root_page_id, meeting_minutes)
 
+
 def transform_notion_page(
-    notion: NotionClient,
-    page_id: str,
-    visited=None
-) -> List[Dict[str, Any]]:
+    notion: NotionClient, page_id: str, visited=None
+) -> list[dict[str, Any]]:
     """
     주어진 Notion 페이지 ID에 대해:
     1) 제목, 본문, 타임라인, 슬랙 링크 등을 파싱
@@ -161,17 +157,16 @@ def transform_notion_page(
     if related_pages_info and related_pages_info["type"] == "relation":
         for related_item in related_pages_info["relation"]:
             child_page_id = related_item["id"]
-            results.extend(transform_notion_page(
-                notion, child_page_id, visited=visited))
+            results.extend(
+                transform_notion_page(notion, child_page_id, visited=visited)
+            )
 
     return results
 
 
 def transform_slack_conversation(
-    slack_client: WebClient,
-    channel_id: str,
-    ts: str
-) -> List[Dict[str, Any]]:
+    slack_client: WebClient, channel_id: str, ts: str
+) -> list[dict[str, Any]]:
     """
     Slack 대화를 불러와서 다음과 같은 형태의 리스트를 반환한다고 가정:
     [
@@ -187,10 +182,7 @@ def transform_slack_conversation(
     실제로는 slack_client.conversations_replies 등을 사용.
     """
     try:
-        response = slack_client.conversations_replies(
-            channel=channel_id,
-            ts=ts
-        )
+        response = slack_client.conversations_replies(channel=channel_id, ts=ts)
         messages = response.get("messages", [])
     except SlackApiError as e:
         print(f"[transform_slack_conversation] 슬랙 API 에러: {e}")
@@ -201,11 +193,7 @@ def transform_slack_conversation(
         user = msg.get("user", "")
         text = msg.get("text", "")
         ts_ = msg.get("ts", "")
-        results.append({
-            "user": user,
-            "text": text,
-            "ts": ts_
-        })
+        results.append({"user": user, "text": text, "ts": ts_})
     return results
 
 
@@ -217,18 +205,14 @@ def get_notion_markdown_body(
     notion2md의 StringExporter를 사용.
     """
     try:
-        md_text = StringExporter(
-            block_id=page_id, output_path="dummy").export()
+        md_text = StringExporter(block_id=page_id, output_path="dummy").export()
         return md_text
     except Exception as e:
         print(f"[get_notion_markdown_body] 노션 본문 변환 오류: {e}")
         return ""
 
 
-def generate_meeting_minutes(
-    openai: OpenAI,
-    prompt: str
-) -> str:
+def generate_meeting_minutes(openai: OpenAI, prompt: str) -> str:
     """
     예시로, prompt를 입력하여 OpenAI API의 ChatCompletion 등을 통해
     회의록 초안을 생성한다고 가정. (실제 구현은 개발 환경에 맞게)
@@ -294,20 +278,17 @@ Example:
 
 ### 결론 및 액션 플랜
 - 노트 작성 시 화면 너비를 초과하는 경우 자동 줄바꿈 기능 적용  
-- UI 디자인 체크리스트 수립 후 실제 적용 시 문제가 없는지 검증"""
+- UI 디자인 체크리스트 수립 후 실제 적용 시 문제가 없는지 검증""",
             },
-            {
-                "role": "user",
-                "content": prompt
-            },
-        ]
+            {"role": "user", "content": prompt},
+        ],
     )
     return response.choices[0].message.content
 
 
 def generate_prompt(
-    related_pages: List[Dict[str, Any]],
-    slack_conversations: List[List[Dict[str, Any]]],
+    related_pages: list[dict[str, Any]],
+    slack_conversations: list[list[dict[str, Any]]],
 ) -> str:
     """
     다음 형식을 만족하는 프롬프트를 생성한다.
@@ -357,9 +338,7 @@ def generate_prompt(
 
 
 def create_meeting_minutes_page(
-    notion: NotionClient,
-    root_page_id: str,
-    meeting_minutes: str
+    notion: NotionClient, root_page_id: str, meeting_minutes: str
 ):
     """
     회의록 초안을 Notion 페이지에 업데이트한다.
@@ -373,38 +352,31 @@ def create_meeting_minutes_page(
                 "title": [
                     {
                         "text": {
-                            "content": root_page["properties"]["제목"]["title"][0]["text"]["content"] + " 회의록"
+                            "content": root_page["properties"]["제목"]["title"][0][
+                                "text"
+                            ]["content"]
+                            + " 회의록"
                         }
                     }
                 ]
             }
-        }
+        },
     )
 
-    notion.blocks.children.append(
-        response["id"],
-        children=parse_md(meeting_minutes)
-    )
+    notion.blocks.children.append(response["id"], children=parse_md(meeting_minutes))
 
     notion.pages.update(
         page_id=root_page_id,
-        properties={
-            "회의록": {
-                "relation": [
-                    {
-                        "id": response["id"]
-                    }
-                ]
-            }
-        }
+        properties={"회의록": {"relation": [{"id": response["id"]}]}},
     )
+
 
 # --------------------------
 # 아래는 보조/유틸 함수들
 # --------------------------
 
 
-def extract_page_title(page_data: Dict[str, Any]) -> str:
+def extract_page_title(page_data: dict[str, Any]) -> str:
     """
     노션 API로 가져온 page 데이터에서 제목을 추출.
     노션의 title property(예: "Name" 또는 "title")를 찾아 반환.
@@ -428,7 +400,7 @@ def extract_page_title(page_data: Dict[str, Any]) -> str:
     return text_val.strip()
 
 
-def extract_timeline_property(page_data: Dict[str, Any]) -> Dict[str, str]:
+def extract_timeline_property(page_data: dict[str, Any]) -> dict[str, str]:
     """
     Notion의 date 프로퍼티(예: '타임라인')가 date range일 경우, start/end 추출
     반환 형식: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
@@ -447,7 +419,7 @@ def extract_timeline_property(page_data: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def parse_slack_links_from_body(md_text: str) -> List[Dict[str, str]]:
+def parse_slack_links_from_body(md_text: str) -> list[dict[str, str]]:
     """
     본문(Markdown) 내 슬랙 링크를 찾아,
     대화 조회에 필요한 channel, ts 정보를 추출한다.
@@ -475,10 +447,7 @@ def parse_slack_links_from_body(md_text: str) -> List[Dict[str, str]]:
             # 혹시 숫자가 10자리 이하라면 그냥 그대로 사용
             ts = raw_ts
 
-        conversations.append({
-            "channel": channel,
-            "ts": ts
-        })
+        conversations.append({"channel": channel, "ts": ts})
     return conversations
 
 
@@ -486,7 +455,7 @@ def link_preview(info: dict) -> str:
     return f"(Link Preview)[{info['url']}]"
 
 
-BLOCK_TYPES['link_preview'] = link_preview
+BLOCK_TYPES["link_preview"] = link_preview
 
 if __name__ == "__main__":
     main()
