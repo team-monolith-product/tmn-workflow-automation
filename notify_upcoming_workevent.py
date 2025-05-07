@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import functools
 import os
-import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Set, Tuple
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
-from api.wantedspace import get_workevent, requests_get_with_retry
+from api.wantedspace import get_workevent, get_event_code_map
 
 # ────────────────────────────── 환경변수 & 상수 ──────────────────────────────
 load_dotenv()
@@ -28,88 +25,33 @@ if not all([SLACK_TOKEN, WANTEDSPACE_API_KEY, WANTEDSPACE_API_SECRET]):
 
 CHANNEL_ID = "C08EUJJSZF1"  # 게시 채널
 DEFAULT_LOOKAHEAD_DAYS = 10
-API_BASE = "https://api.wantedspace.ai/tools/openapi"
-HEADERS = {"Authorization": WANTEDSPACE_API_SECRET}
-COMMON_QS = {"key": WANTEDSPACE_API_KEY}
-
-# ──────────────────────────────── Slack util ────────────────────────────────
-
-
-def slack_call_with_retry(method, max_retries: int = 3, **kwargs):
-    """
-    Slack API 호출 시 429(Rate Limit) 대응 지수 백오프 재시도
-
-    Args:
-        method: 호출할 Slack API 메서드
-        max_retries (int): 최대 재시도 횟수
-        **kwargs: Slack API 메서드에 전달할 인자
-
-    Returns:
-        Slack API 호출 결과
-    """
-    backoff = 4
-    for attempt in range(1, max_retries + 1):
-        try:
-            return method(**kwargs)
-        except SlackApiError as e:
-            if e.response.status_code == 429 or "rate_limited" in str(e):
-                if attempt == max_retries:
-                    raise
-                time.sleep(backoff)
-                backoff *= 2
-            else:
-                raise
-
-
-# ──────────────────────────── WantedSpace util ─────────────────────────────
-
-
-def load_event_code_map() -> Dict[str, str]:
-    """
-    워크이벤트 코드와 텍스트의 매핑을 조회합니다.
-
-    Returns:
-        Dict[str, str]: 이벤트 코드와 이벤트 텍스트의 매핑 (예: {"WNS_VACATION_PM": "연차(오후)"})
-    """
-    url = f"{API_BASE}/workevent/event_codes/"
-    resp = requests_get_with_retry(url, params=COMMON_QS, headers=HEADERS)
-    resp.raise_for_status()
-    return {item["code"]: item["text"] for item in resp.json()}
 
 
 def fetch_absence_between(start_dt: datetime, end_dt: datetime) -> List[dict]:
     """
     특정 기간 내의 확정된 근태 이벤트를 조회합니다.
-
+    
     Args:
         start_dt (datetime): 조회 시작 날짜
         end_dt (datetime): 조회 종료 날짜
-
+        
     Returns:
         List[dict]: 근태 이벤트 목록 (상태가 "APPROVED" 또는 "INFORMED"인 이벤트만)
     """
-    params = {
-        **COMMON_QS,
-        "type": "range",
-        "start_date": start_dt.strftime("%Y-%m-%d"),
-        "end_date": end_dt.strftime("%Y-%m-%d"),
-    }
-    url = f"{API_BASE}/workevent/"
-    events: List[dict] = []
-
     try:
-        while url:
-            r = requests_get_with_retry(url, params=params, headers=HEADERS)
-            r.raise_for_status()
-            js = r.json()
-            events.extend(js.get("results", []))
-            url = js.get("next")
-            params = None  # next URL에 쿼리 포함
+        response = get_workevent(
+            date=start_dt.strftime("%Y-%m-%d"),
+            type="range",
+            start_date=start_dt.strftime("%Y-%m-%d"),
+            end_date=end_dt.strftime("%Y-%m-%d"),
+        )
+        
+        # 확정된 이벤트만 필터링
+        events = response.get("results", [])
+        return [ev for ev in events if ev.get("status") in {"APPROVED", "INFORMED"}]
     except Exception as e:
         print(f"[ERROR] 근태 이벤트 조회 실패: {e}")
         return []
-
-    return [ev for ev in events if ev.get("status") in {"APPROVED", "INFORMED"}]
 
 
 def build_absence_set(
@@ -121,18 +63,18 @@ def build_absence_set(
 ) -> Set[Tuple[date, str, str]]:
     """
     근태 이벤트 목록에서 (날짜, 이름, 종류) 집합을 생성합니다.
-
+    
     Args:
         events (List[dict]): 근태 이벤트 목록
         code_map (Dict[str, str]): 이벤트 코드와 텍스트 매핑
         start (date): 시작 날짜
         end (date): 종료 날짜
-
+        
     Returns:
         Set[Tuple[date, str, str]]: (날짜, 이름, 종류) 집합
     """
     uniq: Set[Tuple[date, str, str]] = set()
-
+    
     try:
         for ev in events:
             name = ev.get("username") or ev.get("email")
@@ -145,7 +87,7 @@ def build_absence_set(
                 cur += timedelta(days=1)
     except Exception as e:
         print(f"[ERROR] 근태 데이터 처리 실패: {e}")
-
+        
     return uniq
 
 
@@ -156,10 +98,10 @@ KOREAN_WEEKDAY = "월화수목금토일"  # Monday=0 → "월"
 def fmt(dt: date) -> str:
     """
     날짜를 한글 포맷으로 변환합니다.
-
+    
     Args:
         dt (date): 변환할 날짜
-
+        
     Returns:
         str: 변환된 문자열 (예: "5월 3일(금)")
     """
@@ -174,11 +116,11 @@ def _compress_person_ranges(
 ) -> List[Tuple[date, date, str]]:
     """
     단일 인원의 연속된 근태 구간을 압축합니다.
-
+    
     Args:
         dates (List[date]): 날짜 목록
         kind_by_date (Dict[date, str]): 날짜별 근태 종류
-
+        
     Returns:
         List[Tuple[date, date, str]]: (시작일, 종료일, 종류) 목록
     """
@@ -205,10 +147,10 @@ def _compress_person_ranges(
 def make_summary(absence_set: Set[Tuple[date, str, str]]) -> str:
     """
     근태 데이터를 이름·종류별로 한 줄씩 정리한 요약을 생성합니다.
-
+    
     Args:
         absence_set (Set[Tuple[date, str, str]]): (날짜, 이름, 종류) 집합
-
+        
     Returns:
         str: 요약 문자열
     """
@@ -239,7 +181,7 @@ def main():
     """
     메인 함수: 명령행 인자를 파싱하고 예정된 근태 정보를 수집하여
     요약을 생성한 후 Slack 채널에 전송합니다.
-
+    
     명령행 옵션:
     --days: 조회할 미래 일수 (기본값: 10일)
     --dry-run: 실제 메시지 전송 없이 콘솔에만 출력
@@ -253,8 +195,11 @@ def main():
     end_dt = today + timedelta(days=args.days - 1)
 
     try:
+        # 이벤트 코드 매핑 가져오기
+        code_map = get_event_code_map()
+        
+        # 근태 이벤트 조회
         events = fetch_absence_between(today, end_dt)
-        code_map = load_event_code_map()
         absence = build_absence_set(
             events, code_map, start=today.date(), end=end_dt.date()
         )
@@ -269,8 +214,7 @@ def main():
             return
 
         slack = WebClient(token=SLACK_TOKEN)
-        slack_call_with_retry(
-            slack.chat_postMessage,
+        slack.chat_postMessage(
             channel=CHANNEL_ID,
             text=title,
             blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": summary}}],

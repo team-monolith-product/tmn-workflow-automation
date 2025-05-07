@@ -12,14 +12,18 @@ import requests
 
 def get_workevent(
     date: str = datetime.datetime.now().strftime("%Y-%m-%d"),
-    type: Literal["day", "week", "month", "year"] | None = None,
+    type: Literal["day", "week", "month", "year", "range"] | None = None,
     email: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ):
     """
     Args:
         date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
-        type (str): 조회하고자 하는 기간 (day, week, month, year)
+        type (str): 조회하고자 하는 기간 (day, week, month, year, range)
         email (str): 조회하고자 하는 사용자의 이메일 (optional)
+        start_date (str): type이 range일 때 시작 날짜 (YYYY-MM-DD)
+        end_date (str): type이 range일 때 종료 날짜 (YYYY-MM-DD)
 
     Returns:
         {
@@ -58,6 +62,9 @@ def get_workevent(
         query["type"] = type
     if email:
         query["email"] = email
+    if type == "range" and start_date and end_date:
+        query["start_date"] = start_date
+        query["end_date"] = end_date
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests_get_with_retry(url, params=query, headers=headers)
     return response.json()
@@ -140,12 +147,30 @@ def requests_get_with_retry(
     원티드스페이스는 429 응답을 반환함.
     """
     backoff = initial_backoff
-    for _ in range(1, max_retries + 1):
+    for attempt in range(1, max_retries + 1):
         response = requests.get(url, params=params, headers=headers, timeout=10)
 
         if response.status_code == 429:
+            if attempt == max_retries:
+                break
             time.sleep(backoff)
             backoff *= 2
+            continue
 
         return response
     return requests.get(url, params=params, headers=headers, timeout=10)
+
+
+def get_event_code_map() -> dict[str, str]:
+    """
+    워크이벤트 코드와 텍스트의 매핑을 조회합니다.
+    
+    Returns:
+        dict[str, str]: 이벤트 코드와 이벤트 텍스트의 매핑 (예: {"WNS_VACATION_PM": "연차(오후)"})
+    """
+    url = "https://api.wantedspace.ai/tools/openapi/workevent/event_codes/"
+    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
+    params = {"key": os.environ.get("WANTEDSPACE_API_KEY")}
+    resp = requests_get_with_retry(url, params=params, headers=headers)
+    resp.raise_for_status()
+    return {item["code"]: item["text"] for item in resp.json()}
