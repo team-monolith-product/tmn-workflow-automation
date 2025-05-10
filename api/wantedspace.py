@@ -18,8 +18,10 @@ def get_workevent(
     end_date: str | None = None,
 ):
     """
+    원티드 스페이스 근태 이벤트 조회 API
+
     Args:
-        date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
+        date (str): 기준 날짜 (YYYY-MM-DD) - type이 day, week, month, year일 때 사용
         type (str): 조회하고자 하는 기간 (day, week, month, year, range)
         email (str): 조회하고자 하는 사용자의 이메일 (optional)
         start_date (str): type이 range일 때 시작 날짜 (YYYY-MM-DD)
@@ -55,16 +57,28 @@ def get_workevent(
     """
     url = "https://api.wantedspace.ai/tools/openapi/workevent/"
     query = {
-        "date": date,
         "key": os.environ.get("WANTEDSPACE_API_KEY"),
     }
-    if type:
+
+    # 이벤트 타입에 따라 적절한 파라미터 설정
+    if type == "range":
+        if not start_date or not end_date:
+            raise ValueError("type이 'range'인 경우 start_date와 end_date가 필요합니다.")
         query["type"] = type
-    if email:
-        query["email"] = email
-    if type == "range" and start_date and end_date:
         query["start_date"] = start_date
         query["end_date"] = end_date
+    elif type in ["day", "week", "month", "year"]:
+        query["type"] = type
+        query["date"] = date
+    elif type is None:
+        # 기본값은 day (문서에 따름)
+        query["date"] = date
+    else:
+        raise ValueError(f"지원하지 않는 type 값입니다: {type}")
+
+    if email:
+        query["email"] = email
+
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests_get_with_retry(url, params=query, headers=headers)
     return response.json()
