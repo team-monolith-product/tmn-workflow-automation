@@ -12,14 +12,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Code Style Guidelines
 - **Formatting**: Use Black for code formatting
 - **Imports**: Group in order: stdlib, third-party, local modules
-- **Types**: 
+- **Types**:
   - Use comprehensive type hints, including Annotated and Literal types
   - Use lowercase generics (list, dict, set) instead of importing List, Dict, Set
   - Use `| None` syntax instead of Optional types (e.g., `str | None` instead of `Optional[str]`)
-- **Naming**: 
+- **Naming**:
   - snake_case for functions/variables, UPPER_SNAKE_CASE for constants
   - File names should use verb_noun.py format (e.g., collect_review_stats.py, notify_worktime_left.py)
-- **Logging & Error Handling**: 
+- **API Design**:
+  - API functions should follow the `{method}_{resource}` naming pattern (e.g., `get_event_codes`, `get_worktime`)
+  - API functions should return raw JSON responses without transformations
+- **Logging & Error Handling**:
   - Keep it simple, use print() statements for scripts
   - Avoid complex logging configuration for these internal tools
   - Minimal error handling - never use try/except without understanding the error
