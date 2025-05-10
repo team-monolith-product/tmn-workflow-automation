@@ -86,14 +86,20 @@ def get_workevent(
 
 def get_worktime(date: str):
     """
+    특정 날짜의 출퇴근 기록을 조회합니다.
     https://wantedplus.notion.site/API-a71d3186deca4cd9b9774dde57798e7a
+
+    중요 사항:
+    - 출근한 사람만 반환되나, 휴가자도 결과에 포함될 수 있음
+    - 휴가자는 wk_start_time과 wk_end_time이 모두 null로 표시됨
+    - 출근했지만 퇴근하지 않은 사람은 wk_start_time은 있고 wk_end_time은 null임
+    - 출퇴근을 모두 완료한 사람은 wk_start_time과 wk_end_time이 모두 존재함
 
     Args:
         date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
 
     Returns:
-        출근한 사람만 반환됩니다.
-        wk_end_time 는 null 일 수 있습니다.
+        출근 기록 API 응답. 응답 형태 예시:
         {
             "next": null,
             "previous": null,

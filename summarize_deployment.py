@@ -94,7 +94,7 @@ def summarize_deployment(
     caller_slack_user_id: str | None = None,
 ):
     """
-    1) Notion DB에서 '배포 예정 날짜'가 오늘인 과업 또는 '종료일'이 오늘인 과업을 가져오고
+    1) Notion DB에서 오늘 배포 예정인 과업 목록 조회
     2) 담당자를 이메일로 매핑해서 Slack 멘션
     3) GitHub PR 링크 파싱
     4) 한 번에 정리된 메시지를 Slack에 전송
@@ -106,35 +106,47 @@ def summarize_deployment(
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 
     # 1) 오늘 배포할 과업 목록 조회
-    #    - '배포 예정 날짜'가 오늘인 경우
-    #    - '종료일'이 오늘인 경우
+    #    - 구성요소 필터링
+    #      '기획' OR '디자인'이 포함되지 않은 과업
+    shared_filters = [
+        {
+            "property": "구성요소",
+            "multi_select": {"does_not_contain": tag},
+        }
+        for tag in ["기획", "디자인"]
+    ]
+
+    #    - 날짜 필터링
+    #      '배포 예정 날짜' ?? '종료일' == 오늘
+    #      <=> {('배포 예정 날짜' == 오늘) OR ('배포 예정 날짜' == NULL AND '종료일' == 오늘)}
+    date_conditions = [
+        # '배포 예정 날짜' == 오늘
+        [
+            {
+                "property": "배포 예정 날짜",
+                "date": {"equals": today_str},
+            }
+        ],
+        # '배포 예정 날짜' == NULL AND '종료일' == 오늘
+        [
+            {"property": "배포 예정 날짜", "date": {"is_empty": True}},
+            {
+                "property": "종료일",
+                "date": {"equals": today_str},
+            },
+        ],
+    ]
+
+    # Notion API에서 Compound filter confitions 를 최대 2 Levels deep으로 지원합니다.
+    # 이에 따라, 구성요소 필터링을 분배법칙으로 OR 연산의 operand 각각에 적용합니다.
+    # 참조: https://developers.notion.com/reference/post-database-query-filter#compound-filter-conditions
+    or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
+
     query_result = notion.databases.query(
         **{
             "database_id": NOTION_DATABASE_ID,
             "filter": {
-                "and": [
-                    {
-                        "or": [
-                            {
-                                "property": "배포 예정 날짜",
-                                "date": {"equals": today_str},
-                            },
-                            {"property": "종료일", "date": {"equals": today_str}},
-                        ]
-                    },
-                    {
-                        "and": [
-                            {
-                                "property": "구성요소",
-                                "multi_select": {"does_not_contain": "기획"},
-                            },
-                            {
-                                "property": "구성요소",
-                                "multi_select": {"does_not_contain": "디자인"},
-                            },
-                        ]
-                    },
-                ]
+                "or": or_filters,
             },
         }
     )
