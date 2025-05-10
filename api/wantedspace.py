@@ -63,7 +63,9 @@ def get_workevent(
     # 이벤트 타입에 따라 적절한 파라미터 설정
     if type == "range":
         if not start_date or not end_date:
-            raise ValueError("type이 'range'인 경우 start_date와 end_date가 필요합니다.")
+            raise ValueError(
+                "type이 'range'인 경우 start_date와 end_date가 필요합니다."
+            )
         query["type"] = type
         query["start_date"] = start_date
         query["end_date"] = end_date
