@@ -147,12 +147,10 @@ def requests_get_with_retry(
     원티드스페이스는 429 응답을 반환함.
     """
     backoff = initial_backoff
-    for attempt in range(1, max_retries + 1):
+    for _ in range(1, max_retries + 1):
         response = requests.get(url, params=params, headers=headers, timeout=10)
 
         if response.status_code == 429:
-            if attempt == max_retries:
-                break
             time.sleep(backoff)
             backoff *= 2
             continue
@@ -161,16 +159,15 @@ def requests_get_with_retry(
     return requests.get(url, params=params, headers=headers, timeout=10)
 
 
-def get_event_code_map() -> dict[str, str]:
+def get_event_codes():
     """
-    워크이벤트 코드와 텍스트의 매핑을 조회합니다.
-    
+    워크이벤트 코드 목록을 조회합니다.
+
     Returns:
-        dict[str, str]: 이벤트 코드와 이벤트 텍스트의 매핑 (예: {"WNS_VACATION_PM": "연차(오후)"})
+        list[dict]: 이벤트 코드 목록 (예: [{"code": "WNS_VACATION_PM", "text": "연차(오후)", ...}])
     """
     url = "https://api.wantedspace.ai/tools/openapi/workevent/event_codes/"
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     params = {"key": os.environ.get("WANTEDSPACE_API_KEY")}
-    resp = requests_get_with_retry(url, params=params, headers=headers)
-    resp.raise_for_status()
-    return {item["code"]: item["text"] for item in resp.json()}
+    response = requests_get_with_retry(url, params=params, headers=headers)
+    return response.json()
