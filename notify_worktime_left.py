@@ -226,12 +226,12 @@ def get_public_holidays(year: int, month: int):
     except Exception as e:
         print("[ERROR] Parsing holiday info:", e)
         print("Response data:", data)
-    
+
     # 수동으로 특정 휴일 추가
     if month == 5:
         # 근로자의 날 추가 (5월 1일)
         holidays.add(f"{year}-05-01")
-    
+
     return holidays
 
 

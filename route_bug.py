@@ -81,7 +81,7 @@ async def route_bug(
 def get_working_emails() -> list[str]:
     """
     워티드스페이스 API를 통해 현재 출근한 사용자 이메일 목록을 반환
-    
+
     주의:
     - 휴가 중인 사용자는 get_worktime API에서 wk_start_time이 null로 반환됨
     - 출근한 사용자는 wk_start_time이 존재하고 퇴근하지 않은 경우 wk_end_time이 null임
