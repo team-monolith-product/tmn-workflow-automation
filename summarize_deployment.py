@@ -108,12 +108,19 @@ def summarize_deployment(
     # 1) 오늘 배포할 과업 목록 조회
     #    - 구성요소 필터링
     #      '기획' OR '디자인'이 포함되지 않은 과업
+    #    - 상태 필터링
+    #      '중단' 이 아닌 과업
     shared_filters = [
         {
             "property": "구성요소",
             "multi_select": {"does_not_contain": tag},
         }
         for tag in ["기획", "디자인"]
+    ] + [
+        {
+            "property": "상태",
+            "status": {"does_not_equal": "중단"},
+        }
     ]
 
     #    - 날짜 필터링
