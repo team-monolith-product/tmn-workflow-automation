@@ -419,7 +419,9 @@ def main():
                 "pr_title": pr.title,
                 "repo_name": pr.base.repo.full_name,
                 "html_url": comment.html_url,
-                "replies": original_id_to_replies.get(comment.id, []),  # 답글 목록 가져오기
+                "replies": original_id_to_replies.get(
+                    comment.id, []
+                ),  # 답글 목록 가져오기
             }
 
             # 반응 생성자 저장용 사전
@@ -444,7 +446,6 @@ def main():
                         reaction_users[reaction_type].append(reaction.user.login)
 
             comment_data["reaction_users"] = reaction_users
-
 
             all_review_comments.append(comment_data)
 
