@@ -5,6 +5,7 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import logging
 import os
 from typing import Annotated, Literal
@@ -34,6 +35,9 @@ import summarize_deployment
 
 # 환경 변수 로드
 load_dotenv()
+
+# 시간대 설정
+KST = ZoneInfo("Asia/Seoul")
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
@@ -145,7 +149,7 @@ async def answer(
         user["id"]: user for user in user_info_list["members"] if user["id"] in user_ids
     }
 
-    today_str = datetime.now().strftime("%Y-%m-%d(%A)")
+    today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
     messages: list[BaseMessage] = [
         SystemMessage(
@@ -609,10 +613,12 @@ async def user_huddle_changed(body, say):
         # 최근 허들 참여 시간 업데이트를 했다면 절차를 생략함.
         # 30분
         last_joined_at = USER_ID_TO_LAST_HUDDLE_JOINED_AT.get(participant)
-        if last_joined_at and (datetime.now() - last_joined_at) < timedelta(minutes=30):
+        if last_joined_at and (datetime.now(tz=KST) - last_joined_at) < timedelta(
+            minutes=30
+        ):
             # 30분 이내에 허들에 참여한 이력이 있다면 생략
             continue
-        USER_ID_TO_LAST_HUDDLE_JOINED_AT[participant] = datetime.now()
+        USER_ID_TO_LAST_HUDDLE_JOINED_AT[participant] = datetime.now(tz=KST)
 
         user_name = user_dict[participant]["real_name"]
 
