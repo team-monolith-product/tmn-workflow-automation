@@ -162,11 +162,18 @@ async def _get_notion_assignee_id(user_email: str | None) -> str | None:
 
 
 def get_create_notion_task_tool(
-    user_email: str | None, slack_thread_url: str, database_id: str
+    user_id: str | None, slack_thread_url: str, database_id: str, client
 ):
     """노션 작업 생성 도구를 반환합니다."""
 
     async def get_assignee_id():
+        if user_id is None:
+            return None
+        # 사용자 정보 조회
+        user_info_list = await slack_users_list(client)
+        user_dict = {user["id"]: user for user in user_info_list["members"]}
+        user_profile = user_dict.get(user_id, {})
+        user_email = user_profile.get("profile", {}).get("email")
         return await _get_notion_assignee_id(user_email)
 
     # 데이터베이스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
@@ -420,45 +427,6 @@ def get_create_notion_follow_up_task_tool(database_id: str):
         return response["url"]
 
     return create_notion_follow_up_task
-
-
-def get_all_notion_tools(
-    user_email: str | None, slack_thread_url: str, database_id: str
-):
-    """모든 노션 도구를 포함한 리스트를 반환합니다 (기존 호환성을 위해)."""
-    return [
-        get_create_notion_task_tool(user_email, slack_thread_url, database_id),
-        get_update_notion_task_deadline_tool(),
-        get_update_notion_task_status_tool(database_id),
-        get_create_notion_follow_up_task_tool(database_id),
-        get_notion_page_tool(),
-    ]
-
-
-# 기존 함수명 유지 (하위 호환성)
-async def get_notion_tools(user_id: str | None, slack_thread_url: str, client):
-    """
-    노션 관련 도구들을 생성하여 반환합니다.
-    사용자 ID를 기반으로 슬랙 사용자 정보를 조회하고 노션 사용자를 찾아 도구에 주입합니다.
-
-    Args:
-        user_id: 슬랙 사용자 ID
-        slack_thread_url: 슬랙 스레드 URL
-        client: 슬랙 클라이언트
-
-    Returns:
-        노션 도구들의 리스트
-    """
-    if user_id is None:
-        user_email = None
-    else:
-        # 사용자 정보 조회
-        user_info_list = await slack_users_list(client)
-        user_dict = {user["id"]: user for user in user_info_list["members"]}
-        user_profile = user_dict.get(user_id, {})
-        user_email = user_profile.get("profile", {}).get("email")
-
-    return get_all_notion_tools(user_email, slack_thread_url, DATABASE_ID)
 
 
 async def answer(
