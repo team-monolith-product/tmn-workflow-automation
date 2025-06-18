@@ -44,7 +44,7 @@ def register_general_handlers(app, assistant):
         channel = event["channel"]
         user = event.get("user")
         text = event["text"]
-        await answer(thread_ts, channel, user, text, say)
+        await answer(thread_ts, channel, user, text, say, app.client)
 
     @app.event("user_huddle_changed")
     async def user_huddle_changed(body, say):
@@ -162,7 +162,7 @@ def register_general_handlers(app, assistant):
         Respond to a user message in the assistant thread.
         """
         await answer(
-            context.thread_ts, context.channel_id, context.user_id, payload["text"], say
+            context.thread_ts, context.channel_id, context.user_id, payload["text"], say, app.client
         )
 
 
