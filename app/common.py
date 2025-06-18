@@ -122,6 +122,29 @@ def get_component_options(client: NotionClient, database_id: str) -> list[str]:
     return []
 
 
+def get_active_projects(client: NotionClient, project_db_id: str) -> dict[str, str]:
+    """프로젝트 DB에서 '진행 중' 상태인 프로젝트들을 조회하여 프로젝트명:페이지ID 매핑을 반환합니다."""
+    response = client.databases.query(
+        database_id=project_db_id,
+        filter={"property": "상태", "status": {"equals": "진행 중"}},
+    )
+
+    project_mapping = {}
+    for page in response["results"]:
+        # 페이지 제목 가져오기 (일반적으로 '이름' 또는 '제목' 속성)
+        title_property = None
+        for prop_name, prop_value in page["properties"].items():
+            if prop_value["type"] == "title":
+                title_property = prop_value
+                break
+
+        if title_property and title_property["title"]:
+            project_name = title_property["title"][0]["plain_text"]
+            project_mapping[project_name] = page["id"]
+
+    return project_mapping
+
+
 search_tool = TavilySearchResults(
     max_results=10,
     search_depth="advanced",
@@ -162,7 +185,11 @@ async def _get_notion_assignee_id(user_email: str | None) -> str | None:
 
 
 def get_create_notion_task_tool(
-    user_id: str | None, slack_thread_url: str, database_id: str, client
+    user_id: str | None,
+    slack_thread_url: str,
+    database_id: str,
+    client,
+    project_db_id: str,
 ):
     """노션 작업 생성 도구를 반환합니다."""
 
@@ -180,6 +207,10 @@ def get_create_notion_task_tool(
     task_type_options = get_task_type_options(notion, database_id)
     component_options = get_component_options(notion, database_id)
 
+    # 프로젝트 DB에서 진행 중인 프로젝트들 조회
+    active_projects = get_active_projects(notion, project_db_id)
+    project_names = list(active_projects.keys())
+
     # 동적으로 Field 생성하여 enum constraint 추가
     task_type_field = Field(
         description=f"작업의 유형. 가능한 값: {', '.join(task_type_options)}",
@@ -196,10 +227,8 @@ def get_create_notion_task_tool(
         task_type: str = task_type_field
         component: str = component_field
         project: str = Field(
-            description="작업이 속한 프로젝트. 가능한 값: 유지보수, 기술개선, 경험개선, 오픈소스",
-            json_schema_extra={
-                "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"]
-            },
+            description=f"작업이 속한 프로젝트. 가능한 값: {', '.join(project_names)}",
+            json_schema_extra={"enum": project_names},
         )
         blocks: str | None = Field(
             default=None,
@@ -236,7 +265,7 @@ def get_create_notion_task_tool(
             "제목": {"title": [{"text": {"content": title}}]},
             "유형": {"select": {"name": task_type}},
             "구성요소": {"multi_select": [{"name": component}]},
-            "프로젝트": {"relation": [{"id": PROJECT_TO_PAGE_ID[project]}]},
+            "프로젝트": {"relation": [{"id": active_projects[project]}]},
             "상태": {"status": {"name": "대기"}},
         }
 

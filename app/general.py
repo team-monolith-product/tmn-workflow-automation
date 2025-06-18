@@ -64,7 +64,11 @@ def register_general_handlers(app, assistant):
 
         notion_tools = [
             get_create_notion_task_tool(
-                user, slack_thread_url, DATABASE_ID, app.client
+                user,
+                slack_thread_url,
+                DATABASE_ID,
+                app.client,
+                "9df81e8ee45e4f49aceb402c084b3ac7",
             ),
             get_update_notion_task_deadline_tool(),
             get_update_notion_task_status_tool(DATABASE_ID),
@@ -196,7 +200,11 @@ def register_general_handlers(app, assistant):
 
         notion_tools = [
             get_create_notion_task_tool(
-                context.user_id, slack_thread_url, DATABASE_ID, app.client
+                context.user_id,
+                slack_thread_url,
+                DATABASE_ID,
+                app.client,
+                "9df81e8ee45e4f49aceb402c084b3ac7",
             ),
             get_update_notion_task_deadline_tool(),
             get_update_notion_task_status_tool(DATABASE_ID),

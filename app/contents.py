@@ -49,7 +49,11 @@ def register_contents_handlers(app_contents):
 
         notion_tools = [
             get_create_notion_task_tool(
-                user, slack_thread_url, CONTENTS_DATABASE_ID, app_contents.client
+                user,
+                slack_thread_url,
+                CONTENTS_DATABASE_ID,
+                app_contents.client,
+                "39a3277286c74a298cbdea4e903549a5",
             ),
             get_update_notion_task_deadline_tool(),
             get_update_notion_task_status_tool(CONTENTS_DATABASE_ID),
