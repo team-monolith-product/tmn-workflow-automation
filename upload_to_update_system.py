@@ -35,7 +35,9 @@ def extract_image_urls(markdown_text: str) -> list:
     return re.findall(pattern, markdown_text)
 
 
-def direct_upload_to_rails(file_bytes: bytes, filename: str, content_type: str, rails_bearer_token: str) -> str:
+def direct_upload_to_rails(
+    file_bytes: bytes, filename: str, content_type: str, rails_bearer_token: str
+) -> str:
     """
     ActiveStorage Direct Upload 프로세스:
       1) rails에 blob 메타데이터 생성 (POST)
@@ -72,7 +74,9 @@ def direct_upload_to_rails(file_bytes: bytes, filename: str, content_type: str, 
     signed_id = data["signed_id"]
 
     # 2) PUT 업로드
-    put_resp = requests.put(upload_url, data=file_bytes, headers=upload_headers, timeout=60)
+    put_resp = requests.put(
+        upload_url, data=file_bytes, headers=upload_headers, timeout=60
+    )
     put_resp.raise_for_status()
 
     # 3) 최종 Blob 접근 경로
@@ -169,7 +173,9 @@ def split_markdown_into_two_parts(
     return (part1, part2)
 
 
-def get_before_and_after_html(page_id: str = PAGE_ID, rails_bearer_token: str | None = None):
+def get_before_and_after_html(
+    page_id: str = PAGE_ID, rails_bearer_token: str | None = None
+):
     if rails_bearer_token is None:
         raise ValueError("rails_bearer_token is required")
     # 1) 노션 문서 -> 전체 MD
@@ -500,9 +506,11 @@ def list_update(session, title):
 # 전역 변수로 rails_bearer_token 저장
 _current_rails_bearer_token = None
 
+
 def set_rails_bearer_token(token: str):
     global _current_rails_bearer_token
     _current_rails_bearer_token = token
+
 
 def video(info: dict):
     global _current_rails_bearer_token
@@ -525,7 +533,12 @@ def video(info: dict):
                 if _current_rails_bearer_token is None:
                     print("[ERROR] Rails bearer token is required for video upload")
                     return ""
-                new_url = direct_upload_to_rails(file_bytes, file_name, content_type_guess, _current_rails_bearer_token)
+                new_url = direct_upload_to_rails(
+                    file_bytes,
+                    file_name,
+                    content_type_guess,
+                    _current_rails_bearer_token,
+                )
             except Exception as e:
                 print(f"[ERROR] Failed to upload video: {e}")
             return f'<video width="600" controls><source src="{new_url}"/>'
@@ -571,10 +584,10 @@ def main():
 
     deployment_date = input("배포 일자를 입력하세요 (YYYYMMDD): ")
     rails_bearer_token = input("Rails Bearer Token을 입력하세요: ")
-    
+
     # Rails Bearer Token을 전역 변수로 설정
     set_rails_bearer_token(rails_bearer_token)
-    
+
     for item in response["results"]:
         title = item["properties"]["제목"]["title"][0]["plain_text"]
         print(f"'{title}' 문서에 대해 처리를 시작합니다.")
@@ -599,7 +612,9 @@ def main():
         print(f"DOCX 파일이 생성되었습니다: meeting_minutes/{title} 회의록.docx")
 
         # 3. 노션 문서를 HTML로 변환
-        before_html, after_html = get_before_and_after_html(item["id"], rails_bearer_token)
+        before_html, after_html = get_before_and_after_html(
+            item["id"], rails_bearer_token
+        )
 
         print("업로드 준비가 완료되었습니다. 다음 내용을 확인해주세요.")
         print(f"키워드: {title}")
