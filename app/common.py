@@ -436,14 +436,29 @@ def get_all_notion_tools(
 
 
 # 기존 함수명 유지 (하위 호환성)
-async def get_notion_tools(user_email: str | None, slack_thread_url: str):
+async def get_notion_tools(user_id: str | None, slack_thread_url: str, client):
     """
     노션 관련 도구들을 생성하여 반환합니다.
-    사용자 이메일을 기반으로 노션 사용자를 찾아 도구에 주입합니다.
+    사용자 ID를 기반으로 슬랙 사용자 정보를 조회하고 노션 사용자를 찾아 도구에 주입합니다.
 
-    Deprecated: get_all_notion_tools() 또는 개별 도구 함수들을 사용하세요.
+    Args:
+        user_id: 슬랙 사용자 ID
+        slack_thread_url: 슬랙 스레드 URL
+        client: 슬랙 클라이언트
+
+    Returns:
+        노션 도구들의 리스트
     """
-    return get_all_notion_tools(user_email, slack_thread_url)
+    if user_id is None:
+        user_email = None
+    else:
+        # 사용자 정보 조회
+        user_info_list = await slack_users_list(client)
+        user_dict = {user["id"]: user for user in user_info_list["members"]}
+        user_profile = user_dict.get(user_id, {})
+        user_email = user_profile.get("profile", {}).get("email")
+
+    return get_all_notion_tools(user_email, slack_thread_url, DATABASE_ID)
 
 
 async def answer(

@@ -7,7 +7,6 @@ from .common import (
     search_tool,
     get_web_page_from_url,
     get_notion_tools,
-    slack_users_list,
 )
 
 
@@ -31,14 +30,6 @@ def register_contents_handlers(app_contents):
         user = event.get("user")
         text = event["text"]
 
-        # 사용자 정보 조회
-        user_info_list = await slack_users_list(app_contents.client)
-        user_dict = {
-            user_info["id"]: user_info for user_info in user_info_list["members"]
-        }
-        user_profile = user_dict.get(user, {})
-        user_email = user_profile.get("profile", {}).get("email")
-
-        notion_tools = await get_notion_tools(user_email, None)
+        notion_tools = await get_notion_tools(user, None, app_contents.client)
         tools = [search_tool, get_web_page_from_url] + notion_tools
         await answer(thread_ts, channel, user, text, say, app_contents.client, tools)
