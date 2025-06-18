@@ -22,10 +22,11 @@ from .common import (
     get_update_notion_task_status_tool,
     get_create_notion_follow_up_task_tool,
     get_notion_page_tool,
-    DATABASE_ID,
 )
 
 # 상수들
+DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
 SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
