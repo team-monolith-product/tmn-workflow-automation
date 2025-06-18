@@ -30,13 +30,6 @@ KST = ZoneInfo("Asia/Seoul")
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
-DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
-PROJECT_TO_PAGE_ID = {
-    "유지보수": "1dd1cc820da6805db022fb396e959a44",
-    "기술개선": "1dd1cc820da680ef9763cb5526f142cf",
-    "경험개선": "1dd1cc820da680fdb25dc9e3cd387cba",
-    "오픈소스": "2a17626c85574a958fb584f2fb2eda08",
-}
 
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
@@ -273,7 +266,7 @@ def get_create_notion_task_tool(
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
 
         response = notion.pages.create(
-            parent={"database_id": DATABASE_ID}, properties=properties
+            parent={"database_id": database_id}, properties=properties
         )
 
         page_id = response["id"]
