@@ -11,8 +11,10 @@ from .common import (
     get_update_notion_task_status_tool,
     get_create_notion_follow_up_task_tool,
     get_notion_page_tool,
-    DATABASE_ID,
 )
+
+# 콘텐츠 팀 전용 노션 데이터베이스 ID
+CONTENTS_DATABASE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
 
 
 def register_contents_handlers(app_contents):
@@ -47,11 +49,11 @@ def register_contents_handlers(app_contents):
 
         notion_tools = [
             get_create_notion_task_tool(
-                user, slack_thread_url, DATABASE_ID, app_contents.client
+                user, slack_thread_url, CONTENTS_DATABASE_ID, app_contents.client
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATABASE_ID),
-            get_create_notion_follow_up_task_tool(DATABASE_ID),
+            get_update_notion_task_status_tool(CONTENTS_DATABASE_ID),
+            get_create_notion_follow_up_task_tool(CONTENTS_DATABASE_ID),
             get_notion_page_tool(),
         ]
         tools = [search_tool, get_web_page_from_url] + notion_tools
