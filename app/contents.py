@@ -25,6 +25,4 @@ def register_contents_handlers(app_contents):
         user = event.get("user")
         text = event["text"]
 
-        await answer(
-            thread_ts, channel, user, text, say, app_contents.client
-        )
+        await answer(thread_ts, channel, user, text, say, app_contents.client)

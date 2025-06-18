@@ -118,7 +118,6 @@ def register_general_handlers(app, assistant):
                     ],
                 )
 
-
     @app.event("message")
     async def message(body, say):
         """
@@ -140,14 +139,12 @@ def register_general_handlers(app, assistant):
         if thread_ts is None or thread_ts == message_ts:
             await route_bug.route_bug(app.client, body)
 
-
     @assistant.thread_started
     async def start_assistant_thread(say, _set_suggested_prompts):
         """
         Assistant thread started
         """
         await say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
-
 
     @assistant.user_message
     async def respond_in_assistant_thread(
@@ -162,9 +159,13 @@ def register_general_handlers(app, assistant):
         Respond to a user message in the assistant thread.
         """
         await answer(
-            context.thread_ts, context.channel_id, context.user_id, payload["text"], say, app.client
+            context.thread_ts,
+            context.channel_id,
+            context.user_id,
+            payload["text"],
+            say,
+            app.client,
         )
-
 
     @app.command("/summarize-deployment")
     async def on_summarize_deployment(ack, body):

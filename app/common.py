@@ -144,29 +144,34 @@ def get_web_page_from_url(
     return documents
 
 
-async def get_notion_tools(user_email: str | None, slack_thread_url: str):
-    """
-    노션 관련 도구들을 생성하여 반환합니다.
-    사용자 이메일을 기반으로 노션 사용자를 찾아 도구에 주입합니다.
-    """
-    # 이메일이 있는 경우에만 노션 사용자 매칭 시도
-    notion_assignee_id = None
-    if user_email:
-        notion_users = await notion_users_list(notion)
-        # 이메일이 일치하는 Notion 사용자 찾기
-        matched_notion_user = next(
-            (
-                user
-                for user in notion_users["results"]
-                if user["type"] == "person" and user["person"]["email"] == user_email
-            ),
-            None,
-        )
-        notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
+async def _get_notion_assignee_id(user_email: str | None) -> str | None:
+    """노션 사용자 ID를 가져옵니다."""
+    if not user_email:
+        return None
+
+    notion_users = await notion_users_list(notion)
+    matched_notion_user = next(
+        (
+            user
+            for user in notion_users["results"]
+            if user["type"] == "person" and user["person"]["email"] == user_email
+        ),
+        None,
+    )
+    return matched_notion_user["id"] if matched_notion_user else None
+
+
+def get_create_notion_task_tool(
+    user_email: str | None, slack_thread_url: str, database_id: str
+):
+    """노션 작업 생성 도구를 반환합니다."""
+
+    async def get_assignee_id():
+        return await _get_notion_assignee_id(user_email)
 
     # 데이터베이스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
-    task_type_options = get_task_type_options(notion, DATABASE_ID)
-    component_options = get_component_options(notion, DATABASE_ID)
+    task_type_options = get_task_type_options(notion, database_id)
+    component_options = get_component_options(notion, database_id)
 
     # 동적으로 Field 생성하여 enum constraint 추가
     task_type_field = Field(
@@ -203,7 +208,7 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
         )
 
     @tool("create_notion_task", args_schema=CreateNotionTaskInput)
-    def create_notion_task(
+    async def create_notion_task(
         title: str,
         task_type: str,
         component: str,
@@ -218,6 +223,8 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
         Returns:
             생성된 노션 페이지의 URL
         """
+        notion_assignee_id = await get_assignee_id()
+
         properties = {
             "제목": {"title": [{"text": {"content": title}}]},
             "유형": {"select": {"name": task_type}},
@@ -255,6 +262,12 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
 
         return response["url"]
 
+    return create_notion_task
+
+
+def get_update_notion_task_deadline_tool():
+    """노션 작업 마감일 업데이트 도구를 반환합니다."""
+
     @tool
     def update_notion_task_deadline(
         page_id: Annotated[
@@ -289,8 +302,14 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
             properties={"타임라인": {"date": {"start": new_start, "end": new_end}}},
         )
 
+    return update_notion_task_deadline
+
+
+def get_update_notion_task_status_tool(database_id: str):
+    """노션 작업 상태 업데이트 도구를 반환합니다."""
+
     # 데이터베이스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
-    status_options = get_status_options(notion, DATABASE_ID)
+    status_options = get_status_options(notion, database_id)
 
     # 동적으로 Field 생성하여 enum constraint 추가
     status_field = Field(
@@ -315,6 +334,12 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
             page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
         )
 
+    return update_notion_task_status
+
+
+def get_notion_page_tool():
+    """노션 페이지 조회 도구를 반환합니다."""
+
     @tool
     def get_notion_page(
         page_id: Annotated[
@@ -326,6 +351,14 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
         www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
         return StringExporter(block_id=page_id, output_path="test").export()
+
+    return get_notion_page
+
+
+def get_create_notion_follow_up_task_tool(database_id: str):
+    """노션 후속 작업 생성 도구를 반환합니다."""
+
+    component_options = get_component_options(notion, database_id)
 
     class CreateNotionFollowUpTaskInput(BaseModel):
         parent_page_id: str = Field(
@@ -381,18 +414,36 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
             }
 
         response = notion.pages.create(
-            parent={"database_id": DATABASE_ID}, properties=properties
+            parent={"database_id": database_id}, properties=properties
         )
 
         return response["url"]
 
+    return create_notion_follow_up_task
+
+
+def get_all_notion_tools(
+    user_email: str | None, slack_thread_url: str, database_id: str
+):
+    """모든 노션 도구를 포함한 리스트를 반환합니다 (기존 호환성을 위해)."""
     return [
-        create_notion_task,
-        update_notion_task_deadline,
-        update_notion_task_status,
-        create_notion_follow_up_task,
-        get_notion_page,
+        get_create_notion_task_tool(user_email, slack_thread_url, database_id),
+        get_update_notion_task_deadline_tool(),
+        get_update_notion_task_status_tool(database_id),
+        get_create_notion_follow_up_task_tool(database_id),
+        get_notion_page_tool(),
     ]
+
+
+# 기존 함수명 유지 (하위 호환성)
+async def get_notion_tools(user_email: str | None, slack_thread_url: str):
+    """
+    노션 관련 도구들을 생성하여 반환합니다.
+    사용자 이메일을 기반으로 노션 사용자를 찾아 도구에 주입합니다.
+
+    Deprecated: get_all_notion_tools() 또는 개별 도구 함수들을 사용하세요.
+    """
+    return get_all_notion_tools(user_email, slack_thread_url)
 
 
 async def answer(
