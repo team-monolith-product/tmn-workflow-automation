@@ -10,8 +10,10 @@ from service.slack import get_email_to_user_id
 # 환경 변수 로드
 load_dotenv()
 
-DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
-CHANNEL_ID: str = "C087PDC9VG8"
+MAIN_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+CONTENTS_DATABASE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
+MAIN_CHANNEL_ID: str = "C087PDC9VG8"
+CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
 
 
 def main():
@@ -20,11 +22,77 @@ def main():
 
     email_to_user_id = get_email_to_user_id(slack_client)
 
-    send_intro_message(slack_client, CHANNEL_ID)
-    alert_overdue_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
-    alert_no_due_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
-    alert_no_tasks(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
-    alert_no_후속_작업(notion, slack_client, DATABASE_ID, CHANNEL_ID, email_to_user_id)
+    # 메인 작업 DB 처리
+    send_intro_message(slack_client, MAIN_CHANNEL_ID)
+    alert_overdue_tasks(
+        notion,
+        slack_client,
+        MAIN_DATABASE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+        "메인 작업",
+    )
+    alert_no_due_tasks(
+        notion,
+        slack_client,
+        MAIN_DATABASE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+        "메인 작업",
+    )
+    alert_no_tasks(
+        notion,
+        slack_client,
+        MAIN_DATABASE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+        "e",
+        "엔지니어",
+    )
+    alert_no_후속_작업(
+        notion,
+        slack_client,
+        MAIN_DATABASE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+        "메인 작업",
+    )
+
+    # 콘텐츠 DB 처리
+    send_intro_message(slack_client, CONTENTS_CHANNEL_ID)
+    alert_overdue_tasks(
+        notion,
+        slack_client,
+        CONTENTS_DATABASE_ID,
+        CONTENTS_CHANNEL_ID,
+        email_to_user_id,
+        "콘텐츠",
+    )
+    alert_no_due_tasks(
+        notion,
+        slack_client,
+        CONTENTS_DATABASE_ID,
+        CONTENTS_CHANNEL_ID,
+        email_to_user_id,
+        "콘텐츠",
+    )
+    alert_no_tasks(
+        notion,
+        slack_client,
+        CONTENTS_DATABASE_ID,
+        CONTENTS_CHANNEL_ID,
+        email_to_user_id,
+        "콘텐츠",
+        "콘텐츠",
+    )
+    alert_no_후속_작업(
+        notion,
+        slack_client,
+        CONTENTS_DATABASE_ID,
+        CONTENTS_CHANNEL_ID,
+        email_to_user_id,
+        "콘텐츠",
+    )
 
 
 def send_intro_message(
@@ -105,9 +173,9 @@ def alert_overdue_tasks(
             slack_user_id = None
 
         if slack_user_id:
-            text = f"과업 <{page_url}|{task_name}>이(가) 기한이 지났습니다. <@{slack_user_id}> 확인 부탁드립니다."
+            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났습니다. <@{slack_user_id}> 확인 부탁드립니다."
         else:
-            text = f"과업 <{page_url}|{task_name}>이(가) 기한이 지났으나 담당자를 확인할 수 없습니다."
+            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났으나 담당자를 확인할 수 없습니다."
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
@@ -166,11 +234,11 @@ def alert_no_due_tasks(
 
         if slack_user_id:
             text = (
-                f"과업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있습니다."
+                f"작업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있습니다."
                 f"<@{slack_user_id}> 확인 부탁드립니다."
             )
         else:
-            text = f"과업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있으나 담당자를 확인할 수 없습니다."
+            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있으나 담당자를 확인할 수 없습니다."
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
@@ -180,9 +248,11 @@ def alert_no_tasks(
     database_id: str,
     channel_id: str,
     email_to_user_id: dict,
+    group_handle: str,
+    team_name: str = "팀",
 ):
     """
-    아무 과업도 진행 중이지 않은 작업자를 슬랙으로 알림 (단, @e 그룹에 속한 멤버만 대상)
+    아무 과업도 진행 중이지 않은 작업자를 슬랙으로 알림
 
     Args:
         notion (NotionClient): Notion
@@ -190,21 +260,33 @@ def alert_no_tasks(
         database_id (str): Notion database id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
+        team_name (str): 팀 이름 (알림 메시지에 사용)
 
     Returns:
         None
     """
     # 1. 현재 '진행' 혹은 '리뷰' 상태인 과업의 담당자 이메일들을 모두 가져옵니다.
-    in_progress_tasks = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": {
-                "or": [
-                    {"property": "상태", "status": {"equals": "진행"}},
-                    {"property": "상태", "status": {"equals": "리뷰"}},
-                ]
-            },
+    if database_id == CONTENTS_DATABASE_ID:
+        # 콘텐츠 DB용 쿼리
+        query_filter = {
+            "or": [
+                {"property": "상태", "status": {"equals": "진행 중"}},
+                {"property": "상태", "status": {"equals": "피드백"}},
+                {"property": "상태", "status": {"equals": "계약"}},
+            ]
         }
+    else:
+        # 메인 작업 DB용 쿼리
+        query_filter = {
+            "or": [
+                {"property": "상태", "status": {"equals": "진행"}},
+                {"property": "상태", "status": {"equals": "리뷰"}},
+            ]
+        }
+
+    in_progress_tasks = notion.databases.query(
+        **{"database_id": database_id, "filter": query_filter}
     )
 
     assigned_emails = set()
@@ -215,12 +297,12 @@ def alert_no_tasks(
             if email:
                 assigned_emails.add(email)
 
-    # 2. Slack 사용자 그룹 목록 중에서 handle이 "e"인 그룹을 찾습니다. (예: @e 그룹)
+    # 2. Slack 사용자 그룹 목록 중에서 지정된 handle인 그룹을 찾습니다.
     usergroup_id = None
     usergroups_response = slack_client.usergroups_list()
     for group in usergroups_response["usergroups"]:
-        # handle이 'e'인 사용자 그룹 찾아 ID 획득
-        if group["handle"] == "e":
+        # 지정된 handle인 사용자 그룹 찾아 ID 획득
+        if group["handle"] == group_handle:
             usergroup_id = group["id"]
             break
 
@@ -228,40 +310,41 @@ def alert_no_tasks(
     if usergroup_id is None:
         slack_client.chat_postMessage(
             channel=channel_id,
-            text="엔지니어 그룹 @e를 찾을 수 없습니다. 확인부탁드립니다.",
+            text=f"{team_name} 그룹 @{group_handle}를 찾을 수 없습니다. 확인부탁드립니다.",
         )
         return
 
-    e_group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
-    e_user_ids = e_group_users_response.get("users", [])
+    group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
+    group_user_ids = group_users_response.get("users", [])
 
     # 4. email_to_user_id는 "email -> slack user id" 매핑이므로,
     #    그 반대("slack user id -> email") 매핑을 쉽게 얻기 위해 역으로 변환합니다.
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
 
-    # 5. @e 그룹에 실제 등록된 멤버의 이메일 목록
-    team_e_emails = []
-    for user_id in e_user_ids:
+    # 5. 그룹에 실제 등록된 멤버의 이메일 목록
+    team_emails = []
+    for user_id in group_user_ids:
         email = user_id_to_email.get(user_id)
         if email:
-            team_e_emails.append(email)
+            team_emails.append(email)
 
-    # 6. "아무 과업도 진행 중이지 않은" ⇒ 팀 E 멤버 중 assigned_emails에 없는 이메일
-    unassigned_emails = set(team_e_emails) - assigned_emails
+    # 6. "아무 과업도 진행 중이지 않은" ⇒ 팀 멤버 중 assigned_emails에 없는 이메일
+    unassigned_emails = set(team_emails) - assigned_emails
 
     # 7. unassigned_emails에 속한 멤버들에게 알림 보내기
+    task_type = "콘텐츠 과업" if database_id == CONTENTS_DATABASE_ID else "과업"
     for email in unassigned_emails:
         slack_user_id = email_to_user_id.get(email)
         if slack_user_id:
             text = (
-                f"<@{slack_user_id}> 현재 진행중인 과업이 없습니다. "
+                f"<@{slack_user_id}> 현재 진행중인 {task_type}이 없습니다. "
                 "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다."
             )
         else:
             # 혹시라도 email_to_user_id에 매핑되어 있지 않은 경우 처리
             text = (
-                f"{email}님께서 현재 진행중인 과업이 없습니다. "
-                "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다."
+                f"{email}님께서 현재 진행중인 {task_type}이 없습니다. "
+                "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다. "
                 "또한 이메일 매핑이 누락된 원인을 파악해주시길 바랍니다."
             )
         slack_client.chat_postMessage(channel=channel_id, text=text)
@@ -273,6 +356,7 @@ def alert_no_후속_작업(
     database_id: str,
     channel_id: str,
     email_to_user_id: dict,
+    db_type: str,
 ):
     """
     후속 작업이 마땅히 예상 되나 후속 작업이 등록되지 않은 경우 알림.
@@ -288,27 +372,51 @@ def alert_no_후속_작업(
         database_id (str): Notion database id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        db_type (str): 데이터베이스 타입 ("메인 작업" 또는 "콘텐츠")
 
     Returns:
         None
     """
-    query_filter = {
-        "and": [
-            {
-                "property": "작성일시",
-                "created_time": {"on_or_after": "2025-01-01T00:00:00.000Z"},
-            },
-            {"property": "상태", "status": {"equals": "완료"}},
-            {
-                "or": [
-                    {"property": "구성요소", "multi_select": {"contains": "기획"}},
-                    {"property": "구성요소", "multi_select": {"contains": "디자인"}},
-                ]
-            },
-            {"property": "후속 작업", "relation": {"is_empty": True}},
-            {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
-        ]
-    }
+    if database_id == CONTENTS_DATABASE_ID:
+        # 콘텐츠 DB용 쿼리 (작성일시 속성이 없으므로 생략)
+        query_filter = {
+            "and": [
+                {"property": "상태", "status": {"equals": "완료"}},
+                {
+                    "or": [
+                        {"property": "구성요소", "multi_select": {"contains": "기획"}},
+                        {
+                            "property": "구성요소",
+                            "multi_select": {"contains": "디자인"},
+                        },
+                    ]
+                },
+                {"property": "후속 작업", "relation": {"is_empty": True}},
+                {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
+            ]
+        }
+    else:
+        # 메인 작업 DB용 쿼리
+        query_filter = {
+            "and": [
+                {
+                    "property": "작성일시",
+                    "created_time": {"on_or_after": "2025-01-01T00:00:00.000Z"},
+                },
+                {"property": "상태", "status": {"equals": "완료"}},
+                {
+                    "or": [
+                        {"property": "구성요소", "multi_select": {"contains": "기획"}},
+                        {
+                            "property": "구성요소",
+                            "multi_select": {"contains": "디자인"},
+                        },
+                    ]
+                },
+                {"property": "후속 작업", "relation": {"is_empty": True}},
+                {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
+            ]
+        }
 
     results = notion.databases.query(
         **{"database_id": database_id, "filter": query_filter}
@@ -331,13 +439,13 @@ def alert_no_후속_작업(
 
         if slack_user_id:
             text = (
-                f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
+                f"[{db_type}] 과업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
                 "아직 후속 작업이 등록되어 있지 않습니다.\n"
                 f"<@{slack_user_id}> 확인 부탁드립니다."
             )
         else:
             text = (
-                f"과업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
+                f"[{db_type}] 과업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
                 "담당자를 확인할 수 없고 후속 작업도 등록되어 있지 않습니다.\n"
                 "Notion에서 담당자/후속 작업 정보를 업데이트 부탁드립니다."
             )
