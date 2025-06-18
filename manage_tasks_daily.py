@@ -52,7 +52,6 @@ def main():
         MAIN_DATABASE_ID,
         MAIN_CHANNEL_ID,
         email_to_user_id,
-        "메인 작업",
     )
 
     # 콘텐츠 DB 처리
@@ -72,14 +71,6 @@ def main():
         email_to_user_id,
     )
     alert_no_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATABASE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-        "콘텐츠",
-    )
-    alert_no_후속_작업(
         notion,
         slack_client,
         CONTENTS_DATABASE_ID,
@@ -261,13 +252,13 @@ def alert_no_tasks(
     # 1. 현재 '진행' 혹은 '리뷰' 상태인 작업의 담당자 이메일들을 모두 가져옵니다.
     in_progress_tasks = notion.databases.query(
         **{
-            "database_id": database_id, 
+            "database_id": database_id,
             "filter": {
                 "or": [
                     {"property": "상태", "status": {"equals": "진행"}},
                     {"property": "상태", "status": {"equals": "리뷰"}},
                 ]
-            }
+            },
         }
     )
 
@@ -339,10 +330,9 @@ def alert_no_후속_작업(
     database_id: str,
     channel_id: str,
     email_to_user_id: dict,
-    db_type: str,
 ):
     """
-    후속 작업이 마땅히 예상 되나 후속 작업이 등록되지 않은 경우 알림.
+    후속 작업이 마땅히 예상 되나 후속 작업이 등록되지 않은 경우 알림 (메인 작업 DB 전용)
     - '구성요소' 다중 선택 속성에 기획 또는 디자인이 들어있는 경우
     - '상태' 속성이 '완료'인 경우
     - '후속 작업'(관계형) 속성이 비어 있는 경우
@@ -355,51 +345,31 @@ def alert_no_후속_작업(
         database_id (str): Notion database id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-        db_type (str): 데이터베이스 타입 ("메인 작업" 또는 "콘텐츠")
 
     Returns:
         None
     """
-    if database_id == CONTENTS_DATABASE_ID:
-        # 콘텐츠 DB용 쿼리 (작성일시 속성이 없으므로 생략)
-        query_filter = {
-            "and": [
-                {"property": "상태", "status": {"equals": "완료"}},
-                {
-                    "or": [
-                        {"property": "구성요소", "multi_select": {"contains": "기획"}},
-                        {
-                            "property": "구성요소",
-                            "multi_select": {"contains": "디자인"},
-                        },
-                    ]
-                },
-                {"property": "후속 작업", "relation": {"is_empty": True}},
-                {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
-            ]
-        }
-    else:
-        # 메인 작업 DB용 쿼리
-        query_filter = {
-            "and": [
-                {
-                    "property": "작성일시",
-                    "created_time": {"on_or_after": "2025-01-01T00:00:00.000Z"},
-                },
-                {"property": "상태", "status": {"equals": "완료"}},
-                {
-                    "or": [
-                        {"property": "구성요소", "multi_select": {"contains": "기획"}},
-                        {
-                            "property": "구성요소",
-                            "multi_select": {"contains": "디자인"},
-                        },
-                    ]
-                },
-                {"property": "후속 작업", "relation": {"is_empty": True}},
-                {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
-            ]
-        }
+    # 메인 작업 DB용 쿼리
+    query_filter = {
+        "and": [
+            {
+                "property": "작성일시",
+                "created_time": {"on_or_after": "2025-01-01T00:00:00.000Z"},
+            },
+            {"property": "상태", "status": {"equals": "완료"}},
+            {
+                "or": [
+                    {"property": "구성요소", "multi_select": {"contains": "기획"}},
+                    {
+                        "property": "구성요소",
+                        "multi_select": {"contains": "디자인"},
+                    },
+                ]
+            },
+            {"property": "후속 작업", "relation": {"is_empty": True}},
+            {"property": "제목", "title": {"does_not_contain": "후속 작업 없음"}},
+        ]
+    }
 
     results = notion.databases.query(
         **{"database_id": database_id, "filter": query_filter}
@@ -422,13 +392,13 @@ def alert_no_후속_작업(
 
         if slack_user_id:
             text = (
-                f"[{db_type}] 작업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
+                f"작업 <{page_url}|{task_name}>은(는) 작업이 완료되었습니다만, "
                 "아직 후속 작업이 등록되어 있지 않습니다.\n"
                 f"<@{slack_user_id}> 확인 부탁드립니다."
             )
         else:
             text = (
-                f"[{db_type}] 작업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
+                f"작업 <{page_url}|{task_name}>은(는) 작업이 완료되었으나, "
                 "담당자를 확인할 수 없고 후속 작업도 등록되어 있지 않습니다.\n"
                 "Notion에서 담당자/후속 작업 정보를 업데이트 부탁드립니다."
             )
