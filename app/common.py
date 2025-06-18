@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
+from pydantic import BaseModel, Field
 
 from cachetools import TTLCache
 from langchain_core.callbacks import BaseCallbackHandler
@@ -39,6 +40,7 @@ PROJECT_TO_PAGE_ID = {
 
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
+_cache_database_schema = TTLCache(maxsize=10, ttl=3600)
 
 
 async def slack_users_list(client: AsyncWebClient):
@@ -63,6 +65,33 @@ async def notion_users_list(client: NotionClient):
     resp = client.users.list()
     _cache_notion_users["notion_users_list"] = resp
     return resp
+
+
+def get_database_schema(client: NotionClient, database_id: str):
+    """
+    노션 데이터베이스 스키마를 조회한다.
+    """
+    cache_key = f"database_schema_{database_id}"
+    if cache_key in _cache_database_schema:
+        return _cache_database_schema[cache_key]
+
+    resp = client.databases.retrieve(database_id)
+    _cache_database_schema[cache_key] = resp
+    return resp
+
+
+def get_status_options(client: NotionClient, database_id: str) -> list[str]:
+    """
+    노션 데이터베이스에서 상태 속성의 가능한 옵션들을 조회한다.
+    """
+    db_schema = get_database_schema(client, database_id)
+    status_property = db_schema["properties"].get("상태", {})
+
+    if "status" in status_property:
+        options = status_property["status"].get("options", [])
+        return [option["name"] for option in options]
+
+    return []
 
 
 search_tool = TavilySearchResults(
@@ -211,18 +240,27 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
             properties={"타임라인": {"date": {"start": new_start, "end": new_end}}},
         )
 
-    @tool
-    def update_notion_task_status(
-        page_id: Annotated[
-            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        ],
-        new_status: Annotated[
-            Literal["대기", "진행", "리뷰", "완료", "중단"], "새로운 상태명"
-        ],
-    ):
+    # 데이터베이스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
+    status_options = get_status_options(notion, DATABASE_ID)
+
+    # 동적으로 Field 생성하여 enum constraint 추가
+    status_field = Field(
+        description=f"새로운 상태명. 가능한 값: {', '.join(status_options)}",
+        json_schema_extra={"enum": status_options},
+    )
+
+    class UpdateNotionTaskStatusInput(BaseModel):
+        page_id: str = Field(
+            description="노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        )
+        new_status: str = status_field
+
+    @tool("update_notion_task_status", args_schema=UpdateNotionTaskStatusInput)
+    def update_notion_task_status(page_id: str, new_status: str) -> None:
         """
         노션 작업의 상태를 변경합니다.
         주로 노션 작업을 진행 중, 완료, 중단 등으로 변경할 때 쓰입니다.
+        상태 옵션은 실제 노션 데이터베이스에서 동적으로 가져옵니다.
         """
         notion.pages.update(
             page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
