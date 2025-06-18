@@ -94,6 +94,34 @@ def get_status_options(client: NotionClient, database_id: str) -> list[str]:
     return []
 
 
+def get_task_type_options(client: NotionClient, database_id: str) -> list[str]:
+    """
+    노션 데이터베이스에서 유형 속성의 가능한 옵션들을 조회한다.
+    """
+    db_schema = get_database_schema(client, database_id)
+    task_type_property = db_schema["properties"].get("유형", {})
+
+    if "select" in task_type_property:
+        options = task_type_property["select"].get("options", [])
+        return [option["name"] for option in options]
+
+    return []
+
+
+def get_component_options(client: NotionClient, database_id: str) -> list[str]:
+    """
+    노션 데이터베이스에서 구성요소 속성의 가능한 옵션들을 조회한다.
+    """
+    db_schema = get_database_schema(client, database_id)
+    component_property = db_schema["properties"].get("구성요소", {})
+
+    if "multi_select" in component_property:
+        options = component_property["multi_select"].get("options", [])
+        return [option["name"] for option in options]
+
+    return []
+
+
 search_tool = TavilySearchResults(
     max_results=10,
     search_depth="advanced",
@@ -136,21 +164,34 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
         )
         notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
 
-    @tool
-    def create_notion_task(
-        title: Annotated[str, "작업의 제목"],
-        task_type: Annotated[Literal["작업 🔨", "버그 🐞"], "작업의 유형"],
-        component: Annotated[
-            Literal["기획", "디자인", "프론트", "백", "인프라", "데이터", "AI"],
-            "작업의 구성요소",
-        ],
-        project: Annotated[
-            Literal["유지보수", "기술개선", "경험개선", "오픈소스"],
-            "작업이 속한 프로젝트",
-        ],
-        blocks: Annotated[
-            str | None,
-            (
+    # 데이터베이스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
+    task_type_options = get_task_type_options(notion, DATABASE_ID)
+    component_options = get_component_options(notion, DATABASE_ID)
+
+    # 동적으로 Field 생성하여 enum constraint 추가
+    task_type_field = Field(
+        description=f"작업의 유형. 가능한 값: {', '.join(task_type_options)}",
+        json_schema_extra={"enum": task_type_options},
+    )
+
+    component_field = Field(
+        description=f"작업의 구성요소. 가능한 값: {', '.join(component_options)}",
+        json_schema_extra={"enum": component_options},
+    )
+
+    class CreateNotionTaskInput(BaseModel):
+        title: str = Field(description="작업의 제목")
+        task_type: str = task_type_field
+        component: str = component_field
+        project: str = Field(
+            description="작업이 속한 프로젝트. 가능한 값: 유지보수, 기술개선, 경험개선, 오픈소스",
+            json_schema_extra={
+                "enum": ["유지보수", "기술개선", "경험개선", "오픈소스"]
+            },
+        )
+        blocks: str | None = Field(
+            default=None,
+            description=(
                 "작업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
                 "# 슬랙 대화 요약\n"
                 "_슬랙 대화 내용을 요약하여 작성한다._\n"
@@ -159,7 +200,15 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
                 "# 의견\n"
                 "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 작업을 해결하기 위한 기술적 방향을 제시._\n"
             ),
-        ],
+        )
+
+    @tool("create_notion_task", args_schema=CreateNotionTaskInput)
+    def create_notion_task(
+        title: str,
+        task_type: str,
+        component: str,
+        project: str,
+        blocks: str | None = None,
     ) -> str:
         """
         노션에 새로운 작업 페이지를 생성합니다.
@@ -278,16 +327,17 @@ async def get_notion_tools(user_email: str | None, slack_thread_url: str):
         """
         return StringExporter(block_id=page_id, output_path="test").export()
 
-    @tool
-    def create_notion_follow_up_task(
-        parent_page_id: Annotated[
-            str, "선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        ],
-        component: Annotated[
-            Literal["디자인", "프론트", "백", "인프라", "데이터", "AI"],
-            "후속 작업의 구성요소",
-        ],
-    ) -> str:
+    class CreateNotionFollowUpTaskInput(BaseModel):
+        parent_page_id: str = Field(
+            description="선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+        )
+        component: str = Field(
+            description=f"후속 작업의 구성요소. 가능한 값: {', '.join(component_options)}",
+            json_schema_extra={"enum": component_options},
+        )
+
+    @tool("create_notion_follow_up_task", args_schema=CreateNotionFollowUpTaskInput)
+    def create_notion_follow_up_task(parent_page_id: str, component: str) -> str:
         """
         선행 작업(parent_page_id)에 대하여 후속 작업을 생성합니다.
         특정 구성 요소에 대해서 생성될 수 있습니다.
