@@ -87,10 +87,25 @@ def get_web_page_from_url(
     return documents
 
 
-def get_notion_tools(notion_assignee_id: str | None, slack_thread_url: str):
+async def get_notion_tools(user_email: str | None, slack_thread_url: str):
     """
     노션 관련 도구들을 생성하여 반환합니다.
+    사용자 이메일을 기반으로 노션 사용자를 찾아 도구에 주입합니다.
     """
+    # 이메일이 있는 경우에만 노션 사용자 매칭 시도
+    notion_assignee_id = None
+    if user_email:
+        notion_users = await notion_users_list(notion)
+        # 이메일이 일치하는 Notion 사용자 찾기
+        matched_notion_user = next(
+            (
+                user
+                for user in notion_users["results"]
+                if user["type"] == "person" and user["person"]["email"] == user_email
+            ),
+            None,
+        )
+        notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
 
     @tool
     def create_notion_task(
@@ -382,26 +397,9 @@ async def answer(
     )
 
     user_email = user_profile.get("profile", {}).get("email")
-    notion_users = await notion_users_list(notion)
+    notion_tools = await get_notion_tools(user_email, slack_thread_url)
 
-    # 이메일이 slack_email인 Notion 사용자 찾기
-    matched_notion_user = next(
-        (
-            user
-            for user in notion_users["results"]
-            if user["type"] == "person" and user["person"]["email"] == user_email
-        ),
-        None,
-    )
-
-    notion_assignee_id = matched_notion_user["id"] if matched_notion_user else None
-
-    notion_tools = get_notion_tools(notion_assignee_id, slack_thread_url)
-    
-    tools = [
-        search_tool,
-        get_web_page_from_url
-    ] + notion_tools
+    tools = [search_tool, get_web_page_from_url] + notion_tools
 
     if text.startswith("o3"):
         model = "o3"
