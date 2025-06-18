@@ -453,6 +453,7 @@ async def answer(
     text: str,
     say,
     client,
+    tools: list,
 ):
     """
     슬랙에서 질문을 받아 답변을 생성하여 슬랙에 전송한다.
@@ -464,6 +465,7 @@ async def answer(
         text: 질문 내용
         say: 메시지 전송 함수
         client: 슬랙 클라이언트
+        tools: 외부에서 주입할 도구들의 리스트.
 
     Returns:
         None
@@ -536,9 +538,6 @@ async def answer(
     )
 
     user_email = user_profile.get("profile", {}).get("email")
-    notion_tools = await get_notion_tools(user_email, slack_thread_url)
-
-    tools = [search_tool, get_web_page_from_url] + notion_tools
 
     if text.startswith("o3"):
         model = "o3"

@@ -15,6 +15,9 @@ from .common import (
     KST,
     slack_users_list,
     answer,
+    search_tool,
+    get_web_page_from_url,
+    get_notion_tools,
 )
 
 # 상수들
@@ -44,7 +47,17 @@ def register_general_handlers(app, assistant):
         channel = event["channel"]
         user = event.get("user")
         text = event["text"]
-        await answer(thread_ts, channel, user, text, say, app.client)
+        # 사용자 정보 조회
+        user_info_list = await slack_users_list(app.client)
+        user_dict = {
+            user_info["id"]: user_info for user_info in user_info_list["members"]
+        }
+        user_profile = user_dict.get(user, {})
+        user_email = user_profile.get("profile", {}).get("email")
+
+        notion_tools = await get_notion_tools(user_email, None)
+        tools = [search_tool, get_web_page_from_url] + notion_tools
+        await answer(thread_ts, channel, user, text, say, app.client, tools)
 
     @app.event("user_huddle_changed")
     async def user_huddle_changed(body, say):
@@ -158,6 +171,15 @@ def register_general_handlers(app, assistant):
         """
         Respond to a user message in the assistant thread.
         """
+        # 사용자 정보 조회
+        user_info_list = await slack_users_list(app.client)
+        user_dict = {user["id"]: user for user in user_info_list["members"]}
+        user_profile = user_dict.get(context.user_id, {})
+        user_email = user_profile.get("profile", {}).get("email")
+
+        notion_tools = await get_notion_tools(user_email, None)
+        tools = [search_tool, get_web_page_from_url] + notion_tools
+
         await answer(
             context.thread_ts,
             context.channel_id,
@@ -165,6 +187,7 @@ def register_general_handlers(app, assistant):
             payload["text"],
             say,
             app.client,
+            tools,
         )
 
     @app.command("/summarize-deployment")
