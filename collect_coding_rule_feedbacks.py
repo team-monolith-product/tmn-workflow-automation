@@ -259,12 +259,27 @@ def format_slack_message(bad_reviews: list[dict]) -> list[dict]:
             if len(body_preview) > 200:
                 body_preview = body_preview[:200] + "..."
 
+            # 기본 리뷰 내용
+            review_text = f"{pr_link} {reactions_text}\n```{body_preview}```"
+
+            # 답글이 있는 경우 추가
+            if "replies" in review and review["replies"]:
+                reply_texts = []
+                for reply in review["replies"]:
+                    reply_body = reply["body"]
+                    if len(reply_body) > 150:  # 답글은 좀 더 짧게 표시
+                        reply_body = reply_body[:150] + "..."
+                    reply_texts.append(f"┗ *@{reply['user']}*: {reply_body}")
+
+                # 줄바꿈으로 답글들 연결하여 원본 리뷰에 추가
+                review_text += "\n" + "\n".join(reply_texts)
+
             blocks.append(
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"{pr_link} {reactions_text}\n```{body_preview}```",
+                        "text": review_text,
                     },
                 }
             )
@@ -352,12 +367,46 @@ def main():
     # 2. 리뷰 댓글 데이터 통합 및 반응 정보 연결
     all_review_comments = []
 
-    # 모든 댓글 정보 순회
+    # 원본 댓글 ID를 답글 목록과 매핑하는 사전
+    original_id_to_replies = {}
+
+    # 1단계: 모든 답글 찾아서 사전 구성
     for pr in all_pull_requests:
         if pr.id not in pr_id_to_comments:
             continue
 
         for comment in pr_id_to_comments[pr.id]:
+            # 답글인 경우 (in_reply_to_id 속성이 있고 값이 있는 경우)
+            if hasattr(comment, "in_reply_to_id") and comment.in_reply_to_id:
+                original_id = comment.in_reply_to_id
+
+                # 사전에 원본 ID가 없으면 빈 목록 생성
+                if original_id not in original_id_to_replies:
+                    original_id_to_replies[original_id] = []
+
+                # 답글 데이터 생성
+                reply_data = {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "user": comment.user.login,
+                    "created_at": comment.created_at,
+                    "updated_at": comment.updated_at,
+                    "html_url": comment.html_url,
+                }
+
+                # 답글 목록에 추가
+                original_id_to_replies[original_id].append(reply_data)
+
+    # 모든 댓글 정보 순회 (실제 데이터 구성)
+    for pr in all_pull_requests:
+        if pr.id not in pr_id_to_comments:
+            continue
+
+        for comment in pr_id_to_comments[pr.id]:
+            # 답글인 경우 건너뛰기 (나중에 원본 댓글의 replies에 추가)
+            if hasattr(comment, "in_reply_to_id") and comment.in_reply_to_id:
+                continue
+
             # 기본 댓글 정보 구성
             comment_data = {
                 "id": comment.id,
@@ -365,10 +414,14 @@ def main():
                 "user": comment.user.login,
                 "created_at": comment.created_at,
                 "updated_at": comment.updated_at,
+                "pr_id": pr.id,  # PR ID 추가 (답글 검색용)
                 "pr_number": pr.number,
                 "pr_title": pr.title,
                 "repo_name": pr.base.repo.full_name,
                 "html_url": comment.html_url,
+                "replies": original_id_to_replies.get(
+                    comment.id, []
+                ),  # 답글 목록 가져오기
             }
 
             # 반응 생성자 저장용 사전
@@ -393,6 +446,7 @@ def main():
                         reaction_users[reaction_type].append(reaction.user.login)
 
             comment_data["reaction_users"] = reaction_users
+
             all_review_comments.append(comment_data)
 
     print(f"리뷰 댓글 {len(all_review_comments)}개를 찾았습니다.")

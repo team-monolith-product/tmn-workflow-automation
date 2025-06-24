@@ -3,3 +3,5 @@
 .vscode
 meeting_minutes
 pr_reports
+
+**/.claude/settings.local.json

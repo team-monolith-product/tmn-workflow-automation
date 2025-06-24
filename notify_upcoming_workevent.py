@@ -40,7 +40,6 @@ def fetch_absence_between(start_dt: datetime, end_dt: datetime) -> List[dict]:
     """
     try:
         response = get_workevent(
-            date=start_dt.strftime("%Y-%m-%d"),
             type="range",
             start_date=start_dt.strftime("%Y-%m-%d"),
             end_date=end_dt.strftime("%Y-%m-%d"),

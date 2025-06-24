@@ -18,8 +18,10 @@ def get_workevent(
     end_date: str | None = None,
 ):
     """
+    원티드 스페이스 근태 이벤트 조회 API
+
     Args:
-        date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
+        date (str): 기준 날짜 (YYYY-MM-DD) - type이 day, week, month, year일 때 사용
         type (str): 조회하고자 하는 기간 (day, week, month, year, range)
         email (str): 조회하고자 하는 사용자의 이메일 (optional)
         start_date (str): type이 range일 때 시작 날짜 (YYYY-MM-DD)
@@ -55,16 +57,30 @@ def get_workevent(
     """
     url = "https://api.wantedspace.ai/tools/openapi/workevent/"
     query = {
-        "date": date,
         "key": os.environ.get("WANTEDSPACE_API_KEY"),
     }
-    if type:
+
+    # 이벤트 타입에 따라 적절한 파라미터 설정
+    if type == "range":
+        if not start_date or not end_date:
+            raise ValueError(
+                "type이 'range'인 경우 start_date와 end_date가 필요합니다."
+            )
         query["type"] = type
-    if email:
-        query["email"] = email
-    if type == "range" and start_date and end_date:
         query["start_date"] = start_date
         query["end_date"] = end_date
+    elif type in ["day", "week", "month", "year"]:
+        query["type"] = type
+        query["date"] = date
+    elif type is None:
+        # 기본값은 day (문서에 따름)
+        query["date"] = date
+    else:
+        raise ValueError(f"지원하지 않는 type 값입니다: {type}")
+
+    if email:
+        query["email"] = email
+
     headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
     response = requests_get_with_retry(url, params=query, headers=headers)
     return response.json()
@@ -72,14 +88,20 @@ def get_workevent(
 
 def get_worktime(date: str):
     """
+    특정 날짜의 출퇴근 기록을 조회합니다.
     https://wantedplus.notion.site/API-a71d3186deca4cd9b9774dde57798e7a
+
+    중요 사항:
+    - 출근한 사람만 반환되나, 휴가자도 결과에 포함될 수 있음
+    - 휴가자는 wk_start_time과 wk_end_time이 모두 null로 표시됨
+    - 출근했지만 퇴근하지 않은 사람은 wk_start_time은 있고 wk_end_time은 null임
+    - 출퇴근을 모두 완료한 사람은 wk_start_time과 wk_end_time이 모두 존재함
 
     Args:
         date (str): 조회하고자 하는 날짜 (YYYY-MM-DD)
 
     Returns:
-        출근한 사람만 반환됩니다.
-        wk_end_time 는 null 일 수 있습니다.
+        출근 기록 API 응답. 응답 형태 예시:
         {
             "next": null,
             "previous": null,
@@ -147,18 +169,30 @@ def requests_get_with_retry(
     원티드스페이스는 429 응답을 반환함.
     """
     backoff = initial_backoff
-    for attempt in range(1, max_retries + 1):
+    for _ in range(1, max_retries + 1):
         response = requests.get(url, params=params, headers=headers, timeout=10)
 
         if response.status_code == 429:
-            if attempt == max_retries:
-                break
             time.sleep(backoff)
             backoff *= 2
             continue
 
         return response
     return requests.get(url, params=params, headers=headers, timeout=10)
+
+
+def get_event_codes():
+    """
+    워크이벤트 코드 목록을 조회합니다.
+
+    Returns:
+        list[dict]: 이벤트 코드 목록 (예: [{"code": "WNS_VACATION_PM", "text": "연차(오후)", ...}])
+    """
+    url = "https://api.wantedspace.ai/tools/openapi/workevent/event_codes/"
+    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
+    params = {"key": os.environ.get("WANTEDSPACE_API_KEY")}
+    response = requests_get_with_retry(url, params=params, headers=headers)
+    return response.json()
 
 
 def get_event_code_map() -> dict[str, str]:
@@ -168,9 +202,5 @@ def get_event_code_map() -> dict[str, str]:
     Returns:
         dict[str, str]: 이벤트 코드와 이벤트 텍스트의 매핑 (예: {"WNS_VACATION_PM": "연차(오후)"})
     """
-    url = "https://api.wantedspace.ai/tools/openapi/workevent/event_codes/"
-    headers = {"Authorization": os.environ.get("WANTEDSPACE_API_SECRET")}
-    params = {"key": os.environ.get("WANTEDSPACE_API_KEY")}
-    resp = requests_get_with_retry(url, params=params, headers=headers)
-    resp.raise_for_status()
-    return {item["code"]: item["text"] for item in resp.json()}
+    event_codes = get_event_codes()
+    return {item["code"]: item["text"] for item in event_codes}
