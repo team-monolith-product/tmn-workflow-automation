@@ -266,7 +266,7 @@ def get_monthly_vacation_breakdown(year: int, month: int, workevent):
                 if dt_cursor.weekday() < 5:
                     weekday_count += 1
                 dt_cursor += timedelta(days=1)
-            
+
             if weekday_count <= 0:
                 continue
 
@@ -339,7 +339,7 @@ def get_daily_vacation_map(year: int, month: int, workevent):
                 if dt_cursor.weekday() < 5:
                     weekday_count += 1
                 dt_cursor += timedelta(days=1)
-            
+
             if weekday_count <= 0:
                 continue
 

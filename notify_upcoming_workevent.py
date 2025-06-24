@@ -30,11 +30,11 @@ DEFAULT_LOOKAHEAD_DAYS = 10
 def fetch_absence_between(start_dt: datetime, end_dt: datetime) -> List[dict]:
     """
     특정 기간 내의 확정된 근태 이벤트를 조회합니다.
-    
+
     Args:
         start_dt (datetime): 조회 시작 날짜
         end_dt (datetime): 조회 종료 날짜
-        
+
     Returns:
         List[dict]: 근태 이벤트 목록 (상태가 "APPROVED" 또는 "INFORMED"인 이벤트만)
     """
@@ -45,7 +45,7 @@ def fetch_absence_between(start_dt: datetime, end_dt: datetime) -> List[dict]:
             start_date=start_dt.strftime("%Y-%m-%d"),
             end_date=end_dt.strftime("%Y-%m-%d"),
         )
-        
+
         # 확정된 이벤트만 필터링
         events = response.get("results", [])
         return [ev for ev in events if ev.get("status") in {"APPROVED", "INFORMED"}]
@@ -63,18 +63,18 @@ def build_absence_set(
 ) -> Set[Tuple[date, str, str]]:
     """
     근태 이벤트 목록에서 (날짜, 이름, 종류) 집합을 생성합니다.
-    
+
     Args:
         events (List[dict]): 근태 이벤트 목록
         code_map (Dict[str, str]): 이벤트 코드와 텍스트 매핑
         start (date): 시작 날짜
         end (date): 종료 날짜
-        
+
     Returns:
         Set[Tuple[date, str, str]]: (날짜, 이름, 종류) 집합
     """
     uniq: Set[Tuple[date, str, str]] = set()
-    
+
     try:
         for ev in events:
             name = ev.get("username") or ev.get("email")
@@ -87,7 +87,7 @@ def build_absence_set(
                 cur += timedelta(days=1)
     except Exception as e:
         print(f"[ERROR] 근태 데이터 처리 실패: {e}")
-        
+
     return uniq
 
 
@@ -98,10 +98,10 @@ KOREAN_WEEKDAY = "월화수목금토일"  # Monday=0 → "월"
 def fmt(dt: date) -> str:
     """
     날짜를 한글 포맷으로 변환합니다.
-    
+
     Args:
         dt (date): 변환할 날짜
-        
+
     Returns:
         str: 변환된 문자열 (예: "5월 3일(금)")
     """
@@ -116,11 +116,11 @@ def _compress_person_ranges(
 ) -> List[Tuple[date, date, str]]:
     """
     단일 인원의 연속된 근태 구간을 압축합니다.
-    
+
     Args:
         dates (List[date]): 날짜 목록
         kind_by_date (Dict[date, str]): 날짜별 근태 종류
-        
+
     Returns:
         List[Tuple[date, date, str]]: (시작일, 종료일, 종류) 목록
     """
@@ -147,10 +147,10 @@ def _compress_person_ranges(
 def make_summary(absence_set: Set[Tuple[date, str, str]]) -> str:
     """
     근태 데이터를 이름·종류별로 한 줄씩 정리한 요약을 생성합니다.
-    
+
     Args:
         absence_set (Set[Tuple[date, str, str]]): (날짜, 이름, 종류) 집합
-        
+
     Returns:
         str: 요약 문자열
     """
@@ -181,7 +181,7 @@ def main():
     """
     메인 함수: 명령행 인자를 파싱하고 예정된 근태 정보를 수집하여
     요약을 생성한 후 Slack 채널에 전송합니다.
-    
+
     명령행 옵션:
     --days: 조회할 미래 일수 (기본값: 10일)
     --dry-run: 실제 메시지 전송 없이 콘솔에만 출력
@@ -197,7 +197,7 @@ def main():
     try:
         # 이벤트 코드 매핑 가져오기
         code_map = get_event_code_map()
-        
+
         # 근태 이벤트 조회
         events = fetch_absence_between(today, end_dt)
         absence = build_absence_set(
