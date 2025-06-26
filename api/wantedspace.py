@@ -193,5 +193,3 @@ def get_event_codes():
     params = {"key": os.environ.get("WANTEDSPACE_API_KEY")}
     response = requests_get_with_retry(url, params=params, headers=headers)
     return response.json()
-
-
