@@ -21,3 +21,4 @@ pypandoc_binary
 tabulate[widechars]
 redis
 PyGithub
+pytest
