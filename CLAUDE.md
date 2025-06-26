@@ -6,8 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run application: `python app.py`
 - Format code: `black .`
 - Run a single file: `python path/to/file.py`
-- No formal test framework; files can be tested directly via `python filename.py`
+- Run tests: `pytest` or `pytest -v` for verbose output
+- Run specific test file: `pytest test_filename.py`
 - Some scripts support `--dry-run` flag; this option will be gradually implemented in more scripts for local testing
+
+## Testing
+- Use pytest for unit testing
+- Test files should be named with `test_` prefix (e.g., `test_notify_worktime_left.py`)
+- Tests can be placed in the root directory or in a `tests/` directory
+- Write comprehensive tests for business logic, especially for complex calculations and API interactions
+- Mock external API calls in tests to ensure reliability and speed
 
 ## Code Style Guidelines
 - **Formatting**: Use Black for code formatting
