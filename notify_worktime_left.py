@@ -265,14 +265,21 @@ def get_monthly_vacation_breakdown(year: int, month: int, workevent):
             if e_dt < first_day_dt or s_dt > last_day_dt:
                 continue
 
-            total_days = (e_dt - s_dt).days + 1
-            if total_days <= 0:
-                continue
-
-            per_day_fraction = counted / total_days
+            # 평일(월~금)만 계산
+            weekday_count = 0
             dt_cursor = s_dt
             while dt_cursor <= e_dt:
-                if first_day_dt <= dt_cursor <= last_day_dt:
+                if dt_cursor.weekday() < 5:
+                    weekday_count += 1
+                dt_cursor += timedelta(days=1)
+
+            if weekday_count <= 0:
+                continue
+
+            per_day_fraction = counted / weekday_count
+            dt_cursor = s_dt
+            while dt_cursor <= e_dt:
+                if first_day_dt <= dt_cursor <= last_day_dt and dt_cursor.weekday() < 5:
                     d_num = dt_cursor.day
                     day_to_vac_fraction[d_num] += per_day_fraction
                     if day_to_vac_fraction[d_num] > 1.0:
@@ -331,14 +338,21 @@ def get_daily_vacation_map(year: int, month: int, workevent):
             if e_dt < first_day_dt or s_dt > last_day_dt:
                 continue
 
-            total_days = (e_dt - s_dt).days + 1
-            if total_days <= 0:
-                continue
-
-            per_day_fraction = counted / total_days
+            # 평일(월~금)만 계산
+            weekday_count = 0
             dt_cursor = s_dt
             while dt_cursor <= e_dt:
-                if first_day_dt <= dt_cursor <= last_day_dt:
+                if dt_cursor.weekday() < 5:
+                    weekday_count += 1
+                dt_cursor += timedelta(days=1)
+
+            if weekday_count <= 0:
+                continue
+
+            per_day_fraction = counted / weekday_count
+            dt_cursor = s_dt
+            while dt_cursor <= e_dt:
+                if first_day_dt <= dt_cursor <= last_day_dt and dt_cursor.weekday() < 5:
                     d_day = dt_cursor.day
                     day_to_vac[d_day] += per_day_fraction
                     if day_to_vac[d_day] > 1.0:
