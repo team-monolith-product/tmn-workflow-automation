@@ -22,6 +22,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **API Design**:
   - API functions should follow the `{method}_{resource}` naming pattern (e.g., `get_event_codes`, `get_worktime`)
   - API functions should return raw JSON responses without transformations
+  - The `api/` folder should only contain direct API wrapper functions
+  - Data transformation and business logic should be placed in appropriate modules (utils, services, etc.)
 - **Logging & Error Handling**:
   - Keep it simple, use print() statements for scripts
   - Avoid complex logging configuration for these internal tools

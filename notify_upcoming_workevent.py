@@ -9,7 +9,7 @@ from typing import Dict, List, Set, Tuple
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 
-from api.wantedspace import get_workevent, get_event_code_map
+from api.wantedspace import get_workevent, get_event_codes
 
 # ────────────────────────────── 환경변수 & 상수 ──────────────────────────────
 load_dotenv()
@@ -195,7 +195,8 @@ def main():
 
     try:
         # 이벤트 코드 매핑 가져오기
-        code_map = get_event_code_map()
+        event_codes = get_event_codes()
+        code_map = {item["code"]: item["text"] for item in event_codes}
 
         # 근태 이벤트 조회
         events = fetch_absence_between(today, end_dt)

@@ -195,12 +195,3 @@ def get_event_codes():
     return response.json()
 
 
-def get_event_code_map() -> dict[str, str]:
-    """
-    워크이벤트 코드와 텍스트의 매핑을 조회합니다.
-
-    Returns:
-        dict[str, str]: 이벤트 코드와 이벤트 텍스트의 매핑 (예: {"WNS_VACATION_PM": "연차(오후)"})
-    """
-    event_codes = get_event_codes()
-    return {item["code"]: item["text"] for item in event_codes}
