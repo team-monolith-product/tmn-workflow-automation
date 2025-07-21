@@ -1,8 +1,7 @@
 """
-버그 신고 채널에 게시글이 올라오면,
-그것을 다음과 같은 규칙을 바탕으로 담당자를 결정하여 멘션합니다.
+개발 환경 인프라 장애 신고 채널에 게시글이 올라오면,
+그것을 다음과 같은 규칙을 바탕으로 인프라 담당자를 결정하여 멘션합니다.
 - 출근을 한 사람을 더 높은 우선 순위로 할당
-- 신고 내용과 관련한 팀 내에서 더 높은 우선 순위로 할당
 - 최근 버그 담당 수가 적은 사람에게 할당
 
 이 파일은 직접 실행되지 않고, 모듈로 import 되어 사용됩니다.
@@ -23,21 +22,20 @@ from slack_sdk.web.async_client import AsyncWebClient
 from api.wantedspace import get_worktime
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 
-REDIS_KEY_PATTERN = "workflow_automation/bug_assigment_time_list"
+REDIS_KEY_PATTERN = "workflow_automation/dev_env_infra_bug_assigment_time_list"
 ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
 
 
-async def route_bug(
+async def route_dev_env_infra_bug(
     slack_client: AsyncWebClient,
     body: dict,
 ) -> None:
     """
-    버그 신고 메시지를 받아 담당자를 결정하고 응답합니다.
+    개발 환경 인프라 장애 신고 메시지를 받아 담당자를 결정하고 응답합니다.
 
     Args:
         body: Slack 이벤트 페이로드 딕셔너리
     """
-    message_text = body.get("event", {}).get("text", "")
     channel_id = body.get("event", {}).get("channel")
     thread_ts = body.get("event", {}).get("ts")
 
@@ -48,7 +46,8 @@ async def route_bug(
         decode_responses=True,
     )
 
-    team, priority = extract_team_and_priority_from_report_text(message_text)
+    team = 'ie'
+    priority = '긴급'
     working_emails = get_working_emails()
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
@@ -95,69 +94,6 @@ def get_working_emails() -> list[str]:
                 working_emails.append(user["email"])
 
     return working_emails
-
-
-def extract_team_and_priority_from_report_text(
-    text,
-) -> tuple[Literal["ie", "fe", "be"], Literal["보통", "높음", "긴급"]]:
-    """버그 신고 메시지 내용을 분석하여 관련 팀/구성 요소 반환"""
-    client = OpenAI()
-    response = client.responses.create(
-        model="gpt-4o",
-        input=[
-            {
-                "role": "system",
-                "content": """
-                    당신은 버그 신고 내용을 분석하여 관련 팀과 우선순위를 결정하는 전문가입니다.
-                    
-                    팀 분류:
-                    - fe: 프론트엔드 관련 버그 (UI, 사용자 상호작용, 브라우저 렌더링 등)
-                    - be: 백엔드 관련 버그 (API, 데이터베이스, 서버 로직 등)
-                    - ie: 인프라 관련 버그 (배포, 서버 환경, 네트워크, 성능 등)
-                    
-                    우선순위 분류:
-                    - 신고 본문에 아래 분류가 직접 포함된다면 그 분류를 추출하세요. 그렇지 않다면 다음 기준을 사용하여 판단하세요.
-                    - 긴급: 수 시간 내에 즉시 해결이 필요한 경우
-                    - 높음: 며칠 내에 해결이 필요한 경우
-                    - 보통: 버그가 과거에도 존재한 것으로 추정되며 해결이 시급하지 않은 경우
-                    
-                    사용자의 버그 신고 내용을 분석하여 JSON 형식으로 정확하게 응답하세요.
-                    """,
-            },
-            {"role": "user", "content": text},
-        ],
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "team_and_priority",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "team": {
-                            "type": "string",
-                            "enum": ["ie", "fe", "be"],
-                            "description": "버그와 관련된 팀 식별자",
-                        },
-                        "priority": {
-                            "type": "string",
-                            "enum": ["보통", "높음", "긴급"],
-                            "description": "버그의 우선순위",
-                        },
-                    },
-                    "required": ["team", "priority"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            }
-        },
-    )
-
-    team_and_priority = json.loads(response.output_text)
-    return (
-        team_and_priority["team"],
-        team_and_priority["priority"],
-    )
-
 
 def get_email_to_bug_count(
     redis_client: redis.Redis, emails: list[str]
