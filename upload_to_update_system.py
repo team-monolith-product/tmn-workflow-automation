@@ -575,18 +575,18 @@ def main():
         }
     )
 
+    deployment_date = input("배포 일자를 입력하세요 (YYYYMMDD): ")
+    rails_bearer_token = input("Rails Bearer Token을 입력하세요: ")
+
+    # Rails Bearer Token을 전역 변수로 설정
+    set_rails_bearer_token(rails_bearer_token)
+
     # 수정/보완 시스템 로그인
     print("수정/보완 시스템에 로그인합니다...")
     session = sign_in_to_update_system()
     if not session:
         print("로그인에 실패했습니다.")
         return
-
-    deployment_date = input("배포 일자를 입력하세요 (YYYYMMDD): ")
-    rails_bearer_token = input("Rails Bearer Token을 입력하세요: ")
-
-    # Rails Bearer Token을 전역 변수로 설정
-    set_rails_bearer_token(rails_bearer_token)
 
     for item in response["results"]:
         title = item["properties"]["제목"]["title"][0]["plain_text"]
