@@ -16,6 +16,7 @@ MAIN_CHANNEL_ID: str = "C087PDC9VG8"
 CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
 
 
+
 def main():
     notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -144,7 +145,10 @@ def alert_overdue_tasks(
     )
 
     for result in results.get("results", []):
-        task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        try:
+            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        except (KeyError, IndexError):
+            task_name = "제목 없음"
         page_url = result["url"]
         people = result["properties"]["담당자"]["people"]
         if people:
@@ -204,7 +208,10 @@ def alert_no_due_tasks(
     )
 
     for result in results.get("results", []):
-        task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        try:
+            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        except (KeyError, IndexError):
+            task_name = "제목 없음"
         page_url = result["url"]
         people = result["properties"]["담당자"]["people"]
         if people:
@@ -376,7 +383,10 @@ def alert_no_후속_작업(
     )
 
     for result in results.get("results", []):
-        task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        try:
+            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        except (KeyError, IndexError):
+            task_name = "제목 없음"
         page_url = result["url"]
 
         people = result["properties"]["담당자"]["people"]
