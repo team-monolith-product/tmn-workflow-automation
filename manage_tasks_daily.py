@@ -16,7 +16,6 @@ MAIN_CHANNEL_ID: str = "C087PDC9VG8"
 CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
 
 
-
 def main():
     notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))

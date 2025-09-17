@@ -108,8 +108,7 @@ def register_general_handlers(app, assistant):
             thread_ts = event.get("thread_ts")
             message_ts = event.get("ts")
             if thread_ts is None or thread_ts == message_ts:
-                await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)    
-    
+                await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
 
     @assistant.thread_started
     async def start_assistant_thread(say, _set_suggested_prompts):
