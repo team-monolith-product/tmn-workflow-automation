@@ -46,8 +46,8 @@ async def route_dev_env_infra_bug(
         decode_responses=True,
     )
 
-    team = 'ie'
-    priority = '긴급'
+    team = "ie"
+    priority = "긴급"
     working_emails = get_working_emails()
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
@@ -94,6 +94,7 @@ def get_working_emails() -> list[str]:
                 working_emails.append(user["email"])
 
     return working_emails
+
 
 def get_email_to_bug_count(
     redis_client: redis.Redis, emails: list[str]
@@ -237,7 +238,7 @@ async def send_slack_response(
         + "\n".join(
             [
                 f"- {email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count.get(email, 0)}회"
-                for email in team_to_emails.get('ie', [])
+                for email in team_to_emails.get("ie", [])
             ]
         )
     )
