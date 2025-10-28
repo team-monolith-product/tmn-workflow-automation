@@ -38,7 +38,7 @@ from service.slack import get_email_to_user_id
 dotenv.load_dotenv()
 
 
-NOTION_DATA_SOURCE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+NOTION_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
 SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 
 
