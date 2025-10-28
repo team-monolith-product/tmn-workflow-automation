@@ -7,7 +7,7 @@ md2notionpage
 cachetools
 requests
 notion2md
-langchain-community
+langchain-community==0.4
 langchain-openai
 langgraph
 langchain-google-community
