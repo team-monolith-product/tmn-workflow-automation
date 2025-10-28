@@ -10,14 +10,16 @@ from service.slack import get_email_to_user_id
 # 환경 변수 로드
 load_dotenv()
 
-MAIN_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
-CONTENTS_DATABASE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
+MAIN_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
+CONTENTS_DATA_SOURCE_ID: str = "fecd7fca-8280-4f02-b78f-7fa720f53aa6"
 MAIN_CHANNEL_ID: str = "C087PDC9VG8"
 CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
 
 
 def main():
-    notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
+    notion = NotionClient(
+        auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
+    )
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     email_to_user_id = get_email_to_user_id(slack_client)
@@ -27,21 +29,21 @@ def main():
     alert_overdue_tasks(
         notion,
         slack_client,
-        MAIN_DATABASE_ID,
+        MAIN_DATA_SOURCE_ID,
         MAIN_CHANNEL_ID,
         email_to_user_id,
     )
     alert_no_due_tasks(
         notion,
         slack_client,
-        MAIN_DATABASE_ID,
+        MAIN_DATA_SOURCE_ID,
         MAIN_CHANNEL_ID,
         email_to_user_id,
     )
     alert_no_tasks(
         notion,
         slack_client,
-        MAIN_DATABASE_ID,
+        MAIN_DATA_SOURCE_ID,
         MAIN_CHANNEL_ID,
         email_to_user_id,
         "e",
@@ -49,7 +51,7 @@ def main():
     alert_no_후속_작업(
         notion,
         slack_client,
-        MAIN_DATABASE_ID,
+        MAIN_DATA_SOURCE_ID,
         MAIN_CHANNEL_ID,
         email_to_user_id,
     )
@@ -59,21 +61,21 @@ def main():
     alert_overdue_tasks(
         notion,
         slack_client,
-        CONTENTS_DATABASE_ID,
+        CONTENTS_DATA_SOURCE_ID,
         CONTENTS_CHANNEL_ID,
         email_to_user_id,
     )
     alert_no_due_tasks(
         notion,
         slack_client,
-        CONTENTS_DATABASE_ID,
+        CONTENTS_DATA_SOURCE_ID,
         CONTENTS_CHANNEL_ID,
         email_to_user_id,
     )
     alert_no_tasks(
         notion,
         slack_client,
-        CONTENTS_DATABASE_ID,
+        CONTENTS_DATA_SOURCE_ID,
         CONTENTS_CHANNEL_ID,
         email_to_user_id,
         "콘텐츠",
@@ -105,7 +107,7 @@ def send_intro_message(
 def alert_overdue_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    database_id: str,
+    data_source_id: str,
     channel_id: str,
     email_to_user_id: dict,
 ):
@@ -115,7 +117,7 @@ def alert_overdue_tasks(
     Args:
         notion (NotionClient): Notion
         slack_client (WebClient): Slack
-        database_id (str): Notion database id
+        data_source_id (str): Notion data_source id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
@@ -125,9 +127,9 @@ def alert_overdue_tasks(
     today = datetime.now().date()
 
     # 대기 또는 진행 상태이면서 타임라인 종료일이 today보다 과거인 페이지 검색
-    results = notion.databases.query(
+    results = notion.data_sources.query(
         **{
-            "database_id": database_id,
+            "data_source_id": data_source_id,
             "filter": {
                 "and": [
                     {
@@ -170,7 +172,7 @@ def alert_overdue_tasks(
 def alert_no_due_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    database_id: str,
+    data_source_id: str,
     channel_id: str,
     email_to_user_id: dict,
 ):
@@ -180,7 +182,7 @@ def alert_no_due_tasks(
     Args:
         notion (NotionClient): Notion
         slack_client (WebClient): Slack
-        database_id (str): Notion database id
+        data_source_id (str): Notion data_source id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
@@ -189,9 +191,9 @@ def alert_no_due_tasks(
     """
 
     # '진행' 또는 '리뷰' 상태이면서 타임라인이 없는 페이지 검색
-    results = notion.databases.query(
+    results = notion.data_sources.query(
         **{
-            "database_id": database_id,
+            "data_source_id": data_source_id,
             "filter": {
                 "and": [
                     {
@@ -236,7 +238,7 @@ def alert_no_due_tasks(
 def alert_no_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    database_id: str,
+    data_source_id: str,
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
@@ -247,7 +249,7 @@ def alert_no_tasks(
     Args:
         notion (NotionClient): Notion
         slack_client (WebClient): Slack
-        database_id (str): Notion database id
+        data_source_id (str): Notion data_source id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
         group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
@@ -256,9 +258,9 @@ def alert_no_tasks(
         None
     """
     # 1. 현재 '진행' 혹은 '리뷰' 상태인 작업의 담당자 이메일들을 모두 가져옵니다.
-    in_progress_tasks = notion.databases.query(
+    in_progress_tasks = notion.data_sources.query(
         **{
-            "database_id": database_id,
+            "data_source_id": data_source_id,
             "filter": {
                 "or": [
                     {"property": "상태", "status": {"equals": "진행"}},
@@ -333,7 +335,7 @@ def alert_no_tasks(
 def alert_no_후속_작업(
     notion: NotionClient,
     slack_client: WebClient,
-    database_id: str,
+    data_source_id: str,
     channel_id: str,
     email_to_user_id: dict,
 ):
@@ -348,7 +350,7 @@ def alert_no_후속_작업(
     Args:
         notion (NotionClient): Notion
         slack_client (WebClient): Slack
-        database_id (str): Notion database id
+        data_source_id (str): Notion data_source id
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
 
@@ -377,8 +379,8 @@ def alert_no_후속_작업(
         ]
     }
 
-    results = notion.databases.query(
-        **{"database_id": database_id, "filter": query_filter}
+    results = notion.data_sources.query(
+        **{"data_source_id": data_source_id, "filter": query_filter}
     )
 
     for result in results.get("results", []):
