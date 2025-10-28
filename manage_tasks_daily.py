@@ -11,7 +11,7 @@ from service.slack import get_email_to_user_id
 load_dotenv()
 
 MAIN_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
-CONTENTS_DATA_SOURCE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
+CONTENTS_DATA_SOURCE_ID: str = "d8d7d2cd-0c62-4314-a2b7-754ad345c0ee"
 MAIN_CHANNEL_ID: str = "C087PDC9VG8"
 CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
 
