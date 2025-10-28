@@ -38,7 +38,7 @@ from service.slack import get_email_to_user_id
 dotenv.load_dotenv()
 
 
-NOTION_DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+NOTION_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
 SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 
 
@@ -146,12 +146,12 @@ def summarize_deployment(
 
     # Notion API에서 Compound filter confitions 를 최대 2 Levels deep으로 지원합니다.
     # 이에 따라, 구성요소 필터링을 분배법칙으로 OR 연산의 operand 각각에 적용합니다.
-    # 참조: https://developers.notion.com/reference/post-database-query-filter#compound-filter-conditions
+    # 참조: https://developers.notion.com/reference/post-data_source-query-filter#compound-filter-conditions
     or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
 
-    query_result = notion.databases.query(
+    query_result = notion.data_sources.query(
         **{
-            "database_id": NOTION_DATABASE_ID,
+            "data_source_id": NOTION_DATA_SOURCE_ID,
             "filter": {
                 "or": or_filters,
             },
