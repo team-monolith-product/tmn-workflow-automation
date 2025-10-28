@@ -5,7 +5,7 @@
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Any
 from pydantic import BaseModel, Field
 
 from cachetools import TTLCache
@@ -33,7 +33,32 @@ notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
 
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
-_cache_database_schema = TTLCache(maxsize=10, ttl=3600)
+_cache_data_source_schema = TTLCache(maxsize=10, ttl=3600)
+_cache_database_data_sources = TTLCache(maxsize=10, ttl=3600)
+
+
+def get_data_sources(client: NotionClient, database_id: str) -> list[dict[str, Any]]:
+    """Return cached data sources for the given database."""
+
+    cache_key = f"database_data_sources_{database_id}"
+    if cache_key in _cache_database_data_sources:
+        return _cache_database_data_sources[cache_key]
+
+    database = client.databases.retrieve(database_id)
+    data_sources = database.get("data_sources", [])
+
+    if not data_sources:
+        raise ValueError(f"No data sources found for database {database_id}.")
+
+    _cache_database_data_sources[cache_key] = data_sources
+    return data_sources
+
+
+def get_data_source_id(client: NotionClient, database_id: str) -> str:
+    """Resolve the primary data source ID for the given database."""
+
+    data_sources = get_data_sources(client, database_id)
+    return data_sources[0]["id"]
 
 
 async def slack_users_list(client: AsyncWebClient):
@@ -64,12 +89,14 @@ def get_database_schema(client: NotionClient, database_id: str):
     """
     노션 데이터베이스 스키마를 조회한다.
     """
-    cache_key = f"database_schema_{database_id}"
-    if cache_key in _cache_database_schema:
-        return _cache_database_schema[cache_key]
+    data_source_id = get_data_source_id(client, database_id)
+    cache_key = f"data_source_schema_{data_source_id}"
 
-    resp = client.databases.retrieve(database_id)
-    _cache_database_schema[cache_key] = resp
+    if cache_key in _cache_data_source_schema:
+        return _cache_data_source_schema[cache_key]
+
+    resp = client.data_sources.retrieve(data_source_id)
+    _cache_data_source_schema[cache_key] = resp
     return resp
 
 
@@ -117,8 +144,9 @@ def get_component_options(client: NotionClient, database_id: str) -> list[str]:
 
 def get_active_projects(client: NotionClient, project_db_id: str) -> dict[str, str]:
     """프로젝트 DB에서 '진행 중' 상태인 프로젝트들을 조회하여 프로젝트명:페이지ID 매핑을 반환합니다."""
-    response = client.databases.query(
-        database_id=project_db_id,
+    project_data_source_id = get_data_source_id(client, project_db_id)
+    response = client.data_sources.query(
+        data_source_id=project_data_source_id,
         filter={"property": "상태", "status": {"equals": "진행 중"}},
     )
 
@@ -199,10 +227,11 @@ def get_create_notion_task_tool(
     # 데이터베이스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
     task_type_options = get_task_type_options(notion, database_id)
     component_options = get_component_options(notion, database_id)
-
     # 프로젝트 DB에서 진행 중인 프로젝트들 조회
     active_projects = get_active_projects(notion, project_db_id)
     project_names = list(active_projects.keys())
+
+    data_source_id = get_data_source_id(notion, database_id)
 
     # 동적으로 Field 생성하여 enum constraint 추가
     task_type_field = Field(
@@ -266,7 +295,11 @@ def get_create_notion_task_tool(
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
 
         response = notion.pages.create(
-            parent={"database_id": database_id}, properties=properties
+            parent={
+                "type": "data_source_id",
+                "data_source_id": data_source_id,
+            },
+            properties=properties,
         )
 
         page_id = response["id"]
@@ -388,6 +421,7 @@ def get_create_notion_follow_up_task_tool(database_id: str):
     """노션 후속 작업 생성 도구를 반환합니다."""
 
     component_options = get_component_options(notion, database_id)
+    data_source_id = get_data_source_id(notion, database_id)
 
     class CreateNotionFollowUpTaskInput(BaseModel):
         parent_page_id: str = Field(
@@ -443,7 +477,11 @@ def get_create_notion_follow_up_task_tool(database_id: str):
             }
 
         response = notion.pages.create(
-            parent={"database_id": database_id}, properties=properties
+            parent={
+                "type": "data_source_id",
+                "data_source_id": data_source_id,
+            },
+            properties=properties,
         )
 
         return response["url"]

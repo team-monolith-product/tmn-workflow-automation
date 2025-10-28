@@ -33,6 +33,7 @@ from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 import dotenv
 
+from app.common import get_data_source_id
 from service.slack import get_email_to_user_id
 
 dotenv.load_dotenv()
@@ -149,13 +150,13 @@ def summarize_deployment(
     # 참조: https://developers.notion.com/reference/post-database-query-filter#compound-filter-conditions
     or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
 
-    query_result = notion.databases.query(
-        **{
-            "database_id": NOTION_DATABASE_ID,
-            "filter": {
-                "or": or_filters,
-            },
-        }
+    data_source_id = get_data_source_id(notion, NOTION_DATABASE_ID)
+
+    query_result = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter={
+            "or": or_filters,
+        },
     )
 
     tasks = query_result.get("results", [])

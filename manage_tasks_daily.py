@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
+from app.common import get_data_source_id
 from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
@@ -124,23 +125,23 @@ def alert_overdue_tasks(
     """
     today = datetime.now().date()
 
+    data_source_id = get_data_source_id(notion, database_id)
+
     # 대기 또는 진행 상태이면서 타임라인 종료일이 today보다 과거인 페이지 검색
-    results = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": {
-                "and": [
-                    {
-                        "or": [
-                            {"property": "상태", "status": {"equals": "대기"}},
-                            {"property": "상태", "status": {"equals": "진행"}},
-                            {"property": "상태", "status": {"equals": "리뷰"}},
-                        ]
-                    },
-                    {"property": "종료일", "date": {"before": today.isoformat()}},
-                ]
-            },
-        }
+    results = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter={
+            "and": [
+                {
+                    "or": [
+                        {"property": "상태", "status": {"equals": "대기"}},
+                        {"property": "상태", "status": {"equals": "진행"}},
+                        {"property": "상태", "status": {"equals": "리뷰"}},
+                    ]
+                },
+                {"property": "종료일", "date": {"before": today.isoformat()}},
+            ]
+        },
     )
 
     for result in results.get("results", []):
@@ -188,22 +189,22 @@ def alert_no_due_tasks(
         None
     """
 
+    data_source_id = get_data_source_id(notion, database_id)
+
     # '진행' 또는 '리뷰' 상태이면서 타임라인이 없는 페이지 검색
-    results = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": {
-                "and": [
-                    {
-                        "or": [
-                            {"property": "상태", "status": {"equals": "진행"}},
-                            {"property": "상태", "status": {"equals": "리뷰"}},
-                        ]
-                    },
-                    {"property": "타임라인", "date": {"is_empty": True}},
-                ]
-            },
-        }
+    results = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter={
+            "and": [
+                {
+                    "or": [
+                        {"property": "상태", "status": {"equals": "진행"}},
+                        {"property": "상태", "status": {"equals": "리뷰"}},
+                    ]
+                },
+                {"property": "타임라인", "date": {"is_empty": True}},
+            ]
+        },
     )
 
     for result in results.get("results", []):
@@ -256,16 +257,15 @@ def alert_no_tasks(
         None
     """
     # 1. 현재 '진행' 혹은 '리뷰' 상태인 작업의 담당자 이메일들을 모두 가져옵니다.
-    in_progress_tasks = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": {
-                "or": [
-                    {"property": "상태", "status": {"equals": "진행"}},
-                    {"property": "상태", "status": {"equals": "리뷰"}},
-                ]
-            },
-        }
+    data_source_id = get_data_source_id(notion, database_id)
+    in_progress_tasks = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter={
+            "or": [
+                {"property": "상태", "status": {"equals": "진행"}},
+                {"property": "상태", "status": {"equals": "리뷰"}},
+            ]
+        },
     )
 
     assigned_emails = set()
@@ -377,8 +377,10 @@ def alert_no_후속_작업(
         ]
     }
 
-    results = notion.databases.query(
-        **{"database_id": database_id, "filter": query_filter}
+    data_source_id = get_data_source_id(notion, database_id)
+    results = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter=query_filter,
     )
 
     for result in results.get("results", []):

@@ -10,6 +10,8 @@ from notion2md.exporter.block import StringExporter
 from notion2md.convertor.block import BLOCK_TYPES, table_row
 from markdown import markdown
 from notion_client import Client as NotionClient
+
+from app.common import get_data_source_id
 import pypandoc
 
 load_dotenv()
@@ -568,11 +570,10 @@ def main():
     print("수정/보완 시스템에 업로드되지 않은 문서를 조회합니다...")
     database_id = "15a1cc820da68092af44fa0d2975cba4"
 
-    response = notion.databases.query(
-        **{
-            "database_id": database_id,
-            "filter": {"property": "mdspSn", "rich_text": {"is_empty": True}},
-        }
+    data_source_id = get_data_source_id(notion, database_id)
+    response = notion.data_sources.query(
+        data_source_id=data_source_id,
+        filter={"property": "mdspSn", "rich_text": {"is_empty": True}},
     )
 
     deployment_date = input("배포 일자를 입력하세요 (YYYYMMDD): ")

@@ -11,6 +11,8 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from md2notionpage.core import parse_md
 
+from app.common import get_data_source_id
+
 # 환경 변수 로드
 load_dotenv()
 
@@ -30,8 +32,9 @@ def main():
     openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     # 1) 데이터베이스에서 '회의록'이 없는 페이지를 찾아서 처리
-    response = notion.databases.query(
-        database_id=AIDT_UPDATE_DATABASE,
+    data_source_id = get_data_source_id(notion, AIDT_UPDATE_DATABASE)
+    response = notion.data_sources.query(
+        data_source_id=data_source_id,
         filter={"property": "회의록", "relation": {"is_empty": True}},
     )
 
@@ -345,8 +348,13 @@ def create_meeting_minutes_page(
     """
     root_page = notion.pages.retrieve(page_id=root_page_id)
 
+    data_source_id = get_data_source_id(notion, "1821cc820da68091b61dce23d7943eda")
+
     response = notion.pages.create(
-        parent={"database_id": "1821cc820da68091b61dce23d7943eda"},
+        parent={
+            "type": "data_source_id",
+            "data_source_id": data_source_id,
+        },
         properties={
             "제목": {
                 "title": [
