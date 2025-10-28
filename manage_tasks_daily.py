@@ -10,7 +10,7 @@ from service.slack import get_email_to_user_id
 # 환경 변수 로드
 load_dotenv()
 
-MAIN_DATA_SOURCE_ID: str = "a9de18b3-877c-453a-8e16-3c2ee1ff4137"
+MAIN_DATA_SOURCE_ID: str = "a9de18b3-877c453a8e163c2ee1ff4137"
 CONTENTS_DATA_SOURCE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
 MAIN_CHANNEL_ID: str = "C087PDC9VG8"
 CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
