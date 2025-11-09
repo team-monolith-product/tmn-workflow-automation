@@ -27,15 +27,10 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 PLAN_MD_REPO = "team-monolith-product/plan-md"
 
 if not WORKFLOW_AUTOMATION_API_KEY:
-    raise RuntimeError(
-        "WORKFLOW_AUTOMATION_API_KEY 환경 변수가 설정되지 않았습니다."
-    )
+    raise RuntimeError("WORKFLOW_AUTOMATION_API_KEY 환경 변수가 설정되지 않았습니다.")
 
 if not GITHUB_TOKEN:
-    raise RuntimeError(
-        "GITHUB_TOKEN 환경 변수가 설정되지 않았습니다."
-    )
-
+    raise RuntimeError("GITHUB_TOKEN 환경 변수가 설정되지 않았습니다.")
 
 
 # ============================================================================
@@ -56,6 +51,7 @@ app = FastAPI(
 
 class NotionAutomationSource(BaseModel):
     """Notion Automation 소스 정보"""
+
     type: str  # "automation"
     automation_id: str
     action_id: str
@@ -66,17 +62,20 @@ class NotionAutomationSource(BaseModel):
 
 class NotionPageProperty(BaseModel):
     """Notion 페이지 속성 (동적으로 처리)"""
+
     pass
 
 
 class WebhookPayload(BaseModel):
     """노션 Automation Webhook 페이로드"""
+
     source: NotionAutomationSource
     data: dict  # Notion page object (dict[str, Any] causes runtime error in Python 3.9)
 
 
 class WebhookResponse(BaseModel):
     """Webhook 처리 결과 응답"""
+
     status: str
     message: str
     pr_url: Optional[str] = None
@@ -130,7 +129,7 @@ def sanitize_filename(filename: str) -> str:
 def find_existing_file(repo, task_id: str) -> Optional[str]:
     """
     TASK-{ID}로 시작하는 파일 검색
-    
+
     Returns:
         기존 파일 경로 또는 None
     """
@@ -145,17 +144,17 @@ def find_existing_file(repo, task_id: str) -> Optional[str]:
 
 
 def create_or_update_file_via_api(
-    repo, 
-    file_path: str, 
-    content: str, 
-    task_id: str, 
-    title: str, 
+    repo,
+    file_path: str,
+    content: str,
+    task_id: str,
+    title: str,
     branch_name: str,
-    existing_file: Optional[str] = None
+    existing_file: Optional[str] = None,
 ) -> None:
     """
     GitHub API를 통해 파일 생성 또는 업데이트
-    
+
     Args:
         repo: GitHub repository object
         file_path: 새 파일 경로
@@ -167,14 +166,14 @@ def create_or_update_file_via_api(
     """
     action = "Update" if existing_file else "Create"
     commit_message = f"{action} [{task_id}] {title}"
-    
+
     # main 브랜치 참조 가져오기
     main_ref = repo.get_git_ref("heads/main")
     main_sha = main_ref.object.sha
-    
+
     # 새 브랜치 생성
     repo.create_git_ref(f"refs/heads/{branch_name}", main_sha)
-    
+
     # 파일명이 변경된 경우 (제목이 바뀐 경우)
     if existing_file and existing_file != file_path:
         # 기존 파일 삭제
@@ -183,40 +182,26 @@ def create_or_update_file_via_api(
             existing_file,
             f"Remove old file for [{task_id}]",
             old_file.sha,
-            branch=branch_name
+            branch=branch_name,
         )
         # 새 파일 생성
-        repo.create_file(
-            file_path,
-            commit_message,
-            content,
-            branch=branch_name
-        )
+        repo.create_file(file_path, commit_message, content, branch=branch_name)
     elif existing_file:
         # 기존 파일 업데이트
         file_content = repo.get_contents(file_path, ref="main")
         repo.update_file(
-            file_path,
-            commit_message,
-            content,
-            file_content.sha,
-            branch=branch_name
+            file_path, commit_message, content, file_content.sha, branch=branch_name
         )
     else:
         # 새 파일 생성
-        repo.create_file(
-            file_path,
-            commit_message,
-            content,
-            branch=branch_name
-        )
+        repo.create_file(file_path, commit_message, content, branch=branch_name)
 
 
 def create_pull_request(repo, task_id: str, title: str, branch_name: str) -> str:
     """GitHub PR 생성"""
     now = datetime.now()
     timestamp = now.strftime("%y%m%d %H:%M")
-    
+
     pr_title = f"[{task_id}] {title} {timestamp} 변동 안내"
     pr_body = f"""## 변경 내용
 - TASK ID: {task_id}
@@ -225,14 +210,14 @@ def create_pull_request(repo, task_id: str, title: str, branch_name: str) -> str
 
 이 PR은 Notion Automation에 의해 자동으로 생성되었습니다.
 """
-    
+
     pr = repo.create_pull(
         title=pr_title,
         body=pr_body,
         head=branch_name,
         base="main",
     )
-    
+
     return pr.html_url
 
 
@@ -286,93 +271,86 @@ async def handle_webhook(
 ):
     """
     노션 Automation Webhook 처리 엔드포인트
-    
+
     노션 버튼 클릭 시 plan-md 레포에 PR을 생성합니다:
     1. plan-md 레포 클론
     2. TASK-{ID}-YYMMDDHHMM 브랜치 생성
     3. Notion 페이지 → 마크다운 변환
     4. [TASK-{ID}] {제목}.md 파일 생성/업데이트
     5. PR 생성
-    
+
     Headers:
         X-API-Key: 인증용 API Key (필수)
-    
+
     Request Body:
         source: Notion automation 정보
         data: Notion page object
-    
+
     Returns:
         WebhookResponse: PR URL 포함 처리 결과
     """
     # API Key 검증
     await verify_api_key(x_api_key)
-    
+
     try:
         # GitHub 클라이언트 초기화
         gh = Github(GITHUB_TOKEN)
         repo = gh.get_repo(PLAN_MD_REPO)
-        
+
         # Notion 페이지 정보 추출
         page_data = payload.data
         page_id = page_data.get("id", "").replace("-", "")  # ID에서 하이픈 제거
         properties = page_data.get("properties", {})
-        
+
         # TASK ID 및 제목 추출
         task_id = extract_task_id(properties)
         if not task_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="TASK ID를 찾을 수 없습니다"
+                detail="TASK ID를 찾을 수 없습니다",
             )
-        
+
         title = extract_title(properties)
-        
+
         # 브랜치 이름 생성
         branch_name = create_branch_name(task_id)
-        
+
         # Notion → 마크다운 변환
         markdown_content = get_notion_markdown(page_id)
-        
+
         # 기존 파일 검색
         existing_file = find_existing_file(repo, task_id)
-        
+
         # 파일 경로 결정
         filename = f"[{task_id}] {title}.md"
         filename = sanitize_filename(filename)
-        
+
         # GitHub API를 통해 파일 생성/업데이트 및 PR 생성
         create_or_update_file_via_api(
-            repo, 
-            filename, 
-            markdown_content, 
-            task_id, 
-            title, 
-            branch_name,
-            existing_file
+            repo, filename, markdown_content, task_id, title, branch_name, existing_file
         )
-        
+
         pr_url = create_pull_request(repo, task_id, title, branch_name)
-        
+
         return WebhookResponse(
             status="success",
             message=f"PR이 성공적으로 생성되었습니다",
             pr_url=pr_url,
             task_id=task_id,
         )
-        
+
     except GithubException as e:
         print(f"[ERROR] GitHub API 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"GitHub 작업 중 오류가 발생했습니다: {e.data.get('message', str(e))}"
+            detail=f"GitHub 작업 중 오류가 발생했습니다: {e.data.get('message', str(e))}",
         )
     except Exception as e:
         print(f"[ERROR] Webhook 처리 실패: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Webhook 처리 중 오류가 발생했습니다: {str(e)}"
+            detail=f"Webhook 처리 중 오류가 발생했습니다: {str(e)}",
         )
-
 
 
 @app.get("/")
