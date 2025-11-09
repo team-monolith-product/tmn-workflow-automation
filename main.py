@@ -5,6 +5,7 @@ Workflow Automation FastAPI Server
 """
 
 import os
+import asyncio
 from datetime import datetime
 from typing import Optional, Any, Tuple
 
@@ -293,6 +294,8 @@ async def handle_webhook(
     await verify_api_key(x_api_key)
 
     try:
+        # 무거운 동기 작업들을 별도 스레드에서 실행하여 이벤트 루프 블로킹 방지
+        
         # GitHub 클라이언트 초기화
         gh = Github(GITHUB_TOKEN)
         repo = gh.get_repo(PLAN_MD_REPO)
@@ -315,22 +318,24 @@ async def handle_webhook(
         # 브랜치 이름 생성
         branch_name = create_branch_name(task_id)
 
-        # Notion → 마크다운 변환
-        markdown_content = get_notion_markdown(page_id)
+        # Notion → 마크다운 변환 (무거운 작업 - 별도 스레드에서 실행)
+        markdown_content = await asyncio.to_thread(get_notion_markdown, page_id)
 
-        # 기존 파일 검색
-        existing_file = find_existing_file(repo, task_id)
+        # 기존 파일 검색 (별도 스레드에서 실행)
+        existing_file = await asyncio.to_thread(find_existing_file, repo, task_id)
 
         # 파일 경로 결정
         filename = f"[{task_id}] {title}.md"
         filename = sanitize_filename(filename)
 
-        # GitHub API를 통해 파일 생성/업데이트 및 PR 생성
-        create_or_update_file_via_api(
+        # GitHub API를 통해 파일 생성/업데이트 (무거운 작업 - 별도 스레드에서 실행)
+        await asyncio.to_thread(
+            create_or_update_file_via_api,
             repo, filename, markdown_content, task_id, title, branch_name, existing_file
         )
 
-        pr_url = create_pull_request(repo, task_id, title, branch_name)
+        # PR 생성 (별도 스레드에서 실행)
+        pr_url = await asyncio.to_thread(create_pull_request, repo, task_id, title, branch_name)
 
         return WebhookResponse(
             status="success",
