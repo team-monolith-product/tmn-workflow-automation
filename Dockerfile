@@ -8,8 +8,9 @@ WORKDIR /app
 COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Playwright 설치 (pip install 후에 실행해야 함)
+RUN python -m playwright install chromium
+RUN python -m playwright install-deps chromium
 
 # 애플리케이션 코드 복사
 COPY . .
