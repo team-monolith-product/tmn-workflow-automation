@@ -22,3 +22,6 @@ tabulate[widechars]
 redis
 PyGithub
 pytest
+fastapi
+uvicorn[standard]
+pydantic
