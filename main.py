@@ -50,7 +50,7 @@ app = FastAPI(
 class WebhookPayload(BaseModel):
     """
     노션 버튼 클릭 시 전송되는 Webhook 페이로드
-    
+
     실제 노션에서 전송하는 데이터 형식에 맞게 수정하세요.
     """
 
@@ -75,7 +75,7 @@ class WebhookResponse(BaseModel):
 async def verify_api_key(x_api_key: Optional[str] = Header(None)) -> None:
     """
     API Key 헤더 검증
-    
+
     요청 헤더에 'X-API-Key: <WORKFLOW_AUTOMATION_API_KEY>' 가 있어야 합니다.
     """
     if not x_api_key:
@@ -83,7 +83,7 @@ async def verify_api_key(x_api_key: Optional[str] = Header(None)) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="X-API-Key 헤더가 필요합니다",
         )
-    
+
     if x_api_key != WORKFLOW_AUTOMATION_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -100,7 +100,7 @@ async def verify_api_key(x_api_key: Optional[str] = Header(None)) -> None:
 async def health_check():
     """
     헬스 체크 엔드포인트
-    
+
     Kubernetes liveness/readiness probe에서 사용됩니다.
     """
     return {
@@ -141,7 +141,7 @@ async def handle_webhook(
     """
     # API Key 검증
     await verify_api_key(request.headers.get("x-api-key"))
-    
+
     # TODO: 실제 자동화 로직 구현
     # 예시:
     # if payload.action == "create_task":
@@ -151,7 +151,7 @@ async def handle_webhook(
     # elif payload.action == "update_status":
     #     # 상태 업데이트 로직
     #     pass
-    
+
     return WebhookResponse(
         status="success",
         message=f"Webhook received for action: {payload.action}",
