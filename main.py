@@ -1,34 +1,41 @@
 """
 Workflow Automation FastAPI Server
 
-노션 버튼 클릭 시 Webhook을 받아 자동화 작업을 수행하는 경량 FastAPI 서버입니다.
-기존 Slack Bot(app.py)과 동일한 컨테이너에서 실행되며, 공유 모듈을 활용합니다.
+노션 버튼 클릭 시 Webhook을 받아 plan-md 레포에 PR을 생성하는 경량 FastAPI 서버입니다.
 """
 
 import os
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Any, Tuple
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
+from notion2md.exporter.block import StringExporter
+from github import Github, GithubException
+from dotenv import load_dotenv
 
-# 기존 모듈 임포트
-# from app.common import ...  # 필요시 공유 함수 사용
-# from api import ...  # 필요시 API 클라이언트 사용
-# from service import ...  # 필요시 서비스 모듈 사용
-
+load_dotenv()
 
 # ============================================================================
 # 환경 변수
 # ============================================================================
 
 WORKFLOW_AUTOMATION_API_KEY = os.environ.get("WORKFLOW_AUTOMATION_API_KEY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+PLAN_MD_REPO = "team-monolith-product/plan-md"
+
 if not WORKFLOW_AUTOMATION_API_KEY:
     raise RuntimeError(
-        "WORKFLOW_AUTOMATION_API_KEY 환경 변수가 설정되지 않았습니다. "
-        "이 변수는 API 인증에 필요합니다."
+        "WORKFLOW_AUTOMATION_API_KEY 환경 변수가 설정되지 않았습니다."
     )
+
+if not GITHUB_TOKEN:
+    raise RuntimeError(
+        "GITHUB_TOKEN 환경 변수가 설정되지 않았습니다."
+    )
+
 
 
 # ============================================================================
@@ -47,24 +54,186 @@ app = FastAPI(
 # ============================================================================
 
 
+class NotionAutomationSource(BaseModel):
+    """Notion Automation 소스 정보"""
+    type: str  # "automation"
+    automation_id: str
+    action_id: str
+    event_id: str
+    user_id: str
+    attempt: int
+
+
+class NotionPageProperty(BaseModel):
+    """Notion 페이지 속성 (동적으로 처리)"""
+    pass
+
+
 class WebhookPayload(BaseModel):
-    """
-    노션 버튼 클릭 시 전송되는 Webhook 페이로드
-
-    실제 노션에서 전송하는 데이터 형식에 맞게 수정하세요.
-    """
-
-    action: str  # 예: "create_task", "update_status" 등
-    notion_page_id: Optional[str] = None
-    data: Optional[dict] = None
+    """노션 Automation Webhook 페이로드"""
+    source: NotionAutomationSource
+    data: dict  # Notion page object (dict[str, Any] causes runtime error in Python 3.9)
 
 
 class WebhookResponse(BaseModel):
     """Webhook 처리 결과 응답"""
-
     status: str
     message: str
-    data: Optional[dict] = None
+    pr_url: Optional[str] = None
+    task_id: Optional[str] = None
+
+
+# ============================================================================
+# 헬퍼 함수
+# ============================================================================
+
+
+def extract_task_id(properties: dict) -> Optional[str]:
+    """Notion 페이지 속성에서 TASK ID 추출"""
+    id_prop = properties.get("ID", {})
+    if id_prop.get("type") == "unique_id":
+        unique_id = id_prop.get("unique_id", {})
+        prefix = unique_id.get("prefix", "TASK")
+        number = unique_id.get("number")
+        if number:
+            return f"{prefix}-{number}"
+    return None
+
+
+def extract_title(properties: dict) -> str:
+    """Notion 페이지 속성에서 제목 추출"""
+    title_prop = properties.get("제목", {})
+    if title_prop.get("type") == "title":
+        title_items = title_prop.get("title", [])
+        if title_items:
+            return title_items[0].get("plain_text", "Untitled")
+    return "Untitled"
+
+
+def get_notion_markdown(page_id: str) -> str:
+    """Notion 페이지를 마크다운으로 변환"""
+    return StringExporter(block_id=page_id, output_path="dummy").export()
+
+
+def create_branch_name(task_id: str) -> str:
+    """브랜치 이름 생성: TASK-{ID}-YYMMDDHHMM"""
+    now = datetime.now()
+    timestamp = now.strftime("%y%m%d%H%M")
+    return f"{task_id}-{timestamp}"
+
+
+def sanitize_filename(filename: str) -> str:
+    """파일명에서 사용 불가능한 문자 제거"""
+    return filename.replace("/", "-").replace("\\", "-").replace(":", "-")
+
+
+def find_existing_file(repo, task_id: str) -> Optional[str]:
+    """
+    TASK-{ID}로 시작하는 파일 검색
+    
+    Returns:
+        기존 파일 경로 또는 None
+    """
+    try:
+        contents = repo.get_contents("", ref="main")
+        for content in contents:
+            if content.type == "file" and content.name.startswith(f"[{task_id}]"):
+                return content.path
+    except GithubException:
+        pass
+    return None
+
+
+def create_or_update_file_via_api(
+    repo, 
+    file_path: str, 
+    content: str, 
+    task_id: str, 
+    title: str, 
+    branch_name: str,
+    existing_file: Optional[str] = None
+) -> None:
+    """
+    GitHub API를 통해 파일 생성 또는 업데이트
+    
+    Args:
+        repo: GitHub repository object
+        file_path: 새 파일 경로
+        content: 파일 내용
+        task_id: TASK ID
+        title: 문서 제목
+        branch_name: 브랜치 이름
+        existing_file: 기존 파일 경로 (있는 경우)
+    """
+    action = "Update" if existing_file else "Create"
+    commit_message = f"{action} [{task_id}] {title}"
+    
+    # main 브랜치 참조 가져오기
+    main_ref = repo.get_git_ref("heads/main")
+    main_sha = main_ref.object.sha
+    
+    # 새 브랜치 생성
+    repo.create_git_ref(f"refs/heads/{branch_name}", main_sha)
+    
+    # 파일명이 변경된 경우 (제목이 바뀐 경우)
+    if existing_file and existing_file != file_path:
+        # 기존 파일 삭제
+        old_file = repo.get_contents(existing_file, ref="main")
+        repo.delete_file(
+            existing_file,
+            f"Remove old file for [{task_id}]",
+            old_file.sha,
+            branch=branch_name
+        )
+        # 새 파일 생성
+        repo.create_file(
+            file_path,
+            commit_message,
+            content,
+            branch=branch_name
+        )
+    elif existing_file:
+        # 기존 파일 업데이트
+        file_content = repo.get_contents(file_path, ref="main")
+        repo.update_file(
+            file_path,
+            commit_message,
+            content,
+            file_content.sha,
+            branch=branch_name
+        )
+    else:
+        # 새 파일 생성
+        repo.create_file(
+            file_path,
+            commit_message,
+            content,
+            branch=branch_name
+        )
+
+
+def create_pull_request(repo, task_id: str, title: str, branch_name: str) -> str:
+    """GitHub PR 생성"""
+    now = datetime.now()
+    timestamp = now.strftime("%y%m%d %H:%M")
+    
+    pr_title = f"[{task_id}] {title} {timestamp} 변동 안내"
+    pr_body = f"""## 변경 내용
+- TASK ID: {task_id}
+- 문서 제목: {title}
+- 업데이트 시각: {timestamp}
+
+이 PR은 Notion Automation에 의해 자동으로 생성되었습니다.
+"""
+    
+    pr = repo.create_pull(
+        title=pr_title,
+        body=pr_body,
+        head=branch_name,
+        base="main",
+    )
+    
+    return pr.html_url
 
 
 # ============================================================================
@@ -113,53 +282,97 @@ async def health_check():
 async def handle_webhook(
     payload: WebhookPayload,
     request: Request,
-    _: None = Header(None, alias="X-API-Key", include_in_schema=False),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ):
     """
-    노션 Webhook 처리 엔드포인트
+    노션 Automation Webhook 처리 엔드포인트
     
-    노션 버튼 클릭 시 이 엔드포인트로 POST 요청이 전송됩니다.
+    노션 버튼 클릭 시 plan-md 레포에 PR을 생성합니다:
+    1. plan-md 레포 클론
+    2. TASK-{ID}-YYMMDDHHMM 브랜치 생성
+    3. Notion 페이지 → 마크다운 변환
+    4. [TASK-{ID}] {제목}.md 파일 생성/업데이트
+    5. PR 생성
     
     Headers:
         X-API-Key: 인증용 API Key (필수)
     
     Request Body:
-        action: 수행할 작업 유형
-        notion_page_id: 노션 페이지 ID (선택)
-        data: 추가 데이터 (선택)
+        source: Notion automation 정보
+        data: Notion page object
     
     Returns:
-        WebhookResponse: 처리 결과
-    
-    Example:
-        ```bash
-        curl -X POST https://wfa.codle.io/webhook \\
-          -H "Content-Type: application/json" \\
-          -H "X-API-Key: your-api-key" \\
-          -d '{"action": "create_task", "notion_page_id": "abc123", "data": {}}'
-        ```
+        WebhookResponse: PR URL 포함 처리 결과
     """
     # API Key 검증
-    await verify_api_key(request.headers.get("x-api-key"))
+    await verify_api_key(x_api_key)
+    
+    try:
+        # GitHub 클라이언트 초기화
+        gh = Github(GITHUB_TOKEN)
+        repo = gh.get_repo(PLAN_MD_REPO)
+        
+        # Notion 페이지 정보 추출
+        page_data = payload.data
+        page_id = page_data.get("id", "").replace("-", "")  # ID에서 하이픈 제거
+        properties = page_data.get("properties", {})
+        
+        # TASK ID 및 제목 추출
+        task_id = extract_task_id(properties)
+        if not task_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TASK ID를 찾을 수 없습니다"
+            )
+        
+        title = extract_title(properties)
+        
+        # 브랜치 이름 생성
+        branch_name = create_branch_name(task_id)
+        
+        # Notion → 마크다운 변환
+        markdown_content = get_notion_markdown(page_id)
+        
+        # 기존 파일 검색
+        existing_file = find_existing_file(repo, task_id)
+        
+        # 파일 경로 결정
+        filename = f"[{task_id}] {title}.md"
+        filename = sanitize_filename(filename)
+        
+        # GitHub API를 통해 파일 생성/업데이트 및 PR 생성
+        create_or_update_file_via_api(
+            repo, 
+            filename, 
+            markdown_content, 
+            task_id, 
+            title, 
+            branch_name,
+            existing_file
+        )
+        
+        pr_url = create_pull_request(repo, task_id, title, branch_name)
+        
+        return WebhookResponse(
+            status="success",
+            message=f"PR이 성공적으로 생성되었습니다",
+            pr_url=pr_url,
+            task_id=task_id,
+        )
+        
+    except GithubException as e:
+        print(f"[ERROR] GitHub API 오류: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"GitHub 작업 중 오류가 발생했습니다: {e.data.get('message', str(e))}"
+        )
+    except Exception as e:
+        print(f"[ERROR] Webhook 처리 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Webhook 처리 중 오류가 발생했습니다: {str(e)}"
+        )
 
-    # TODO: 실제 자동화 로직 구현
-    # 예시:
-    # if payload.action == "create_task":
-    #     # Notion API로 작업 생성
-    #     # GitHub API로 이슈 생성
-    #     pass
-    # elif payload.action == "update_status":
-    #     # 상태 업데이트 로직
-    #     pass
-
-    return WebhookResponse(
-        status="success",
-        message=f"Webhook received for action: {payload.action}",
-        data={
-            "received_action": payload.action,
-            "notion_page_id": payload.notion_page_id,
-        },
-    )
 
 
 @app.get("/")
