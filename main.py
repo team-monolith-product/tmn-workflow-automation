@@ -6,6 +6,8 @@ Workflow Automation FastAPI Server
 
 import os
 import asyncio
+import logging
+import time
 from datetime import datetime
 from typing import Optional, Any, Tuple
 
@@ -18,6 +20,17 @@ from github import Github, GithubException
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ============================================================================
+# 로깅 설정
+# ============================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # 환경 변수
@@ -290,17 +303,26 @@ async def handle_webhook(
     Returns:
         WebhookResponse: PR URL 포함 처리 결과
     """
+    start_time = time.time()
+    logger.info("=" * 80)
+    logger.info("웹훅 처리 시작")
+    
     # API Key 검증
+    step_start = time.time()
     await verify_api_key(x_api_key)
+    logger.info(f"[1/7] API Key 검증 완료 (소요시간: {time.time() - step_start:.3f}초)")
 
     try:
         # 무거운 동기 작업들을 별도 스레드에서 실행하여 이벤트 루프 블로킹 방지
         
         # GitHub 클라이언트 초기화
+        step_start = time.time()
         gh = Github(GITHUB_TOKEN)
         repo = gh.get_repo(PLAN_MD_REPO)
+        logger.info(f"[2/7] GitHub 클라이언트 초기화 완료 (소요시간: {time.time() - step_start:.3f}초)")
 
         # Notion 페이지 정보 추출
+        step_start = time.time()
         page_data = payload.data
         page_id = page_data.get("id", "").replace("-", "")  # ID에서 하이픈 제거
         properties = page_data.get("properties", {})
@@ -314,28 +336,44 @@ async def handle_webhook(
             )
 
         title = extract_title(properties)
+        logger.info(f"[3/7] 페이지 정보 추출 완료 - Task ID: {task_id}, Title: {title} (소요시간: {time.time() - step_start:.3f}초)")
 
         # 브랜치 이름 생성
+        step_start = time.time()
         branch_name = create_branch_name(task_id)
+        logger.info(f"[4/7] 브랜치 이름 생성 완료: {branch_name} (소요시간: {time.time() - step_start:.3f}초)")
 
         # Notion → 마크다운 변환 (무거운 작업 - 별도 스레드에서 실행)
+        step_start = time.time()
         markdown_content = await asyncio.to_thread(get_notion_markdown, page_id)
+        logger.info(f"[5/7] Notion → 마크다운 변환 완료 (소요시간: {time.time() - step_start:.3f}초)")
 
         # 기존 파일 검색 (별도 스레드에서 실행)
+        step_start = time.time()
         existing_file = await asyncio.to_thread(find_existing_file, repo, task_id)
+        logger.info(f"[6/7] 기존 파일 검색 완료 - 기존 파일: {existing_file or '없음'} (소요시간: {time.time() - step_start:.3f}초)")
 
         # 파일 경로 결정
         filename = f"[{task_id}] {title}.md"
         filename = sanitize_filename(filename)
 
         # GitHub API를 통해 파일 생성/업데이트 (무거운 작업 - 별도 스레드에서 실행)
+        step_start = time.time()
         await asyncio.to_thread(
             create_or_update_file_via_api,
             repo, filename, markdown_content, task_id, title, branch_name, existing_file
         )
+        action = "업데이트" if existing_file else "생성"
+        logger.info(f"[7/7] GitHub 파일 {action} 완료: {filename} (소요시간: {time.time() - step_start:.3f}초)")
 
         # PR 생성 (별도 스레드에서 실행)
+        step_start = time.time()
         pr_url = await asyncio.to_thread(create_pull_request, repo, task_id, title, branch_name)
+        logger.info(f"PR 생성 완료: {pr_url} (소요시간: {time.time() - step_start:.3f}초)")
+
+        total_time = time.time() - start_time
+        logger.info(f"웹훅 처리 완료 ✓ (총 소요시간: {total_time:.3f}초)")
+        logger.info("=" * 80)
 
         return WebhookResponse(
             status="success",
@@ -345,13 +383,19 @@ async def handle_webhook(
         )
 
     except GithubException as e:
-        print(f"[ERROR] GitHub API 오류: {e}")
+        total_time = time.time() - start_time
+        logger.error(f"GitHub API 오류 발생 (총 소요시간: {total_time:.3f}초)")
+        logger.error(f"오류 상세: {e}")
+        logger.info("=" * 80)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"GitHub 작업 중 오류가 발생했습니다: {e.data.get('message', str(e))}",
         )
     except Exception as e:
-        print(f"[ERROR] Webhook 처리 실패: {e}")
+        total_time = time.time() - start_time
+        logger.error(f"Webhook 처리 실패 (총 소요시간: {total_time:.3f}초)")
+        logger.error(f"오류 상세: {e}", exc_info=True)
+        logger.info("=" * 80)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Webhook 처리 중 오류가 발생했습니다: {str(e)}",
@@ -380,6 +424,7 @@ async def root():
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """HTTP 예외 핸들러"""
+    logger.warning(f"HTTP Exception: {exc.status_code} - {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -393,7 +438,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def general_exception_handler(request: Request, exc: Exception):
     """일반 예외 핸들러"""
     # 프로덕션 환경에서는 상세 에러를 숨기고 로깅만 수행
-    print(f"[ERROR] Unhandled exception: {exc}")
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
