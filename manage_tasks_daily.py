@@ -48,13 +48,14 @@ def main():
         email_to_user_id,
         "e",
     )
-    alert_no_후속_작업(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-    )
+    # https://www.notion.so/team-mono/25Y-11M-2a11cc820da68051bab8ea146ee3001e?source=copy_link#2a41cc820da680daa823ff847717f6bf
+    # alert_no_후속_작업(
+    #     notion,
+    #     slack_client,
+    #     MAIN_DATA_SOURCE_ID,
+    #     MAIN_CHANNEL_ID,
+    #     email_to_user_id,
+    # )
 
     # 콘텐츠 DB 처리
     send_intro_message(slack_client, CONTENTS_CHANNEL_ID)
