@@ -2,7 +2,7 @@ black
 python-dotenv
 slack-bolt
 openai
-notion-client
+notion-client==2.7.0
 md2notionpage
 cachetools
 requests

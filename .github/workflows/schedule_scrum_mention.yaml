@@ -1,0 +1,25 @@
+name: Schedule Scrum Mention
+
+on:
+  schedule:
+    - cron: '20 7 * * 1-5'  # 16:20 KST (월-금) - 10분 당김
+  workflow_dispatch:
+
+jobs:
+  schedule_scrum_mention:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run schedule_scrum_mention.py
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          python schedule_scrum_mention.py
