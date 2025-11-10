@@ -60,25 +60,36 @@ async def notion_users_list(client: NotionClient):
     return resp
 
 
-def get_database_schema(client: NotionClient, database_id: str):
+def get_data_source_schema(client: NotionClient, data_source_id: str):
     """
-    노션 데이터베이스 스키마를 조회한다.
+    노션 데이터 소스 스키마를 조회한다.
+    Notion API 2025-09-03 버전부터 database와 data source가 분리되어
+    properties는 data source 레벨에 있다.
     """
-    cache_key = f"database_schema_{database_id}"
+    cache_key = f"data_source_schema_{data_source_id}"
     if cache_key in _cache_database_schema:
         return _cache_database_schema[cache_key]
 
-    resp = client.databases.retrieve(database_id)
-    _cache_database_schema[cache_key] = resp
-    return resp
+    # data source 조회
+    data_source = client.data_sources.retrieve(data_source_id)
+
+    # properties 확인
+    if "properties" not in data_source:
+        raise KeyError(
+            f"'properties' not found in data source {data_source_id}. "
+            f"Available keys: {list(data_source.keys())}"
+        )
+
+    _cache_database_schema[cache_key] = data_source
+    return data_source
 
 
-def get_status_options(client: NotionClient, database_id: str) -> list[str]:
+def get_status_options(client: NotionClient, data_source_id: str) -> list[str]:
     """
-    노션 데이터베이스에서 상태 속성의 가능한 옵션들을 조회한다.
+    노션 데이터 소스에서 상태 속성의 가능한 옵션들을 조회한다.
     """
-    db_schema = get_database_schema(client, database_id)
-    status_property = db_schema["properties"].get("상태", {})
+    ds_schema = get_data_source_schema(client, data_source_id)
+    status_property = ds_schema["properties"].get("상태", {})
 
     if "status" in status_property:
         options = status_property["status"].get("options", [])
@@ -87,12 +98,12 @@ def get_status_options(client: NotionClient, database_id: str) -> list[str]:
     return []
 
 
-def get_task_type_options(client: NotionClient, database_id: str) -> list[str]:
+def get_task_type_options(client: NotionClient, data_source_id: str) -> list[str]:
     """
-    노션 데이터베이스에서 유형 속성의 가능한 옵션들을 조회한다.
+    노션 데이터 소스에서 유형 속성의 가능한 옵션들을 조회한다.
     """
-    db_schema = get_database_schema(client, database_id)
-    task_type_property = db_schema["properties"].get("유형", {})
+    ds_schema = get_data_source_schema(client, data_source_id)
+    task_type_property = ds_schema["properties"].get("유형", {})
 
     if "select" in task_type_property:
         options = task_type_property["select"].get("options", [])
@@ -101,12 +112,12 @@ def get_task_type_options(client: NotionClient, database_id: str) -> list[str]:
     return []
 
 
-def get_component_options(client: NotionClient, database_id: str) -> list[str]:
+def get_component_options(client: NotionClient, data_source_id: str) -> list[str]:
     """
-    노션 데이터베이스에서 구성요소 속성의 가능한 옵션들을 조회한다.
+    노션 데이터 소스에서 구성요소 속성의 가능한 옵션들을 조회한다.
     """
-    db_schema = get_database_schema(client, database_id)
-    component_property = db_schema["properties"].get("구성요소", {})
+    ds_schema = get_data_source_schema(client, data_source_id)
+    component_property = ds_schema["properties"].get("구성요소", {})
 
     if "multi_select" in component_property:
         options = component_property["multi_select"].get("options", [])
@@ -115,18 +126,22 @@ def get_component_options(client: NotionClient, database_id: str) -> list[str]:
     return []
 
 
-def get_active_projects(client: NotionClient, project_db_id: str) -> dict[str, str]:
-    """프로젝트 DB에서 '진행 중' 상태인 프로젝트들을 조회하여 프로젝트명:페이지ID 매핑을 반환합니다."""
-    response = client.databases.query(
-        database_id=project_db_id,
+def get_active_projects(
+    client: NotionClient, project_data_source_id: str
+) -> dict[str, str]:
+    """
+    프로젝트 데이터 소스에서 '진행 중' 상태인 프로젝트들을 조회하여 프로젝트명:페이지ID 매핑을 반환합니다.
+    """
+    response = client.data_sources.query(
+        data_source_id=project_data_source_id,
         filter={"property": "상태", "status": {"equals": "진행 중"}},
     )
 
     project_mapping = {}
     for page in response["results"]:
-        # 페이지 제목 가져오기 (일반적으로 '이름' 또는 '제목' 속성)
+        # 페이지 제목 가져오기
         title_property = None
-        for prop_name, prop_value in page["properties"].items():
+        for prop_value in page["properties"].values():
             if prop_value["type"] == "title":
                 title_property = prop_value
                 break
@@ -180,9 +195,9 @@ async def _get_notion_assignee_id(user_email: str | None) -> str | None:
 def get_create_notion_task_tool(
     user_id: str | None,
     slack_thread_url: str,
-    database_id: str,
+    data_source_id: str,
     client,
-    project_db_id: str,
+    project_data_source_id: str,
 ):
     """노션 작업 생성 도구를 반환합니다."""
 
@@ -196,12 +211,12 @@ def get_create_notion_task_tool(
         user_email = user_profile.get("profile", {}).get("email")
         return await _get_notion_assignee_id(user_email)
 
-    # 데이터베이스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
-    task_type_options = get_task_type_options(notion, database_id)
-    component_options = get_component_options(notion, database_id)
+    # 데이터 소스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
+    task_type_options = get_task_type_options(notion, data_source_id)
+    component_options = get_component_options(notion, data_source_id)
 
-    # 프로젝트 DB에서 진행 중인 프로젝트들 조회
-    active_projects = get_active_projects(notion, project_db_id)
+    # 프로젝트 데이터 소스에서 진행 중인 프로젝트들 조회
+    active_projects = get_active_projects(notion, project_data_source_id)
     project_names = list(active_projects.keys())
 
     # 동적으로 Field 생성하여 enum constraint 추가
@@ -266,7 +281,7 @@ def get_create_notion_task_tool(
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
 
         response = notion.pages.create(
-            parent={"database_id": database_id}, properties=properties
+            parent={"data_source_id": data_source_id}, properties=properties
         )
 
         page_id = response["id"]
@@ -334,11 +349,11 @@ def get_update_notion_task_deadline_tool():
     return update_notion_task_deadline
 
 
-def get_update_notion_task_status_tool(database_id: str):
+def get_update_notion_task_status_tool(data_source_id: str):
     """노션 작업 상태 업데이트 도구를 반환합니다."""
 
-    # 데이터베이스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
-    status_options = get_status_options(notion, database_id)
+    # 데이터 소스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
+    status_options = get_status_options(notion, data_source_id)
 
     # 동적으로 Field 생성하여 enum constraint 추가
     status_field = Field(
@@ -384,10 +399,10 @@ def get_notion_page_tool():
     return get_notion_page
 
 
-def get_create_notion_follow_up_task_tool(database_id: str):
+def get_create_notion_follow_up_task_tool(data_source_id: str):
     """노션 후속 작업 생성 도구를 반환합니다."""
 
-    component_options = get_component_options(notion, database_id)
+    component_options = get_component_options(notion, data_source_id)
 
     class CreateNotionFollowUpTaskInput(BaseModel):
         parent_page_id: str = Field(
@@ -443,7 +458,7 @@ def get_create_notion_follow_up_task_tool(database_id: str):
             }
 
         response = notion.pages.create(
-            parent={"database_id": database_id}, properties=properties
+            parent={"data_source_id": data_source_id}, properties=properties
         )
 
         return response["url"]

@@ -14,7 +14,9 @@ from .common import (
 )
 
 # 콘텐츠 팀 전용 노션 데이터베이스 ID
-CONTENTS_DATABASE_ID: str = "a87afa9c63f6438381255db5d01e68d4"
+# Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
+CONTENTS_DATA_SOURCE_ID: str = "fecd7fca-8280-4f02-b78f-7fa720f53aa6"  # 작업 로드맵 DB
+CONTENTS_PROJECT_DATA_SOURCE_ID: str = "d8d7d2cd-0c62-4314-a2b7-754ad345c0ee"  # 콘텐츠 프로젝트 DB
 
 
 def register_contents_handlers(app_contents):
@@ -51,13 +53,13 @@ def register_contents_handlers(app_contents):
             get_create_notion_task_tool(
                 user,
                 slack_thread_url,
-                CONTENTS_DATABASE_ID,
+                CONTENTS_DATA_SOURCE_ID,
                 app_contents.client,
-                "39a3277286c74a298cbdea4e903549a5",
+                CONTENTS_PROJECT_DATA_SOURCE_ID,
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(CONTENTS_DATABASE_ID),
-            get_create_notion_follow_up_task_tool(CONTENTS_DATABASE_ID),
+            get_update_notion_task_status_tool(CONTENTS_DATA_SOURCE_ID),
+            get_create_notion_follow_up_task_tool(CONTENTS_DATA_SOURCE_ID),
             get_notion_page_tool(),
         ]
         tools = [search_tool, get_web_page_from_url] + notion_tools

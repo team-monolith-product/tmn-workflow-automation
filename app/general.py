@@ -26,7 +26,9 @@ from .common import (
 )
 
 # 상수들
-DATABASE_ID: str = "a9de18b3877c453a8e163c2ee1ff4137"
+# Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
+DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB
+PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
@@ -69,13 +71,13 @@ def register_general_handlers(app, assistant):
             get_create_notion_task_tool(
                 user,
                 slack_thread_url,
-                DATABASE_ID,
+                DATA_SOURCE_ID,
                 app.client,
-                "9df81e8ee45e4f49aceb402c084b3ac7",
+                PROJECT_DATA_SOURCE_ID,
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATABASE_ID),
-            get_create_notion_follow_up_task_tool(DATABASE_ID),
+            get_update_notion_task_status_tool(DATA_SOURCE_ID),
+            get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
             get_notion_page_tool(),
         ]
         tools = [search_tool, get_web_page_from_url] + notion_tools
@@ -141,13 +143,13 @@ def register_general_handlers(app, assistant):
             get_create_notion_task_tool(
                 context.user_id,
                 slack_thread_url,
-                DATABASE_ID,
+                DATA_SOURCE_ID,
                 app.client,
-                "9df81e8ee45e4f49aceb402c084b3ac7",
+                PROJECT_DATA_SOURCE_ID,
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATABASE_ID),
-            get_create_notion_follow_up_task_tool(DATABASE_ID),
+            get_update_notion_task_status_tool(DATA_SOURCE_ID),
+            get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
             get_notion_page_tool(),
         ]
         tools = [search_tool, get_web_page_from_url] + notion_tools
