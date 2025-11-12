@@ -317,7 +317,7 @@ def get_in_progress_tasks(
 
         # 타임라인 (마감일)
         timeline = result["properties"]["타임라인"].get("date")
-        deadline = timeline["start"] if timeline else None
+        deadline = timeline["end"] if timeline and timeline.get("end") else (timeline["start"] if timeline else None)
 
         # GitHub PR 연결 여부
         github_prs = result["properties"]["GitHub 풀 리퀘스트"]["relation"]
