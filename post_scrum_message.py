@@ -285,11 +285,16 @@ def get_in_progress_tasks(
     Returns:
         list[dict]: 태스크 정보 목록
     """
-    # 진행 상태의 태스크 조회
+    # 진행 또는 리뷰 상태의 태스크 조회
     results = notion.data_sources.query(
         **{
             "data_source_id": MAIN_DATA_SOURCE_ID,
-            "filter": {"property": "상태", "status": {"equals": "진행"}},
+            "filter": {
+                "or": [
+                    {"property": "상태", "status": {"equals": "진행"}},
+                    {"property": "상태", "status": {"equals": "리뷰"}},
+                ]
+            },
         }
     )
 
