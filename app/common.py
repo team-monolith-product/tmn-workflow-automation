@@ -280,6 +280,13 @@ def get_create_notion_task_tool(
         if notion_assignee_id:
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
 
+        # Slack thread URL에서 채널 ID를 추출하여 아이디어 뱅크 채널인지 확인
+        if slack_thread_url and "/archives/" in slack_thread_url:
+            # URL 형식: https://monolith-keb2010.slack.com/archives/C03U6N87RKN/p1234567890
+            channel_id = slack_thread_url.split("/archives/")[1].split("/")[0]
+            if channel_id == "C03U6N87RKN":
+                properties["아이디어 뱅크"] = {"checkbox": True}
+
         response = notion.pages.create(
             parent={"data_source_id": data_source_id}, properties=properties
         )
