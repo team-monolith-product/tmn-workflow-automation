@@ -29,9 +29,9 @@ def main():
 
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-    # 16:00에 보낸 스크럼 메시지 찾기 (최근 1시간 이내)
+    # 16:00에 보낸 스크럼 메시지 찾기 (최근 2시간 이내)
     now = time.time()
-    oldest = now - 3600*2  # 1시간 전
+    oldest = now - 3600 * 2  # 2시간 전
 
     print(f"현재 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
     print(f"검색 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(oldest))}")
@@ -39,10 +39,11 @@ def main():
 
     try:
         # 채널의 최근 메시지 조회
+        # Slack API는 oldest를 정수 형태의 문자열로 전달해야 함
         print("\n메시지 조회 중...")
         response = slack_client.conversations_history(
             channel=SCRUM_CHANNEL_ID,
-            oldest=oldest,
+            oldest=str(int(oldest)),  # float를 int로 변환 후 문자열로
             limit=50,
         )
 
