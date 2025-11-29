@@ -118,9 +118,13 @@ def summarize_deployment(
         for tag in ["기획", "디자인"]
     ] + [
         {
+            "property": "구성요소",
+            "multi_select": {"is_not_empty": True},
+        },
+        {
             "property": "상태",
             "status": {"does_not_equal": "중단"},
-        }
+        },
     ]
 
     #    - 날짜 필터링
