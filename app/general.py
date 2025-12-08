@@ -89,6 +89,8 @@ def register_general_handlers(app, assistant):
         버그 신고 채널에 올라오는 메시지를 LLM으로 분석하여
         Notion에 버그 작업을 생성하고, 시급한 경우 담당 그룹을 태그합니다.
         """
+        print("Received message event:", body)
+
         event = body.get("event", {})
         channel = event.get("channel")
         if channel == SLACK_BUG_REPORT_CHANNEL_ID:
