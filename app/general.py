@@ -93,25 +93,37 @@ def register_general_handlers(app, assistant):
 
         event = body.get("event", {})
         channel = event.get("channel")
+        print(f"Channel: {channel}")
+
         if channel == SLACK_BUG_REPORT_CHANNEL_ID:
             # 메시지 편집 이벤트 필터링
             subtype = event.get("subtype")
+            print(f"Subtype: {subtype}")
             if subtype != "bot_message":
+                print("Skipping non-bot message")
                 return
 
             thread_ts = event.get("thread_ts")
             message_ts = event.get("ts")
+            print(f"Thread TS: {thread_ts}, Message TS: {message_ts}")
+
             if thread_ts is None or thread_ts == message_ts:
+                print("Routing bug report")
                 await route_bug.route_bug(app.client, body)
         elif channel == SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID:
             # 메시지 편집 이벤트 필터링
             subtype = event.get("subtype")
+            print(f"Subtype: {subtype}")
             if subtype != "bot_message":
+                print("Skipping non-bot message")
                 return
 
             thread_ts = event.get("thread_ts")
             message_ts = event.get("ts")
+            print(f"Thread TS: {thread_ts}, Message TS: {message_ts}")
+
             if thread_ts is None or thread_ts == message_ts:
+                print("Routing dev env infra bug report")
                 await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
 
     @assistant.thread_started
