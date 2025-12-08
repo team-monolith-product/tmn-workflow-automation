@@ -43,8 +43,8 @@ async def route_bug(
     print(f"Route bug: message_text={message_text}, channel_id={channel_id}, thread_ts={thread_ts}")
 
     # Redis 연결 설정
-    redis_client = redis.Redis(
-        host=os.environ.get("REDIS_HOST", "localhost"),
+    redis_client = redis.Redis.from_url(
+        os.environ.get("REDIS_URL", "redis://localhost:6379"),
         password=os.environ.get("REDIS_PASSWORD", ""),
         decode_responses=True,
     )
@@ -392,8 +392,8 @@ if __name__ == "__main__":
     async def main():
         slack_client = AsyncWebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
         # Redis 연결 설정
-        redis_client = redis.Redis(
-            host=os.environ.get("REDIS_HOST", "localhost"),
+        redis_client = redis.Redis.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379"),
             password=os.environ.get("REDIS_PASSWORD", ""),
             decode_responses=True,
         )

@@ -40,8 +40,8 @@ async def route_dev_env_infra_bug(
     thread_ts = body.get("event", {}).get("ts")
 
     # Redis 연결 설정
-    redis_client = redis.Redis(
-        host=os.environ.get("REDIS_HOST", "localhost"),
+    redis_client = redis.Redis.from_url(
+        os.environ.get("REDIS_URL", "redis://localhost:6379"),
         password=os.environ.get("REDIS_PASSWORD", ""),
         decode_responses=True,
     )
