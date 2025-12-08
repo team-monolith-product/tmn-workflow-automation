@@ -40,6 +40,7 @@ async def route_bug(
     message_text = body.get("event", {}).get("text", "")
     channel_id = body.get("event", {}).get("channel")
     thread_ts = body.get("event", {}).get("ts")
+    print(f"Route bug: message_text={message_text}, channel_id={channel_id}, thread_ts={thread_ts}")
 
     # Redis 연결 설정
     redis_client = redis.Redis(
@@ -49,16 +50,21 @@ async def route_bug(
     )
 
     team, priority = extract_team_and_priority_from_report_text(message_text)
+    print(f"Extracted team={team}, priority={priority}")
     working_emails = get_working_emails()
+    print(f"Working emails: {working_emails}")
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
+    print(f"Team to emails: {team_to_emails}")
     all_emails = list(
         set([email for emails in team_to_emails.values() for email in emails])
     )
     email_to_bug_count = get_email_to_bug_count(redis_client, all_emails)
+    print(f"Email to bug count: {email_to_bug_count}")
     reason_text, assignee_email = select_assignee_email(
         team, priority, working_emails, team_to_emails, email_to_bug_count
     )
+    print(f"Selected assignee: {assignee_email}, reason: {reason_text}")
     update_bug_count(redis_client, assignee_email)
 
     await send_slack_response(
