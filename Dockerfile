@@ -1,6 +1,9 @@
 # 베이스 이미지 설정
 FROM python:3.11-slim as prd
 
+# 환경 변수 설정 (Python 출력 버퍼링 비활성화)
+ENV PYTHONUNBUFFERED=1
+
 # 작업 디렉토리 설정
 WORKDIR /app
 
