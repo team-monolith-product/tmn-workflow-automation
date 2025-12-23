@@ -57,7 +57,7 @@ def main():
     send_intro_message(slack_client, args.dry_run)
 
     # 2. 기획팀 스크럼
-    send_planning_team_scrum(slack_client, args.dry_run)
+    send_team_scrum(notion, slack_client, email_to_user_id, "기획", "기획", args.dry_run)
 
     # 3. FE팀 스크럼
     send_team_scrum(notion, slack_client, email_to_user_id, "fe", "FE", args.dry_run)
@@ -121,26 +121,6 @@ def send_intro_message(slack_client: WebClient, dry_run: bool = False):
         )
 
 
-def send_planning_team_scrum(slack_client: WebClient, dry_run: bool = False):
-    """
-    기획팀 스크럼 메시지 발송 (Notion 조회 없이 멘션만)
-
-    Args:
-        slack_client: Slack WebClient
-        dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
-    """
-    text = "기획팀 스크럼"
-
-    if dry_run:
-        print(f"\n[기획팀 스크럼]")
-        print(text)
-    else:
-        slack_client.chat_postMessage(
-            channel=SCRUM_CHANNEL_ID,
-            text=text,
-        )
-
-
 def send_team_scrum(
     notion: NotionClient,
     slack_client: WebClient,
@@ -197,8 +177,10 @@ def send_team_scrum(
 
         # 인원별 메시지 생성
         person_message = f"{assignee_name}\n"
+        # 기획팀 여부 확인
+        is_planning_team = team_handle == "기획"
         for task in tasks:
-            task_line = format_task_line(task)
+            task_line = format_task_line(task, is_planning_team)
             person_message += f"{task_line}\n"
 
         thread_messages.append(person_message.strip())
@@ -345,12 +327,13 @@ def get_in_progress_tasks(
     return tasks
 
 
-def format_task_line(task: dict[str, Any]) -> str:
+def format_task_line(task: dict[str, Any], is_planning_team: bool = False) -> str:
     """
     태스크 정보를 한 줄 형식으로 포맷팅 (인원별 그룹화에 사용)
 
     Args:
         task: 태스크 정보
+        is_planning_team: 기획팀 여부 (True인 경우 PR 경고 표시 안 함)
 
     Returns:
         str: 포맷팅된 한 줄 메시지
@@ -375,8 +358,8 @@ def format_task_line(task: dict[str, Any]) -> str:
         else:
             deadline_text = f" 마감일 지남 ({abs(days_until_deadline)}일)."
 
-        # PR 없음 경고 (마감 1일 전 또는 당일)
-        if days_until_deadline <= 1 and not task["has_pr"]:
+        # PR 없음 경고 (마감 1일 전 또는 당일, 기획팀 제외)
+        if days_until_deadline <= 1 and not task["has_pr"] and not is_planning_team:
             warning_text = " PR이 없으므로 일정 조정이 필요합니다."
 
     # 메시지 포맷
