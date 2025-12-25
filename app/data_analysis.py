@@ -50,12 +50,6 @@ async def answer_data_analysis(
                 "- 데이터 분석 요청에 대해 먼저 Redash 대시보드를 검색하여 관련 쿼리를 찾습니다.\n"
                 "- Redash에서 찾은 쿼리를 참고하여 Athena에서 SQL 쿼리를 실행합니다.\n"
                 "\n"
-                "- **중요: database 파라미터는 필수입니다!**\n"
-                "  - execute_athena_query 도구를 사용할 때 반드시 database 파라미터를 지정해야 합니다.\n"
-                "  - Redash 쿼리에서 'database.table' 패턴을 찾아 데이터베이스 이름을 파악하세요.\n"
-                '  - 예: SELECT * FROM analytics.users → database="analytics"\n'
-                "  - 데이터베이스를 지정하지 않으면 쿼리가 실패합니다.\n"
-                "\n"
                 "- 결과를 명확하고 간결하게 설명하고, 필요시 시각화를 권장합니다.\n"
                 "- 쿼리 작성 시 표준 SQL 문법을 사용합니다.\n"
             )
@@ -75,9 +69,9 @@ async def answer_data_analysis(
     else:
         messages.append(HumanMessage(content=f"{user_real_name}: {text}"))
 
-    # GPT-5.2 모델 사용 (tech.md에 명시된 대로)
-    # 현재는 gpt-4.1을 사용하고, GPT-5.2가 출시되면 업데이트 예정
-    chat_model = ChatOpenAI(model="gpt-4.1", temperature=0)
+    # GPT-5.2 모델 사용 - OpenAI의 최신 플래그십 모델 (2025년 12월 출시)
+    # 데이터 분석, 긴 컨텍스트 이해, 도구 호출에 최적화됨
+    chat_model = ChatOpenAI(model="gpt-5.2", temperature=0)
 
     # 데이터 분석 전용 Tools
     tools = [list_redash_dashboards, read_redash_dashboard, execute_athena_query]
@@ -118,11 +112,52 @@ async def answer_data_analysis(
 
     agent_answer = response["messages"][-1].content
 
-    await say(
-        {
-            "blocks": [
-                {"type": "section", "text": {"type": "mrkdwn", "text": agent_answer}}
-            ]
-        },
-        thread_ts=thread_ts,
-    )
+    # Slack 텍스트 블록은 최대 3000자까지만 지원
+    # 긴 응답은 여러 메시지로 분할하여 전송
+    MAX_CHARS = 3000
+    if len(agent_answer) <= MAX_CHARS:
+        await say(
+            {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": agent_answer},
+                    }
+                ]
+            },
+            thread_ts=thread_ts,
+        )
+    else:
+        # 메시지를 3000자 단위로 분할
+        chunks = []
+        current_chunk = ""
+
+        for line in agent_answer.split("\n"):
+            # 현재 줄을 추가했을 때 3000자를 초과하면 chunk 저장
+            if len(current_chunk) + len(line) + 1 > MAX_CHARS:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                if current_chunk:
+                    current_chunk += "\n" + line
+                else:
+                    current_chunk = line
+
+        # 마지막 chunk 저장
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        # 각 chunk를 순차적으로 전송
+        for chunk in chunks:
+            await say(
+                {
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": chunk},
+                        }
+                    ]
+                },
+                thread_ts=thread_ts,
+            )

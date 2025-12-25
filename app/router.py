@@ -17,7 +17,7 @@ async def route_question(question: str) -> Literal["data_analysis", "general"]:
     Returns:
         "data_analysis" 또는 "general"
     """
-    router_llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+    router_llm = ChatOpenAI(model="gpt-5.2", temperature=0)
 
     system_prompt = """당신은 질문을 분류하는 라우터입니다.
 

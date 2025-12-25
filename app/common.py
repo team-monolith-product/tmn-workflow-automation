@@ -569,7 +569,7 @@ async def answer(
     if text.startswith("o3"):
         model = "o3"
     else:
-        model = "gpt-4.1"
+        model = "gpt-5.2"
 
     chat_model = ChatOpenAI(model=model)
     agent_executor = create_react_agent(chat_model, tools, debug=True)
