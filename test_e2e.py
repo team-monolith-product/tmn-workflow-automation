@@ -63,7 +63,8 @@ class TestDataAnalysisE2E:
         assert mock_say.called
         # 최종 답변 호출 찾기 (blocks가 있는 호출)
         blocks_calls = [
-            call for call in mock_say.call_args_list
+            call
+            for call in mock_say.call_args_list
             if call.args and isinstance(call.args[0], dict) and "blocks" in call.args[0]
         ]
         assert len(blocks_calls) > 0, "최종 답변이 호출되지 않았습니다"
@@ -220,9 +221,7 @@ class TestDataAnalysisE2E:
     @pytest.mark.asyncio
     @patch("app.data_analysis.create_react_agent")
     @patch("app.data_analysis.ChatOpenAI")
-    async def test_thread_context_handling(
-        self, mock_chat_openai, mock_create_agent
-    ):
+    async def test_thread_context_handling(self, mock_chat_openai, mock_create_agent):
         """
         스레드 컨텍스트(이전 대화)가 올바르게 처리되는지 테스트
         """
@@ -247,7 +246,9 @@ class TestDataAnalysisE2E:
         from app.data_analysis import answer_data_analysis
 
         # 스레드 컨텍스트와 함께 실행
-        threads_joined = "유저A: 11월 매출이 얼마였어?\n\nBot: 11월 매출은 4천만원이었습니다."
+        threads_joined = (
+            "유저A: 11월 매출이 얼마였어?\n\nBot: 11월 매출은 4천만원이었습니다."
+        )
 
         await answer_data_analysis(
             thread_ts="1234567890.123456",
