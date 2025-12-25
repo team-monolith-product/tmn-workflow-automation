@@ -40,7 +40,7 @@ def list_redash_dashboards() -> str:
 
 @tool
 def read_redash_dashboard(
-    slug: Annotated[str, "대시보드 슬러그"],
+    slug: Annotated[str, "대시보드 슬러그 또는 ID"],
 ) -> str:
     """
     Redash 대시보드의 상세 정보를 조회합니다.
@@ -49,13 +49,31 @@ def read_redash_dashboard(
     대시보드의 각 위젯에 연결된 쿼리 정보(쿼리 내용, 데이터베이스, 테이블 스키마, JOIN 패턴 등)를 반환합니다.
 
     Args:
-        slug: 대시보드 슬러그 (URL에 사용되는 식별자)
+        slug: 대시보드 슬러그 또는 ID (슬러그인 경우 자동으로 ID로 변환됨)
 
     Returns:
         str: 대시보드 상세 정보 (쿼리 내용 및 데이터베이스 정보 포함)
     """
     try:
-        dashboard_data = redash.get_dashboard(slug)
+        # slug가 숫자가 아닌 경우, 대시보드 목록에서 ID를 찾음
+        dashboard_id = slug
+        if not slug.isdigit():
+            dashboards_response = redash.list_dashboards()
+            dashboards = dashboards_response.get("results", [])
+
+            # slug로 대시보드 찾기
+            matching_dashboard = None
+            for dashboard in dashboards:
+                if dashboard.get("slug") == slug or dashboard.get("name") == slug:
+                    matching_dashboard = dashboard
+                    break
+
+            if not matching_dashboard:
+                return f"'{slug}' 슬러그 또는 이름을 가진 대시보드를 찾을 수 없습니다."
+
+            dashboard_id = str(matching_dashboard.get("id"))
+
+        dashboard_data = redash.get_dashboard(dashboard_id)
 
         name = dashboard_data.get("name", "Untitled")
         widgets = dashboard_data.get("widgets", [])
