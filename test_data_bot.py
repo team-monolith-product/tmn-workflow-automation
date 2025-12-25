@@ -173,7 +173,7 @@ class TestRedashTools:
             ]
         }
 
-        result = redash_tools.list_redash_dashboards.func(query="sales")
+        result = redash_tools.list_redash_dashboards.func()
 
         assert "Sales Dashboard" in result
         assert "sales-dashboard" in result

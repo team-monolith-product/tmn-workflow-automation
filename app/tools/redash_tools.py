@@ -8,23 +8,17 @@ from api import redash
 
 
 @tool
-def list_redash_dashboards(
-    query: Annotated[str | None, "검색어 (선택사항)"] = None,
-) -> str:
+def list_redash_dashboards() -> str:
     """
     Redash 대시보드 목록을 조회합니다.
 
-    이 도구는 관련 대시보드를 찾을 때 사용합니다.
-    검색어를 지정하면 해당 키워드를 포함하는 대시보드만 반환됩니다.
-
-    Args:
-        query: 검색어 (선택사항)
+    이 도구는 모든 대시보드를 조회할 때 사용합니다.
 
     Returns:
         str: 대시보드 목록 (이름, 슬러그, 태그 포함)
     """
     try:
-        response = redash.list_dashboards(query)
+        response = redash.list_dashboards()
         dashboards = response.get("results", [])
 
         if not dashboards:

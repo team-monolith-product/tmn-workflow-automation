@@ -130,7 +130,7 @@ class TestDataAnalysisE2E:
 
         # 5. Tool 체인 실행
         # Step 1: 대시보드 목록 조회
-        dashboard_list = list_redash_dashboards.func(query="매출")
+        dashboard_list = list_redash_dashboards.func()
         assert "매출 대시보드" in dashboard_list
         assert "sales-dashboard" in dashboard_list
 
