@@ -523,7 +523,15 @@ async def answer(
                 "  Your answer will be sent to the Slack thread.\n"
                 "  Therefore, for normal conversations, you don't have to use Slack Tool.\n"
                 "- We are a edu-tech startup in Korea. So always answer in Korean.\n"
-                f"- Today's date is {today_str}"
+                f"- Today's date is {today_str}\n"
+                "\n"
+                "**슬랙 텍스트 포맷팅**:\n"
+                "- 슬랙은 마크다운이 아닌 자체 mrkdwn 포맷을 사용합니다.\n"
+                "- Bold: `*텍스트*` (별표 1개, **텍스트** 형식은 작동하지 않음)\n"
+                "- Italic: `_텍스트_` (언더스코어)\n"
+                "- Strikethrough: `~텍스트~` (물결표)\n"
+                "- Code: `` `코드` `` (백틱)\n"
+                "- Code block: ``` ```코드 블록``` ``` (백틱 3개)"
             )
         )
     ]
