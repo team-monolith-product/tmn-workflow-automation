@@ -40,7 +40,9 @@ async def route_bug(
     message_text = body.get("event", {}).get("text", "")
     channel_id = body.get("event", {}).get("channel")
     thread_ts = body.get("event", {}).get("ts")
-    print(f"Route bug: message_text={message_text}, channel_id={channel_id}, thread_ts={thread_ts}")
+    print(
+        f"Route bug: message_text={message_text}, channel_id={channel_id}, thread_ts={thread_ts}"
+    )
 
     # Redis 연결 설정
     redis_client = redis.Redis.from_url(

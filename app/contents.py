@@ -16,7 +16,9 @@ from .common import (
 # 콘텐츠 팀 전용 노션 데이터베이스 ID
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
 CONTENTS_DATA_SOURCE_ID: str = "fecd7fca-8280-4f02-b78f-7fa720f53aa6"  # 작업 로드맵 DB
-CONTENTS_PROJECT_DATA_SOURCE_ID: str = "d8d7d2cd-0c62-4314-a2b7-754ad345c0ee"  # 콘텐츠 프로젝트 DB
+CONTENTS_PROJECT_DATA_SOURCE_ID: str = (
+    "d8d7d2cd-0c62-4314-a2b7-754ad345c0ee"  # 콘텐츠 프로젝트 DB
+)
 
 
 def register_contents_handlers(app_contents):
