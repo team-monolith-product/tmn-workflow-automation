@@ -26,3 +26,5 @@ fastapi
 uvicorn[standard]
 pydantic
 boto3
+pandas
+matplotlib

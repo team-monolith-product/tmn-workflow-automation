@@ -12,6 +12,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # GUI 없는 백엔드 사용
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from api import athena
 
@@ -48,8 +49,10 @@ def get_execute_python_with_chart_tool(
         이 도구는 데이터 시각화가 필요할 때 사용합니다.
         코드 내에서 matplotlib을 사용하여 차트를 그리면 자동으로 슬랙에 이미지로 전송됩니다.
 
-        **사용 가능한 함수**:
-        코드 컨텍스트 내에서 다음 함수를 사용할 수 있습니다:
+        **사용 가능한 라이브러리 및 함수**:
+        코드 컨텍스트 내에서 다음을 사용할 수 있습니다:
+        - `pd` (pandas): 데이터 분석 및 조작을 위한 pandas 라이브러리
+        - `plt` (matplotlib.pyplot): 차트 시각화를 위한 matplotlib
         - `execute_athena_query(query: str, database: str)`: Athena SQL을 실행하고 결과를 반환합니다.
           결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
 
@@ -66,17 +69,17 @@ def get_execute_python_with_chart_tool(
             database="analytics_db"
         )
 
-        # 결과에서 데이터 추출
+        # 결과를 pandas DataFrame으로 변환
         rows = results["ResultSet"]["Rows"]
         headers = [col.get("VarCharValue", "") for col in rows[0]["Data"]]
         data_rows = [[col.get("VarCharValue", "") for col in row["Data"]] for row in rows[1:]]
 
-        # 차트 그리기
-        dates = [row[0] for row in data_rows]
-        counts = [int(row[1]) for row in data_rows]
+        df = pd.DataFrame(data_rows, columns=headers)
+        df["count"] = df["count"].astype(int)
 
+        # pandas를 활용한 차트 그리기
         plt.figure(figsize=(10, 6))
-        plt.plot(dates, counts)
+        plt.plot(df["date"], df["count"])
         plt.xlabel('Date')
         plt.ylabel('Count')
         plt.title('Daily Stats')
@@ -102,6 +105,7 @@ def get_execute_python_with_chart_tool(
                 "execute_athena_query": athena.execute_and_wait,
                 "plt": plt,
                 "matplotlib": matplotlib,
+                "pd": pd,
                 "__builtins__": __builtins__,
             }
             exec_locals = {}

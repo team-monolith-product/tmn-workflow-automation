@@ -603,7 +603,7 @@ async def answer(
             )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [SayHandler()]}
+        {"messages": messages}, {"callbacks": [SayHandler()], "recursion_limit": 50}
     )
 
     agent_answer = response["messages"][-1].content

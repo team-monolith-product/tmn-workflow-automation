@@ -146,7 +146,7 @@ async def answer_data_analysis(
             )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [SayHandler()]}
+        {"messages": messages}, {"callbacks": [SayHandler()], "recursion_limit": 50}
     )
 
     # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
