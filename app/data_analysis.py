@@ -11,7 +11,11 @@ from langgraph.prebuilt import create_react_agent
 from app.common import KST
 from app.tools.athena_tools import get_execute_athena_query_tool
 from app.tools.chart_tools import get_execute_python_with_chart_tool
-from app.tools.redash_tools import list_redash_dashboards, read_redash_dashboard
+from app.tools.redash_tools import (
+    list_redash_dashboards,
+    read_redash_dashboard,
+    read_redash_query,
+)
 
 
 async def answer_data_analysis(
@@ -106,6 +110,7 @@ async def answer_data_analysis(
     tools = [
         list_redash_dashboards,
         read_redash_dashboard,
+        read_redash_query,
         execute_athena_query,
         execute_python_with_chart,
     ]

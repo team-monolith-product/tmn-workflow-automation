@@ -39,16 +39,16 @@ def read_redash_dashboard(
     slug: Annotated[str, "대시보드 슬러그 또는 ID"],
 ) -> str:
     """
-    Redash 대시보드의 상세 정보를 조회합니다.
+    Redash 대시보드의 쿼리 목록을 조회합니다.
 
-    이 도구는 특정 대시보드에 포함된 쿼리들을 확인할 때 사용합니다.
-    대시보드의 각 위젯에 연결된 쿼리 정보(쿼리 내용, 데이터베이스, 테이블 스키마, JOIN 패턴 등)를 반환합니다.
+    이 도구는 특정 대시보드에 포함된 쿼리 이름과 ID 목록을 확인할 때 사용합니다.
+    쿼리의 상세 SQL을 보려면 read_redash_query 도구를 사용하세요.
 
     Args:
         slug: 대시보드 슬러그 또는 ID (슬러그인 경우 자동으로 ID로 변환됨)
 
     Returns:
-        str: 대시보드 상세 정보 (쿼리 내용 및 데이터베이스 정보 포함)
+        str: 대시보드의 쿼리 목록 (쿼리 ID와 이름)
     """
     try:
         # slug가 숫자가 아닌 경우, 대시보드 목록에서 ID를 찾음
@@ -80,6 +80,8 @@ def read_redash_dashboard(
             result.append("이 대시보드에는 위젯이 없습니다.")
             return "\n".join(result)
 
+        # 쿼리 ID와 이름만 수집
+        query_list = []
         for widget in widgets:
             visualization = widget.get("visualization")
             if not visualization:
@@ -89,12 +91,49 @@ def read_redash_dashboard(
             if not query_data:
                 continue
 
+            query_id = query_data.get("id")
             query_name = query_data.get("name", "Untitled Query")
-            query_string = query_data.get("query", "")
 
-            result.append(f"\n## 쿼리: {query_name}")
-            result.append(f"\n```sql\n{query_string}\n```\n")
+            if query_id:
+                query_list.append(f"- Query ID {query_id}: {query_name}")
+
+        if query_list:
+            result.append("## 쿼리 목록\n")
+            result.extend(query_list)
+        else:
+            result.append("이 대시보드에는 쿼리가 없습니다.")
 
         return "\n".join(result)
     except Exception as e:
         return f"대시보드 조회 중 오류 발생: {str(e)}"
+
+
+@tool
+def read_redash_query(
+    query_id: Annotated[int, "쿼리 ID"],
+) -> str:
+    """
+    Redash 쿼리의 상세 정보를 조회합니다.
+
+    이 도구는 특정 쿼리의 SQL 내용을 확인할 때 사용합니다.
+
+    Args:
+        query_id: 쿼리 ID
+
+    Returns:
+        str: 쿼리 상세 정보 (이름, SQL 내용, 데이터베이스 정보)
+    """
+    try:
+        query_data = redash.get_query(query_id)
+
+        query_name = query_data.get("name", "Untitled Query")
+        query_string = query_data.get("query", "")
+
+        result = [
+            f"# 쿼리: {query_name}",
+            f"```sql\n{query_string}\n```",
+        ]
+
+        return "\n".join(result)
+    except Exception as e:
+        return f"쿼리 조회 중 오류 발생: {str(e)}"

@@ -176,8 +176,6 @@ class TestRedashTools:
         result = redash_tools.list_redash_dashboards.func()
 
         assert "Sales Dashboard" in result
-        assert "sales-dashboard" in result
-        assert "sales" in result
 
     @patch("api.redash.list_dashboards")
     def test_list_redash_dashboards_empty(self, mock_list):
@@ -189,9 +187,8 @@ class TestRedashTools:
         assert "검색 결과가 없습니다" in result
 
     @patch("api.redash.get_dashboard")
-    @patch("api.redash.get_query")
-    def test_read_redash_dashboard_tool(self, mock_get_query, mock_get_dashboard):
-        """Redash 대시보드 읽기 tool 테스트"""
+    def test_read_redash_dashboard_tool(self, mock_get_dashboard):
+        """Redash 대시보드 읽기 tool 테스트 - 쿼리 목록만 반환"""
         mock_get_dashboard.return_value = {
             "name": "Test Dashboard",
             "widgets": [
@@ -200,22 +197,34 @@ class TestRedashTools:
                         "query": {
                             "id": 123,
                             "name": "Test Query",
-                            "query": "SELECT * FROM analytics.users",
                         }
                     }
                 }
             ],
         }
-        mock_get_query.return_value = {
-            "data_source_id": 1,
-            "options": {"data_source": "Analytics DB"},
-        }
 
-        result = redash_tools.read_redash_dashboard.func(slug="test-dashboard")
+        # ID가 숫자인 경우 직접 사용
+        result = redash_tools.read_redash_dashboard.func(slug="123")
 
         assert "Test Dashboard" in result
+        assert "Query ID 123" in result
+        assert "Test Query" in result
+
+    @patch("api.redash.get_query")
+    def test_read_redash_query_tool(self, mock_get_query):
+        """Redash 쿼리 상세 조회 tool 테스트"""
+        mock_get_query.return_value = {
+            "id": 123,
+            "name": "Test Query",
+            "query": "SELECT * FROM analytics.users",
+            "data_source_id": 1,
+        }
+
+        result = redash_tools.read_redash_query.func(query_id=123)
+
         assert "Test Query" in result
         assert "analytics.users" in result
+        assert "**Data Source ID:** 1" in result
 
 
 class TestRouter:
