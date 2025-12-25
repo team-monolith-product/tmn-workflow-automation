@@ -34,7 +34,9 @@ def main():
     oldest = now - 3600 * 2  # 2시간 전
 
     print(f"현재 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
-    print(f"검색 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(oldest))}")
+    print(
+        f"검색 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(oldest))}"
+    )
     print(f"채널 ID: {SCRUM_CHANNEL_ID}")
 
     try:
@@ -56,7 +58,7 @@ def main():
         for idx, message in enumerate(messages, 1):
             text = message.get("text", "")
             ts = message.get("ts", "")
-            msg_time = time.strftime('%H:%M:%S', time.localtime(float(ts)))
+            msg_time = time.strftime("%H:%M:%S", time.localtime(float(ts)))
 
             print(f"\n[메시지 {idx}] 시간: {msg_time}")
             print(f"텍스트: {text[:100]}{'...' if len(text) > 100 else ''}")

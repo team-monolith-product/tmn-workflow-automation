@@ -27,8 +27,8 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -306,7 +306,7 @@ async def handle_webhook(
     start_time = time.time()
     logger.info("=" * 80)
     logger.info("웹훅 처리 시작")
-    
+
     # API Key 검증
     step_start = time.time()
     await verify_api_key(x_api_key)
@@ -314,12 +314,14 @@ async def handle_webhook(
 
     try:
         # 무거운 동기 작업들을 별도 스레드에서 실행하여 이벤트 루프 블로킹 방지
-        
+
         # GitHub 클라이언트 초기화
         step_start = time.time()
         gh = Github(GITHUB_TOKEN)
         repo = gh.get_repo(PLAN_MD_REPO)
-        logger.info(f"[2/7] GitHub 클라이언트 초기화 완료 (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[2/7] GitHub 클라이언트 초기화 완료 (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # Notion 페이지 정보 추출
         step_start = time.time()
@@ -336,22 +338,30 @@ async def handle_webhook(
             )
 
         title = extract_title(properties)
-        logger.info(f"[3/7] 페이지 정보 추출 완료 - Task ID: {task_id}, Title: {title} (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[3/7] 페이지 정보 추출 완료 - Task ID: {task_id}, Title: {title} (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # 브랜치 이름 생성
         step_start = time.time()
         branch_name = create_branch_name(task_id)
-        logger.info(f"[4/7] 브랜치 이름 생성 완료: {branch_name} (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[4/7] 브랜치 이름 생성 완료: {branch_name} (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # Notion → 마크다운 변환 (무거운 작업 - 별도 스레드에서 실행)
         step_start = time.time()
         markdown_content = await asyncio.to_thread(get_notion_markdown, page_id)
-        logger.info(f"[5/7] Notion → 마크다운 변환 완료 (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[5/7] Notion → 마크다운 변환 완료 (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # 기존 파일 검색 (별도 스레드에서 실행)
         step_start = time.time()
         existing_file = await asyncio.to_thread(find_existing_file, repo, task_id)
-        logger.info(f"[6/7] 기존 파일 검색 완료 - 기존 파일: {existing_file or '없음'} (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[6/7] 기존 파일 검색 완료 - 기존 파일: {existing_file or '없음'} (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # 파일 경로 결정
         filename = f"[{task_id}] {title}.md"
@@ -361,15 +371,27 @@ async def handle_webhook(
         step_start = time.time()
         await asyncio.to_thread(
             create_or_update_file_via_api,
-            repo, filename, markdown_content, task_id, title, branch_name, existing_file
+            repo,
+            filename,
+            markdown_content,
+            task_id,
+            title,
+            branch_name,
+            existing_file,
         )
         action = "업데이트" if existing_file else "생성"
-        logger.info(f"[7/7] GitHub 파일 {action} 완료: {filename} (소요시간: {time.time() - step_start:.3f}초)")
+        logger.info(
+            f"[7/7] GitHub 파일 {action} 완료: {filename} (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         # PR 생성 (별도 스레드에서 실행)
         step_start = time.time()
-        pr_url = await asyncio.to_thread(create_pull_request, repo, task_id, title, branch_name)
-        logger.info(f"PR 생성 완료: {pr_url} (소요시간: {time.time() - step_start:.3f}초)")
+        pr_url = await asyncio.to_thread(
+            create_pull_request, repo, task_id, title, branch_name
+        )
+        logger.info(
+            f"PR 생성 완료: {pr_url} (소요시간: {time.time() - step_start:.3f}초)"
+        )
 
         total_time = time.time() - start_time
         logger.info(f"웹훅 처리 완료 ✓ (총 소요시간: {total_time:.3f}초)")

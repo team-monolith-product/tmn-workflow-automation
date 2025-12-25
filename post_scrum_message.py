@@ -57,7 +57,9 @@ def main():
     send_intro_message(slack_client, args.dry_run)
 
     # 2. 기획팀 스크럼
-    send_team_scrum(notion, slack_client, email_to_user_id, "기획", "기획", args.dry_run)
+    send_team_scrum(
+        notion, slack_client, email_to_user_id, "기획", "기획", args.dry_run
+    )
 
     # 3. FE팀 스크럼
     send_team_scrum(notion, slack_client, email_to_user_id, "fe", "FE", args.dry_run)
@@ -150,9 +152,7 @@ def send_team_scrum(
     # 팀 멤버의 진행 중인 태스크 조회
     team_members = get_team_members(slack_client, team_handle)
     team_emails = [
-        email
-        for email, user_id in email_to_user_id.items()
-        if user_id in team_members
+        email for email, user_id in email_to_user_id.items() if user_id in team_members
     ]
 
     # Notion에서 진행 중인 태스크 조회
@@ -304,7 +304,11 @@ def get_in_progress_tasks(
 
         # 타임라인 (마감일)
         timeline = result["properties"]["타임라인"].get("date")
-        deadline = timeline["end"] if timeline and timeline.get("end") else (timeline["start"] if timeline else None)
+        deadline = (
+            timeline["end"]
+            if timeline and timeline.get("end")
+            else (timeline["start"] if timeline else None)
+        )
 
         # GitHub PR 연결 여부
         github_prs = result["properties"]["GitHub 풀 리퀘스트"]["relation"]

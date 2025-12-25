@@ -72,7 +72,9 @@ class TestAthenaIntegration:
             print(f"✗ Athena 클라이언트 생성 실패: {str(e)}")
             raise
 
-    @pytest.mark.skip(reason="실제 쿼리 실행은 비용이 발생할 수 있으므로 기본적으로 스킵")
+    @pytest.mark.skip(
+        reason="실제 쿼리 실행은 비용이 발생할 수 있으므로 기본적으로 스킵"
+    )
     def test_execute_simple_query(self):
         """간단한 쿼리 실행 integration 테스트 (스킵됨)"""
         try:
