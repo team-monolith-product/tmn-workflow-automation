@@ -11,6 +11,7 @@ from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 
 from app.general import register_general_handlers
 from app.contents import register_contents_handlers
+from app.data_bot import register_data_handlers
 
 # 환경 변수 로드
 load_dotenv()
@@ -18,11 +19,13 @@ load_dotenv()
 # 앱 초기화
 app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
 app_contents = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_CONTENTS"))
+app_data = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_DATA"))
 assistant = AsyncAssistant()
 
 # 이벤트 핸들러 등록
 register_general_handlers(app, assistant)
 register_contents_handlers(app_contents)
+register_data_handlers(app_data)
 
 
 async def main():
@@ -37,9 +40,14 @@ async def main():
         app_contents, os.environ["SLACK_APP_TOKEN_CONTENTS"]
     ).start_async()
 
+    data_coroutine = AsyncSocketModeHandler(
+        app_data, os.environ["SLACK_APP_TOKEN_DATA"]
+    ).start_async()
+
     await asyncio.gather(
         bot_coroutine,
         contents_coroutine,
+        data_coroutine,
     )
 
 

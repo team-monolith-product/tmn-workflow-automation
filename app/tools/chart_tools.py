@@ -17,6 +17,46 @@ import pandas as pd
 from api import athena
 
 
+# 한글 폰트 설정
+def setup_korean_font():
+    """matplotlib에서 한글을 표시하기 위한 폰트 설정"""
+    import matplotlib.font_manager as fm
+
+    # 시스템에서 사용 가능한 한글 폰트 찾기
+    font_list = fm.findSystemFonts(fontpaths=None, fontext="ttf")
+
+    # 한글 폰트 우선순위 리스트
+    korean_fonts = [
+        "NanumGothic",
+        "NanumBarunGothic",
+        "NanumMyeongjo",
+        "Malgun Gothic",
+        "Apple SD Gothic Neo",
+        "AppleGothic",
+        "DejaVu Sans",
+    ]
+
+    # 사용 가능한 한글 폰트 찾기
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    selected_font = None
+
+    for font in korean_fonts:
+        if font in available_fonts:
+            selected_font = font
+            break
+
+    # 폰트 설정
+    if selected_font:
+        plt.rcParams["font.family"] = selected_font
+
+    # 마이너스 기호 깨짐 방지
+    plt.rcParams["axes.unicode_minus"] = False
+
+
+# 폰트 설정 초기화
+setup_korean_font()
+
+
 def get_execute_python_with_chart_tool(
     say: Callable[[dict[str, Any], str], Any] | None = None,
     thread_ts: str | None = None,

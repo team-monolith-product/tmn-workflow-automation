@@ -1,5 +1,5 @@
 """
-데이터 분석 Agent
+데이터 봇 전용 로직
 """
 
 from datetime import datetime
@@ -8,14 +8,82 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from app.common import KST
-from app.tools.athena_tools import get_execute_athena_query_tool
-from app.tools.chart_tools import get_execute_python_with_chart_tool
-from app.tools.redash_tools import (
+from .common import KST, slack_users_list
+from .tools.athena_tools import get_execute_athena_query_tool
+from .tools.chart_tools import get_execute_python_with_chart_tool
+from .tools.redash_tools import (
     list_redash_dashboards,
     read_redash_dashboard,
     read_redash_query,
 )
+
+
+def register_data_handlers(app_data):
+    """
+    데이터 봇의 이벤트 핸들러를 등록합니다.
+    """
+
+    @app_data.event("app_mention")
+    async def app_mention_data(body, say):
+        """
+        슬랙에서 데이터 봇을 멘션하여 데이터 분석을 시작하면 호출되는 이벤트
+        """
+        event = body.get("event")
+
+        if event is None:
+            return
+
+        thread_ts = event.get("thread_ts") or body["event"]["ts"]
+        channel = event["channel"]
+        user = event.get("user")
+        text = event["text"]
+
+        # 스레드의 모든 메시지를 가져옴
+        result = await app_data.client.conversations_replies(
+            channel=channel, ts=thread_ts
+        )
+
+        # 메시지에서 사용자 ID를 수집
+        user_ids = set(
+            message["user"] for message in result["messages"] if "user" in message
+        )
+        if user:
+            user_ids.add(user)
+
+        # 사용자 정보 일괄 조회
+        user_info_list = await slack_users_list(app_data.client)
+        user_dict = {
+            user["id"]: user
+            for user in user_info_list["members"]
+            if user["id"] in user_ids
+        }
+
+        threads = []
+        for message in result["messages"][:-1]:
+            slack_user_id = message.get("user", None)
+            if slack_user_id:
+                user_profile = user_dict.get(slack_user_id, {})
+                user_real_name = user_profile.get("real_name", "Unknown")
+            else:
+                user_real_name = "Bot"
+            threads.append(f"{user_real_name}:\n{message['text']}")
+
+        # 최종 질의한 사용자 정보
+        slack_user_id = user
+        user_profile = user_dict.get(slack_user_id, {})
+        user_real_name = user_profile.get("real_name", "Unknown")
+
+        threads_joined = "\n\n".join(threads)
+
+        await answer_data_analysis(
+            thread_ts,
+            channel,
+            user_real_name,
+            threads_joined,
+            text,
+            say,
+            app_data.client,
+        )
 
 
 async def answer_data_analysis(
@@ -37,6 +105,7 @@ async def answer_data_analysis(
         threads_joined: 스레드 대화 내용
         text: 질문 내용
         say: 메시지 전송 함수
+        slack_client: Slack 클라이언트
 
     Returns:
         None

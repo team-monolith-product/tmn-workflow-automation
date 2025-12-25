@@ -7,6 +7,15 @@ ENV PYTHONUNBUFFERED=1
 # 작업 디렉토리 설정
 WORKDIR /app
 
+# 한글 폰트 설치 (matplotlib 차트 한글 표시용)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-nanum \
+    fonts-nanum-coding \
+    && rm -rf /var/lib/apt/lists/*
+
+# matplotlib 폰트 캐시 삭제 (새 폰트 인식을 위해)
+RUN rm -rf /root/.cache/matplotlib
+
 # 필요한 패키지 설치
 COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
