@@ -52,7 +52,6 @@ api/
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=ap-northeast-2
-ATHENA_DATABASE=your_database
 ATHENA_OUTPUT_LOCATION=s3://your-bucket/athena-results/
 
 # Redash
@@ -80,7 +79,8 @@ async def route_question(question: str) -> Literal["data_analysis", "general"]:
 
 **Tools**:
 1. `list_redash_dashboards(query: str | None)` → 동적 검색
-2. `read_redash_dashboard(slug: str)` → 쿼리 정의, 테이블 스키마, JOIN 패턴
+2. `read_redash_dashboard(slug: str)` → 쿼리 정의, 데이터베이스, 테이블 스키마, JOIN 패턴
+3. `execute_athena_query(query: str, database: str)` → SQL 실행
 
 ### 핸들러 통합
 

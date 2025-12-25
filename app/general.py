@@ -24,6 +24,8 @@ from .common import (
     get_create_notion_follow_up_task_tool,
     get_notion_page_tool,
 )
+from .router import route_question
+from .data_analysis import answer_data_analysis
 
 # 상수들
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
@@ -67,21 +69,68 @@ def register_general_handlers(app, assistant):
             f"/archives/{channel}/p{thread_ts_for_link}"
         )
 
-        notion_tools = [
-            get_create_notion_task_tool(
-                user,
-                slack_thread_url,
-                DATA_SOURCE_ID,
-                app.client,
-                PROJECT_DATA_SOURCE_ID,
-            ),
-            get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATA_SOURCE_ID),
-            get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
-            get_notion_page_tool(),
-        ]
-        tools = [search_tool, get_web_page_from_url] + notion_tools
-        await answer(thread_ts, channel, user, text, say, app.client, tools)
+        # 질문을 라우팅
+        agent_type = await route_question(text)
+
+        if agent_type == "data_analysis":
+            # 데이터 분석 Agent 사용
+            # 스레드의 모든 메시지를 가져옴
+            result = await app.client.conversations_replies(
+                channel=channel, ts=thread_ts
+            )
+
+            # 메시지에서 사용자 ID를 수집
+            user_ids = set(
+                message["user"] for message in result["messages"] if "user" in message
+            )
+            if user:
+                user_ids.add(user)
+
+            # 사용자 정보 일괄 조회
+            user_info_list = await slack_users_list(app.client)
+            user_dict = {
+                user["id"]: user
+                for user in user_info_list["members"]
+                if user["id"] in user_ids
+            }
+
+            threads = []
+            for message in result["messages"][:-1]:
+                slack_user_id = message.get("user", None)
+                if slack_user_id:
+                    user_profile = user_dict.get(slack_user_id, {})
+                    user_real_name = user_profile.get("real_name", "Unknown")
+                else:
+                    user_real_name = "Bot"
+                threads.append(f"{user_real_name}:\n{message['text']}")
+
+            # 최종 질의한 사용자 정보
+            slack_user_id = user
+            user_profile = user_dict.get(slack_user_id, {})
+            user_real_name = user_profile.get("real_name", "Unknown")
+
+            threads_joined = "\n\n".join(threads)
+
+            await answer_data_analysis(
+                thread_ts, channel, user_real_name, threads_joined, text, say
+            )
+        else:
+            # 기존 General Agent 사용
+            notion_tools = [
+                get_create_notion_task_tool(
+                    user,
+                    slack_thread_url,
+                    DATA_SOURCE_ID,
+                    app.client,
+                    PROJECT_DATA_SOURCE_ID,
+                ),
+                get_update_notion_task_deadline_tool(),
+                get_update_notion_task_status_tool(DATA_SOURCE_ID),
+                get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
+                get_notion_page_tool(),
+            ]
+            tools = [search_tool, get_web_page_from_url] + notion_tools
+            await answer(thread_ts, channel, user, text, say, app.client, tools)
 
     @app.event("message")
     async def message(body, say):
