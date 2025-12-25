@@ -2,14 +2,14 @@
 AWS Athena 관련 LangChain Tools
 """
 
-from typing import Annotated
+from typing import Annotated, Callable, Any
 from langchain_core.tools import tool
 from api import athena
 
 
-def format_query_results(results: dict) -> str:
+def format_query_results_as_markdown(results: dict) -> str:
     """
-    Athena 쿼리 결과를 읽기 쉬운 형태로 포맷팅합니다.
+    Athena 쿼리 결과를 마크다운 테이블 형식으로 포맷팅합니다.
 
     Args:
         results: Athena 쿼리 결과 (원본 응답)
@@ -50,30 +50,134 @@ def format_query_results(results: dict) -> str:
     return formatted
 
 
-@tool
-def execute_athena_query(
-    query: Annotated[str, "실행할 SQL 쿼리"],
-    database: Annotated[str, "사용할 Athena 데이터베이스 이름 (필수)"],
-) -> str:
+def format_query_results_as_slack_table(results: dict) -> dict:
     """
-    AWS Athena에서 SQL 쿼리를 실행하고 결과를 반환합니다.
+    Athena 쿼리 결과를 Slack Block Kit table 형식으로 포맷팅합니다.
 
-    이 도구는 데이터베이스에서 데이터를 조회할 때 사용합니다.
-    쿼리는 표준 SQL 문법을 따릅니다.
-
-    **중요**: database 파라미터는 필수입니다.
-    Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
-    동일한 데이터베이스를 반드시 지정해야 합니다.
+    Slack table block 공식 문서:
+    https://docs.slack.dev/reference/block-kit/blocks/table-block/
 
     Args:
-        query: 실행할 SQL 쿼리
-        database: 사용할 Athena 데이터베이스 이름 (필수)
+        results: Athena 쿼리 결과 (원본 응답)
 
     Returns:
-        str: 쿼리 실행 결과 (마크다운 테이블 형식)
+        dict: Slack table block
     """
-    try:
-        results = athena.execute_and_wait(query, database=database)
-        return format_query_results(results)
-    except Exception as e:
-        return f"쿼리 실행 중 오류 발생: {str(e)}"
+    if "ResultSet" not in results:
+        return {
+            "type": "section",
+            "text": {"type": "plain_text", "text": "결과가 없습니다."},
+        }
+
+    result_set = results["ResultSet"]
+    rows = result_set.get("Rows", [])
+
+    if not rows:
+        return {
+            "type": "section",
+            "text": {"type": "plain_text", "text": "결과가 없습니다."},
+        }
+
+    # Slack table block 형식으로 변환
+    # 첫 번째 행은 헤더, 나머지는 데이터 행
+    # 각 셀은 {"type": "raw_text", "text": "내용"} 형식
+    table_rows = []
+    for row in rows:
+        cells = [
+            {"type": "raw_text", "text": col.get("VarCharValue", "")}
+            for col in row["Data"]
+        ]
+        table_rows.append(cells)
+
+    table_block = {
+        "type": "table",
+        "rows": table_rows,
+    }
+
+    return table_block
+
+
+def get_execute_athena_query_tool(
+    say: Callable[[dict[str, Any], str], Any] | None = None,
+    thread_ts: str | None = None,
+):
+    """
+    Athena 쿼리 실행 도구를 반환합니다.
+
+    Args:
+        say: Slack 메시지 전송 함수
+        thread_ts: Slack 스레드 타임스탬프
+
+    Returns:
+        execute_athena_query tool
+    """
+
+    @tool
+    async def execute_athena_query(
+        query: Annotated[str, "실행할 SQL 쿼리"],
+        database: Annotated[str, "사용할 Athena 데이터베이스 이름 (필수)"],
+        show_result_to_user: Annotated[
+            bool, "결과를 사용자에게 Slack 메시지로 직접 전송할지 여부"
+        ] = False,
+    ) -> str:
+        """
+        AWS Athena에서 SQL 쿼리를 실행하고 결과를 반환합니다.
+
+        이 도구는 데이터베이스에서 데이터를 조회할 때 사용합니다.
+        쿼리는 표준 SQL 문법을 따릅니다.
+
+        **중요**: database 파라미터는 필수입니다.
+        Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
+        동일한 데이터베이스를 반드시 지정해야 합니다.
+
+        **show_result_to_user**: 사용자에게 쿼리 결과를 보여주고 싶으면 반드시 이 값을 true로 설정해야 합니다.
+        이 값이 true일 때만 사용자가 결과를 볼 수 있습니다.
+        agent가 직접 표를 작성하여 답변하는 것은 허용되지 않습니다.
+
+        Args:
+            query: 실행할 SQL 쿼리
+            database: 사용할 Athena 데이터베이스 이름 (필수)
+            show_result_to_user: 결과를 사용자에게 Slack으로 전송할지 여부 (기본값: False)
+
+        Returns:
+            str: show_result_to_user가 False이면 쿼리 실행 결과 (마크다운 테이블 형식),
+                 True이면 "결과를 슬랙 메시지로 전송했습니다."
+        """
+        try:
+            results = athena.execute_and_wait(query, database=database)
+
+            if show_result_to_user and say and thread_ts:
+                # 1. 먼저 사용된 SQL 쿼리를 전송
+                await say(
+                    {
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"*실행된 쿼리:*\n```\n{query}\n```",
+                                },
+                            }
+                        ]
+                    },
+                    thread_ts=thread_ts,
+                )
+
+                # 2. 그 다음 쿼리 결과를 table block으로 전송
+                table_block = format_query_results_as_slack_table(results)
+                await say(
+                    {"blocks": [table_block]},
+                    thread_ts=thread_ts,
+                )
+                return "쿼리와 결과를 슬랙 메시지로 전송했습니다."
+
+            # Agent가 분석용으로 사용할 때는 마크다운 테이블 반환
+            return format_query_results_as_markdown(results)
+        except Exception as e:
+            return f"쿼리 실행 중 오류 발생: {str(e)}"
+
+    return execute_athena_query
+
+
+# 기본 tool (backward compatibility를 위해 유지)
+execute_athena_query = get_execute_athena_query_tool()

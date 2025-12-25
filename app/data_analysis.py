@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from app.common import KST
-from app.tools.athena_tools import execute_athena_query
+from app.tools.athena_tools import get_execute_athena_query_tool
 from app.tools.redash_tools import list_redash_dashboards, read_redash_dashboard
 
 
@@ -50,6 +50,11 @@ async def answer_data_analysis(
                 "- 데이터 분석 요청에 대해 먼저 Redash 대시보드를 검색하여 관련 쿼리를 찾습니다.\n"
                 "- Redash에서 찾은 쿼리를 참고하여 Athena에서 SQL 쿼리를 실행합니다.\n"
                 "\n"
+                "**중요**: 사용자에게 쿼리 결과를 보여주고 싶을 때:\n"
+                "- execute_athena_query 도구를 호출할 때 반드시 show_result_to_user=True를 설정해야 합니다.\n"
+                "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
+                "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
+                "\n"
                 "- 결과를 명확하고 간결하게 설명하고, 필요시 시각화를 권장합니다.\n"
                 "- 쿼리 작성 시 표준 SQL 문법을 사용합니다.\n"
             )
@@ -74,6 +79,8 @@ async def answer_data_analysis(
     chat_model = ChatOpenAI(model="gpt-5.2", temperature=0)
 
     # 데이터 분석 전용 Tools
+    # execute_athena_query tool은 Slack 메시지 전송을 위해 say와 thread_ts를 주입
+    execute_athena_query = get_execute_athena_query_tool(say=say, thread_ts=thread_ts)
     tools = [list_redash_dashboards, read_redash_dashboard, execute_athena_query]
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
