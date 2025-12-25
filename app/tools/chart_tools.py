@@ -174,7 +174,6 @@ def get_execute_python_with_chart_tool(
                         file=img_buffer,
                         filename="chart.png",
                         title="차트 시각화 결과",
-                        initial_comment="📊 차트 시각화 결과입니다.",
                     )
 
                     # figure 닫기
