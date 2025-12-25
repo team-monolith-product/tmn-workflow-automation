@@ -10,6 +10,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app.common import KST
 from app.tools.athena_tools import get_execute_athena_query_tool
+from app.tools.chart_tools import get_execute_python_with_chart_tool
 from app.tools.redash_tools import list_redash_dashboards, read_redash_dashboard
 
 
@@ -20,6 +21,7 @@ async def answer_data_analysis(
     threads_joined: str,
     text: str,
     say,
+    slack_client,
 ):
     """
     데이터 분석 질문에 답변합니다.
@@ -55,8 +57,14 @@ async def answer_data_analysis(
                 "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
                 "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
                 "\n"
+                "**차트 시각화**:\n"
+                "- 데이터를 차트로 시각화하고 싶을 때는 execute_python_with_chart 도구를 사용하세요.\n"
+                "- 이 도구는 파이썬 코드를 실행하고 matplotlib 차트를 슬랙에 자동으로 업로드합니다.\n"
+                "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
+                "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
+                "\n"
                 "- 결과를 명확하고 간결하게 설명하고, 필요시 시각화를 권장합니다.\n"
-                "- 쿼리 작성 시 표준 SQL 문법을 사용합니다.\n"
+                "- 쿼리 작성 시 Athena(Presto) SQL 문법을 사용합니다.\n"
             )
         )
     ]
@@ -76,12 +84,31 @@ async def answer_data_analysis(
 
     # GPT-5.2 모델 사용 - OpenAI의 최신 플래그십 모델 (2025년 12월 출시)
     # 데이터 분석, 긴 컨텍스트 이해, 도구 호출에 최적화됨
-    chat_model = ChatOpenAI(model="gpt-5.2", temperature=0)
+    # reasoning 파라미터로 확장된 추론 능력 활성화
+    reasoning = {
+        "effort": "high",  # 데이터 분석을 위한 깊이 있는 추론
+        "summary": "auto",  # 자동으로 추론 요약 생성
+    }
+    chat_model = ChatOpenAI(
+        model="gpt-5.2",
+        temperature=0,
+        reasoning=reasoning,
+        output_version="responses/v1",
+    )
 
     # 데이터 분석 전용 Tools
     # execute_athena_query tool은 Slack 메시지 전송을 위해 say와 thread_ts를 주입
     execute_athena_query = get_execute_athena_query_tool(say=say, thread_ts=thread_ts)
-    tools = [list_redash_dashboards, read_redash_dashboard, execute_athena_query]
+    # execute_python_with_chart tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
+    execute_python_with_chart = get_execute_python_with_chart_tool(
+        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
+    )
+    tools = [
+        list_redash_dashboards,
+        read_redash_dashboard,
+        execute_athena_query,
+        execute_python_with_chart,
+    ]
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
@@ -117,7 +144,16 @@ async def answer_data_analysis(
         {"messages": messages}, {"callbacks": [SayHandler()]}
     )
 
-    agent_answer = response["messages"][-1].content
+    # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
+    # [{'type': 'reasoning', ...}, {'type': 'text', 'text': '실제 응답', ...}]
+    content = response["messages"][-1].content
+    if isinstance(content, list):
+        # reasoning 모드: type='text'인 항목에서 text 추출
+        text_items = [item for item in content if item.get("type") == "text"]
+        agent_answer = text_items[0]["text"] if text_items else ""
+    else:
+        # 일반 모드: 문자열 그대로 사용
+        agent_answer = content
 
     # Slack 텍스트 블록은 최대 3000자까지만 지원
     # 긴 응답은 여러 메시지로 분할하여 전송

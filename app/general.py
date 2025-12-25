@@ -112,7 +112,13 @@ def register_general_handlers(app, assistant):
             threads_joined = "\n\n".join(threads)
 
             await answer_data_analysis(
-                thread_ts, channel, user_real_name, threads_joined, text, say
+                thread_ts,
+                channel,
+                user_real_name,
+                threads_joined,
+                text,
+                say,
+                app.client,
             )
         else:
             # 기존 General Agent 사용

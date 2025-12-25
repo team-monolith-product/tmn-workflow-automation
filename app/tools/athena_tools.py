@@ -134,6 +134,15 @@ def get_execute_athena_query_tool(
         이 값이 true일 때만 사용자가 결과를 볼 수 있습니다.
         agent가 직접 표를 작성하여 답변하는 것은 허용되지 않습니다.
 
+        **SHOW TABLES 구문 주의사항**:
+        Athena의 SHOW TABLES는 SQL 표준 LIKE가 아닌 정규표현식을 사용합니다.
+        - ❌ 잘못된 예: SHOW TABLES IN database_name LIKE '%pattern%'
+        - ✅ 올바른 예: SHOW TABLES IN database_name '*pattern*'
+        - LIKE 키워드를 사용하지 마세요
+        - % 대신 * 또는 .* 을 사용하세요
+        - 예: SHOW TABLES IN jce_prd '*activ*' (activ를 포함하는 모든 테이블)
+        - 예: SHOW TABLES IN jce_prd 'class_*' (class_로 시작하는 모든 테이블)
+
         Args:
             query: 실행할 SQL 쿼리
             database: 사용할 Athena 데이터베이스 이름 (필수)
@@ -155,7 +164,7 @@ def get_execute_athena_query_tool(
                                 "type": "section",
                                 "text": {
                                     "type": "mrkdwn",
-                                    "text": f"*실행된 쿼리:*\n```\n{query}\n```",
+                                    "text": f"```\n{query}\n```",
                                 },
                             }
                         ]
