@@ -178,8 +178,10 @@ async def answer_data_analysis(
     )
 
     # 데이터 분석 전용 Tools
-    # execute_athena_query tool은 Slack 메시지 전송을 위해 say와 thread_ts를 주입
-    execute_athena_query = get_execute_athena_query_tool(say=say, thread_ts=thread_ts)
+    # execute_athena_query tool은 Slack 메시지 전송을 위해 say, thread_ts, slack_client, channel을 주입
+    execute_athena_query = get_execute_athena_query_tool(
+        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
+    )
     # execute_python_with_chart tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
     execute_python_with_chart = get_execute_python_with_chart_tool(
         say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel

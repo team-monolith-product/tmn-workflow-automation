@@ -100,6 +100,8 @@ def format_query_results_as_slack_table(results: dict) -> dict:
 def get_execute_athena_query_tool(
     say: Callable[[dict[str, Any], str], Any] | None = None,
     thread_ts: str | None = None,
+    slack_client: Any | None = None,
+    channel: str | None = None,
 ):
     """
     Athena 쿼리 실행 도구를 반환합니다.
@@ -107,6 +109,8 @@ def get_execute_athena_query_tool(
     Args:
         say: Slack 메시지 전송 함수
         thread_ts: Slack 스레드 타임스탬프
+        slack_client: Slack 클라이언트 (파일 업로드용)
+        channel: Slack 채널 ID
 
     Returns:
         execute_athena_query tool
@@ -152,25 +156,39 @@ def get_execute_athena_query_tool(
             str: show_result_to_user가 False이면 쿼리 실행 결과 (마크다운 테이블 형식),
                  True이면 "결과를 슬랙 메시지로 전송했습니다."
         """
+        MAX_QUERY_LENGTH = 2900  # Slack section block text 길이 제한 (3000자보다 여유있게)
+
         try:
             results = athena.execute_and_wait(query, database=database)
 
             if show_result_to_user and say and thread_ts:
                 # 1. 먼저 사용된 SQL 쿼리를 전송
-                await say(
-                    {
-                        "blocks": [
-                            {
-                                "type": "section",
-                                "text": {
-                                    "type": "mrkdwn",
-                                    "text": f"```\n{query}\n```",
-                                },
-                            }
-                        ]
-                    },
-                    thread_ts=thread_ts,
-                )
+                # 쿼리가 너무 길면 코드 스니펫으로 업로드, 짧으면 코드 블록으로 표시
+                if len(query) > MAX_QUERY_LENGTH and slack_client and channel:
+                    # 코드 스니펫으로 업로드
+                    await slack_client.files_upload_v2(
+                        channel=channel,
+                        content=query,
+                        filename="query.sql",
+                        title="실행된 SQL 쿼리",
+                        thread_ts=thread_ts,
+                    )
+                else:
+                    # 코드 블록으로 전송
+                    await say(
+                        {
+                            "blocks": [
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"```\n{query}\n```",
+                                    },
+                                }
+                            ]
+                        },
+                        thread_ts=thread_ts,
+                    )
 
                 # 2. 그 다음 쿼리 결과를 table block으로 전송
                 table_block = format_query_results_as_slack_table(results)

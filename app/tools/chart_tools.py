@@ -22,9 +22,6 @@ def setup_korean_font():
     """matplotlib에서 한글을 표시하기 위한 폰트 설정"""
     import matplotlib.font_manager as fm
 
-    # 시스템에서 사용 가능한 한글 폰트 찾기
-    font_list = fm.findSystemFonts(fontpaths=None, fontext="ttf")
-
     # 한글 폰트 우선순위 리스트
     korean_fonts = [
         "NanumGothic",

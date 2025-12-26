@@ -15,7 +15,7 @@ def list_redash_dashboards() -> str:
     이 도구는 모든 대시보드를 조회할 때 사용합니다.
 
     Returns:
-        str: 대시보드 목록 (이름, 슬러그, 태그 포함)
+        str: 대시보드 목록 (ID와 이름)
     """
     try:
         response = redash.list_dashboards()
@@ -26,8 +26,9 @@ def list_redash_dashboards() -> str:
 
         result = []
         for dashboard in dashboards:
+            dashboard_id = dashboard.get("id")
             name = dashboard.get("name", "Untitled")
-            result.append(f"- {name}")
+            result.append(f"- ID {dashboard_id}: {name}")
 
         return "\n".join(result)
     except Exception as e:
@@ -36,7 +37,7 @@ def list_redash_dashboards() -> str:
 
 @tool
 def read_redash_dashboard(
-    slug: Annotated[str, "대시보드 슬러그 또는 ID"],
+    dashboard_id: Annotated[int, "대시보드 ID"],
 ) -> str:
     """
     Redash 대시보드의 쿼리 목록을 조회합니다.
@@ -45,31 +46,13 @@ def read_redash_dashboard(
     쿼리의 상세 SQL을 보려면 read_redash_query 도구를 사용하세요.
 
     Args:
-        slug: 대시보드 슬러그 또는 ID (슬러그인 경우 자동으로 ID로 변환됨)
+        dashboard_id: 대시보드 ID (list_redash_dashboards에서 조회 가능)
 
     Returns:
         str: 대시보드의 쿼리 목록 (쿼리 ID와 이름)
     """
     try:
-        # slug가 숫자가 아닌 경우, 대시보드 목록에서 ID를 찾음
-        dashboard_id = slug
-        if not slug.isdigit():
-            dashboards_response = redash.list_dashboards()
-            dashboards = dashboards_response.get("results", [])
-
-            # slug로 대시보드 찾기
-            matching_dashboard = None
-            for dashboard in dashboards:
-                if dashboard.get("slug") == slug or dashboard.get("name") == slug:
-                    matching_dashboard = dashboard
-                    break
-
-            if not matching_dashboard:
-                return f"'{slug}' 슬러그 또는 이름을 가진 대시보드를 찾을 수 없습니다."
-
-            dashboard_id = str(matching_dashboard.get("id"))
-
-        dashboard_data = redash.get_dashboard(dashboard_id)
+        dashboard_data = redash.get_dashboard(str(dashboard_id))
 
         name = dashboard_data.get("name", "Untitled")
         widgets = dashboard_data.get("widgets", [])
