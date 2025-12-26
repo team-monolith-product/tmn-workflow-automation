@@ -249,6 +249,15 @@ def get_create_notion_task_tool(
                 "_작업 배경, 요구 사항 등을 정리하여 작성한다._\n"
                 "# 의견\n"
                 "_담당 엔지니어에게 전달하고 싶은 추가적인 조언. 주로 작업을 해결하기 위한 기술적 방향을 제시._\n"
+                "\n"
+                # 서로 다른 타입의 리스트 중첩 금지는 md2notion 의 버그
+                "**마크다운 작성 제약 사항 (반드시 준수):**\n"
+                "- 서로 다른 타입의 리스트 중첩 절대 금지\n"
+                "- 잘못된 예 1: '1) 번호 항목\\n   - 불릿 하위 항목' (번호+불릿 혼합)\n"
+                "- 잘못된 예 2: '- 불릿 항목\\n  1. 번호 하위 항목' (불릿+번호 혼합)\n"
+                "- 올바른 예 1: '- 불릿\\n  - 불릿 하위' (같은 타입 중첩 OK)\n"
+                "- 올바른 예 2: '1. 번호\\n   1) 번호 하위' (같은 타입 중첩 OK)\n"
+                "- 올바른 예 3: 중첩 대신 별도 섹션으로 분리\n"
             ),
         )
 
@@ -585,14 +594,12 @@ async def answer(
 
     # 툴 호출 상태를 슬랙에 표시하는 핸들러
     tool_status_handler = ToolStatusHandler(
-        say=say,
-        thread_ts=thread_ts,
-        slack_client=client,
-        channel=channel
+        say=say, thread_ts=thread_ts, slack_client=client, channel=channel
     )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [tool_status_handler], "recursion_limit": 50}
+        {"messages": messages},
+        {"callbacks": [tool_status_handler], "recursion_limit": 50},
     )
 
     agent_answer = response["messages"][-1].content
