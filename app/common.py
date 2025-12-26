@@ -9,7 +9,6 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from cachetools import TTLCache
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -21,6 +20,8 @@ from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
+
+from .tool_status_handler import ToolStatusHandler
 
 # 환경 변수 로드
 load_dotenv()
@@ -582,36 +583,16 @@ async def answer(
     chat_model = ChatOpenAI(model=model)
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-    class SayHandler(BaseCallbackHandler):
-        """
-        Agent Handler That Slack-Says the Tool Call
-        """
-
-        async def on_tool_start(
-            self,
-            serialized,
-            input_str,
-            **kwargs,
-        ):
-            await say(
-                {
-                    "blocks": [
-                        {
-                            "type": "context",
-                            "elements": [
-                                {
-                                    "type": "plain_text",
-                                    "text": f"{serialized['name']}({input_str}) 실행 중...",
-                                }
-                            ],
-                        }
-                    ]
-                },
-                thread_ts=thread_ts,
-            )
+    # 툴 호출 상태를 슬랙에 표시하는 핸들러
+    tool_status_handler = ToolStatusHandler(
+        say=say,
+        thread_ts=thread_ts,
+        slack_client=client,
+        channel=channel
+    )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [SayHandler()], "recursion_limit": 50}
+        {"messages": messages}, {"callbacks": [tool_status_handler], "recursion_limit": 50}
     )
 
     agent_answer = response["messages"][-1].content

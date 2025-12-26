@@ -3,12 +3,12 @@
 """
 
 from datetime import datetime
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from .common import KST, slack_users_list
+from .tool_status_handler import ToolStatusHandler
 from .tools.athena_tools import get_execute_athena_query_tool
 from .tools.chart_tools import get_execute_python_with_chart_tool
 from .tools.redash_tools import (
@@ -196,36 +196,16 @@ async def answer_data_analysis(
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-    class SayHandler(BaseCallbackHandler):
-        """
-        Agent Handler That Slack-Says the Tool Call
-        """
-
-        async def on_tool_start(
-            self,
-            serialized,
-            input_str,
-            **kwargs,
-        ):
-            await say(
-                {
-                    "blocks": [
-                        {
-                            "type": "context",
-                            "elements": [
-                                {
-                                    "type": "plain_text",
-                                    "text": f"{serialized['name']}({input_str}) 실행 중...",
-                                }
-                            ],
-                        }
-                    ]
-                },
-                thread_ts=thread_ts,
-            )
+    # 툴 호출 상태를 슬랙에 표시하는 핸들러
+    tool_status_handler = ToolStatusHandler(
+        say=say,
+        thread_ts=thread_ts,
+        slack_client=slack_client,
+        channel=channel
+    )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [SayHandler()], "recursion_limit": 50}
+        {"messages": messages}, {"callbacks": [tool_status_handler], "recursion_limit": 50}
     )
 
     # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
