@@ -154,7 +154,7 @@ def get_execute_athena_query_tool(
 
         Returns:
             str: show_result_to_user가 False이면 쿼리 실행 결과 (마크다운 테이블 형식),
-                 True이면 "결과를 슬랙 메시지로 전송했습니다."
+                 True이면 "쿼리 결과 총 {행수}행을 슬랙 메시지로 전송했습니다."
         """
         MAX_QUERY_LENGTH = 2900  # Slack section block text 길이 제한 (3000자보다 여유있게)
 
@@ -196,7 +196,13 @@ def get_execute_athena_query_tool(
                     {"blocks": [table_block]},
                     thread_ts=thread_ts,
                 )
-                return "쿼리와 결과를 슬랙 메시지로 전송했습니다."
+
+                # 행 수 계산 (헤더 제외)
+                result_set = results.get("ResultSet", {})
+                rows = result_set.get("Rows", [])
+                row_count = len(rows) - 1 if len(rows) > 0 else 0
+
+                return f"쿼리 결과 총 {row_count}행을 슬랙 메시지로 전송했습니다."
 
             # Agent가 분석용으로 사용할 때는 마크다운 테이블 반환
             return format_query_results_as_markdown(results)
