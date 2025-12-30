@@ -140,16 +140,11 @@ def summarize_deployment(
         ],
         # '배포 예정 날짜' == NULL AND '종료일' == 오늘
         [
-          {
-              "property": "배포 예정 날짜",
-              "date": {"is_empty": True},
-          },
-          {
-              "property": "종료일",
-              "formula": {
-                  "date": {"equals": today_str}
-              }
-          }
+            {
+                "property": "배포 예정 날짜",
+                "date": {"is_empty": True},
+            },
+            {"property": "종료일", "formula": {"date": {"equals": today_str}}},
         ],
     ]
 

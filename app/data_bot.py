@@ -198,14 +198,12 @@ async def answer_data_analysis(
 
     # 툴 호출 상태를 슬랙에 표시하는 핸들러
     tool_status_handler = ToolStatusHandler(
-        say=say,
-        thread_ts=thread_ts,
-        slack_client=slack_client,
-        channel=channel
+        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
 
     response = await agent_executor.ainvoke(
-        {"messages": messages}, {"callbacks": [tool_status_handler], "recursion_limit": 50}
+        {"messages": messages},
+        {"callbacks": [tool_status_handler], "recursion_limit": 50},
     )
 
     # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
