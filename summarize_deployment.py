@@ -143,8 +143,7 @@ def summarize_deployment(
             {
                 "property": "배포 예정 날짜",
                 "date": {"is_empty": True},
-            },
-            {"property": "종료일", "formula": {"date": {"equals": today_str}}},
+            }
         ],
     ]
 
