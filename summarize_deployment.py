@@ -153,9 +153,7 @@ def summarize_deployment(
     # 참조: https://developers.notion.com/reference/post-data_source-query-filter#compound-filter-conditions
     or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
 
-    db = notion.data_sources.retrieve(
-      data_source_id=NOTION_DATA_SOURCE_ID
-    )
+    db = notion.data_sources.retrieve(data_source_id=NOTION_DATA_SOURCE_ID)
 
     for name, prop in db["properties"].items():
         print(name, "=>", prop["type"])
