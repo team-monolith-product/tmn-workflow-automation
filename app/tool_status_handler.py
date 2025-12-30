@@ -32,7 +32,9 @@ class ToolStatusHandler(BaseCallbackHandler):
         self.channel = channel
 
         self.status_message_ts = None  # 상태 메시지의 타임스탬프
-        self.tool_history = []  # 실행된 툴 이력: {"run_id": str, "name": str, "params": str, "status": str}
+        self.tool_history = (
+            []
+        )  # 실행된 툴 이력: {"run_id": str, "name": str, "params": str, "status": str}
         self._lock = None  # 동시성 제어를 위한 lock (lazy init)
         self.langsmith_run_id = None  # LangSmith trace의 최상위 run_id
 
@@ -80,20 +82,32 @@ class ToolStatusHandler(BaseCallbackHandler):
 
         # 완료된 툴
         for tool_info in completed:
-            params = tool_info['params']
-            params_short = params[:MAX_PARAM_LENGTH] + "..." if len(params) > MAX_PARAM_LENGTH else params
+            params = tool_info["params"]
+            params_short = (
+                params[:MAX_PARAM_LENGTH] + "..."
+                if len(params) > MAX_PARAM_LENGTH
+                else params
+            )
             status_lines.append(f"✅ {tool_info['name']}({params_short})")
 
         # 에러 툴
         for tool_info in errors:
-            params = tool_info['params']
-            params_short = params[:MAX_PARAM_LENGTH] + "..." if len(params) > MAX_PARAM_LENGTH else params
+            params = tool_info["params"]
+            params_short = (
+                params[:MAX_PARAM_LENGTH] + "..."
+                if len(params) > MAX_PARAM_LENGTH
+                else params
+            )
             status_lines.append(f"❌ {tool_info['name']}({params_short})")
 
         # 실행 중인 툴
         for tool_info in running:
-            params = tool_info['params']
-            params_short = params[:MAX_PARAM_LENGTH] + "..." if len(params) > MAX_PARAM_LENGTH else params
+            params = tool_info["params"]
+            params_short = (
+                params[:MAX_PARAM_LENGTH] + "..."
+                if len(params) > MAX_PARAM_LENGTH
+                else params
+            )
             status_lines.append(f"⏳ {tool_info['name']}({params_short})")
 
         return "\n".join(status_lines)
@@ -128,12 +142,14 @@ class ToolStatusHandler(BaseCallbackHandler):
 
         # Lock 안에서는 tool_history만 수정
         async with self.lock:
-            self.tool_history.append({
-                "run_id": run_id,
-                "name": tool_name,
-                "params": input_str,
-                "status": "running"
-            })
+            self.tool_history.append(
+                {
+                    "run_id": run_id,
+                    "name": tool_name,
+                    "params": input_str,
+                    "status": "running",
+                }
+            )
 
             status_text = self._format_status_text()
             is_first_message = self.status_message_ts is None
