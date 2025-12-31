@@ -156,7 +156,9 @@ def get_execute_athena_query_tool(
             str: show_result_to_user가 False이면 쿼리 실행 결과 (마크다운 테이블 형식),
                  True이면 "쿼리 결과 총 {행수}행을 슬랙 메시지로 전송했습니다."
         """
-        MAX_QUERY_LENGTH = 2900  # Slack section block text 길이 제한 (3000자보다 여유있게)
+        MAX_QUERY_LENGTH = (
+            2900  # Slack section block text 길이 제한 (3000자보다 여유있게)
+        )
 
         try:
             results = athena.execute_and_wait(query, database=database)
