@@ -8,9 +8,6 @@ jobs:
 
   build:
     uses: team-monolith-product/tmn-gh-actions/.github/workflows/build_v2.yml@main
-    permissions:
-      id-token: read
-      contents: read
     with:
       env: prd
       target: main
