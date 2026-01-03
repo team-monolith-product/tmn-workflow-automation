@@ -2,7 +2,7 @@ name: Build Workflow Automation Slack
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ chore/TASK-5062 ]
 
 jobs:
 
