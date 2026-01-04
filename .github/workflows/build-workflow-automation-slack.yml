@@ -7,11 +7,16 @@ on:
 jobs:
 
   build:
-    uses: team-monolith-product/tmn-gh-actions/.github/workflows/build.yml@main
+    uses: team-monolith-product/tmn-gh-actions/.github/workflows/build_v2.yml@main
     with:
       env: prd
       target: main
-      awsImageName: jce-ecr-workflow-automation-slack-all-prd
-      awsValueFilePath: workflow-automation-slack/aws-apne2-prd-service.yaml
+      updateTargets: |
+        {
+          "aws": {
+            "imageName": "jce-ecr-workflow-automation-slack-all-prd",
+            "valueFilePath": ["workflow-automation-slack/aws-apne2-prd-service.yaml"]
+          }
+        }
     secrets:
       MACHINE_TOKEN: ${{ secrets.MACHINE_TOKEN }}
