@@ -44,32 +44,44 @@ def find_quarter_projects(
     Returns:
         프로젝트 페이지 목록
     """
-    results = notion.data_sources.query(data_source_id=data_source_id)
-
     projects = []
-    for page in results.get("results", []):
-        title_prop = page["properties"].get("프로젝트 이름", {}).get("title", [])
-        if not title_prop:
-            continue
+    has_more = True
+    start_cursor = None
 
-        project_name = title_prop[0]["text"]["content"]
+    # 페이지네이션 처리
+    while has_more:
+        query_params = {"data_source_id": data_source_id}
+        if start_cursor:
+            query_params["start_cursor"] = start_cursor
 
-        # 분기 매칭
-        if quarter not in project_name:
-            continue
+        results = notion.data_sources.query(**query_params)
 
-        # 카테고리 필터링
-        if categories:
-            matched = False
-            for category in categories:
-                if project_name.startswith(category):
-                    matched = True
-                    break
-            if not matched:
+        for page in results.get("results", []):
+            title_prop = page["properties"].get("프로젝트 이름", {}).get("title", [])
+            if not title_prop:
                 continue
 
-        projects.append(page)
-        print(f"✓ 찾은 프로젝트: {project_name} (ID: {page['id']})")
+            project_name = title_prop[0]["text"]["content"]
+
+            # 분기 매칭
+            if quarter not in project_name:
+                continue
+
+            # 카테고리 필터링
+            if categories:
+                matched = False
+                for category in categories:
+                    if project_name.startswith(category):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+
+            projects.append(page)
+            print(f"✓ 찾은 프로젝트: {project_name} (ID: {page['id']})")
+
+        has_more = results.get("has_more", False)
+        start_cursor = results.get("next_cursor")
 
     return projects
 
@@ -80,24 +92,36 @@ def get_tasks_for_projects(
     project_ids: list[str],
 ) -> list[dict]:
     """
-    주어진 프로젝트들에 연결된 모든 작업 조회
+    주어진 프로젝트들에 연결된 모든 작업 조회 (페이지네이션 지원)
     """
     all_tasks = []
     seen_task_ids = set()
 
     for project_id in project_ids:
-        results = notion.data_sources.query(
-            data_source_id=data_source_id,
-            filter={
-                "property": "프로젝트",
-                "relation": {"contains": project_id},
-            },
-        )
+        has_more = True
+        start_cursor = None
 
-        for task in results.get("results", []):
-            if task["id"] not in seen_task_ids:
-                all_tasks.append(task)
-                seen_task_ids.add(task["id"])
+        # 페이지네이션 처리
+        while has_more:
+            query_params = {
+                "data_source_id": data_source_id,
+                "filter": {
+                    "property": "프로젝트",
+                    "relation": {"contains": project_id},
+                },
+            }
+            if start_cursor:
+                query_params["start_cursor"] = start_cursor
+
+            results = notion.data_sources.query(**query_params)
+
+            for task in results.get("results", []):
+                if task["id"] not in seen_task_ids:
+                    all_tasks.append(task)
+                    seen_task_ids.add(task["id"])
+
+            has_more = results.get("has_more", False)
+            start_cursor = results.get("next_cursor")
 
     return all_tasks
 
