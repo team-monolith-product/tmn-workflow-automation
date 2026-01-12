@@ -33,6 +33,13 @@ def main():
         MAIN_CHANNEL_ID,
         email_to_user_id,
     )
+    alert_pending_but_started_tasks(
+        notion,
+        slack_client,
+        MAIN_DATA_SOURCE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+    )
     alert_no_due_tasks(
         notion,
         slack_client,
@@ -60,6 +67,13 @@ def main():
     # 콘텐츠 DB 처리
     send_intro_message(slack_client, CONTENTS_CHANNEL_ID)
     alert_overdue_tasks(
+        notion,
+        slack_client,
+        CONTENTS_DATA_SOURCE_ID,
+        CONTENTS_CHANNEL_ID,
+        email_to_user_id,
+    )
+    alert_pending_but_started_tasks(
         notion,
         slack_client,
         CONTENTS_DATA_SOURCE_ID,
@@ -167,6 +181,65 @@ def alert_overdue_tasks(
             text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났습니다. <@{slack_user_id}> 확인 부탁드립니다."
         else:
             text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났으나 담당자를 확인할 수 없습니다."
+        slack_client.chat_postMessage(channel=channel_id, text=text)
+
+
+def alert_pending_but_started_tasks(
+    notion: NotionClient,
+    slack_client: WebClient,
+    data_source_id: str,
+    channel_id: str,
+    email_to_user_id: dict,
+):
+    """
+    시작일이 지났으나 아직 대기 상태인 작업을 슬랙으로 알림
+
+    Args:
+        notion (NotionClient): Notion
+        slack_client (WebClient): Slack
+        data_source_id (str): Notion data_source id
+        channel_id (str): Slack channel id
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+
+    Returns:
+        None
+    """
+    today = datetime.now().date()
+
+    # 대기 상태이면서 시작일이 today보다 과거인 페이지 검색
+    results = notion.data_sources.query(
+        **{
+            "data_source_id": data_source_id,
+            "filter": {
+                "and": [
+                    {"property": "상태", "status": {"equals": "대기"}},
+                    {"property": "시작일", "date": {"before": today.isoformat()}},
+                ]
+            },
+        }
+    )
+
+    for result in results.get("results", []):
+        try:
+            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+        except (KeyError, IndexError):
+            task_name = "제목 없음"
+        page_url = result["url"]
+        people = result["properties"]["담당자"]["people"]
+        if people:
+            person = people[0].get("person")
+            if person:
+                assignee_email = person["email"]
+                slack_user_id = email_to_user_id.get(assignee_email)
+            else:
+                slack_user_id = None
+        else:
+            slack_user_id = None
+
+        if slack_user_id:
+            text = f"작업 <{page_url}|{task_name}>이(가) 시작일이 지났으나 아직 대기 상태입니다. <@{slack_user_id}> 확인 부탁드립니다."
+        else:
+            text = f"작업 <{page_url}|{task_name}>이(가) 시작일이 지났으나 아직 대기 상태이며, 담당자를 확인할 수 없습니다."
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
