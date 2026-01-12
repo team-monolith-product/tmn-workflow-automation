@@ -26,6 +26,92 @@ from .tool_status_handler import ToolStatusHandler
 # 환경 변수 로드
 load_dotenv()
 
+# Notion API 블록 중첩 제한 (2단계까지만 허용)
+MAX_NESTING_DEPTH = 2
+
+
+def flatten_deep_children(block: dict, current_depth: int = 0) -> dict:
+    """
+    Notion API의 블록 중첩 제한(2단계)을 초과하는 children을 평탄화한다.
+    3단계 이상 중첩된 항목은 상위 항목의 텍스트에 들여쓰기로 병합된다.
+
+    Args:
+        block: Notion 블록 딕셔너리
+        current_depth: 현재 중첩 깊이 (0부터 시작)
+
+    Returns:
+        중첩이 평탄화된 블록
+    """
+    block = block.copy()
+    block_type = block.get("type")
+
+    if not block_type:
+        return block
+
+    block_content = block.get(block_type, {})
+    if not isinstance(block_content, dict):
+        return block
+
+    children = block_content.get("children", [])
+    if not children:
+        return block
+
+    block_content = block_content.copy()
+    block[block_type] = block_content
+
+    if current_depth >= MAX_NESTING_DEPTH:
+        # 최대 깊이에 도달: children을 텍스트로 병합
+        flattened_text = _collect_nested_text(children, indent_level=1)
+        if flattened_text:
+            rich_text = block_content.get("rich_text", [])
+            if rich_text:
+                rich_text = list(rich_text) + [
+                    {"type": "text", "text": {"content": flattened_text}}
+                ]
+            else:
+                rich_text = [{"type": "text", "text": {"content": flattened_text}}]
+            block_content["rich_text"] = rich_text
+        del block_content["children"]
+    else:
+        # 깊이 여유가 있으면 재귀적으로 처리
+        new_children = [
+            flatten_deep_children(child, current_depth + 1) for child in children
+        ]
+        block_content["children"] = new_children
+
+    return block
+
+
+def _collect_nested_text(blocks: list, indent_level: int = 0) -> str:
+    """
+    중첩된 블록들에서 텍스트를 추출하여 들여쓰기가 적용된 문자열로 반환한다.
+    """
+    result = []
+    indent = "  " * indent_level
+
+    for block in blocks:
+        block_type = block.get("type", "")
+        block_content = block.get(block_type, {})
+
+        if isinstance(block_content, dict):
+            rich_text = block_content.get("rich_text", [])
+            text = "".join(
+                rt.get("text", {}).get("content", "") or rt.get("plain_text", "")
+                for rt in rich_text
+            )
+            if text:
+                result.append(f"\n{indent}• {text}")
+
+            # 하위 children도 처리
+            nested_children = block_content.get("children", [])
+            if nested_children:
+                nested_text = _collect_nested_text(nested_children, indent_level + 1)
+                if nested_text:
+                    result.append(nested_text)
+
+    return "".join(result)
+
+
 # 시간대 설정
 KST = ZoneInfo("Asia/Seoul")
 
@@ -311,15 +397,17 @@ def get_create_notion_task_tool(
 
         if blocks:
             for block in parse_md(blocks):
-                notion.blocks.children.append(page_id, children=[block])
+                flattened_block = flatten_deep_children(block)
+                notion.blocks.children.append(page_id, children=[flattened_block])
 
             template = """# 작업 내용
-- 
+-
 # 검증
 
             """
             for block in parse_md(template):
-                notion.blocks.children.append(page_id, children=[block])
+                flattened_block = flatten_deep_children(block)
+                notion.blocks.children.append(page_id, children=[flattened_block])
 
         return response["url"]
 
