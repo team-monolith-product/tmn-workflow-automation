@@ -58,9 +58,9 @@ def register_general_handlers(app, assistant):
         user = event.get("user")
         text = event["text"]
 
-        # OOM 분석 요청 감지 ("분석" 키워드가 포함된 스레드 멘션)
+        # OOM 분석 요청 감지 (특정 채널의 스레드에서 "분석" 키워드 멘션)
         # 예: "@봇 분석해줘", "@봇 이 알림 분석해주세요"
-        if "분석" in text and event.get("thread_ts"):
+        if channel == "C07B6FT3R5L" and "분석" in text and event.get("thread_ts"):
             await analyze_oom.analyze_oom_alert(app.client, body, say)
             return
 
