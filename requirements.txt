@@ -9,6 +9,7 @@ requests
 notion2md
 langchain-community
 langchain-openai
+langchain-anthropic
 langgraph
 langchain-google-community
 tavily-python
