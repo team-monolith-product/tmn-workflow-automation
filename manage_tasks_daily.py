@@ -423,7 +423,7 @@ def alert_no_upcoming_tasks(
     group_handle: str,
 ):
     """
-    5일 후에 예정된 작업이 없는 작업자를 슬랙으로 알림
+    5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림
 
     Args:
         notion (NotionClient): Notion
@@ -436,6 +436,9 @@ def alert_no_upcoming_tasks(
     Returns:
         None
     """
+    # 예진님 Slack ID
+    YEJIN_SLACK_ID = "U075PUFNGHX"
+
     # 5일 후 날짜 계산
     target_date = (datetime.now() + timedelta(days=5)).date()
 
@@ -508,20 +511,21 @@ def alert_no_upcoming_tasks(
     # 5일 후에 예정된 작업이 없는 멤버 찾기
     unassigned_emails = set(team_emails) - assigned_emails
 
-    # 알림 보내기
-    for email in unassigned_emails:
-        slack_user_id = email_to_user_id.get(email)
-        if slack_user_id:
-            text = (
-                f"<@{slack_user_id}> 5일 후에 예정된 작업이 없습니다. "
-                "로드맵 점검 부탁드립니다."
-            )
-        else:
-            text = (
-                f"{email}님께서 5일 후에 예정된 작업이 없습니다. "
-                "로드맵 점검 부탁드립니다. "
-                "또한 이메일 매핑이 누락된 원인을 파악해주시길 바랍니다."
-            )
+    # 예진님에게 알림 보내기
+    if unassigned_emails:
+        member_mentions = []
+        for email in unassigned_emails:
+            slack_user_id = email_to_user_id.get(email)
+            if slack_user_id:
+                member_mentions.append(f"<@{slack_user_id}>")
+            else:
+                member_mentions.append(email)
+
+        members_text = ", ".join(member_mentions)
+        text = (
+            f"<@{YEJIN_SLACK_ID}> 5일 후에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
+            "로드맵 점검 부탁드립니다."
+        )
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
