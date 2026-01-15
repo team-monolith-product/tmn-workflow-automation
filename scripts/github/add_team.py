@@ -9,6 +9,7 @@ GitHub Organization의 모든 리포지토리에 특정 팀을 추가하는 스�
     --team: 추가할 팀의 slug (기본값: security)
     --permission: 팀에 부여할 권한 (pull, push, admin, maintain, triage 중 선택, 기본값: push)
 """
+
 import argparse
 import os
 import sys
