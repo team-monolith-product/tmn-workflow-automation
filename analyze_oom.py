@@ -34,23 +34,10 @@ def _strip_frontmatter(content: str) -> str:
 
 
 def _load_system_prompt() -> str:
-    """SKILL.md와 references 폴더의 모든 md 파일을 로드"""
-    parts = []
-
-    # SKILL.md 로드
+    """SKILL.md 파일에서 시스템 프롬프트 로드"""
     skill_md = SKILL_DIR / "SKILL.md"
-    if skill_md.exists():
-        content = _strip_frontmatter(skill_md.read_text(encoding="utf-8"))
-        parts.append(content)
-
-    # references 폴더의 모든 .md 파일 로드
-    references_dir = SKILL_DIR / "references"
-    if references_dir.exists():
-        for ref_file in sorted(references_dir.glob("*.md")):
-            content = ref_file.read_text(encoding="utf-8")
-            parts.append(f"\n\n## Reference: {ref_file.stem}\n\n{content}")
-
-    return "\n".join(parts)
+    content = skill_md.read_text(encoding="utf-8")
+    return _strip_frontmatter(content)
 
 
 async def analyze_oom_alert(slack_client, body, say):
