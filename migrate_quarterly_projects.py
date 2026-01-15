@@ -11,6 +11,7 @@ Usage:
     # 롤백
     python migrate_quarterly_projects.py --rollback backup_20260104_123456.json
 """
+
 import os
 import json
 import argparse
@@ -21,7 +22,9 @@ from notion_client import Client as NotionClient
 
 # 상수
 PROJECT_DATABASE_ID = "9df81e8ee45e4f49aceb402c084b3ac7"  # 프로젝트 데이터베이스 ID
-PROJECT_DATA_SOURCE_ID = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 데이터 소스 ID
+PROJECT_DATA_SOURCE_ID = (
+    "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 데이터 소스 ID
+)
 TASK_DATABASE_ID = "a9de18b3877c453a8e163c2ee1ff4137"  # 작업 데이터베이스 ID
 TASK_DATA_SOURCE_ID = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 데이터 소스 ID
 
@@ -147,7 +150,7 @@ def backup_task_relations(
     backup_data = {
         "timestamp": datetime.now().isoformat(),
         "project_ids": project_ids,
-        "tasks": []
+        "tasks": [],
     }
 
     for task in tasks:
@@ -164,7 +167,7 @@ def backup_task_relations(
             "id": task["id"],
             "title": task_title,
             "status": status,
-            "project_relations": project_ids_list
+            "project_relations": project_ids_list,
         }
 
         backup_data["tasks"].append(task_data)
@@ -205,9 +208,7 @@ def restore_task_relations(notion: NotionClient, backup_file: str):
         try:
             notion.pages.update(
                 page_id=task_id,
-                properties={
-                    "프로젝트": {"relation": original_relations}
-                }
+                properties={"프로젝트": {"relation": original_relations}},
             )
             print(f"  ✓ 복원 완료")
         except Exception as e:
@@ -287,8 +288,11 @@ def calculate_task_relation_updates(
             continue
 
         # 구/신 프로젝트 제외한 다른 프로젝트 관계 유지
-        other_relations = [rel for rel in current_relations
-                          if rel["id"] not in [old_project_id, new_project_id]]
+        other_relations = [
+            rel
+            for rel in current_relations
+            if rel["id"] not in [old_project_id, new_project_id]
+        ]
 
         new_relations = []
         reason = ""
@@ -301,7 +305,10 @@ def calculate_task_relation_updates(
 
         elif status in ["진행", "리뷰"]:
             # 양쪽 프로젝트 모두 유지
-            new_relations = other_relations + [{"id": old_project_id}, {"id": new_project_id}]
+            new_relations = other_relations + [
+                {"id": old_project_id},
+                {"id": new_project_id},
+            ]
             reason = f"양쪽 프로젝트 유지 (상태: {status})"
 
         elif status == "대기" or status is None:
@@ -314,16 +321,23 @@ def calculate_task_relation_updates(
 
         else:
             # 알 수 없는 상태 - 안전하게 양쪽 유지
-            print(f"  경고: 알 수 없는 상태 '{status}' - 작업: {task_title} (양쪽 프로젝트 유지)")
-            new_relations = other_relations + [{"id": old_project_id}, {"id": new_project_id}]
+            print(
+                f"  경고: 알 수 없는 상태 '{status}' - 작업: {task_title} (양쪽 프로젝트 유지)"
+            )
+            new_relations = other_relations + [
+                {"id": old_project_id},
+                {"id": new_project_id},
+            ]
             reason = f"양쪽 프로젝트 유지 (알 수 없는 상태: {status})"
 
-        updates.append({
-            "task_id": task["id"],
-            "task_title": task_title,
-            "new_relations": new_relations,
-            "reason": reason,
-        })
+        updates.append(
+            {
+                "task_id": task["id"],
+                "task_title": task_title,
+                "new_relations": new_relations,
+                "reason": reason,
+            }
+        )
 
     return updates
 
@@ -352,9 +366,7 @@ def apply_task_relation_updates(
             try:
                 notion.pages.update(
                     page_id=task_id,
-                    properties={
-                        "프로젝트": {"relation": new_relations}
-                    }
+                    properties={"프로젝트": {"relation": new_relations}},
                 )
             except Exception as e:
                 print(f"      ✗ 오류: {e}")
@@ -449,7 +461,9 @@ def migrate_quarterly_projects(
     project_database_id = PROJECT_DATABASE_ID
 
     for old_project in old_projects:
-        old_title = old_project["properties"]["프로젝트 이름"]["title"][0]["text"]["content"]
+        old_title = old_project["properties"]["프로젝트 이름"]["title"][0]["text"][
+            "content"
+        ]
         category = old_title.rsplit(" ", 1)[0]
         new_title = f"{category} {to_quarter}"
 
@@ -471,10 +485,14 @@ def migrate_quarterly_projects(
                 created_count += 1
             else:
                 # Dry run 모드에서는 가상 ID 사용
-                project_mapping[old_project["id"]] = f"dry-run-new-id-{old_project['id']}"
+                project_mapping[old_project["id"]] = (
+                    f"dry-run-new-id-{old_project['id']}"
+                )
                 created_count += 1
 
-    print(f"  → 총 {len(project_mapping)}개 프로젝트 (기존: {reused_count}개, 신규 생성: {created_count}개)")
+    print(
+        f"  → 총 {len(project_mapping)}개 프로젝트 (기존: {reused_count}개, 신규 생성: {created_count}개)"
+    )
 
     # Step 4: 연결된 작업 조회
     print(f"\nStep 4: 프로젝트에 연결된 작업 조회...")
@@ -502,7 +520,9 @@ def migrate_quarterly_projects(
     # Step 7: 구 분기 프로젝트 상태 업데이트
     print(f"\nStep 7: {from_quarter} 프로젝트 상태 업데이트 → '완료'")
     for old_project in old_projects:
-        title = old_project["properties"]["프로젝트 이름"]["title"][0]["text"]["content"]
+        title = old_project["properties"]["프로젝트 이름"]["title"][0]["text"][
+            "content"
+        ]
         update_project_status(notion, old_project["id"], title, "완료", dry_run)
 
     # Step 8: 수동 작업 안내
@@ -522,7 +542,9 @@ def migrate_quarterly_projects(
 
     if not dry_run:
         print(f"\n✓ 백업 파일: {backup_filename}")
-        print(f"  롤백 명령어: python migrate_quarterly_projects.py --rollback {backup_filename}")
+        print(
+            f"  롤백 명령어: python migrate_quarterly_projects.py --rollback {backup_filename}"
+        )
 
     print("\n마이그레이션 완료!")
 
