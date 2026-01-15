@@ -18,6 +18,7 @@ Ruleset API는 PyGithub에서 직접 지원하지 않으므로 REST API를 사�
     - Main Protection: 기본 브랜치 보호 (PR 필수, force push 금지)
     - Develop Protection: develop 브랜치 보호 (일반 push 허용, force push 금지)
 """
+
 import argparse
 import json
 import os
@@ -167,7 +168,9 @@ def add_ruleset(org_name: str, repo_name: str, ruleset: dict) -> dict:
     url = f"https://api.github.com/repos/{org_name}/{repo_name}/rulesets"
 
     # 리포지토리별로 동적 필드 제거 (새로 생성 시 불필요)
-    payload = {k: v for k, v in ruleset.items() if k not in ["id", "source", "source_type"]}
+    payload = {
+        k: v for k, v in ruleset.items() if k not in ["id", "source", "source_type"]
+    }
 
     response = requests.post(url, json=payload, headers=get_headers(), timeout=30)
     response.raise_for_status()

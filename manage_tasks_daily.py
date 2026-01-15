@@ -1,8 +1,8 @@
 import argparse
 import os
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from collections import defaultdict
 
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
@@ -53,6 +53,14 @@ def main():
         email_to_user_id,
     )
     alert_no_tasks(
+        notion,
+        slack_client,
+        MAIN_DATA_SOURCE_ID,
+        MAIN_CHANNEL_ID,
+        email_to_user_id,
+        "e",
+    )
+    alert_no_upcoming_tasks(
         notion,
         slack_client,
         MAIN_DATA_SOURCE_ID,
@@ -416,6 +424,121 @@ def alert_no_tasks(
                 "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다. "
                 "또한 이메일 매핑이 누락된 원인을 파악해주시길 바랍니다."
             )
+        slack_client.chat_postMessage(channel=channel_id, text=text)
+
+
+def alert_no_upcoming_tasks(
+    notion: NotionClient,
+    slack_client: WebClient,
+    data_source_id: str,
+    channel_id: str,
+    email_to_user_id: dict,
+    group_handle: str,
+):
+    """
+    5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림
+
+    Args:
+        notion (NotionClient): Notion
+        slack_client (WebClient): Slack
+        data_source_id (str): Notion data_source id
+        channel_id (str): Slack channel id
+        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
+        group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
+
+    Returns:
+        None
+    """
+    # 예진님 Slack ID
+    YEJIN_SLACK_ID = "U075PUFNGHX"
+
+    # 5일 후 날짜 계산
+    target_date = (datetime.now() + timedelta(days=5)).date()
+
+    # 5일 후에 진행 중일 것으로 예상되는 작업들을 찾습니다.
+    # 시작일 <= 5일 후 AND 종료일 >= 5일 후 AND 상태가 완료/보류가 아닌 작업
+    upcoming_tasks = notion.data_sources.query(
+        **{
+            "data_source_id": data_source_id,
+            "filter": {
+                "and": [
+                    {
+                        "or": [
+                            {"property": "상태", "status": {"equals": "대기"}},
+                            {"property": "상태", "status": {"equals": "진행"}},
+                            {"property": "상태", "status": {"equals": "리뷰"}},
+                        ]
+                    },
+                    {
+                        "property": "시작일",
+                        "date": {"on_or_before": target_date.isoformat()},
+                    },
+                    {
+                        "property": "종료일",
+                        "date": {"on_or_after": target_date.isoformat()},
+                    },
+                ]
+            },
+        }
+    )
+
+    # 5일 후에 작업이 예정된 담당자 이메일 수집
+    assigned_emails = set()
+    for task in upcoming_tasks.get("results", []):
+        people = task["properties"]["담당자"].get("people", [])
+        for person in people:
+            person_info = person.get("person")
+            if person_info:
+                email = person_info.get("email")
+                if email:
+                    assigned_emails.add(email)
+
+    # Slack 사용자 그룹에서 지정된 handle인 그룹을 찾습니다.
+    usergroup_id = None
+    usergroups_response = slack_client.usergroups_list()
+    for group in usergroups_response["usergroups"]:
+        if group["handle"] == group_handle:
+            usergroup_id = group["id"]
+            break
+
+    if usergroup_id is None:
+        slack_client.chat_postMessage(
+            channel=channel_id,
+            text=f"그룹 @{group_handle}를 찾을 수 없습니다. 확인부탁드립니다.",
+        )
+        return
+
+    group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
+    group_user_ids = group_users_response.get("users", [])
+
+    # "slack user id -> email" 매핑 생성
+    user_id_to_email = {v: k for k, v in email_to_user_id.items()}
+
+    # 그룹에 등록된 멤버의 이메일 목록
+    team_emails = []
+    for user_id in group_user_ids:
+        email = user_id_to_email.get(user_id)
+        if email:
+            team_emails.append(email)
+
+    # 5일 후에 예정된 작업이 없는 멤버 찾기
+    unassigned_emails = set(team_emails) - assigned_emails
+
+    # 예진님에게 알림 보내기
+    if unassigned_emails:
+        member_mentions = []
+        for email in unassigned_emails:
+            slack_user_id = email_to_user_id.get(email)
+            if slack_user_id:
+                member_mentions.append(f"<@{slack_user_id}>")
+            else:
+                member_mentions.append(email)
+
+        members_text = ", ".join(member_mentions)
+        text = (
+            f"<@{YEJIN_SLACK_ID}> 5일 후에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
+            "로드맵 점검 부탁드립니다."
+        )
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 

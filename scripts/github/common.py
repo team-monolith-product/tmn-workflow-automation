@@ -4,6 +4,7 @@ GitHub API 공통 유틸리티 모듈
 PyGithub 라이브러리를 사용하여 Organization의 리포지토리를 관리합니다.
 보안을 위해 토큰은 환경변수로 관리됩니다.
 """
+
 import os
 import sys
 from typing import Generator

@@ -9,6 +9,7 @@ import logging
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
+import analyze_oom
 import route_bug
 import route_dev_env_infra_bug
 import summarize_deployment
@@ -56,6 +57,13 @@ def register_general_handlers(app, assistant):
         channel = event["channel"]
         user = event.get("user")
         text = event["text"]
+
+        # OOM 분석 요청 감지 (특정 채널의 스레드에서 "분석" 키워드 멘션)
+        # 예: "@봇 분석해줘", "@봇 이 알림 분석해주세요"
+        if channel == "C07B6FT3R5L" and "분석" in text and event.get("thread_ts"):
+            await analyze_oom.analyze_oom_alert(app.client, body, say)
+            return
+
         # Slack 스레드 링크 만들기
         slack_workspace = "monolith-keb2010"
         thread_ts_for_link = (event.get("thread_ts") or body["event"]["ts"]).replace(

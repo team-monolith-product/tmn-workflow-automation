@@ -8,6 +8,7 @@ GitHub Organization의 모든 리포지토리에 CODEOWNERS 파일을 추가하�
     --dry-run: 실제 변경 없이 어떤 리포지토리에 CODEOWNERS가 추가될지 확인
     --team: CODEOWNERS에 지정할 팀 이름 (기본값: Security)
 """
+
 import argparse
 import os
 import sys
