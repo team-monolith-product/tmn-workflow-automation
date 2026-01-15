@@ -103,14 +103,6 @@ def main():
         email_to_user_id,
         "콘텐츠",
     )
-    alert_no_upcoming_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-        "콘텐츠",
-    )
 
 
 def send_intro_message(
