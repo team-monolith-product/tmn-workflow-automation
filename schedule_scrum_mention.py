@@ -8,17 +8,19 @@ import time
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 
+from service.teams import get_team_mention
+
 # 환경 변수 로드
 load_dotenv()
 
 SCRUM_CHANNEL_ID = "C09277NGUET"
 
-# 팀별 멘션 그룹 ID
+# 팀별 멘션 그룹 ID (service.teams에서 가져온 값 + 개인)
 TEAM_MENTIONS = {
-    "기획": "<!subteam^S092KHHE0AF>",
-    "FE": "<!subteam^S07V4G2QJJY>",
-    "BE": "<!subteam^S085DBK2TFD>",
-    "IE": "<!subteam^S08628PEEUQ>",
+    "기획": get_team_mention("기획"),
+    "FE": get_team_mention("fe"),
+    "BE": get_team_mention("be"),
+    "IE": get_team_mention("ie"),
     "이창환": "<@U02HT4EU4VD>",
 }
 

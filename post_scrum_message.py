@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
+from service.business_days import count_business_days
 from service.slack import get_email_to_user_id
+from service.teams import ALL_TEAM_USERGROUP_IDS
 
 # 환경 변수 로드
 load_dotenv()
@@ -19,14 +21,6 @@ load_dotenv()
 # 상수 정의
 MAIN_DATA_SOURCE_ID = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
 SCRUM_CHANNEL_ID = "C09277NGUET"
-
-# 팀별 Slack 그룹 ID
-TEAM_GROUPS = {
-    "기획": "S092KHHE0AF",
-    "fe": "S07V4G2QJJY",
-    "be": "S085DBK2TFD",
-    "ie": "S08628PEEUQ",
-}
 
 USER_CHANGWHAN = "U02HT4EU4VD"
 
@@ -241,7 +235,7 @@ def get_team_members(slack_client: WebClient, team_handle: str) -> list[str]:
         list[str]: Slack User ID 목록
     """
     # 사용자 그룹 ID 조회
-    group_id = TEAM_GROUPS.get(team_handle)
+    group_id = ALL_TEAM_USERGROUP_IDS.get(team_handle)
     if not group_id:
         return []
 
@@ -351,7 +345,7 @@ def format_task_line(task: dict[str, Any], is_planning_team: bool = False) -> st
         today = datetime.now().date()
 
         # 영업일 기준으로 마감까지 남은 일수 계산
-        days_until_deadline = calculate_business_days(today, deadline_date)
+        days_until_deadline = count_business_days(today, deadline_date)
 
         if days_until_deadline > 1:
             deadline_text = f" 마감 {days_until_deadline}일 전."
@@ -370,32 +364,6 @@ def format_task_line(task: dict[str, Any], is_planning_team: bool = False) -> st
     message = f"- <{task['url']}|{task['title']}>{deadline_text}{warning_text}"
 
     return message
-
-
-def calculate_business_days(start_date, end_date) -> int:
-    """
-    시작일과 종료일 사이의 영업일 수 계산 (주말 제외)
-
-    Args:
-        start_date: 시작 날짜
-        end_date: 종료 날짜
-
-    Returns:
-        int: 영업일 수
-    """
-    if start_date > end_date:
-        return -calculate_business_days(end_date, start_date)
-
-    business_days = 0
-    current_date = start_date
-
-    while current_date < end_date:
-        # 월-금 (0-4)만 카운트
-        if current_date.weekday() < 5:
-            business_days += 1
-        current_date += timedelta(days=1)
-
-    return business_days
 
 
 if __name__ == "__main__":

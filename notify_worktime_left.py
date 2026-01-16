@@ -9,7 +9,7 @@ from slack_sdk import WebClient
 import tabulate
 
 from api.wantedspace import get_workevent, get_worktime
-from api.data_go_kr import get_rest_de_info
+from service.holidays import get_public_holidays
 from service.slack import get_email_to_user_id, get_user_id_to_user_info
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
@@ -199,40 +199,6 @@ def insert_horizontal_lines(table_str: str) -> str:
         new_lines.append(line_sep)
 
     return "\n".join(new_lines)
-
-
-def get_public_holidays(year: int, month: int):
-    """
-    공공데이터포털 API로 해당 연/월의 공휴일(YYYY-MM-DD) 집합을 조회
-    """
-    data = get_rest_de_info(year, month)
-    holidays = set()
-    try:
-        items = data["response"]["body"]["items"]
-        if "item" in items:
-            item = items["item"]
-            if isinstance(item, list):
-                for holiday in item:
-                    if holiday.get("isHoliday") == "Y":
-                        locdate = str(holiday["locdate"])
-                        date_str = f"{locdate[:4]}-{locdate[4:6]}-{locdate[6:]}"
-                        holidays.add(date_str)
-            else:
-                # 단일 item
-                if item.get("isHoliday") == "Y":
-                    locdate = str(item["locdate"])
-                    date_str = f"{locdate[:4]}-{locdate[4:6]}-{locdate[6:]}"
-                    holidays.add(date_str)
-    except Exception as e:
-        print("[ERROR] Parsing holiday info:", e)
-        print("Response data:", data)
-
-    # 수동으로 특정 휴일 추가
-    if month == 5:
-        # 근로자의 날 추가 (5월 1일)
-        holidays.add(f"{year}-05-01")
-
-    return holidays
 
 
 def get_monthly_vacation_breakdown(year: int, month: int, workevent):

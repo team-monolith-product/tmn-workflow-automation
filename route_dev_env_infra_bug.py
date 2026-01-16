@@ -19,8 +19,9 @@ import redis
 from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
 
-from api.wantedspace import get_worktime
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
+from service.teams import TEAM_USERGROUP_IDS
+from service.worktime import get_working_emails
 
 REDIS_KEY_PATTERN = "workflow_automation/dev_env_infra_bug_assigment_time_list"
 ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
@@ -71,29 +72,6 @@ async def route_dev_env_infra_bug(
         working_emails,
         email_to_bug_count,
     )
-
-
-def get_working_emails() -> list[str]:
-    """
-    워티드스페이스 API를 통해 현재 출근한 사용자 이메일 목록을 반환
-
-    주의:
-    - 휴가 중인 사용자는 get_worktime API에서 wk_start_time이 null로 반환됨
-    - 출근한 사용자는 wk_start_time이 존재하고 퇴근하지 않은 경우 wk_end_time이 null임
-    - 따라서 출근한 상태로 간주하기 위해서는 wk_start_time이 존재하고 wk_end_time이 null인지 확인해야 함
-    """
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    worktime = get_worktime(date=today)
-
-    working_emails = []
-    if worktime and "results" in worktime:
-        for user in worktime["results"]:
-            # 실제 출근 기록이 있고(wk_start_time이 존재), 아직 퇴근하지 않은(wk_end_time이 null) 사용자만 포함
-            # 휴가자는 wk_start_time이 null이므로 자동으로 제외됨
-            if user["wk_start_time"] is not None and user["wk_end_time"] is None:
-                working_emails.append(user["email"])
-
-    return working_emails
 
 
 def get_email_to_bug_count(
@@ -254,14 +232,9 @@ async def get_team_to_emails(
     email_to_user_id: dict[str, str],
 ) -> dict[Literal["ie", "fe", "be"], list[str]]:
     """특정 팀에 속한 구성원 목록 반환"""
-    team_to_usergroup_id: dict[Literal["ie", "fe", "be"], str] = {
-        "fe": "S07V4G2QJJY",
-        "be": "S085DBK2TFD",
-        "ie": "S08628PEEUQ",
-    }
     team_to_user_ids: dict[Literal["ie", "fe", "be"], list[str]] = {
         k: (await slack_client.usergroups_users_list(usergroup=v))["users"]
-        for k, v in team_to_usergroup_id.items()
+        for k, v in TEAM_USERGROUP_IDS.items()
     }  # type: ignore
 
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}

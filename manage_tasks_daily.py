@@ -9,7 +9,7 @@ from notion_client import Client as NotionClient
 from openai import OpenAI
 from slack_sdk import WebClient
 
-from notify_worktime_left import get_public_holidays
+from service.holidays import get_public_holidays
 from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
