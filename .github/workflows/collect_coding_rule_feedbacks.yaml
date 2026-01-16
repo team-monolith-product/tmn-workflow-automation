@@ -27,4 +27,4 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.WORKFLOW_AUTOMATION_GITHUB_TOKEN }}
         run: |
-          python collect_coding_rule_feedbacks.py --days 7  # 최근 일주일간의 리뷰 데이터 수집
+          python scripts/collect_coding_rule_feedbacks.py --days 7  # 최근 일주일간의 리뷰 데이터 수집

@@ -26,4 +26,4 @@ jobs:
           WANTEDSPACE_API_SECRET: ${{ secrets.WANTEDSPACE_API_SECRET }}
           DATA_GO_KR_SPECIAL_DAY_KEY: ${{ secrets.DATA_GO_KR_SPECIAL_DAY_KEY }}
         run: |
-          python notify_worktime_left.py
+          python scripts/notify_worktime_left.py
