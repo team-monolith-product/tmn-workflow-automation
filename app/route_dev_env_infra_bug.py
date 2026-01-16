@@ -11,12 +11,10 @@
 import json
 import random
 from typing import Literal
-import datetime
 import os
 import time
 
 import redis
-from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async

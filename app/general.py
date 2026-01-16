@@ -9,10 +9,7 @@ import logging
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
-import analyze_oom
-import route_bug
-import route_dev_env_infra_bug
-import summarize_deployment
+from . import analyze_oom, route_bug, route_dev_env_infra_bug, summarize_deployment
 from .common import (
     KST,
     answer,

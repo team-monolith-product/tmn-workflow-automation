@@ -21,7 +21,7 @@ from app.tools.oom_tools import (
     query_alb_access_logs,
 )
 
-SKILL_DIR = Path(__file__).parent / ".claude" / "skills" / "oom-analyzer"
+SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
 
 
 def _strip_frontmatter(content: str) -> str:

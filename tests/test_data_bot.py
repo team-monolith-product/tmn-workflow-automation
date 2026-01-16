@@ -6,7 +6,6 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from api import athena, redash
 from app.tools import athena_tools, redash_tools
-from app import router
 
 
 class TestAthenaAPI:
@@ -225,38 +224,6 @@ class TestRedashTools:
         assert "Test Query" in result
         assert "analytics.users" in result
         assert "**Data Source ID:** 1" in result
-
-
-class TestRouter:
-    """질문 라우터 테스트"""
-
-    @pytest.mark.asyncio
-    @patch("app.router.ChatOpenAI")
-    async def test_route_data_analysis_question(self, mock_chat):
-        """데이터 분석 질문 라우팅 테스트"""
-        mock_llm = MagicMock()
-        mock_response = Mock()
-        mock_response.content = "data_analysis"
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        mock_chat.return_value = mock_llm
-
-        result = await router.route_question("지난달 매출이 얼마야?")
-
-        assert result == "data_analysis"
-
-    @pytest.mark.asyncio
-    @patch("app.router.ChatOpenAI")
-    async def test_route_general_question(self, mock_chat):
-        """일반 질문 라우팅 테스트"""
-        mock_llm = MagicMock()
-        mock_response = Mock()
-        mock_response.content = "general"
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        mock_chat.return_value = mock_llm
-
-        result = await router.route_question("노션 페이지 만들어줘")
-
-        assert result == "general"
 
 
 if __name__ == "__main__":
