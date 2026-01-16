@@ -987,7 +987,7 @@ def _send_schedule_alert(
     # 스레드용 세부 내용 구성
     # 작업 목록 (기간 정보 포함)
     task_summary = []
-    for task in tasks[:5]:
+    for task in tasks:
         status_emoji = {"대기": "⏳", "진행": "🔄", "리뷰": "👀"}.get(
             task["status"], "📋"
         )
@@ -996,9 +996,6 @@ def _send_schedule_alert(
         task_summary.append(
             f"{status_emoji} <{task['url']}|{task['title']}> ({start}~{end})"
         )
-
-    if len(tasks) > 5:
-        task_summary.append(f"    ... 외 {len(tasks) - 5}개")
 
     task_list_text = "\n".join(task_summary)
 
