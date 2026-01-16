@@ -926,7 +926,9 @@ def _evaluate_schedule_with_llm(assignee_name: str, tasks_text: str) -> dict:
 응답 형식 (반드시 첫 줄에 판정 결과를 명시):
 실현가능여부: [가능/불가능/주의필요]
 분석: [문제가 되는 부분만 간결하게 1-2문장으로 설명. 정상인 부분(리뷰 기간 겹침, 순차 배치 등)은 언급하지 않음]
-제안: [일정 조정이 필요한 경우 구체적인 제안, 필요 없으면 "없음"]"""
+제안: [일정 조정이 필요한 경우 구체적인 제안, 필요 없으면 "없음"]
+
+주의: Slack 포맷팅 규칙 - **bold**가 아니라 *bold* 사용. 마크다운 문법 사용 금지."""
 
     user_prompt = f"""담당자: {assignee_name}
 
@@ -969,9 +971,20 @@ def _send_schedule_alert(
     email_to_user_id: dict,
     dry_run: bool = False,
 ):
-    """일정 문제가 있는 담당자에게 Slack 알림 전송"""
+    """일정 문제가 있는 담당자에게 Slack 알림 전송 (메인 메시지 + 스레드)"""
     slack_user_id = email_to_user_id.get(assignee_email)
 
+    mention = (
+        f"<@{slack_user_id}>" if slack_user_id else (assignee_name or assignee_email)
+    )
+
+    # 메인 메시지: 간단한 경고 + 멘션
+    if evaluation["is_feasible"] is False:
+        main_message = f"🚨 *일정 실현 불가능* - {mention}"
+    else:
+        main_message = f"⚠️ *일정 주의 필요* - {mention}"
+
+    # 스레드용 세부 내용 구성
     # 작업 목록 (기간 정보 포함)
     task_summary = []
     for task in tasks[:5]:
@@ -989,10 +1002,6 @@ def _send_schedule_alert(
 
     task_list_text = "\n".join(task_summary)
 
-    mention = (
-        f"<@{slack_user_id}>" if slack_user_id else (assignee_name or assignee_email)
-    )
-
     # AI 응답 파싱
     full_response = evaluation["full_response"]
     analysis = ""
@@ -1005,15 +1014,8 @@ def _send_schedule_alert(
         elif line_stripped.startswith("제안:"):
             suggestion = line_stripped[3:].strip()
 
-    if evaluation["is_feasible"] is False:
-        status_text = "🚨 *일정 실현 불가능*"
-    else:
-        status_text = "⚠️ *일정 주의 필요*"
-
-    # 메시지 구성
-    message_parts = [
-        f"{status_text} - {mention}",
-        "",
+    # 스레드 메시지 구성
+    thread_parts = [
         f"*현재 작업 ({len(tasks)}개):*",
         task_list_text,
         "",
@@ -1022,20 +1024,28 @@ def _send_schedule_alert(
 
     # 제안이 있고 "없음"이 아닌 경우만 표시
     if suggestion and suggestion != "없음":
-        message_parts.append("")
-        message_parts.append(f"*제안:* {suggestion}")
+        thread_parts.append("")
+        thread_parts.append(f"*제안:* {suggestion}")
 
-    message_parts.append("")
-    message_parts.append("일정 조정이 필요하면 로봇에게 요청해주세요.")
+    thread_parts.append("")
+    thread_parts.append("일정 조정이 필요하면 로봇에게 요청해주세요.")
 
-    message = "\n".join(line for line in message_parts if line is not None)
+    thread_message = "\n".join(line for line in thread_parts if line is not None)
 
     if dry_run:
-        print(f"[dry-run] Slack 메시지 (채널: {channel_id}):")
-        print(message)
+        print(f"[dry-run] 메인 메시지 (채널: {channel_id}):")
+        print(main_message)
+        print(f"[dry-run] 스레드 메시지:")
+        print(thread_message)
         print("-" * 50)
     else:
-        slack_client.chat_postMessage(channel=channel_id, text=message)
+        # 메인 메시지 전송 후 스레드로 세부 내용 전송
+        response = slack_client.chat_postMessage(channel=channel_id, text=main_message)
+        slack_client.chat_postMessage(
+            channel=channel_id,
+            text=thread_message,
+            thread_ts=response["ts"],
+        )
 
 
 def run_schedule_feasibility_only(dry_run: bool = False):
