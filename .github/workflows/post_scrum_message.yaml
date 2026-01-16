@@ -22,5 +22,6 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          DATA_GO_KR_SPECIAL_DAY_KEY: ${{ secrets.DATA_GO_KR_SPECIAL_DAY_KEY }}
         run: |
           python scripts/post_scrum_message.py
