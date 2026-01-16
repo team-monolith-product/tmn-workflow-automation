@@ -2,6 +2,11 @@
 매일 16:30에 스크럼 작성 멘션을 각 팀 스레드에 답글로 발송하는 스크립트
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import os
 import time
 

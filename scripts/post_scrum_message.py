@@ -2,6 +2,11 @@
 매일 16:00에 스크럼 메시지를 Slack 채널에 발송하는 스크립트
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import os
 from datetime import datetime
