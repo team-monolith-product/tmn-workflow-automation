@@ -180,7 +180,7 @@ def alert_overdue_tasks(
                             {"property": "상태", "status": {"equals": "리뷰"}},
                         ]
                     },
-                    {"property": "종료일", "date": {"before": today.isoformat()}},
+                    {"property": "종료일", "formula": {"date": {"before": today.isoformat()}}},
                 ]
             },
         }
@@ -239,7 +239,7 @@ def alert_pending_but_started_tasks(
             "filter": {
                 "and": [
                     {"property": "상태", "status": {"equals": "대기"}},
-                    {"property": "시작일", "date": {"before": today.isoformat()}},
+                    {"property": "시작일", "formula": {"date": {"before": today.isoformat()}}},
                 ]
             },
         }
@@ -476,11 +476,11 @@ def alert_no_upcoming_tasks(
                     },
                     {
                         "property": "시작일",
-                        "date": {"on_or_before": target_date.isoformat()},
+                        "formula": {"date": {"on_or_before": target_date.isoformat()}},
                     },
                     {
                         "property": "종료일",
-                        "date": {"on_or_after": target_date.isoformat()},
+                        "formula": {"date": {"on_or_after": target_date.isoformat()}},
                     },
                 ]
             },
