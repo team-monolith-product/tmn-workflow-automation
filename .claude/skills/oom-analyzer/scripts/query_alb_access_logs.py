@@ -2,13 +2,13 @@
 """
 Query ALB Access Logs from Athena to find payload sizes for suspicious requests
 """
+
 import boto3
 import json
 import sys
 import time
 import argparse
 from datetime import datetime, timedelta
-
 
 # Configuration
 ATHENA_DATABASE = "default"

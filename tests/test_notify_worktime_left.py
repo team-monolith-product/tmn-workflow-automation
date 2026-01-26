@@ -3,7 +3,10 @@
 주말 포함 외근신청 시 평일만 계산되는지 검증
 """
 
-from scripts.notify_worktime_left import get_monthly_vacation_breakdown, get_daily_vacation_map
+from scripts.notify_worktime_left import (
+    get_monthly_vacation_breakdown,
+    get_daily_vacation_map,
+)
 
 
 def test_weekend_vacation_calculation():
