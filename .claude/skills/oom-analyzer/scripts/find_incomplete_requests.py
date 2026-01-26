@@ -3,6 +3,7 @@
 Find incomplete requests in Rails logs
 Fetches logs from CloudWatch and analyzes incomplete requests before OOM
 """
+
 import json
 import re
 import sys

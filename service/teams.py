@@ -6,7 +6,6 @@ Slack 사용자 그룹 ID와 팀 관련 유틸리티 함수를 제공합니다.
 
 from typing import Literal
 
-
 # 개발팀 Slack 사용자 그룹 ID
 TEAM_USERGROUP_IDS: dict[Literal["fe", "be", "ie"], str] = {
     "fe": "S07V4G2QJJY",
