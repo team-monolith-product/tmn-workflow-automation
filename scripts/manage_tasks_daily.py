@@ -72,6 +72,7 @@ def main():
         MAIN_CHANNEL_ID,
         email_to_user_id,
         "e",
+        exclude_group_handles=["ie"],
     )
     # https://www.notion.so/team-mono/25Y-11M-2a11cc820da68051bab8ea146ee3001e?source=copy_link#2a41cc820da680daa823ff847717f6bf
     # alert_no_후속_작업(
@@ -445,6 +446,7 @@ def alert_no_upcoming_tasks(
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
+    exclude_group_handles: list[str] | None = None,
 ):
     """
     5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림
@@ -456,6 +458,7 @@ def alert_no_upcoming_tasks(
         channel_id (str): Slack channel id
         email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
         group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
+        exclude_group_handles (list[str] | None): 제외할 Slack 사용자 그룹 핸들 목록 (예: ["ie"])
 
     Returns:
         None
@@ -520,7 +523,22 @@ def alert_no_upcoming_tasks(
         return
 
     group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
-    group_user_ids = group_users_response.get("users", [])
+    group_user_ids = set(group_users_response.get("users", []))
+
+    # 제외할 그룹 멤버 필터링
+    if exclude_group_handles:
+        for exclude_handle in exclude_group_handles:
+            exclude_usergroup_id = None
+            for group in usergroups_response["usergroups"]:
+                if group["handle"] == exclude_handle:
+                    exclude_usergroup_id = group["id"]
+                    break
+            if exclude_usergroup_id:
+                exclude_response = slack_client.usergroups_users_list(
+                    usergroup=exclude_usergroup_id
+                )
+                exclude_user_ids = set(exclude_response.get("users", []))
+                group_user_ids -= exclude_user_ids
 
     # "slack user id -> email" 매핑 생성
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
