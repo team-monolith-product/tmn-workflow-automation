@@ -4,5 +4,8 @@
   },
   "tmn-e2e-video": {
     "skip": ["ruleset.json"]
+  },
+  "tmn-cc-settings": {
+    "skip": ["ruleset.json"]
   }
 }
