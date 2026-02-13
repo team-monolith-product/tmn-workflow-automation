@@ -1,3 +1,8 @@
 {
-  "jce-codle-react": ["ruleset_develop_fe_only.json"]
+  "jce-codle-react": {
+    "add": ["ruleset_develop_fe_only.json"]
+  },
+  "tmn-e2e-video": {
+    "skip": ["main"]
+  }
 }

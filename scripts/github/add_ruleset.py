@@ -95,12 +95,20 @@ def load_ruleset_template(ruleset_file: str) -> dict:
         return json.load(f)
 
 
-def load_repo_rulesets_config() -> dict[str, list[str]]:
+def load_repo_rulesets_config() -> dict[str, dict]:
     """
-    repo별 추가 ruleset 매핑 설정을 로드하는 함수
+    repo별 ruleset 설정을 로드하는 함수
+
+    설정 형식:
+        {
+          "repo-name": {
+            "add": ["추가_ruleset.json"],   # repo에 추가 적용할 ruleset 파일 목록
+            "skip": ["main"]                # org 전체 적용에서 제외할 ruleset 키 목록
+          }
+        }
 
     Returns:
-        dict: repo 이름 → ruleset 파일 목록 매핑 (설정 파일이 없으면 빈 딕셔너리)
+        dict: repo 이름 → 설정 딕셔너리 매핑 (설정 파일이 없으면 빈 딕셔너리)
     """
     config_path = SCRIPT_DIR / REPO_RULESETS_CONFIG_FILE
     if not config_path.exists():
@@ -230,7 +238,12 @@ def apply_ruleset_to_repo(
 
 
 def apply_ruleset_to_repos(
-    org, org_name: str, ruleset_template: dict, dry_run: bool
+    org,
+    org_name: str,
+    ruleset_key: str,
+    ruleset_template: dict,
+    dry_run: bool,
+    skip_repos: set[str] | None = None,
 ) -> tuple[int, int]:
     """
     모든 리포지토리에 ruleset을 적용하는 함수 (항상 덮어쓰기)
@@ -238,8 +251,10 @@ def apply_ruleset_to_repos(
     Args:
         org: PyGithub Organization 객체
         org_name: Organization 이름
+        ruleset_key: AVAILABLE_RULESETS의 키 (예: "main", "develop")
         ruleset_template: Ruleset 설정 딕셔너리
         dry_run: dry-run 모드 여부
+        skip_repos: 이 ruleset을 적용하지 않을 repo 이름 집합
 
     Returns:
         tuple: (성공 수, 오류 수)
@@ -249,6 +264,11 @@ def apply_ruleset_to_repos(
 
     for repo in get_all_repos(org):
         repo_name = repo.name
+
+        if skip_repos and repo_name in skip_repos:
+            print(f"  [SKIP] {repo_name}: config에서 {ruleset_key} 제외됨")
+            continue
+
         try:
             if apply_ruleset_to_repo(org_name, repo_name, ruleset_template, dry_run):
                 success_count += 1
@@ -284,7 +304,8 @@ def apply_repo_specific_rulesets(org_name: str, dry_run: bool) -> tuple[int, int
     success_count = 0
     error_count = 0
 
-    for repo_name, ruleset_files in config.items():
+    for repo_name, repo_config in config.items():
+        ruleset_files = repo_config.get("add", [])
         for ruleset_file in ruleset_files:
             try:
                 template = load_ruleset_template(ruleset_file)
@@ -349,6 +370,13 @@ def main():
     total_success = 0
     total_error = 0
 
+    # repo별 config에서 skip 목록 구성
+    repo_config = load_repo_rulesets_config()
+    skip_repos_by_key: dict[str, set[str]] = {}
+    for repo_name, conf in repo_config.items():
+        for key in conf.get("skip", []):
+            skip_repos_by_key.setdefault(key, set()).add(repo_name)
+
     # 1단계: org 전체 ruleset 적용
     for ruleset_key, ruleset_template in ruleset_templates:
         ruleset_name = ruleset_template["name"]
@@ -356,7 +384,12 @@ def main():
         print("-" * 50)
 
         success, error = apply_ruleset_to_repos(
-            org, org_name, ruleset_template, args.dry_run
+            org,
+            org_name,
+            ruleset_key,
+            ruleset_template,
+            args.dry_run,
+            skip_repos=skip_repos_by_key.get(ruleset_key),
         )
         total_success += success
         total_error += error
