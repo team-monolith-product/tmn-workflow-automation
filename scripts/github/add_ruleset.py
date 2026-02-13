@@ -17,6 +17,7 @@ Ruleset API는 PyGithub에서 직접 지원하지 않으므로 REST API를 사�
 적용되는 Ruleset:
     - Main Protection: 기본 브랜치 보호 (PR 필수, force push 금지)
     - Develop Protection: develop 브랜치 보호 (일반 push 허용, force push 금지)
+    - repo별 추가 Ruleset: repo_rulesets_config.json에 정의된 repo에만 적용
 """
 
 import argparse
@@ -48,6 +49,8 @@ AVAILABLE_RULESETS = {
     "main": "ruleset.json",
     "develop": "ruleset_develop.json",
 }
+
+REPO_RULESETS_CONFIG_FILE = "repo_rulesets_config.json"
 
 
 def get_headers() -> dict[str, str]:
@@ -89,6 +92,24 @@ def load_ruleset_template(ruleset_file: str) -> dict:
         raise FileNotFoundError(f"Ruleset 파일을 찾을 수 없습니다: {ruleset_path}")
 
     with open(ruleset_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_repo_rulesets_config() -> dict[str, list[str]]:
+    """
+    repo별 추가 ruleset 매핑 설정을 로드하는 함수
+
+    Returns:
+        dict: repo 이름 → ruleset 파일 목록 매핑
+
+    Raises:
+        FileNotFoundError: 설정 파일이 없는 경우
+    """
+    config_path = SCRIPT_DIR / REPO_RULESETS_CONFIG_FILE
+    if not config_path.exists():
+        return {}
+
+    with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -177,6 +198,40 @@ def add_ruleset(org_name: str, repo_name: str, ruleset: dict) -> dict:
     return response.json()
 
 
+def apply_ruleset_to_repo(
+    org_name: str, repo_name: str, ruleset_template: dict, dry_run: bool
+) -> bool:
+    """
+    단일 리포지토리에 ruleset을 적용하는 함수 (항상 덮어쓰기)
+
+    Args:
+        org_name: Organization 이름
+        repo_name: 리포지토리 이름
+        ruleset_template: Ruleset 설정 딕셔너리
+        dry_run: dry-run 모드 여부
+
+    Returns:
+        bool: 성공 시 True, 오류 시 False
+    """
+    ruleset_name = ruleset_template["name"]
+    exists, ruleset_id = find_ruleset_by_name(org_name, repo_name, ruleset_name)
+
+    if dry_run:
+        action = "덮어쓰기 예정" if exists else "추가 예정"
+        print(f"  [DRY-RUN] {repo_name}: {action}")
+        return True
+
+    # 기존 ruleset 삭제 (있으면)
+    if exists and ruleset_id:
+        delete_ruleset(org_name, repo_name, ruleset_id)
+
+    # 새 ruleset 추가
+    add_ruleset(org_name, repo_name, ruleset_template)
+    action = "덮어쓰기 완료" if exists else "추가 완료"
+    print(f"  [SUCCESS] {repo_name}: {action}")
+    return True
+
+
 def apply_ruleset_to_repos(
     org, org_name: str, ruleset_template: dict, dry_run: bool
 ) -> tuple[int, int]:
@@ -192,31 +247,14 @@ def apply_ruleset_to_repos(
     Returns:
         tuple: (성공 수, 오류 수)
     """
-    ruleset_name = ruleset_template["name"]
     success_count = 0
     error_count = 0
 
     for repo in get_all_repos(org):
         repo_name = repo.name
         try:
-            exists, ruleset_id = find_ruleset_by_name(org_name, repo_name, ruleset_name)
-
-            if dry_run:
-                action = "덮어쓰기 예정" if exists else "추가 예정"
-                print(f"  [DRY-RUN] {repo_name}: {action}")
+            if apply_ruleset_to_repo(org_name, repo_name, ruleset_template, dry_run):
                 success_count += 1
-                continue
-
-            # 기존 ruleset 삭제 (있으면)
-            if exists and ruleset_id:
-                delete_ruleset(org_name, repo_name, ruleset_id)
-
-            # 새 ruleset 추가
-            add_ruleset(org_name, repo_name, ruleset_template)
-            action = "덮어쓰기 완료" if exists else "추가 완료"
-            print(f"  [SUCCESS] {repo_name}: {action}")
-            success_count += 1
-
         except requests.exceptions.RequestException as e:
             error_msg = str(e)
             if hasattr(e, "response") and e.response is not None:
@@ -226,6 +264,55 @@ def apply_ruleset_to_repos(
                     pass
             print(f"  [ERROR] {repo_name}: {error_msg}")
             error_count += 1
+
+    return success_count, error_count
+
+
+def apply_repo_specific_rulesets(org, org_name: str, dry_run: bool) -> tuple[int, int]:
+    """
+    repo_rulesets_config.json에 정의된 repo별 추가 ruleset을 적용하는 함수
+
+    Args:
+        org: PyGithub Organization 객체
+        org_name: Organization 이름
+        dry_run: dry-run 모드 여부
+
+    Returns:
+        tuple: (성공 수, 오류 수)
+    """
+    config = load_repo_rulesets_config()
+    if not config:
+        print("\n[repo별 추가 Ruleset: 설정 없음]")
+        return 0, 0
+
+    success_count = 0
+    error_count = 0
+
+    for repo_name, ruleset_files in config.items():
+        for ruleset_file in ruleset_files:
+            try:
+                template = load_ruleset_template(ruleset_file)
+            except FileNotFoundError as e:
+                print(f"  [ERROR] {repo_name}: {e}")
+                error_count += 1
+                continue
+
+            ruleset_name = template["name"]
+            print(f"\n[repo별 Ruleset: {ruleset_name} → {repo_name}]")
+            print("-" * 50)
+
+            try:
+                if apply_ruleset_to_repo(org_name, repo_name, template, dry_run):
+                    success_count += 1
+            except requests.exceptions.RequestException as e:
+                error_msg = str(e)
+                if hasattr(e, "response") and e.response is not None:
+                    try:
+                        error_msg = e.response.json().get("message", str(e))
+                    except (ValueError, KeyError):
+                        pass
+                print(f"  [ERROR] {repo_name}: {error_msg}")
+                error_count += 1
 
     return success_count, error_count
 
@@ -266,6 +353,7 @@ def main():
     total_success = 0
     total_error = 0
 
+    # 1단계: org 전체 ruleset 적용
     for ruleset_key, ruleset_template in ruleset_templates:
         ruleset_name = ruleset_template["name"]
         print(f"\n[Ruleset: {ruleset_name}]")
@@ -279,7 +367,16 @@ def main():
 
         print(f"  소계: 성공 {success}, 오류 {error}")
 
+    # 2단계: repo별 추가 ruleset 적용
+    print("\n" + "=" * 60)
+    print("repo별 추가 Ruleset 적용")
     print("=" * 60)
+
+    repo_success, repo_error = apply_repo_specific_rulesets(org, org_name, args.dry_run)
+    total_success += repo_success
+    total_error += repo_error
+
+    print("\n" + "=" * 60)
     print(f"총계: 성공 {total_success}, 오류 {total_error}")
 
 
