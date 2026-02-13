@@ -100,10 +100,7 @@ def load_repo_rulesets_config() -> dict[str, list[str]]:
     repo별 추가 ruleset 매핑 설정을 로드하는 함수
 
     Returns:
-        dict: repo 이름 → ruleset 파일 목록 매핑
-
-    Raises:
-        FileNotFoundError: 설정 파일이 없는 경우
+        dict: repo 이름 → ruleset 파일 목록 매핑 (설정 파일이 없으면 빈 딕셔너리)
     """
     config_path = SCRIPT_DIR / REPO_RULESETS_CONFIG_FILE
     if not config_path.exists():
@@ -268,12 +265,11 @@ def apply_ruleset_to_repos(
     return success_count, error_count
 
 
-def apply_repo_specific_rulesets(org, org_name: str, dry_run: bool) -> tuple[int, int]:
+def apply_repo_specific_rulesets(org_name: str, dry_run: bool) -> tuple[int, int]:
     """
     repo_rulesets_config.json에 정의된 repo별 추가 ruleset을 적용하는 함수
 
     Args:
-        org: PyGithub Organization 객체
         org_name: Organization 이름
         dry_run: dry-run 모드 여부
 
@@ -372,7 +368,7 @@ def main():
     print("repo별 추가 Ruleset 적용")
     print("=" * 60)
 
-    repo_success, repo_error = apply_repo_specific_rulesets(org, org_name, args.dry_run)
+    repo_success, repo_error = apply_repo_specific_rulesets(org_name, args.dry_run)
     total_success += repo_success
     total_error += repo_error
 
