@@ -103,7 +103,7 @@ def load_repo_rulesets_config() -> dict[str, dict]:
         {
           "repo-name": {
             "add": ["추가_ruleset.json"],   # repo에 추가 적용할 ruleset 파일 목록
-            "skip": ["main"]                # org 전체 적용에서 제외할 ruleset 키 목록
+            "skip": ["ruleset.json"]        # org 전체 적용에서 제외할 ruleset 파일 목록
           }
         }
 
@@ -370,15 +370,16 @@ def main():
     total_success = 0
     total_error = 0
 
-    # repo별 config에서 skip 목록 구성
+    # repo별 config에서 skip 목록 구성 (파일명 → 제외할 repo 집합)
     repo_config = load_repo_rulesets_config()
-    skip_repos_by_key: dict[str, set[str]] = {}
+    skip_repos_by_file: dict[str, set[str]] = {}
     for repo_name, conf in repo_config.items():
-        for key in conf.get("skip", []):
-            skip_repos_by_key.setdefault(key, set()).add(repo_name)
+        for ruleset_file in conf.get("skip", []):
+            skip_repos_by_file.setdefault(ruleset_file, set()).add(repo_name)
 
     # 1단계: org 전체 ruleset 적용
     for ruleset_key, ruleset_template in ruleset_templates:
+        ruleset_file = AVAILABLE_RULESETS[ruleset_key]
         ruleset_name = ruleset_template["name"]
         print(f"\n[Ruleset: {ruleset_name}]")
         print("-" * 50)
@@ -389,7 +390,7 @@ def main():
             ruleset_key,
             ruleset_template,
             args.dry_run,
-            skip_repos=skip_repos_by_key.get(ruleset_key),
+            skip_repos=skip_repos_by_file.get(ruleset_file),
         )
         total_success += success
         total_error += error

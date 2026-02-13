@@ -3,6 +3,6 @@
     "add": ["ruleset_develop_fe_only.json"]
   },
   "tmn-e2e-video": {
-    "skip": ["main"]
+    "skip": ["ruleset.json"]
   }
 }
