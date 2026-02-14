@@ -1,0 +1,11 @@
+{
+  "jce-codle-react": {
+    "add": ["ruleset_develop_fe_only.json"]
+  },
+  "tmn-e2e-video": {
+    "skip": ["ruleset.json"]
+  },
+  "tmn-cc-settings": {
+    "skip": ["ruleset.json"]
+  }
+}
