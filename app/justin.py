@@ -159,7 +159,9 @@ async def _download_slack_file(file_url: str, bot_token: str) -> bytes:
             return await resp.read()
 
 
-def _pdf_to_base64_images(pdf_bytes: bytes, max_pages: int = MAX_PDF_PAGES) -> list[str]:
+def _pdf_to_base64_images(
+    pdf_bytes: bytes, max_pages: int = MAX_PDF_PAGES
+) -> list[str]:
     """PDF를 페이지별 base64 인코딩 JPEG 이미지로 변환합니다."""
     images = convert_from_bytes(pdf_bytes, dpi=200)
     result = []
@@ -180,7 +182,8 @@ def _extract_pdf_files(event: dict) -> list[dict]:
     """Slack 이벤트에서 PDF 파일 정보를 추출합니다."""
     files = event.get("files", [])
     return [
-        f for f in files
+        f
+        for f in files
         if f.get("mimetype") == "application/pdf"
         or (f.get("name", "").lower().endswith(".pdf"))
     ]
@@ -226,9 +229,7 @@ def register_justin_handlers(app):
         if user:
             user_info_list = await slack_users_list(app.client)
             user_dict = {
-                u["id"]: u
-                for u in user_info_list["members"]
-                if u["id"] == user
+                u["id"]: u for u in user_info_list["members"] if u["id"] == user
             }
             user_profile = user_dict.get(user, {})
             user_real_name = user_profile.get("real_name", "Unknown")
@@ -246,7 +247,9 @@ def register_justin_handlers(app):
         )
 
 
-async def _handle_notion_feedback(app, say, page_id, user_real_name, text, thread_ts, channel):
+async def _handle_notion_feedback(
+    app, say, page_id, user_real_name, text, thread_ts, channel
+):
     """Notion 페이지 기반 피드백을 처리합니다."""
     status_msg = await say(
         ":hourglass_flowing_sand: Notion 페이지를 읽고 있습니다...",
