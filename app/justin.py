@@ -102,21 +102,28 @@ def _build_system_prompt(doc_type: Literal["meeting", "proposal"]) -> str:
     """문서 유형에 따라 시스템 프롬프트를 구성합니다."""
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
-    feedback_all = _load_prompt_file("Feedback_all.md")
-
     if doc_type == "meeting":
         feedback_guide = _load_prompt_file("meeting_feedback.md")
         role_desc = "미팅 보고서 피드백"
+        extra_guides = ""
     else:
         feedback_guide = _load_prompt_file("proposal_feedback.md")
+        proposal_writer = _load_prompt_file("proposal_writer.md")
+        proposal_review = _load_prompt_file("proposal_review_page_by_page.md")
         role_desc = "제안서 피드백"
+        extra_guides = (
+            f"\n\n---\n\n"
+            f"# 제안서 작성 가이드\n\n{proposal_writer}\n\n"
+            f"---\n\n"
+            f"# 제안서 페이지별 리뷰 가이드\n\n{proposal_review}\n"
+        )
 
     return (
         f"당신은 팀모노리스의 AI 피드백 시스템 *Justin*입니다.\n"
         f"오늘 날짜: {today_str}\n\n"
         f"## 역할\n"
         f"직원이 제출한 {role_desc}을(를) 수행합니다.\n"
-        f"아래 피드백 가이드와 팀 역할 가이드를 철저히 준수하여 피드백을 작성하세요.\n\n"
+        f"아래 피드백 가이드를 철저히 준수하여 피드백을 작성하세요.\n\n"
         f"## 슬랙 텍스트 포맷팅\n"
         f"- 슬랙은 마크다운이 아닌 자체 mrkdwn 포맷을 사용합니다.\n"
         f"- Bold: `*텍스트*` (별표 1개, **텍스트** 형식은 작동하지 않음)\n"
@@ -125,9 +132,8 @@ def _build_system_prompt(doc_type: Literal["meeting", "proposal"]) -> str:
         f"- Code: `` `코드` `` (백틱)\n"
         f"- Code block: ``` ```코드 블록``` ``` (백틱 3개)\n\n"
         f"---\n\n"
-        f"# 피드백 가이드\n\n{feedback_guide}\n\n"
-        f"---\n\n"
-        f"# 팀 역할 가이드 & 직원별 프로파일\n\n{feedback_all}\n"
+        f"# 피드백 가이드\n\n{feedback_guide}"
+        f"{extra_guides}\n"
     )
 
 
