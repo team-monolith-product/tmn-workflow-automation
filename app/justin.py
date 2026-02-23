@@ -30,8 +30,8 @@ def _load_prompts_dir() -> Path:
     prompts_dir = os.environ.get("JUSTIN_PROMPTS_DIR", "")
     if prompts_dir:
         return Path(prompts_dir)
-    # 기본값: tmn-workflow-automation과 같은 레벨의 Justin_Project
-    return Path(__file__).resolve().parent.parent.parent / "Justin_Project"
+    # 기본값: 레포지토리 내 justin_prompts 디렉토리
+    return Path(__file__).resolve().parent.parent / "justin_prompts"
 
 
 def _load_prompt_file(filename: str) -> str:
