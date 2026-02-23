@@ -1,20 +1,29 @@
 """
 Justin Bot — 미팅 보고서 / 제안서 자동 피드백 봇
 
-Slack에서 @Justin을 멘션하면서 Notion 페이지 링크를 전달하면,
-Justin_Project의 MD 파일을 기반으로 피드백을 자동 생성합니다.
+Slack에서 @Justin을 멘션하면서 Notion 페이지 링크 또는 PDF 첨부파일을 전달하면,
+Justin 프롬프트 MD 파일을 기반으로 피드백을 자동 생성합니다.
+
+- 미팅 보고서: Notion 링크 → 마크다운 변환 → 피드백
+- 제안서: PDF 첨부파일 → 페이지별 이미지 변환 → Claude Vision → 피드백
 """
 
+import base64
+import io
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+import aiohttp
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from notion2md.exporter.block import StringExporter
+from pdf2image import convert_from_bytes
+from PIL import Image
 
 from .common import slack_users_list
 from .tool_status_handler import ToolStatusHandler
@@ -23,6 +32,9 @@ KST = ZoneInfo("Asia/Seoul")
 
 # Justin 프롬프트 MD 파일 캐시
 _prompts_cache: dict[str, str] = {}
+
+# PDF 페이지 처리 제한
+MAX_PDF_PAGES = 50
 
 
 def _load_prompts_dir() -> Path:
@@ -137,6 +149,43 @@ def _build_system_prompt(doc_type: Literal["meeting", "proposal"]) -> str:
     )
 
 
+async def _download_slack_file(file_url: str, bot_token: str) -> bytes:
+    """Slack 파일을 다운로드합니다."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            file_url, headers={"Authorization": f"Bearer {bot_token}"}
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.read()
+
+
+def _pdf_to_base64_images(pdf_bytes: bytes, max_pages: int = MAX_PDF_PAGES) -> list[str]:
+    """PDF를 페이지별 base64 인코딩 JPEG 이미지로 변환합니다."""
+    images = convert_from_bytes(pdf_bytes, dpi=200)
+    result = []
+    for i, img in enumerate(images[:max_pages]):
+        # 가로 폭 1600px로 리사이즈 (API 비용 최적화)
+        if img.width > 1600:
+            ratio = 1600 / img.width
+            img = img.resize((1600, int(img.height * ratio)), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        result.append(b64)
+    return result
+
+
+def _extract_pdf_files(event: dict) -> list[dict]:
+    """Slack 이벤트에서 PDF 파일 정보를 추출합니다."""
+    files = event.get("files", [])
+    return [
+        f for f in files
+        if f.get("mimetype") == "application/pdf"
+        or (f.get("name", "").lower().endswith(".pdf"))
+    ]
+
+
 def register_justin_handlers(app):
     """
     Justin 봇의 이벤트 핸들러를 등록합니다.
@@ -145,7 +194,10 @@ def register_justin_handlers(app):
     @app.event("app_mention")
     async def justin_app_mention(body, say):
         """
-        Slack에서 @Justin을 멘션하면 Notion 페이지를 읽고 피드백을 생성합니다.
+        Slack에서 @Justin을 멘션하면 Notion 페이지 또는 PDF를 읽고 피드백을 생성합니다.
+
+        - Notion 링크가 있으면 → 미팅 보고서 피드백
+        - PDF 첨부파일이 있으면 → 제안서 피드백 (Claude Vision)
         """
         event = body.get("event")
         if event is None:
@@ -156,90 +208,194 @@ def register_justin_handlers(app):
         user = event.get("user")
         text = event["text"]
 
-        # Notion 페이지 ID 추출
+        # 입력 소스 판별: PDF 첨부 vs Notion 링크
+        pdf_files = _extract_pdf_files(event)
         page_id = extract_notion_page_id(text)
-        if not page_id:
+
+        if not pdf_files and not page_id:
             await say(
-                "Notion 페이지 링크를 함께 보내주세요.\n"
-                "예: `@Justin https://www.notion.so/your-page-id`",
+                "피드백할 문서를 함께 보내주세요.\n"
+                "• 미팅 보고서: `@Justin <Notion 페이지 링크>`\n"
+                "• 제안서: `@Justin` + PDF 파일 첨부",
                 thread_ts=thread_ts,
             )
             return
-
-        # 진행 상태 표시
-        status_msg = await say(
-            ":hourglass_flowing_sand: Notion 페이지를 읽고 있습니다...",
-            thread_ts=thread_ts,
-        )
-
-        # Notion 페이지 → 마크다운 변환
-        try:
-            page_content = StringExporter(block_id=page_id, output_path="test").export()
-        except Exception as e:
-            await say(
-                f"Notion 페이지를 읽는 데 실패했습니다. 페이지 ID를 확인해주세요.\n"
-                f"오류: `{e}`",
-                thread_ts=thread_ts,
-            )
-            return
-
-        if not page_content or not page_content.strip():
-            await say(
-                "Notion 페이지의 내용이 비어 있습니다. 페이지를 확인해주세요.",
-                thread_ts=thread_ts,
-            )
-            return
-
-        # 문서 유형 감지
-        doc_type = detect_document_type(page_content)
-
-        # 상태 업데이트
-        doc_type_label = "미팅 보고서" if doc_type == "meeting" else "제안서"
-        await app.client.chat_update(
-            channel=channel,
-            ts=status_msg["ts"],
-            text=f":hourglass_flowing_sand: {doc_type_label} 피드백을 작성 중입니다...",
-        )
 
         # 작성자 정보 조회
         user_real_name = "Unknown"
         if user:
             user_info_list = await slack_users_list(app.client)
             user_dict = {
-                u["id"]: u for u in user_info_list["members"] if u["id"] == user
+                u["id"]: u
+                for u in user_info_list["members"]
+                if u["id"] == user
             }
             user_profile = user_dict.get(user, {})
             user_real_name = user_profile.get("real_name", "Unknown")
 
-        # 시스템 프롬프트 구성
-        system_prompt = _build_system_prompt(doc_type)
+        # --- PDF 제안서 피드백 ---
+        if pdf_files:
+            await _handle_pdf_feedback(
+                app, say, pdf_files, user_real_name, thread_ts, channel
+            )
+            return
 
-        # 사용자 메시지 구성
-        human_message = (
-            f"아래는 {user_real_name}님이 제출한 {doc_type_label}입니다.\n"
-            f"피드백 가이드에 따라 피드백을 작성해주세요.\n\n"
-            f"---\n\n"
-            f"{page_content}"
+        # --- Notion 미팅 보고서 피드백 ---
+        await _handle_notion_feedback(
+            app, say, page_id, user_real_name, text, thread_ts, channel
         )
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_message),
-        ]
 
-        # Claude로 피드백 생성
-        chat_model = ChatAnthropic(model="claude-sonnet-4-20250514")
+async def _handle_notion_feedback(app, say, page_id, user_real_name, text, thread_ts, channel):
+    """Notion 페이지 기반 피드백을 처리합니다."""
+    status_msg = await say(
+        ":hourglass_flowing_sand: Notion 페이지를 읽고 있습니다...",
+        thread_ts=thread_ts,
+    )
 
-        response = await chat_model.ainvoke(messages)
-        feedback = response.content
+    try:
+        page_content = StringExporter(block_id=page_id, output_path="test").export()
+    except Exception as e:
+        await say(
+            f"Notion 페이지를 읽는 데 실패했습니다. 페이지 ID를 확인해주세요.\n"
+            f"오류: `{e}`",
+            thread_ts=thread_ts,
+        )
+        return
 
-        # 상태 메시지 삭제
-        await app.client.chat_delete(
-            channel=channel,
-            ts=status_msg["ts"],
+    if not page_content or not page_content.strip():
+        await say(
+            "Notion 페이지의 내용이 비어 있습니다. 페이지를 확인해주세요.",
+            thread_ts=thread_ts,
+        )
+        return
+
+    doc_type = detect_document_type(page_content)
+    doc_type_label = "미팅 보고서" if doc_type == "meeting" else "제안서"
+
+    await app.client.chat_update(
+        channel=channel,
+        ts=status_msg["ts"],
+        text=f":hourglass_flowing_sand: {doc_type_label} 피드백을 작성 중입니다...",
+    )
+
+    system_prompt = _build_system_prompt(doc_type)
+    human_message = (
+        f"아래는 {user_real_name}님이 제출한 {doc_type_label}입니다.\n"
+        f"피드백 가이드에 따라 피드백을 작성해주세요.\n\n"
+        f"---\n\n"
+        f"{page_content}"
+    )
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message),
+    ]
+
+    chat_model = ChatAnthropic(model="claude-opus-4-20250514")
+    response = await chat_model.ainvoke(messages)
+    feedback = response.content
+
+    await app.client.chat_delete(channel=channel, ts=status_msg["ts"])
+
+    await say(
+        {
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": feedback},
+                }
+            ]
+        },
+        thread_ts=thread_ts,
+    )
+
+
+async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, channel):
+    """PDF 첨부파일 기반 제안서 피드백을 처리합니다."""
+    pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
+    file_name = pdf_file.get("name", "제안서.pdf")
+
+    status_msg = await say(
+        f":hourglass_flowing_sand: `{file_name}` PDF를 분석 중입니다...",
+        thread_ts=thread_ts,
+    )
+
+    # Slack에서 PDF 다운로드
+    file_url = pdf_file.get("url_private_download") or pdf_file.get("url_private")
+    bot_token = os.environ["SLACK_BOT_TOKEN_JUSTIN"]
+
+    try:
+        pdf_bytes = await _download_slack_file(file_url, bot_token)
+    except Exception as e:
+        await say(
+            f"PDF 파일을 다운로드하는 데 실패했습니다.\n오류: `{e}`",
+            thread_ts=thread_ts,
+        )
+        return
+
+    # PDF → 페이지별 이미지 변환
+    await app.client.chat_update(
+        channel=channel,
+        ts=status_msg["ts"],
+        text=f":hourglass_flowing_sand: `{file_name}` PDF를 이미지로 변환 중입니다...",
+    )
+
+    try:
+        page_images = _pdf_to_base64_images(pdf_bytes)
+    except Exception as e:
+        await say(
+            f"PDF를 이미지로 변환하는 데 실패했습니다.\n오류: `{e}`",
+            thread_ts=thread_ts,
+        )
+        return
+
+    total_pages = len(page_images)
+
+    await app.client.chat_update(
+        channel=channel,
+        ts=status_msg["ts"],
+        text=f":hourglass_flowing_sand: `{file_name}` 제안서 피드백을 작성 중입니다... ({total_pages}페이지)",
+    )
+
+    # Claude Vision 메시지 구성
+    system_prompt = _build_system_prompt("proposal")
+
+    # HumanMessage content를 멀티모달로 구성 (텍스트 + 이미지들)
+    content_parts = [
+        {
+            "type": "text",
+            "text": (
+                f"{user_real_name}님이 제출한 제안서 `{file_name}` ({total_pages}페이지)입니다.\n"
+                f"각 페이지 이미지를 순서대로 확인하고, 피드백 가이드에 따라 피드백을 작성해주세요.\n"
+                f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요."
+            ),
+        }
+    ]
+
+    for i, b64_img in enumerate(page_images):
+        content_parts.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64_img}",
+                },
+            }
         )
 
-        # 피드백 전송
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=content_parts),
+    ]
+
+    chat_model = ChatAnthropic(model="claude-opus-4-20250514")
+    response = await chat_model.ainvoke(messages)
+    feedback = response.content
+
+    await app.client.chat_delete(channel=channel, ts=status_msg["ts"])
+
+    # Slack 메시지 길이 제한(3000자) 대응: 길면 여러 블록으로 분할
+    if len(feedback) <= 3000:
         await say(
             {
                 "blocks": [
@@ -251,3 +407,18 @@ def register_justin_handlers(app):
             },
             thread_ts=thread_ts,
         )
+    else:
+        # 3000자씩 분할하여 전송
+        chunks = [feedback[i : i + 3000] for i in range(0, len(feedback), 3000)]
+        for chunk in chunks:
+            await say(
+                {
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": chunk},
+                        }
+                    ]
+                },
+                thread_ts=thread_ts,
+            )
