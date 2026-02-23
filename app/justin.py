@@ -37,13 +37,7 @@ _prompts_cache: dict[str, str] = {}
 MAX_PDF_PAGES = 50
 
 
-def _load_prompts_dir() -> Path:
-    """Justin_Project 디렉토리 경로를 반환합니다."""
-    prompts_dir = os.environ.get("JUSTIN_PROMPTS_DIR", "")
-    if prompts_dir:
-        return Path(prompts_dir)
-    # 기본값: 레포지토리 내 justin_prompts 디렉토리
-    return Path(__file__).resolve().parent.parent / "justin_prompts"
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "justin_prompts"
 
 
 def _load_prompt_file(filename: str) -> str:
@@ -51,7 +45,7 @@ def _load_prompt_file(filename: str) -> str:
     if filename in _prompts_cache:
         return _prompts_cache[filename]
 
-    filepath = _load_prompts_dir() / filename
+    filepath = PROMPTS_DIR / filename
     content = filepath.read_text(encoding="utf-8")
     _prompts_cache[filename] = content
     return content
