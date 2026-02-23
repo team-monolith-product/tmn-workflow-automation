@@ -5,37 +5,32 @@ Slack에서 @Justin을 멘션하면서 Notion 페이지 링크 또는 PDF 첨부
 Justin 프롬프트 MD 파일을 기반으로 피드백을 자동 생성합니다.
 
 - 미팅 보고서: Notion 링크 → 마크다운 변환 → 피드백
-- 제안서: PDF 첨부파일 → 페이지별 이미지 변환 → Claude Vision → 피드백
+- 제안서: PDF 첨부파일 → Claude 네이티브 PDF 분석 → 피드백
 """
 
 import base64
-import io
 import os
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 import aiohttp
+import anthropic
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from notion2md.exporter.block import StringExporter
-from pdf2image import convert_from_bytes
-from PIL import Image
 
 from .common import slack_users_list
 from .tool_status_handler import ToolStatusHandler
 
 KST = ZoneInfo("Asia/Seoul")
 
+MODEL = "claude-opus-4-20250514"
+
 # Justin 프롬프트 MD 파일 캐시
 _prompts_cache: dict[str, str] = {}
-
-# PDF 페이지 처리 제한
-MAX_PDF_PAGES = 50
-
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "justin_prompts"
 
@@ -149,25 +144,6 @@ async def _download_slack_file(file_url: str, bot_token: str) -> bytes:
             return await resp.read()
 
 
-def _pdf_to_base64_images(
-    pdf_bytes: bytes, max_pages: int = MAX_PDF_PAGES
-) -> list[str]:
-    """PDF를 페이지별 base64 인코딩 JPEG 이미지로 변환합니다."""
-    images = convert_from_bytes(pdf_bytes, dpi=200)
-    result = []
-    for i, img in enumerate(images[:max_pages]):
-        # 가로 폭 1600px로 리사이즈 (API 비용 최적화)
-        if img.width > 1600:
-            ratio = 1600 / img.width
-            img = img.resize((1600, int(img.height * ratio)), Image.LANCZOS)
-
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-        result.append(b64)
-    return result
-
-
 def _extract_pdf_files(event: dict) -> list[dict]:
     """Slack 이벤트에서 PDF 파일 정보를 추출합니다."""
     files = event.get("files", [])
@@ -190,7 +166,7 @@ def register_justin_handlers(app):
         Slack에서 @Justin을 멘션하면 Notion 페이지 또는 PDF를 읽고 피드백을 생성합니다.
 
         - Notion 링크가 있으면 → 미팅 보고서 피드백
-        - PDF 첨부파일이 있으면 → 제안서 피드백 (Claude Vision)
+        - PDF 첨부파일이 있으면 → 제안서 피드백 (네이티브 PDF)
         """
         event = body.get("event")
         if event is None:
@@ -285,7 +261,7 @@ async def _handle_notion_feedback(
         HumanMessage(content=human_message),
     ]
 
-    chat_model = ChatAnthropic(model="claude-opus-4-20250514")
+    chat_model = ChatAnthropic(model=MODEL)
     response = await chat_model.ainvoke(messages)
     feedback = response.content
 
@@ -305,7 +281,7 @@ async def _handle_notion_feedback(
 
 
 async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, channel):
-    """PDF 첨부파일 기반 제안서 피드백을 처리합니다."""
+    """PDF 첨부파일 기반 제안서 피드백을 처리합니다. (Claude 네이티브 PDF 지원)"""
     pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
     file_name = pdf_file.get("name", "제안서.pdf")
 
@@ -327,63 +303,48 @@ async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, c
         )
         return
 
-    # PDF → 페이지별 이미지 변환
-    await app.client.chat_update(
-        channel=channel,
-        ts=status_msg["ts"],
-        text=f":hourglass_flowing_sand: `{file_name}` PDF를 이미지로 변환 중입니다...",
-    )
-
-    try:
-        page_images = _pdf_to_base64_images(pdf_bytes)
-    except Exception as e:
-        await say(
-            f"PDF를 이미지로 변환하는 데 실패했습니다.\n오류: `{e}`",
-            thread_ts=thread_ts,
-        )
-        return
-
-    total_pages = len(page_images)
+    pdf_base64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
     await app.client.chat_update(
         channel=channel,
         ts=status_msg["ts"],
-        text=f":hourglass_flowing_sand: `{file_name}` 제안서 피드백을 작성 중입니다... ({total_pages}페이지)",
+        text=f":hourglass_flowing_sand: `{file_name}` 제안서 피드백을 작성 중입니다...",
     )
 
-    # Claude Vision 메시지 구성
+    # Claude 네이티브 PDF API로 직접 호출
     system_prompt = _build_system_prompt("proposal")
 
-    # HumanMessage content를 멀티모달로 구성 (텍스트 + 이미지들)
-    content_parts = [
-        {
-            "type": "text",
-            "text": (
-                f"{user_real_name}님이 제출한 제안서 `{file_name}` ({total_pages}페이지)입니다.\n"
-                f"각 페이지 이미지를 순서대로 확인하고, 피드백 가이드에 따라 피드백을 작성해주세요.\n"
-                f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요."
-            ),
-        }
-    ]
-
-    for i, b64_img in enumerate(page_images):
-        content_parts.append(
+    client = anthropic.AsyncAnthropic()
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=16384,
+        system=system_prompt,
+        messages=[
             {
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{b64_img}",
-                },
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            f"{user_real_name}님이 제출한 제안서 `{file_name}`입니다.\n"
+                            f"피드백 가이드에 따라 피드백을 작성해주세요.\n"
+                            f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요."
+                        ),
+                    },
+                ],
             }
-        )
+        ],
+    )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=content_parts),
-    ]
-
-    chat_model = ChatAnthropic(model="claude-opus-4-20250514")
-    response = await chat_model.ainvoke(messages)
-    feedback = response.content
+    feedback = response.content[0].text
 
     await app.client.chat_delete(channel=channel, ts=status_msg["ts"])
 
@@ -401,7 +362,6 @@ async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, c
             thread_ts=thread_ts,
         )
     else:
-        # 3000자씩 분할하여 전송
         chunks = [feedback[i : i + 3000] for i in range(0, len(feedback), 3000)]
         for chunk in chunks:
             await say(

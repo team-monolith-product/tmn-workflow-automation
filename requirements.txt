@@ -29,5 +29,4 @@ pydantic
 boto3
 pandas
 matplotlib
-pdf2image
-Pillow
+anthropic
