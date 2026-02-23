@@ -120,13 +120,10 @@ def _build_system_prompt(doc_type: Literal["meeting", "proposal"]) -> str:
         extra_guides = ""
     else:
         feedback_guide = _load_prompt_file("proposal_feedback.md")
-        proposal_writer = _load_prompt_file("proposal_writer.md")
         proposal_review = _load_prompt_file("proposal_review_page_by_page.md")
         role_desc = "제안서 피드백"
         extra_guides = (
             f"\n\n---\n\n"
-            f"# 제안서 작성 가이드\n\n{proposal_writer}\n\n"
-            f"---\n\n"
             f"# 제안서 페이지별 리뷰 가이드\n\n{proposal_review}\n"
         )
 
