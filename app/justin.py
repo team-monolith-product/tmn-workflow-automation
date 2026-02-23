@@ -123,8 +123,7 @@ def _build_system_prompt(doc_type: Literal["meeting", "proposal"]) -> str:
         proposal_review = _load_prompt_file("proposal_review_page_by_page.md")
         role_desc = "제안서 피드백"
         extra_guides = (
-            f"\n\n---\n\n"
-            f"# 제안서 페이지별 리뷰 가이드\n\n{proposal_review}\n"
+            f"\n\n---\n\n" f"# 제안서 페이지별 리뷰 가이드\n\n{proposal_review}\n"
         )
 
     return (
