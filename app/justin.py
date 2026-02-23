@@ -168,9 +168,7 @@ def register_justin_handlers(app):
 
         # Notion 페이지 → 마크다운 변환
         try:
-            page_content = StringExporter(
-                block_id=page_id, output_path="test"
-            ).export()
+            page_content = StringExporter(block_id=page_id, output_path="test").export()
         except Exception as e:
             await say(
                 f"Notion 페이지를 읽는 데 실패했습니다. 페이지 ID를 확인해주세요.\n"
@@ -202,9 +200,7 @@ def register_justin_handlers(app):
         if user:
             user_info_list = await slack_users_list(app.client)
             user_dict = {
-                u["id"]: u
-                for u in user_info_list["members"]
-                if u["id"] == user
+                u["id"]: u for u in user_info_list["members"] if u["id"] == user
             }
             user_profile = user_dict.get(user, {})
             user_real_name = user_profile.get("real_name", "Unknown")
