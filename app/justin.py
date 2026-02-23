@@ -27,7 +27,7 @@ from .tool_status_handler import ToolStatusHandler
 
 KST = ZoneInfo("Asia/Seoul")
 
-MODEL = "claude-opus-4-20250514"
+MODEL = "claude-opus-4-6"
 
 # Justin 프롬프트 MD 파일 캐시
 _prompts_cache: dict[str, str] = {}
