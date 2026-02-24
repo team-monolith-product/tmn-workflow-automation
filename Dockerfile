@@ -10,6 +10,7 @@ WORKDIR /app
 # 한글 폰트 설치 (matplotlib 차트 한글 표시용)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-nanum \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # matplotlib 폰트 캐시 삭제 (새 폰트 인식을 위해)
