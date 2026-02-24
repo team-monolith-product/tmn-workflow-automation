@@ -28,7 +28,30 @@ def main(dry_run: bool = False):
 
     email_to_user_id = get_email_to_user_id(slack_client)
 
-    alert_missing_author(notion, slack_client, email_to_user_id, dry_run)
+    send_intro_message(slack_client, dry_run)
+    issues_found = alert_missing_author(notion, slack_client, email_to_user_id, dry_run)
+
+    if not issues_found:
+        text = "검출된 항목이 없습니다. 고생하셨습니다!"
+        if dry_run:
+            print(f"[dry-run] {text}")
+        else:
+            slack_client.chat_postMessage(channel=CHANNEL_ID, text=text)
+
+
+def send_intro_message(
+    slack_client: WebClient,
+    dry_run: bool = False,
+):
+    """일간 고객팀 보고서 자동 검수 인트로 메시지 전송"""
+    text = (
+        "일간 고객팀 보고서 자동 검수 결과를 안내드립니다.\n"
+        "아래 항목을 확인 후 조치 부탁드립니다."
+    )
+    if dry_run:
+        print(f"[dry-run] {text}")
+    else:
+        slack_client.chat_postMessage(channel=CHANNEL_ID, text=text)
 
 
 def alert_missing_author(
@@ -88,6 +111,8 @@ def alert_missing_author(
             print(f"[dry-run] {text}")
         else:
             slack_client.chat_postMessage(channel=CHANNEL_ID, text=text)
+
+    return len(results.get("results", [])) > 0
 
 
 if __name__ == "__main__":
