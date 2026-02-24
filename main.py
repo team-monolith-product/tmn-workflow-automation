@@ -15,7 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
-from notion2md.exporter.block import StringExporter
+from app.common import notion_page_to_markdown
 from github import Github, GithubException
 from dotenv import load_dotenv
 
@@ -125,7 +125,7 @@ def extract_title(properties: dict) -> str:
 
 def get_notion_markdown(page_id: str) -> str:
     """Notion 페이지를 마크다운으로 변환"""
-    return StringExporter(block_id=page_id, output_path="dummy").export()
+    return notion_page_to_markdown(page_id)
 
 
 def create_branch_name(task_id: str) -> str:

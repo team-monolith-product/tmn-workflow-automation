@@ -6,7 +6,7 @@ notion-client==2.7.0
 md2notionpage
 cachetools
 requests
-notion2md
+notion-to-md-py @ git+https://github.com/team-monolith-product/notion-to-md-py.git@main
 langchain-community
 langchain-openai
 langchain-anthropic

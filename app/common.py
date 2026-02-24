@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
-from notion2md.exporter.block import StringExporter
+from notion_to_md import NotionToMarkdown
 from langchain_core.tools import tool
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.tools import TavilySearchResults
@@ -117,6 +117,15 @@ KST = ZoneInfo("Asia/Seoul")
 
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
+
+
+def notion_page_to_markdown(page_id: str) -> str:
+    """노션 페이지를 마크다운 문자열로 변환한다."""
+    n2m = NotionToMarkdown(notion_client=notion)
+    md_blocks = n2m.page_to_markdown(page_id)
+    md_string_dict = n2m.to_markdown_string(md_blocks)
+    return md_string_dict.get("parent", "")
+
 
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
@@ -499,7 +508,7 @@ def get_notion_page_tool():
         노션 페이지를 마크다운 형태로 조회합니다.
         www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
-        return StringExporter(block_id=page_id, output_path="test").export()
+        return notion_page_to_markdown(page_id)
 
     return get_notion_page
 
