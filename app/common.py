@@ -118,6 +118,15 @@ KST = ZoneInfo("Asia/Seoul")
 # 노션 클라이언트 초기화
 notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
 
+
+def notion_page_to_markdown(page_id: str) -> str:
+    """노션 페이지를 마크다운 문자열로 변환한다."""
+    n2m = NotionToMarkdown(notion_client=notion)
+    md_blocks = n2m.page_to_markdown(page_id)
+    md_string_dict = n2m.to_markdown_string(md_blocks)
+    return md_string_dict.get("parent", "")
+
+
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
 _cache_database_schema = TTLCache(maxsize=10, ttl=3600)
@@ -499,10 +508,7 @@ def get_notion_page_tool():
         노션 페이지를 마크다운 형태로 조회합니다.
         www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
-        n2m = NotionToMarkdown(notion_client=notion)
-        md_blocks = n2m.page_to_markdown(page_id)
-        md_string_dict = n2m.to_markdown_string(md_blocks)
-        return md_string_dict.get("parent", "")
+        return notion_page_to_markdown(page_id)
 
     return get_notion_page
 
