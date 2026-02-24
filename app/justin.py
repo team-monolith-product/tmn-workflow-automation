@@ -20,9 +20,9 @@ import aiohttp
 import anthropic
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
-from notion2md.exporter.block import StringExporter
+from notion_to_md import NotionToMarkdown
 
-from .common import slack_users_list
+from .common import slack_users_list, notion
 from .tool_status_handler import ToolStatusHandler
 
 KST = ZoneInfo("Asia/Seoul")
@@ -223,7 +223,10 @@ async def _handle_notion_feedback(
     )
 
     try:
-        page_content = StringExporter(block_id=page_id, output_path="test").export()
+        n2m = NotionToMarkdown(notion_client=notion)
+        md_blocks = n2m.page_to_markdown(page_id)
+        md_string_dict = n2m.to_markdown_string(md_blocks)
+        page_content = md_string_dict.get("parent", "")
     except Exception as e:
         await say(
             f"Notion 페이지를 읽는 데 실패했습니다. 페이지 ID를 확인해주세요.\n"

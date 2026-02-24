@@ -15,7 +15,8 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
-from notion2md.exporter.block import StringExporter
+from notion_to_md import NotionToMarkdown
+from notion_client import Client as NotionClient
 from github import Github, GithubException
 from dotenv import load_dotenv
 
@@ -123,9 +124,15 @@ def extract_title(properties: dict) -> str:
     return "Untitled"
 
 
+_notion_client = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
+
+
 def get_notion_markdown(page_id: str) -> str:
     """Notion 페이지를 마크다운으로 변환"""
-    return StringExporter(block_id=page_id, output_path="dummy").export()
+    n2m = NotionToMarkdown(notion_client=_notion_client)
+    md_blocks = n2m.page_to_markdown(page_id)
+    md_string_dict = n2m.to_markdown_string(md_blocks)
+    return md_string_dict.get("parent", "")
 
 
 def create_branch_name(task_id: str) -> str:
