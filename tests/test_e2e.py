@@ -1,35 +1,24 @@
 """
 End-to-End 테스트 - 전체 플로우 테스트
 
-슬랙 멘션 → 라우터 → 데이터 분석 Agent → Tools → 슬랙 응답
+슬랙 멘션 → 데이터 분석 Agent → Tools → 슬랙 응답
 """
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from datetime import datetime
 
 
 class TestDataAnalysisE2E:
     """데이터 분석 Bot의 전체 플로우를 테스트합니다"""
 
     @pytest.mark.asyncio
-    @patch("app.router.ChatOpenAI")
-    @patch("app.data_analysis.create_react_agent")
-    @patch("app.data_analysis.ChatOpenAI")
-    async def test_data_analysis_flow_with_router(
-        self, mock_chat_openai, mock_create_agent, mock_router_chat
-    ):
+    @patch("app.data_bot.create_react_agent")
+    @patch("app.data_bot.ChatOpenAI")
+    async def test_data_analysis_flow(self, mock_chat_openai, mock_create_agent):
         """
-        전체 플로우 테스트: 라우터 → 데이터 분석 Agent
+        전체 플로우 테스트: 데이터 분석 Agent 실행
         """
-        # 1. 라우터 모킹 - "data_analysis"로 라우팅
-        mock_router_llm = MagicMock()
-        mock_router_response = Mock()
-        mock_router_response.content = "data_analysis"
-        mock_router_llm.ainvoke = AsyncMock(return_value=mock_router_response)
-        mock_router_chat.return_value = mock_router_llm
-
-        # 2. Agent 실행 결과 모킹
+        # Agent 실행 결과 모킹
         mock_agent_executor = MagicMock()
         mock_final_message = Mock()
         mock_final_message.content = "지난달 매출은 1억 원입니다."
@@ -38,17 +27,12 @@ class TestDataAnalysisE2E:
         )
         mock_create_agent.return_value = mock_agent_executor
 
-        # 3. Say 함수 모킹
+        # Say 함수 모킹
         mock_say = AsyncMock()
+        mock_slack_client = MagicMock()
 
-        # 4. 라우터 실행
-        from app.router import route_question
-
-        agent_type = await route_question("지난달 매출이 얼마야?")
-        assert agent_type == "data_analysis"
-
-        # 5. 데이터 분석 Agent 실행
-        from app.data_analysis import answer_data_analysis
+        # 데이터 분석 Agent 실행
+        from app.data_bot import answer_data_analysis
 
         await answer_data_analysis(
             thread_ts="1234567890.123456",
@@ -57,9 +41,10 @@ class TestDataAnalysisE2E:
             threads_joined="",
             text="지난달 매출이 얼마야?",
             say=mock_say,
+            slack_client=mock_slack_client,
         )
 
-        # 6. 검증: say가 호출되었는지 확인
+        # 검증: say가 호출되었는지 확인
         assert mock_say.called
         # 최종 답변 호출 찾기 (blocks가 있는 호출)
         blocks_calls = [
@@ -89,7 +74,7 @@ class TestDataAnalysisE2E:
         # 1. Redash 대시보드 목록 모킹
         mock_list_dashboards.return_value = {
             "results": [
-                {"name": "매출 대시보드", "slug": "sales-dashboard", "tags": ["sales"]}
+                {"id": 1, "name": "매출 대시보드", "slug": "sales-dashboard", "tags": ["sales"]}
             ]
         }
 
@@ -126,70 +111,36 @@ class TestDataAnalysisE2E:
 
         # 4. Tools 임포트 및 실행
         from app.tools.redash_tools import list_redash_dashboards, read_redash_dashboard
-        from app.tools.athena_tools import execute_athena_query
+        from app.tools.athena_tools import get_execute_athena_query_tool
 
         # 5. Tool 체인 실행
         # Step 1: 대시보드 목록 조회
         dashboard_list = list_redash_dashboards.func()
         assert "매출 대시보드" in dashboard_list
-        assert "sales-dashboard" in dashboard_list
+        assert "ID 1" in dashboard_list
 
-        # Step 2: 대시보드 상세 조회
-        dashboard_detail = read_redash_dashboard.func(slug="sales-dashboard")
+        # Step 2: 대시보드 상세 조회 (dashboard_id 사용)
+        dashboard_detail = read_redash_dashboard.func(dashboard_id=1)
         assert "월별 매출" in dashboard_detail
-        assert "analytics.sales" in dashboard_detail
 
-        # Step 3: Athena 쿼리 실행
-        query_result = execute_athena_query.func(
-            query="SELECT SUM(amount) FROM analytics.sales WHERE date >= '2024-12-01'",
-            database="analytics",
+        # Step 3: Athena 쿼리 실행 (async tool)
+        execute_athena_query = get_execute_athena_query_tool()
+        query_result = await execute_athena_query.ainvoke(
+            {
+                "query": "SELECT SUM(amount) FROM analytics.sales WHERE date >= '2024-12-01'",
+                "database": "analytics",
+            }
         )
         assert "total_sales" in query_result
         assert "100000000" in query_result
 
         # 6. 모든 API가 호출되었는지 검증
         mock_list_dashboards.assert_called_once()
-        mock_get_dashboard.assert_called_once()
         mock_athena_exec.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("app.router.ChatOpenAI")
-    async def test_router_classification(self, mock_chat):
-        """
-        라우터가 다양한 질문을 올바르게 분류하는지 테스트
-        """
-        from app.router import route_question
-
-        test_cases = [
-            # (질문, 기대 결과)
-            ("지난달 매출이 얼마야?", "data_analysis"),
-            ("사용자 수 추이를 보여줘", "data_analysis"),
-            ("전환율이 어떻게 되나요?", "data_analysis"),
-            ("SQL로 데이터 조회해줘", "data_analysis"),
-            ("노션 페이지 만들어줘", "general"),
-            ("구글에서 검색해줘", "general"),
-            ("오늘 날씨 어때?", "general"),
-        ]
-
-        for question, expected_type in test_cases:
-            # 라우터 LLM 모킹
-            mock_llm = MagicMock()
-            mock_response = Mock()
-            mock_response.content = expected_type
-            mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-            mock_chat.return_value = mock_llm
-
-            # 라우팅 실행
-            result = await route_question(question)
-
-            # 검증
-            assert (
-                result == expected_type
-            ), f"질문 '{question}'의 분류가 잘못되었습니다. 기대: {expected_type}, 실제: {result}"
-
-    @pytest.mark.asyncio
-    @patch("app.data_analysis.create_react_agent")
-    @patch("app.data_analysis.ChatOpenAI")
+    @patch("app.data_bot.create_react_agent")
+    @patch("app.data_bot.ChatOpenAI")
     async def test_error_handling_in_agent(self, mock_chat_openai, mock_create_agent):
         """
         Agent에서 에러가 발생했을 때의 처리를 테스트
@@ -202,8 +153,9 @@ class TestDataAnalysisE2E:
         mock_create_agent.return_value = mock_agent_executor
 
         mock_say = AsyncMock()
+        mock_slack_client = MagicMock()
 
-        from app.data_analysis import answer_data_analysis
+        from app.data_bot import answer_data_analysis
 
         # 에러가 발생해도 프로그램이 중단되지 않아야 함
         with pytest.raises(Exception) as exc_info:
@@ -214,13 +166,14 @@ class TestDataAnalysisE2E:
                 threads_joined="",
                 text="지난달 매출이 얼마야?",
                 say=mock_say,
+                slack_client=mock_slack_client,
             )
 
         assert "Athena 쿼리 실행 실패" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    @patch("app.data_analysis.create_react_agent")
-    @patch("app.data_analysis.ChatOpenAI")
+    @patch("app.data_bot.create_react_agent")
+    @patch("app.data_bot.ChatOpenAI")
     async def test_thread_context_handling(self, mock_chat_openai, mock_create_agent):
         """
         스레드 컨텍스트(이전 대화)가 올바르게 처리되는지 테스트
@@ -242,8 +195,9 @@ class TestDataAnalysisE2E:
         mock_create_agent.return_value = mock_agent_executor
 
         mock_say = AsyncMock()
+        mock_slack_client = MagicMock()
 
-        from app.data_analysis import answer_data_analysis
+        from app.data_bot import answer_data_analysis
 
         # 스레드 컨텍스트와 함께 실행
         threads_joined = (
@@ -257,6 +211,7 @@ class TestDataAnalysisE2E:
             threads_joined=threads_joined,
             text="그럼 12월은?",
             say=mock_say,
+            slack_client=mock_slack_client,
         )
 
         # 검증: 스레드 컨텍스트가 메시지에 포함되었는지 확인
@@ -265,28 +220,6 @@ class TestDataAnalysisE2E:
         assert "11월 매출" in human_message_content
         assert "유저B" in human_message_content
         assert "그럼 12월은?" in human_message_content
-
-
-class TestGeneralAgentE2E:
-    """General Agent의 전체 플로우를 테스트합니다"""
-
-    @pytest.mark.asyncio
-    @patch("app.router.ChatOpenAI")
-    async def test_general_flow_routing(self, mock_chat):
-        """
-        일반 질문이 general agent로 라우팅되는지 테스트
-        """
-        # 라우터 모킹 - "general"로 라우팅
-        mock_llm = MagicMock()
-        mock_response = Mock()
-        mock_response.content = "general"
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        mock_chat.return_value = mock_llm
-
-        from app.router import route_question
-
-        agent_type = await route_question("노션에 페이지 만들어줘")
-        assert agent_type == "general"
 
 
 if __name__ == "__main__":

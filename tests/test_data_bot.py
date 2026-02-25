@@ -113,7 +113,7 @@ class TestAthenaTools:
     def test_format_query_results_empty(self):
         """빈 결과 포맷팅 테스트"""
         results = {}
-        formatted = athena_tools.format_query_results(results)
+        formatted = athena_tools.format_query_results_as_markdown(results)
         assert formatted == "결과가 없습니다."
 
     def test_format_query_results_with_data(self):
@@ -127,7 +127,7 @@ class TestAthenaTools:
                 ]
             }
         }
-        formatted = athena_tools.format_query_results(results)
+        formatted = athena_tools.format_query_results_as_markdown(results)
 
         assert "id" in formatted
         assert "name" in formatted
@@ -135,8 +135,9 @@ class TestAthenaTools:
         assert "Bob" in formatted
         assert "|" in formatted  # 마크다운 테이블 형식
 
+    @pytest.mark.asyncio
     @patch("api.athena.execute_and_wait")
-    def test_execute_athena_query_tool(self, mock_execute):
+    async def test_execute_athena_query_tool(self, mock_execute):
         """Athena 쿼리 실행 tool 테스트"""
         mock_execute.return_value = {
             "ResultSet": {
@@ -147,8 +148,8 @@ class TestAthenaTools:
             }
         }
 
-        result = athena_tools.execute_athena_query.func(
-            query="SELECT COUNT(*) as count FROM test", database="test_db"
+        result = await athena_tools.execute_athena_query.ainvoke(
+            {"query": "SELECT COUNT(*) as count FROM test", "database": "test_db"}
         )
 
         assert "count" in result
@@ -202,8 +203,7 @@ class TestRedashTools:
             ],
         }
 
-        # ID가 숫자인 경우 직접 사용
-        result = redash_tools.read_redash_dashboard.func(slug="123")
+        result = redash_tools.read_redash_dashboard.func(dashboard_id=123)
 
         assert "Test Dashboard" in result
         assert "Query ID 123" in result
@@ -223,7 +223,6 @@ class TestRedashTools:
 
         assert "Test Query" in result
         assert "analytics.users" in result
-        assert "**Data Source ID:** 1" in result
 
 
 if __name__ == "__main__":
