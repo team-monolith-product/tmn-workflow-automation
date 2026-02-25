@@ -212,6 +212,43 @@ def register_justin_handlers(app):
             app, say, page_id, user_real_name, text, thread_ts, channel
         )
 
+    @app.event("message")
+    async def justin_auto_review(body, say):
+        """
+        고객팀 채널에 Notion 링크가 포함된 메시지가 올라오면
+        멘션 없이 자동으로 미팅 보고서 피드백을 수행합니다.
+        """
+        event = body.get("event")
+        if event is None:
+            return
+
+        # 봇 메시지, 메시지 수정, 삭제 등은 무시
+        if event.get("bot_id") or event.get("subtype"):
+            return
+
+        text = event.get("text", "")
+        page_id = extract_notion_page_id(text)
+        if not page_id:
+            return
+
+        thread_ts = event.get("thread_ts") or event["ts"]
+        channel = event["channel"]
+        user = event.get("user")
+
+        # 작성자 정보 조회
+        user_real_name = "Unknown"
+        if user:
+            user_info_list = await slack_users_list(app.client)
+            user_dict = {
+                u["id"]: u for u in user_info_list["members"] if u["id"] == user
+            }
+            user_profile = user_dict.get(user, {})
+            user_real_name = user_profile.get("real_name", "Unknown")
+
+        await _handle_notion_feedback(
+            app, say, page_id, user_real_name, text, thread_ts, channel
+        )
+
 
 async def _handle_notion_feedback(
     app, say, page_id, user_real_name, text, thread_ts, channel
