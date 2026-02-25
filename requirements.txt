@@ -23,6 +23,7 @@ tabulate[widechars]
 redis
 PyGithub
 pytest
+pytest-asyncio
 fastapi
 uvicorn[standard]
 pydantic

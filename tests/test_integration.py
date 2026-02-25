@@ -2,6 +2,7 @@
 Integration 테스트 - 실제 API와 통신
 """
 
+import os
 import pytest
 from dotenv import load_dotenv
 from api import redash, athena
@@ -10,6 +11,10 @@ from api import redash, athena
 load_dotenv()
 
 
+@pytest.mark.skipif(
+    not os.environ.get("REDASH_BASE_URL"),
+    reason="REDASH_BASE_URL 환경 변수가 설정되지 않음 (integration 테스트는 실제 API 필요)",
+)
 class TestRedashIntegration:
     """Redash API Integration 테스트"""
 
