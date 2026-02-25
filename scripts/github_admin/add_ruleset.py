@@ -5,7 +5,7 @@ Ruleset API는 PyGithub에서 직접 지원하지 않으므로 REST API를 사�
 인증은 환경변수의 토큰을 사용하여 보안을 유지합니다.
 
 사용법:
-    python scripts/github/add_ruleset.py [--dry-run]
+    python scripts/github_admin/add_ruleset.py [--dry-run]
 
 옵션:
     --dry-run: 실제 변경 없이 어떤 리포지토리에 ruleset이 적용될지 확인
@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from scripts.github.common import (
+from scripts.github_admin.common import (
     get_all_repos,
     get_github_client,
     get_org_name,
