@@ -8,3 +8,7 @@ backup_*.json
 **/.claude/settings.local.json
 
 .idea
+
+# mcp-memory build artifacts
+node_modules/
+mcp-memory/dist/
