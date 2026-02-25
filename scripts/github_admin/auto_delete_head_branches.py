@@ -4,7 +4,7 @@ GitHub Organization의 모든 리포지토리에 delete_branch_on_merge 설정�
 PR 병합 시 head 브랜치를 자동으로 삭제하도록 설정합니다.
 
 사용법:
-    python scripts/github/auto_delete_head_branches.py [--dry-run]
+    python scripts/github_admin/auto_delete_head_branches.py [--dry-run]
 
 옵션:
     --dry-run: 실제 변경 없이 어떤 리포지토리에 설정이 적용될지 확인
@@ -20,7 +20,7 @@ from github.Repository import Repository
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from scripts.github.common import (
+from scripts.github_admin.common import (
     get_all_repos,
     get_github_client,
     get_organization,

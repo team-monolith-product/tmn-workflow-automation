@@ -2,6 +2,7 @@
 GitHub Organization 관리 스크립트 모음
 
 이 패키지는 GitHub Organization의 리포지토리를 일괄 관리하는 스크립트를 제공합니다.
+패키지 이름이 github_admin인 이유: PyGithub의 github 패키지와 이름 충돌을 방지하기 위함.
 
 스크립트 목록:
 - add_code_owners.py: 모든 리포지토리에 CODEOWNERS 파일 추가
