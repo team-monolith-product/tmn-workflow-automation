@@ -100,13 +100,7 @@ def main():
         CONTENTS_CHANNEL_ID,
         email_to_user_id,
     )
-    alert_pending_but_started_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-    )
+    # 콘텐츠 DB에는 '시작일' formula 속성이 없으므로 alert_pending_but_started_tasks 생략
     alert_no_due_tasks(
         notion,
         slack_client,
