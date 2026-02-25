@@ -18,8 +18,11 @@ import uvicorn
 from app.common import notion_page_to_markdown
 from github import Github, GithubException
 from dotenv import load_dotenv
+import sentry_sdk
 
 load_dotenv()
+
+sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN", ""))
 
 # ============================================================================
 # 로깅 설정
