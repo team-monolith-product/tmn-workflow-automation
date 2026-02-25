@@ -74,7 +74,12 @@ class TestDataAnalysisE2E:
         # 1. Redash 대시보드 목록 모킹
         mock_list_dashboards.return_value = {
             "results": [
-                {"id": 1, "name": "매출 대시보드", "slug": "sales-dashboard", "tags": ["sales"]}
+                {
+                    "id": 1,
+                    "name": "매출 대시보드",
+                    "slug": "sales-dashboard",
+                    "tags": ["sales"],
+                }
             ]
         }
 
