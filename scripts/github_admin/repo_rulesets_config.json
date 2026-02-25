@@ -7,5 +7,16 @@
   },
   "tmn-cc-settings": {
     "skip": ["ruleset.json"]
+  },
+  "aha-memory": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
+  "aha": {
+    "skip": ["ruleset_develop.json"]
+  },
+  "docgen": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
   }
 }
