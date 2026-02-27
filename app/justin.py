@@ -44,7 +44,6 @@ def _load_prompt_file(filename: str) -> str:
     return content
 
 
-
 def extract_notion_page_id(text: str) -> str | None:
     """Slack 메시지에서 Notion 페이지 ID(32자 hex)를 추출합니다."""
     # Slack이 URL을 <url|label> 형식으로 감쌀 수 있으므로 < > 안도 탐색
