@@ -260,8 +260,7 @@ async def _handle_notion_feedback(
 
     user_instructions = _extract_user_instructions(text)
     instructions_block = (
-        f"\n\n---\n\n"
-        f"## 요청자의 추가 지시사항\n\n{user_instructions}\n"
+        f"\n\n---\n\n" f"## 요청자의 추가 지시사항\n\n{user_instructions}\n"
         if user_instructions
         else ""
     )
@@ -298,7 +297,9 @@ async def _handle_notion_feedback(
     )
 
 
-async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, text, thread_ts, channel):
+async def _handle_pdf_feedback(
+    app, say, pdf_files, user_real_name, text, thread_ts, channel
+):
     """PDF 첨부파일 기반 제안서 피드백을 처리합니다. (Claude 네이티브 PDF 지원)"""
     pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
     file_name = pdf_file.get("name", "제안서.pdf")
