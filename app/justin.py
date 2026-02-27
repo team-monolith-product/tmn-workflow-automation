@@ -44,6 +44,16 @@ def _load_prompt_file(filename: str) -> str:
     return content
 
 
+def _extract_user_instructions(text: str) -> str:
+    """멘션 메시지에서 봇 멘션과 URL을 제거하고 사용자의 추가 지시사항만 추출합니다."""
+    cleaned = text
+    # 봇 멘션 제거: <@UXXXXXX>
+    cleaned = re.sub(r"<@[A-Z0-9]+>", "", cleaned)
+    # Slack 링크 제거: <url|label> 또는 <url>
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    return cleaned.strip()
+
+
 def extract_notion_page_id(text: str) -> str | None:
     """Slack 메시지에서 Notion 페이지 ID(32자 hex)를 추출합니다."""
     # Slack이 URL을 <url|label> 형식으로 감쌀 수 있으므로 < > 안도 탐색
@@ -201,7 +211,7 @@ def register_justin_handlers(app):
         # --- PDF 제안서 피드백 ---
         if pdf_files:
             await _handle_pdf_feedback(
-                app, say, pdf_files, user_real_name, thread_ts, channel
+                app, say, pdf_files, user_real_name, text, thread_ts, channel
             )
             return
 
@@ -247,9 +257,19 @@ async def _handle_notion_feedback(
     )
 
     system_prompt = _build_system_prompt(doc_type)
+
+    user_instructions = _extract_user_instructions(text)
+    instructions_block = (
+        f"\n\n---\n\n"
+        f"## 요청자의 추가 지시사항\n\n{user_instructions}\n"
+        if user_instructions
+        else ""
+    )
+
     human_message = (
         f"아래는 {user_real_name}님이 제출한 {doc_type_label}입니다.\n"
-        f"피드백 가이드에 따라 피드백을 작성해주세요.\n\n"
+        f"피드백 가이드에 따라 피드백을 작성해주세요.\n"
+        f"{instructions_block}\n"
         f"---\n\n"
         f"{page_content}"
     )
@@ -278,7 +298,7 @@ async def _handle_notion_feedback(
     )
 
 
-async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, channel):
+async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, text, thread_ts, channel):
     """PDF 첨부파일 기반 제안서 피드백을 처리합니다. (Claude 네이티브 PDF 지원)"""
     pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
     file_name = pdf_file.get("name", "제안서.pdf")
@@ -312,6 +332,13 @@ async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, c
     # Claude 네이티브 PDF API로 직접 호출
     system_prompt = _build_system_prompt("proposal")
 
+    user_instructions = _extract_user_instructions(text)
+    instructions_block = (
+        f"\n\n## 요청자의 추가 지시사항\n{user_instructions}"
+        if user_instructions
+        else ""
+    )
+
     client = anthropic.AsyncAnthropic()
     response = await client.messages.create(
         model=MODEL,
@@ -335,6 +362,7 @@ async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, c
                             f"{user_real_name}님이 제출한 제안서 `{file_name}`입니다.\n"
                             f"피드백 가이드에 따라 피드백을 작성해주세요.\n"
                             f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요."
+                            f"{instructions_block}"
                         ),
                     },
                 ],
