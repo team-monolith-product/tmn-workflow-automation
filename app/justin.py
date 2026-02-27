@@ -201,7 +201,7 @@ def register_justin_handlers(app):
         # --- PDF 제안서 피드백 ---
         if pdf_files:
             await _handle_pdf_feedback(
-                app, say, pdf_files, user_real_name, thread_ts, channel
+                app, say, pdf_files, user_real_name, text, thread_ts, channel
             )
             return
 
@@ -247,9 +247,12 @@ async def _handle_notion_feedback(
     )
 
     system_prompt = _build_system_prompt(doc_type)
+
     human_message = (
         f"아래는 {user_real_name}님이 제출한 {doc_type_label}입니다.\n"
         f"피드백 가이드에 따라 피드백을 작성해주세요.\n\n"
+        f"---\n\n"
+        f"## 요청자의 슬랙 멘션 메시지 원문\n\n{text}\n\n"
         f"---\n\n"
         f"{page_content}"
     )
@@ -278,7 +281,9 @@ async def _handle_notion_feedback(
     )
 
 
-async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, channel):
+async def _handle_pdf_feedback(
+    app, say, pdf_files, user_real_name, text, thread_ts, channel
+):
     """PDF 첨부파일 기반 제안서 피드백을 처리합니다. (Claude 네이티브 PDF 지원)"""
     pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
     file_name = pdf_file.get("name", "제안서.pdf")
@@ -334,7 +339,8 @@ async def _handle_pdf_feedback(app, say, pdf_files, user_real_name, thread_ts, c
                         "text": (
                             f"{user_real_name}님이 제출한 제안서 `{file_name}`입니다.\n"
                             f"피드백 가이드에 따라 피드백을 작성해주세요.\n"
-                            f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요."
+                            f"페이지별 리뷰 가이드가 있다면 해당 가이드도 참고하세요.\n\n"
+                            f"## 요청자의 슬랙 멘션 메시지 원문\n\n{text}"
                         ),
                     },
                 ],
