@@ -228,7 +228,9 @@ def summarize_deployment(
         )
 
         # 메시지 구성
-        message_line: str = f"{task_number}. {assignee_mention} {task_title_link} ({pr_links_str})\n"
+        message_line: str = (
+            f"{task_number}. {assignee_mention} {task_title_link} ({pr_links_str})\n"
+        )
         message += message_line
 
     # 레포지토리 안내 추가
