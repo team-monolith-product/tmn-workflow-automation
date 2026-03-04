@@ -6,6 +6,7 @@ import asyncio
 import os
 
 import sentry_sdk
+from aiohttp import ClientConnectionResetError
 from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp, AsyncAssistant
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
@@ -18,7 +19,19 @@ from app.justin import register_justin_handlers
 # 환경 변수 로드
 load_dotenv()
 
-sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN", ""))
+
+def _before_send(event, hint):
+    if "exc_info" in hint:
+        _, exc_value, _ = hint["exc_info"]
+        if isinstance(exc_value, ClientConnectionResetError):
+            return None
+    return event
+
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN", ""),
+    before_send=_before_send,
+)
 
 # 앱 초기화
 app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
