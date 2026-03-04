@@ -26,6 +26,7 @@ TEAM_MENTIONS = {
     "FE": get_team_mention("fe"),
     "BE": get_team_mention("be"),
     "IE": get_team_mention("ie"),
+    "탐색": get_team_mention("탐색"),
     "이창환": "<@U02HT4EU4VD>",
 }
 
@@ -71,7 +72,7 @@ def main():
             print(f"텍스트: {text[:100]}{'...' if len(text) > 100 else ''}")
 
             # 팀별 스크럼 메시지 매칭 (타임스탬프 제거됨)
-            for team_name in ["기획", "FE", "BE", "IE", "이창환"]:
+            for team_name in ["기획", "FE", "BE", "IE", "탐색", "이창환"]:
                 if f"{team_name}팀 스크럼" in text or f"{team_name} 스크럼" in text:
                     team_threads[team_name] = message["ts"]
                     print(f"✓ {team_name} 팀 스레드 발견 (ts: {ts})")

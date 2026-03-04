@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -24,10 +25,41 @@ from service.teams import ALL_TEAM_USERGROUP_IDS
 load_dotenv()
 
 # 상수 정의
-MAIN_DATA_SOURCE_ID = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
 SCRUM_CHANNEL_ID = "C09277NGUET"
 
 USER_CHANGWHAN = "U02HT4EU4VD"
+
+
+@dataclass(frozen=True)
+class NotionDBConfig:
+    """Notion DB별 프로퍼티 매핑 설정"""
+
+    data_source_id: str
+    title_property: str
+    status_property: str
+    in_progress_statuses: list[str] = field(default_factory=list)
+    assignee_property: str = "담당자"
+    date_property: str = "타임라인"
+    pr_property: str | None = "GitHub 풀 리퀘스트"
+
+
+MAIN_DB_CONFIG = NotionDBConfig(
+    data_source_id="3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b",
+    title_property="제목",
+    status_property="상태",
+    in_progress_statuses=["진행", "리뷰"],
+    date_property="타임라인",
+    pr_property="GitHub 풀 리퀘스트",
+)
+
+EXPLORE_DB_CONFIG = NotionDBConfig(
+    data_source_id="3141cc82-0da6-8103-913c-000ba234b439",
+    title_property="작업",
+    status_property="진행 상태",
+    in_progress_statuses=["진행 중", "테스트 중"],
+    date_property="마감일",
+    pr_property=None,
+)
 
 
 def main():
@@ -69,7 +101,18 @@ def main():
     # 5. IE팀 스크럼
     send_team_scrum(notion, slack_client, email_to_user_id, "ie", "IE", args.dry_run)
 
-    # 6. 이창환 스크럼
+    # 6. 탐색팀 스크럼
+    send_team_scrum(
+        notion,
+        slack_client,
+        email_to_user_id,
+        "탐색",
+        "탐색",
+        args.dry_run,
+        db_config=EXPLORE_DB_CONFIG,
+    )
+
+    # 7. 이창환 스크럼
     send_personal_scrum(slack_client, args.dry_run)
 
     if args.dry_run:
@@ -129,6 +172,7 @@ def send_team_scrum(
     team_handle: str,
     team_name: str,
     dry_run: bool = False,
+    db_config: NotionDBConfig = MAIN_DB_CONFIG,
 ):
     """
     팀별 스크럼 메시지 발송 (Notion에서 진행 중인 태스크 조회)
@@ -140,6 +184,7 @@ def send_team_scrum(
         team_handle: 팀 핸들 (예: "fe", "be", "ie")
         team_name: 팀 이름 (예: "FE", "BE", "IE")
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
+        db_config: Notion DB 설정 (기본값: MAIN_DB_CONFIG)
     """
     # 메인 메시지
     text = f"{team_name}팀 스크럼"
@@ -155,7 +200,7 @@ def send_team_scrum(
     ]
 
     # Notion에서 진행 중인 태스크 조회
-    in_progress_tasks = get_in_progress_tasks(notion, team_emails)
+    in_progress_tasks = get_in_progress_tasks(notion, team_emails, db_config)
 
     # 이메일별로 태스크 그룹화
     email_to_tasks = {}
@@ -176,8 +221,8 @@ def send_team_scrum(
 
         # 인원별 메시지 생성
         person_message = f"{assignee_name}\n"
-        # 기획팀 여부 확인
-        is_planning_team = team_handle == "기획"
+        # PR 경고 비활성화 여부 (기획팀이거나 PR 프로퍼티가 없는 DB)
+        is_planning_team = team_handle == "기획" or db_config.pr_property is None
         for task in tasks:
             task_line = format_task_line(task, is_planning_team)
             person_message += f"{task_line}\n"
@@ -254,7 +299,9 @@ def get_team_members(slack_client: WebClient, team_handle: str) -> list[str]:
 
 
 def get_in_progress_tasks(
-    notion: NotionClient, team_emails: list[str]
+    notion: NotionClient,
+    team_emails: list[str],
+    db_config: NotionDBConfig = MAIN_DB_CONFIG,
 ) -> list[dict[str, Any]]:
     """
     Notion에서 팀 멤버들의 진행 중인 태스크 조회
@@ -262,27 +309,27 @@ def get_in_progress_tasks(
     Args:
         notion: Notion Client
         team_emails: 팀 멤버 이메일 목록
+        db_config: Notion DB 설정
 
     Returns:
         list[dict]: 태스크 정보 목록
     """
-    # 진행 또는 리뷰 상태의 태스크 조회
+    # 진행 중 상태의 태스크 조회 (DB별 상태값 사용)
+    status_filters = [
+        {"property": db_config.status_property, "status": {"equals": status}}
+        for status in db_config.in_progress_statuses
+    ]
     results = notion.data_sources.query(
         **{
-            "data_source_id": MAIN_DATA_SOURCE_ID,
-            "filter": {
-                "or": [
-                    {"property": "상태", "status": {"equals": "진행"}},
-                    {"property": "상태", "status": {"equals": "리뷰"}},
-                ]
-            },
+            "data_source_id": db_config.data_source_id,
+            "filter": {"or": status_filters},
         }
     )
 
     tasks = []
     for result in results.get("results", []):
         # 담당자 확인
-        people = result["properties"]["담당자"].get("people", [])
+        people = result["properties"][db_config.assignee_property].get("people", [])
         if not people:
             continue
 
@@ -296,22 +343,24 @@ def get_in_progress_tasks(
 
         # 태스크 정보 추출
         try:
-            title_prop = result["properties"]["제목"]["title"]
+            title_prop = result["properties"][db_config.title_property]["title"]
             title = title_prop[0]["text"]["content"] if title_prop else "제목 없음"
         except (KeyError, IndexError):
             title = "제목 없음"
 
-        # 타임라인 (마감일)
-        timeline = result["properties"]["타임라인"].get("date")
+        # 마감일
+        date_value = result["properties"][db_config.date_property].get("date")
         deadline = (
-            timeline["end"]
-            if timeline and timeline.get("end")
-            else (timeline["start"] if timeline else None)
+            date_value["end"]
+            if date_value and date_value.get("end")
+            else (date_value["start"] if date_value else None)
         )
 
         # GitHub PR 연결 여부
-        github_prs = result["properties"]["GitHub 풀 리퀘스트"]["relation"]
-        has_pr = len(github_prs) > 0
+        has_pr = False
+        if db_config.pr_property:
+            github_prs = result["properties"][db_config.pr_property]["relation"]
+            has_pr = len(github_prs) > 0
 
         # 담당자 이름
         assignee_name = people[0].get("name", "")

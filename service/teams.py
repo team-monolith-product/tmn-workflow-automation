@@ -13,9 +13,10 @@ TEAM_USERGROUP_IDS: dict[Literal["fe", "be", "ie"], str] = {
     "ie": "S08628PEEUQ",
 }
 
-# 전체 팀 Slack 사용자 그룹 ID (기획팀 포함)
+# 전체 팀 Slack 사용자 그룹 ID (기획팀, 탐색팀 포함)
 ALL_TEAM_USERGROUP_IDS: dict[str, str] = {
     "기획": "S092KHHE0AF",
+    "탐색": "S0AJD6M5LH4",
     **TEAM_USERGROUP_IDS,
 }
 
