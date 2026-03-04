@@ -231,9 +231,7 @@ def send_personal_scrum(slack_client: WebClient, dry_run: bool = False):
         )
 
 
-def send_simple_scrum(
-    slack_client: WebClient, name: str, dry_run: bool = False
-):
+def send_simple_scrum(slack_client: WebClient, name: str, dry_run: bool = False):
     """
     Notion 태스크 조회 없이 단순 스크럼 메시지만 발송
 
