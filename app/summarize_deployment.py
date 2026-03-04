@@ -181,7 +181,7 @@ def summarize_deployment(
     else:
         message = "오늘 배포 예정 과업!\n"
 
-    for task in tasks:
+    for task_number, task in enumerate(tasks, start=1):
         props = task["properties"]
 
         # 2) 담당자(people 속성)에서 이메일을 추출하여 Slack 멘션 처리
@@ -228,7 +228,7 @@ def summarize_deployment(
         )
 
         # 메시지 구성
-        message_line: str = f"{assignee_mention} {task_title_link} ({pr_links_str})\n"
+        message_line: str = f"{task_number}. {assignee_mention} {task_title_link} ({pr_links_str})\n"
         message += message_line
 
     # 레포지토리 안내 추가
