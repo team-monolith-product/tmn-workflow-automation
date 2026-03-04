@@ -72,6 +72,9 @@ def main():
     # 6. 이창환 스크럼
     send_personal_scrum(slack_client, args.dry_run)
 
+    # 7. 탐색팀 스크럼
+    send_simple_scrum(slack_client, "탐색팀", args.dry_run)
+
     if args.dry_run:
         print("\n=== DRY RUN COMPLETED ===")
 
@@ -220,6 +223,29 @@ def send_personal_scrum(slack_client: WebClient, dry_run: bool = False):
 
     if dry_run:
         print(f"\n[이창환 스크럼]")
+        print(text)
+    else:
+        slack_client.chat_postMessage(
+            channel=SCRUM_CHANNEL_ID,
+            text=text,
+        )
+
+
+def send_simple_scrum(
+    slack_client: WebClient, name: str, dry_run: bool = False
+):
+    """
+    Notion 태스크 조회 없이 단순 스크럼 메시지만 발송
+
+    Args:
+        slack_client: Slack WebClient
+        name: 스크럼 이름 (예: "탐색팀")
+        dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
+    """
+    text = f"{name} 스크럼"
+
+    if dry_run:
+        print(f"\n[{name} 스크럼]")
         print(text)
     else:
         slack_client.chat_postMessage(
