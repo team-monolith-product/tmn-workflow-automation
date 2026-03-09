@@ -35,6 +35,8 @@ SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
+logger = logging.getLogger(__name__)
+
 # 이벤트 중복 처리 방지를 위한 캐시 (TTL 60초, 최대 1000건)
 # Slack Socket Mode에서 동시 요청 시 같은 이벤트가 중복 전달될 수 있음
 _processed_events: TTLCache = TTLCache(maxsize=1000, ttl=60)
@@ -57,7 +59,16 @@ def register_general_handlers(app, assistant):
 
         # 이벤트 중복 처리 방지: event_ts를 키로 사용하여 이미 처리된 이벤트는 무시
         event_ts = event.get("ts")
+        event_type = body.get("event", {}).get("type")
+        logger.info(
+            "app_mention received: event_ts=%s, channel=%s, event_type=%s",
+            event_ts, event.get("channel"), event_type,
+        )
         if event_ts in _processed_events:
+            logger.warning(
+                "app_mention DUPLICATE blocked: event_ts=%s (already processed)",
+                event_ts,
+            )
             return
         _processed_events[event_ts] = True
 
@@ -105,13 +116,21 @@ def register_general_handlers(app, assistant):
         버그 신고 채널에 올라오는 메시지를 LLM으로 분석하여
         Notion에 버그 작업을 생성하고, 시급한 경우 담당 그룹을 태그합니다.
         """
-        print("Received message event:", body)
-
         event = body.get("event", {})
 
         # 이벤트 중복 처리 방지
         event_ts = event.get("ts")
+        event_type = event.get("type")
+        event_subtype = event.get("subtype")
+        logger.info(
+            "message received: event_ts=%s, channel=%s, type=%s, subtype=%s",
+            event_ts, event.get("channel"), event_type, event_subtype,
+        )
         if event_ts in _processed_events:
+            logger.warning(
+                "message DUPLICATE blocked: event_ts=%s (already processed)",
+                event_ts,
+            )
             return
         _processed_events[event_ts] = True
 
@@ -170,7 +189,15 @@ def register_general_handlers(app, assistant):
         """
         # 이벤트 중복 처리 방지
         event_ts = payload.get("ts") or payload.get("event_ts")
+        logger.info(
+            "assistant.user_message received: event_ts=%s, channel=%s",
+            event_ts, context.channel_id,
+        )
         if event_ts and event_ts in _processed_events:
+            logger.warning(
+                "assistant.user_message DUPLICATE blocked: event_ts=%s (already processed)",
+                event_ts,
+            )
             return
         if event_ts:
             _processed_events[event_ts] = True
