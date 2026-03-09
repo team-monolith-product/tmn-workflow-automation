@@ -62,7 +62,9 @@ def register_general_handlers(app, assistant):
         event_type = body.get("event", {}).get("type")
         logger.info(
             "app_mention received: event_ts=%s, channel=%s, event_type=%s",
-            event_ts, event.get("channel"), event_type,
+            event_ts,
+            event.get("channel"),
+            event_type,
         )
         if event_ts in _processed_events:
             logger.warning(
@@ -124,7 +126,10 @@ def register_general_handlers(app, assistant):
         event_subtype = event.get("subtype")
         logger.info(
             "message received: event_ts=%s, channel=%s, type=%s, subtype=%s",
-            event_ts, event.get("channel"), event_type, event_subtype,
+            event_ts,
+            event.get("channel"),
+            event_type,
+            event_subtype,
         )
         if event_ts in _processed_events:
             logger.warning(
@@ -191,7 +196,8 @@ def register_general_handlers(app, assistant):
         event_ts = payload.get("ts") or payload.get("event_ts")
         logger.info(
             "assistant.user_message received: event_ts=%s, channel=%s",
-            event_ts, context.channel_id,
+            event_ts,
+            context.channel_id,
         )
         if event_ts and event_ts in _processed_events:
             logger.warning(
