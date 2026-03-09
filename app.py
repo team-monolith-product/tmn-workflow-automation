@@ -25,6 +25,18 @@ def _before_send(event, hint):
         _, exc_value, _ = hint["exc_info"]
         if isinstance(exc_value, ClientConnectionResetError):
             return None
+
+    message = event.get("message", "") or ""
+    logentry = event.get("logentry", {}) or {}
+    logentry_message = (
+        logentry.get("formatted", "") or logentry.get("message", "") or ""
+    )
+    if (
+        "ClientConnectionResetError" in message
+        or "ClientConnectionResetError" in logentry_message
+    ):
+        return None
+
     return event
 
 
