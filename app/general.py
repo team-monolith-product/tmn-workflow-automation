@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 
+from cachetools import TTLCache
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -34,6 +35,10 @@ SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
+# 이벤트 중복 처리 방지를 위한 캐시 (TTL 60초, 최대 1000건)
+# Slack Socket Mode에서 동시 요청 시 같은 이벤트가 중복 전달될 수 있음
+_processed_events: TTLCache = TTLCache(maxsize=1000, ttl=60)
+
 
 def register_general_handlers(app, assistant):
     """
@@ -49,6 +54,12 @@ def register_general_handlers(app, assistant):
 
         if event is None:
             return
+
+        # 이벤트 중복 처리 방지: event_ts를 키로 사용하여 이미 처리된 이벤트는 무시
+        event_ts = event.get("ts")
+        if event_ts in _processed_events:
+            return
+        _processed_events[event_ts] = True
 
         thread_ts = event.get("thread_ts") or body["event"]["ts"]
         channel = event["channel"]
@@ -97,6 +108,13 @@ def register_general_handlers(app, assistant):
         print("Received message event:", body)
 
         event = body.get("event", {})
+
+        # 이벤트 중복 처리 방지
+        event_ts = event.get("ts")
+        if event_ts in _processed_events:
+            return
+        _processed_events[event_ts] = True
+
         channel = event.get("channel")
         print(f"Channel: {channel}")
 
@@ -150,6 +168,13 @@ def register_general_handlers(app, assistant):
         """
         Respond to a user message in the assistant thread.
         """
+        # 이벤트 중복 처리 방지
+        event_ts = payload.get("ts") or payload.get("event_ts")
+        if event_ts and event_ts in _processed_events:
+            return
+        if event_ts:
+            _processed_events[event_ts] = True
+
         # Slack 스레드 링크 만들기
         slack_workspace = "monolith-keb2010"
         thread_ts_for_link = context.thread_ts.replace(".", "")
