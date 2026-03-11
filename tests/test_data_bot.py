@@ -209,6 +209,32 @@ class TestRedashTools:
         assert "Query ID 123" in result
         assert "Test Query" in result
 
+    @patch("api.redash.get_dashboard")
+    def test_read_redash_dashboard_textbox(self, mock_get_dashboard):
+        """Redash 대시보드 읽기 tool 테스트 - textbox 위젯 포함"""
+        mock_get_dashboard.return_value = {
+            "name": "Dashboard with Textbox",
+            "widgets": [
+                {"text": "# 안내사항\n이 대시보드는 매출 현황을 보여줍니다."},
+                {
+                    "visualization": {
+                        "query": {
+                            "id": 456,
+                            "name": "매출 쿼리",
+                        }
+                    }
+                },
+            ],
+        }
+
+        result = redash_tools.read_redash_dashboard.func(dashboard_id=1)
+
+        assert "Dashboard with Textbox" in result
+        assert "안내사항" in result
+        assert "매출 현황" in result
+        assert "Query ID 456" in result
+        assert "매출 쿼리" in result
+
     @patch("api.redash.get_query")
     def test_read_redash_query_tool(self, mock_get_query):
         """Redash 쿼리 상세 조회 tool 테스트"""

@@ -63,9 +63,16 @@ def read_redash_dashboard(
             result.append("이 대시보드에는 위젯이 없습니다.")
             return "\n".join(result)
 
-        # 쿼리 ID와 이름만 수집
+        # 텍스트박스와 쿼리 수집
+        text_list = []
         query_list = []
         for widget in widgets:
+            # textbox 위젯 처리
+            text_content = widget.get("text")
+            if text_content:
+                text_list.append(text_content)
+                continue
+
             visualization = widget.get("visualization")
             if not visualization:
                 continue
@@ -80,11 +87,18 @@ def read_redash_dashboard(
             if query_id:
                 query_list.append(f"- Query ID {query_id}: {query_name}")
 
+        if text_list:
+            result.append("## 텍스트\n")
+            for text in text_list:
+                result.append(text)
+                result.append("")
+
         if query_list:
             result.append("## 쿼리 목록\n")
             result.extend(query_list)
-        else:
-            result.append("이 대시보드에는 쿼리가 없습니다.")
+
+        if not text_list and not query_list:
+            result.append("이 대시보드에는 위젯이 없습니다.")
 
         return "\n".join(result)
     except Exception as e:
