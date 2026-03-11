@@ -197,7 +197,7 @@ async def answer_data_analysis(
         "summary": "auto",  # 자동으로 추론 요약 생성
     }
     chat_model = ChatOpenAI(
-        model="gpt-5.2",
+        model="gpt-5.4",
         temperature=0,
         reasoning=reasoning,
         output_version="responses/v1",
