@@ -170,6 +170,10 @@ def register_justin_handlers(app):
         if event is None:
             return
 
+        # 봇이 보낸 메시지는 무시 (자기 자신을 태그하는 무한 루프 방지)
+        if event.get("bot_id"):
+            return
+
         thread_ts = event.get("thread_ts") or event["ts"]
         channel = event["channel"]
         user = event.get("user")
