@@ -11,6 +11,7 @@ from .common import (
     get_update_notion_task_status_tool,
     get_create_notion_follow_up_task_tool,
     get_notion_page_tool,
+    is_duplicate_event,
 )
 
 # 콘텐츠 팀 전용 노션 데이터베이스 ID
@@ -31,6 +32,9 @@ def register_contents_handlers(app_contents):
         """
         슬랙에서 콘텐츠 비서를 멘션하여 대화를 시작하면 호출되는 이벤트
         """
+        if is_duplicate_event(body):
+            return
+
         event = body.get("event")
 
         if event is None:

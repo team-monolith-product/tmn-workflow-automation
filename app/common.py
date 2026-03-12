@@ -9,6 +9,21 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from cachetools import TTLCache
+
+# 이벤트 중복 처리 방지용 캐시 (5분 TTL, 최대 1000개)
+# Socket Mode에서 동일 이벤트가 여러 번 전달될 수 있으므로 event_id로 중복 체크
+_processed_events: TTLCache = TTLCache(maxsize=1000, ttl=300)
+
+
+def is_duplicate_event(body: dict) -> bool:
+    """이미 처리된 이벤트인지 확인하고, 미처리 시 처리 완료로 기록합니다."""
+    event_id = body.get("event_id")
+    if not event_id:
+        return False
+    if event_id in _processed_events:
+        return True
+    _processed_events[event_id] = True
+    return False
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
