@@ -36,10 +36,6 @@ class ToolStatusHandler(BaseCallbackHandler):
             []
         )  # 실행된 툴 이력: {"run_id": str, "name": str, "params": str, "status": str}
         self._lock = None  # 동시성 제어를 위한 lock (lazy init)
-        self._message_created_event = (
-            None  # 첫 메시지 생성 완료 대기용 Event (lazy init)
-        )
-        self._creating_message = False  # 첫 메시지 생성 중 플래그
         self.langsmith_run_id = None  # LangSmith trace의 최상위 run_id
 
     @property
@@ -48,13 +44,6 @@ class ToolStatusHandler(BaseCallbackHandler):
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
-
-    @property
-    def message_created_event(self):
-        """현재 event loop에서 Event를 lazy하게 생성"""
-        if self._message_created_event is None:
-            self._message_created_event = asyncio.Event()
-        return self._message_created_event
 
     def _format_status_text(self) -> str:
         """
@@ -151,7 +140,6 @@ class ToolStatusHandler(BaseCallbackHandler):
         tool_name = serialized["name"]
         run_id = kwargs.get("run_id")  # 툴 실행의 고유 ID
 
-        # Lock 안에서 tool_history 수정 및 역할 결정
         async with self.lock:
             self.tool_history.append(
                 {
@@ -164,55 +152,35 @@ class ToolStatusHandler(BaseCallbackHandler):
 
             status_text = self._format_status_text()
 
-            if self.status_message_ts is not None:
-                # 이미 메시지가 존재 → 업데이트
-                role = "update"
-            elif self._creating_message:
-                # 다른 코루틴이 메시지 생성 중 → 대기 후 업데이트
-                role = "wait_then_update"
-            else:
-                # 첫 번째 코루틴 → 메시지 생성 담당
-                self._creating_message = True
-                role = "create"
-
-        # Lock 밖에서 Slack API 호출
-        if role == "create":
-            response = await self.say(
-                {
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": status_text},
-                            "expand": False,
-                        }
-                    ]
-                },
-                thread_ts=self.thread_ts,
-            )
-            async with self.lock:
-                self.status_message_ts = response.get("ts")
-            # 대기 중인 코루틴들에게 메시지 생성 완료를 알림
-            self.message_created_event.set()
-        else:
-            if role == "wait_then_update":
-                # 첫 메시지 생성이 완료될 때까지 대기
-                await self.message_created_event.wait()
-                # 대기 후 최신 상태로 다시 포맷팅
-                async with self.lock:
-                    status_text = self._format_status_text()
-
-            # 기존 메시지 업데이트
-            await self.slack_client.chat_update(
-                channel=self.channel,
-                ts=self.status_message_ts,
-                blocks=[
+            if self.status_message_ts is None:
+                # 첫 메시지 생성: lock을 유지하여 중복 방지
+                response = await self.say(
                     {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": status_text},
-                        "expand": False,
-                    }
-                ],
-            )
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": status_text},
+                                "expand": False,
+                            }
+                        ]
+                    },
+                    thread_ts=self.thread_ts,
+                )
+                self.status_message_ts = response.get("ts")
+                return
+
+        # Lock 밖에서 기존 메시지 업데이트
+        await self.slack_client.chat_update(
+            channel=self.channel,
+            ts=self.status_message_ts,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": status_text},
+                    "expand": False,
+                }
+            ],
+        )
 
     async def on_tool_end(
         self,
