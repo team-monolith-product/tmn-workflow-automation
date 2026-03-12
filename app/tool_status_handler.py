@@ -140,7 +140,6 @@ class ToolStatusHandler(BaseCallbackHandler):
         tool_name = serialized["name"]
         run_id = kwargs.get("run_id")  # 툴 실행의 고유 ID
 
-        # Lock 안에서는 tool_history만 수정
         async with self.lock:
             self.tool_history.append(
                 {
@@ -152,39 +151,36 @@ class ToolStatusHandler(BaseCallbackHandler):
             )
 
             status_text = self._format_status_text()
-            is_first_message = self.status_message_ts is None
 
-        # Lock 밖에서 Slack API 호출
-        if is_first_message:
-            response = await self.say(
-                {
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": status_text},
-                            "expand": False,
-                        }
-                    ]
-                },
-                thread_ts=self.thread_ts,
-            )
-            # say() 응답에서 ts 저장
-            async with self.lock:
-                if self.status_message_ts is None:  # 다시 체크 (race condition 방지)
-                    self.status_message_ts = response.get("ts")
-        else:
-            # 기존 메시지 업데이트
-            await self.slack_client.chat_update(
-                channel=self.channel,
-                ts=self.status_message_ts,
-                blocks=[
+            if self.status_message_ts is None:
+                # 첫 메시지 생성: lock을 유지하여 중복 방지
+                response = await self.say(
                     {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": status_text},
-                        "expand": False,
-                    }
-                ],
-            )
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": status_text},
+                                "expand": False,
+                            }
+                        ]
+                    },
+                    thread_ts=self.thread_ts,
+                )
+                self.status_message_ts = response.get("ts")
+                return
+
+        # Lock 밖에서 기존 메시지 업데이트
+        await self.slack_client.chat_update(
+            channel=self.channel,
+            ts=self.status_message_ts,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": status_text},
+                    "expand": False,
+                }
+            ],
+        )
 
     async def on_tool_end(
         self,
