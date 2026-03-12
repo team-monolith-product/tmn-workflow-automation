@@ -36,7 +36,9 @@ class ToolStatusHandler(BaseCallbackHandler):
             []
         )  # 실행된 툴 이력: {"run_id": str, "name": str, "params": str, "status": str}
         self._lock = None  # 동시성 제어를 위한 lock (lazy init)
-        self._message_created_event = None  # 첫 메시지 생성 완료 대기용 Event (lazy init)
+        self._message_created_event = (
+            None  # 첫 메시지 생성 완료 대기용 Event (lazy init)
+        )
         self._creating_message = False  # 첫 메시지 생성 중 플래그
         self.langsmith_run_id = None  # LangSmith trace의 최상위 run_id
 
