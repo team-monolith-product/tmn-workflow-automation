@@ -565,8 +565,10 @@ def alert_no_upcoming_tasks(
                 member_mentions.append(email)
 
         members_text = ", ".join(member_mentions)
+        weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
+        target_weekday = weekday_names[target_date.weekday()]
         text = (
-            f"<@{YEJIN_SLACK_ID}> 5일 후에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
+            f"<@{YEJIN_SLACK_ID}> 5일 후 {target_date.month}/{target_date.day}({target_weekday})에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
             "로드맵 점검 부탁드립니다."
         )
         slack_client.chat_postMessage(channel=channel_id, text=text)
