@@ -26,6 +26,16 @@ load_dotenv()
 CHANNEL_ID: str = "C08EUJJSZF1"
 REQUIRED_DAILY_MINUTES = 8 * 60  # 하루 근무시간(480분)
 
+# 근무 현황 표에서 제외할 이름 목록
+EXCLUDED_NAMES: set[str] = {
+    "David Eom",
+    "고려대학교 HPIC 연구원",
+    "엄은상",
+    "자흐라",
+    "이의찬",
+    "류승찬",
+}
+
 
 def main():
     """
@@ -87,6 +97,8 @@ def main():
         user_info = user_id_to_user_info.get(user_id, {})
         real_name = user_info.get("real_name", "")
         if not real_name:
+            continue
+        if real_name in EXCLUDED_NAMES:
             continue
 
         # 이미 근무한 시간(분)
