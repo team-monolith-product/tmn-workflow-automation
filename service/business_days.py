@@ -121,6 +121,46 @@ def get_business_days_in_range(
     return business_days
 
 
+def get_nth_business_day_from(
+    start_date: date,
+    n: int,
+    exclude_holidays: bool = True,
+) -> date:
+    """
+    시작일로부터 n번째 영업일 날짜를 반환
+
+    Args:
+        start_date: 시작 날짜 (포함하지 않음)
+        n: 영업일 수
+        exclude_holidays: True면 공휴일도 제외
+
+    Returns:
+        date: n번째 영업일 날짜
+    """
+    holidays_cache: dict[tuple[int, int], set[str]] = {}
+
+    def get_holidays_cached(year: int, month: int) -> set[str]:
+        key = (year, month)
+        if key not in holidays_cache:
+            holidays_cache[key] = get_public_holidays(year, month)
+        return holidays_cache[key]
+
+    count = 0
+    current_date = start_date
+
+    while count < n:
+        current_date += timedelta(days=1)
+        if current_date.weekday() < 5:
+            if exclude_holidays:
+                holidays = get_holidays_cached(current_date.year, current_date.month)
+                if current_date.isoformat() not in holidays:
+                    count += 1
+            else:
+                count += 1
+
+    return current_date
+
+
 def count_business_days_in_month(
     year: int,
     month: int,
