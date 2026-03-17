@@ -14,6 +14,7 @@ from notion_client import Client as NotionClient
 from openai import OpenAI
 from slack_sdk import WebClient
 
+from service.business_days import get_nth_business_day_from
 from service.holidays import get_public_holidays
 from service.slack import get_email_to_user_id
 
@@ -466,8 +467,8 @@ def alert_no_upcoming_tasks(
     # 예진님 Slack ID
     YEJIN_SLACK_ID = "U075PUFNGHX"
 
-    # 5일 후 날짜 계산
-    target_date = (datetime.now() + timedelta(days=5)).date()
+    # 영업일 기준 5일 후 날짜 계산
+    target_date = get_nth_business_day_from(datetime.now().date(), 5)
 
     # 5일 후에 진행 중일 것으로 예상되는 작업들을 찾습니다.
     # 시작일 <= 5일 후 AND 종료일 >= 5일 후 AND 상태가 완료/보류가 아닌 작업
