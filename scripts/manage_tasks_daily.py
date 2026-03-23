@@ -14,6 +14,7 @@ from notion_client import Client as NotionClient
 from openai import OpenAI
 from slack_sdk import WebClient
 
+from api.wantedspace import get_workevent
 from service.business_days import get_nth_business_day_from
 from service.holidays import get_public_holidays
 from service.slack import get_email_to_user_id
@@ -551,8 +552,21 @@ def alert_no_upcoming_tasks(
         if email:
             team_emails.append(email)
 
-    # 5일 후에 예정된 작업이 없는 멤버 찾기
-    unassigned_emails = set(team_emails) - assigned_emails
+    # 5일 후 당일 종일 연차인 멤버 제외
+    target_date_str = target_date.isoformat()
+    workevent = get_workevent(date=target_date_str, type="day")
+    vacation_days_by_email: dict[str, float] = defaultdict(float)
+    for ev in workevent.get("results", []):
+        email = ev.get("email")
+        counted = float(ev.get("wk_counted_days", 0.0))
+        if email and counted > 0:
+            vacation_days_by_email[email] += counted
+    on_leave_emails = {
+        email for email, days in vacation_days_by_email.items() if days >= 1.0
+    }
+
+    # 5일 후에 예정된 작업이 없는 멤버 찾기 (연차자 제외)
+    unassigned_emails = set(team_emails) - assigned_emails - on_leave_emails
 
     # 예진님에게 알림 보내기
     if unassigned_emails:
