@@ -114,21 +114,11 @@ def summarize_deployment(
     today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
 
     # 1) 오늘 배포할 과업 목록 조회
-    #    - 구성요소 필터링
-    #      '기획' OR '디자인'이 포함되지 않은 과업
     #    - 상태 필터링
     #      '중단' 이 아닌 과업
+    #    - PR 필터링 (메시지 구성 시)
+    #      closed가 아닌 PR이 존재하는 과업만 포함
     shared_filters = [
-        {
-            "property": "구성요소",
-            "multi_select": {"does_not_contain": tag},
-        }
-        for tag in ["기획", "디자인"]
-    ] + [
-        {
-            "property": "구성요소",
-            "multi_select": {"is_not_empty": True},
-        },
         {
             "property": "상태",
             "status": {"does_not_equal": "중단"},
@@ -189,8 +179,20 @@ def summarize_deployment(
     else:
         message = "오늘 배포 예정 과업!\n"
 
-    for task_index, task in enumerate(tasks, start=1):
+    task_index = 0
+    for task in tasks:
         props = task["properties"]
+
+        # 4) GitHub PR 링크 정보
+        pr_link_property: dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
+        pr_relations: list[dict[str, Any]] = pr_link_property.get("relation", [])
+        pr_links_info: list[dict[str, Any]] = get_pr_links(notion, pr_relations)
+
+        # closed가 아닌 PR이 존재하지 않으면 스킵
+        if not pr_links_info:
+            continue
+
+        task_index += 1
 
         # 2) 담당자(people 속성)에서 이메일을 추출하여 Slack 멘션 처리
         assignees = props.get("담당자", {}).get("people", [])
@@ -218,11 +220,6 @@ def summarize_deployment(
         notion_page_url = task["url"]
         task_title_link = f"<{notion_page_url}|{task_title}>"
 
-        # 4) GitHub PR 링크 정보(가정: "GitHub 풀 리퀘스트"라는 URL 속성이 있다고 가정)
-        pr_link_property: dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
-        pr_relations: list[dict[str, Any]] = pr_link_property.get("relation", [])
-        pr_links_info: list[dict[str, Any]] = get_pr_links(notion, pr_relations)
-
         # PR 링크 포맷 및 레포지토리 이름 수집
         formatted_pr_links: list[str] = []
         for pr_info in pr_links_info:
@@ -231,15 +228,22 @@ def summarize_deployment(
             if repo_name:
                 repos_to_deploy.add(repo_name)
 
-        pr_links_str: str = (
-            ", ".join(formatted_pr_links) if formatted_pr_links else "No PR Link"
-        )
+        pr_links_str: str = ", ".join(formatted_pr_links)
 
         # 메시지 구성
         message_line: str = (
             f"{task_index}. {assignee_mention} {task_title_link} ({pr_links_str})\n"
         )
         message += message_line
+
+    # PR 필터링 후 과업이 없으면 메시지 전송 후 종료
+    if task_index == 0:
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
+        )
+        print("No tasks with open PRs scheduled for deployment today.")
+        return
 
     # 레포지토리 안내 추가
     if repos_to_deploy:
