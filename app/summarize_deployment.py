@@ -45,7 +45,7 @@ SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 def get_pr_links(
     notion: NotionClient, pr_relations: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다."""
+    """PR 관계 속성에서 PR 링크들과 병합 상태를 추출합니다. closed(미병합) PR은 제외합니다."""
     pr_links_info: list[dict[str, Any]] = []
     for relation in pr_relations:
         pr_page_id: str = relation["id"]
@@ -57,11 +57,19 @@ def get_pr_links(
             pr_url: str = url_property["url"]
             # 'Merged At' 필드에서 병합 여부 추출
             merged_at_property: dict[str, Any] = properties.get("Merged At", {})
-            is_merged: bool = False
-            if merged_at_property.get("date") and merged_at_property["date"].get(
-                "start"
-            ):
-                is_merged = True
+            is_merged: bool = bool(
+                merged_at_property.get("date")
+                and merged_at_property["date"].get("start")
+            )
+            # 'Closed At' 필드에서 종료 여부 추출
+            closed_at_property: dict[str, Any] = properties.get("Closed At", {})
+            is_closed: bool = bool(
+                closed_at_property.get("date")
+                and closed_at_property["date"].get("start")
+            )
+            # closed이면서 미병합인 PR은 제외
+            if is_closed and not is_merged:
+                continue
             pr_links_info.append({"url": pr_url, "merged": is_merged})
         else:
             # URL 속성이 없는 경우 처리 로직을 추가할 수 있습니다.
