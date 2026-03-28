@@ -13,29 +13,25 @@ import time
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 
-from service.teams import get_team_mention
+from service.scrum_config import load_scrum_config
 
 # 환경 변수 로드
 load_dotenv()
-
-SCRUM_CHANNEL_ID = "C09277NGUET"
-
-# 팀별 멘션 그룹 ID (service.teams에서 가져온 값 + 개인)
-TEAM_MENTIONS = {
-    "기획": get_team_mention("기획"),
-    "FE": get_team_mention("fe"),
-    "BE": get_team_mention("be"),
-    "IE": get_team_mention("ie"),
-    "탐색": get_team_mention("탐색"),
-    "이창환": "<@U02HT4EU4VD>",
-}
 
 
 def main():
     """메인 함수"""
     print("=== 스크럼 멘션 스케줄러 시작 ===")
 
+    config = load_scrum_config()
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+
+    # config에서 팀별 멘션 구성
+    team_mentions = {}
+    for squad in config.squads:
+        team_mentions[squad.display_name] = f"<!subteam^{squad.slack_usergroup_id}>"
+    for personal in config.personal_scrums:
+        team_mentions[personal.name] = f"<@{personal.slack_user_id}>"
 
     # 16:00에 보낸 스크럼 메시지 찾기 (최근 2시간 이내)
     now = time.time()
@@ -45,14 +41,14 @@ def main():
     print(
         f"검색 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(oldest))}"
     )
-    print(f"채널 ID: {SCRUM_CHANNEL_ID}")
+    print(f"채널 ID: {config.channel_id}")
 
     try:
         # 채널의 최근 메시지 조회
         # Slack API는 oldest를 정수 형태의 문자열로 전달해야 함
         print("\n메시지 조회 중...")
         response = slack_client.conversations_history(
-            channel=SCRUM_CHANNEL_ID,
+            channel=config.channel_id,
             oldest=str(int(oldest)),  # float를 int로 변환 후 문자열로
             limit=50,
         )
@@ -71,8 +67,8 @@ def main():
             print(f"\n[메시지 {idx}] 시간: {msg_time}")
             print(f"텍스트: {text[:100]}{'...' if len(text) > 100 else ''}")
 
-            # 팀별 스크럼 메시지 매칭 (타임스탬프 제거됨)
-            for team_name in ["기획", "FE", "BE", "IE", "탐색", "이창환"]:
+            # 팀별 스크럼 메시지 매칭
+            for team_name in team_mentions:
                 if f"{team_name}팀 스크럼" in text or f"{team_name} 스크럼" in text:
                     team_threads[team_name] = message["ts"]
                     print(f"✓ {team_name} 팀 스레드 발견 (ts: {ts})")
@@ -86,7 +82,7 @@ def main():
         # 각 팀 스레드에 멘션 답글 추가
         print("\n=== 멘션 발송 시작 ===")
         for team_name, thread_ts in team_threads.items():
-            mention = TEAM_MENTIONS.get(team_name)
+            mention = team_mentions.get(team_name)
             if mention:
                 reply_text = f"{mention} 스크럼 작성 부탁드립니다."
                 print(f"\n{team_name} 팀에 멘션 발송 중...")
@@ -94,7 +90,7 @@ def main():
                 print(f"  - 멘션: {mention}")
 
                 slack_client.chat_postMessage(
-                    channel=SCRUM_CHANNEL_ID,
+                    channel=config.channel_id,
                     thread_ts=thread_ts,
                     text=reply_text,
                 )

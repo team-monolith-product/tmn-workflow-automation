@@ -9,7 +9,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -18,48 +17,16 @@ from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
 from service.business_days import count_business_days
+from service.scrum_config import (
+    NotionDBConfig,
+    PersonalScrum,
+    ScrumSquad,
+    load_scrum_config,
+)
 from service.slack import get_email_to_user_id
-from service.teams import ALL_TEAM_USERGROUP_IDS
 
 # 환경 변수 로드
 load_dotenv()
-
-# 상수 정의
-SCRUM_CHANNEL_ID = "C09277NGUET"
-
-USER_CHANGWHAN = "U02HT4EU4VD"
-
-
-@dataclass(frozen=True)
-class NotionDBConfig:
-    """Notion DB별 프로퍼티 매핑 설정"""
-
-    data_source_id: str
-    title_property: str
-    status_property: str
-    in_progress_statuses: list[str] = field(default_factory=list)
-    assignee_property: str = "담당자"
-    date_property: str = "타임라인"
-    pr_property: str | None = "GitHub 풀 리퀘스트"
-
-
-MAIN_DB_CONFIG = NotionDBConfig(
-    data_source_id="3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b",
-    title_property="제목",
-    status_property="상태",
-    in_progress_statuses=["진행", "리뷰"],
-    date_property="타임라인",
-    pr_property="GitHub 풀 리퀘스트",
-)
-
-EXPLORE_DB_CONFIG = NotionDBConfig(
-    data_source_id="3141cc82-0da6-8103-913c-000ba234b439",
-    title_property="작업",
-    status_property="진행 상태",
-    in_progress_statuses=["진행 중", "테스트 중"],
-    date_property="마감일",
-    pr_property=None,
-)
 
 
 def main():
@@ -72,6 +39,8 @@ def main():
     )
     args = parser.parse_args()
 
+    config = load_scrum_config()
+
     notion = NotionClient(
         auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
     )
@@ -82,49 +51,37 @@ def main():
 
     if args.dry_run:
         print("=== DRY RUN MODE ===")
-        print(f"채널: {SCRUM_CHANNEL_ID}\n")
+        print(f"채널: {config.channel_id}\n")
 
     # 1. 안내 메시지 발송
-    send_intro_message(slack_client, args.dry_run)
+    send_intro_message(slack_client, config.channel_id, args.dry_run)
 
-    # 2. 기획팀 스크럼
-    send_team_scrum(
-        notion, slack_client, email_to_user_id, "기획", "기획", args.dry_run
-    )
+    # 2. 스쿼드별 스크럼
+    for squad in config.squads:
+        send_team_scrum(
+            notion,
+            slack_client,
+            email_to_user_id,
+            squad,
+            config.channel_id,
+            args.dry_run,
+        )
 
-    # 3. FE팀 스크럼
-    send_team_scrum(notion, slack_client, email_to_user_id, "fe", "FE", args.dry_run)
-
-    # 4. BE팀 스크럼
-    send_team_scrum(notion, slack_client, email_to_user_id, "be", "BE", args.dry_run)
-
-    # 5. IE팀 스크럼
-    send_team_scrum(notion, slack_client, email_to_user_id, "ie", "IE", args.dry_run)
-
-    # 6. 탐색팀 스크럼
-    send_team_scrum(
-        notion,
-        slack_client,
-        email_to_user_id,
-        "탐색",
-        "탐색",
-        args.dry_run,
-        db_config=EXPLORE_DB_CONFIG,
-    )
-
-    # 7. 이창환 스크럼
-    send_personal_scrum(slack_client, args.dry_run)
+    # 3. 개인 스크럼
+    for personal in config.personal_scrums:
+        send_personal_scrum(slack_client, personal, config.channel_id, args.dry_run)
 
     if args.dry_run:
         print("\n=== DRY RUN COMPLETED ===")
 
 
-def send_intro_message(slack_client: WebClient, dry_run: bool = False):
+def send_intro_message(slack_client: WebClient, channel_id: str, dry_run: bool = False):
     """
     안내 메시지 발송
 
     Args:
         slack_client: Slack WebClient
+        channel_id: 스크럼 채널 ID
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
     intro_text = "오늘 스크럼을 시작합니다. 4:40까지 작성 부탁드립니다!"
@@ -152,14 +109,14 @@ def send_intro_message(slack_client: WebClient, dry_run: bool = False):
     else:
         # 메인 메시지 발송
         response = slack_client.chat_postMessage(
-            channel=SCRUM_CHANNEL_ID,
+            channel=channel_id,
             text=intro_text,
         )
 
         # 스레드에 상세 안내 추가
         thread_ts = response["ts"]
         slack_client.chat_postMessage(
-            channel=SCRUM_CHANNEL_ID,
+            channel=channel_id,
             thread_ts=thread_ts,
             text=detail_text,
         )
@@ -169,10 +126,9 @@ def send_team_scrum(
     notion: NotionClient,
     slack_client: WebClient,
     email_to_user_id: dict[str, str],
-    team_handle: str,
-    team_name: str,
+    squad: ScrumSquad,
+    channel_id: str,
     dry_run: bool = False,
-    db_config: NotionDBConfig = MAIN_DB_CONFIG,
 ):
     """
     팀별 스크럼 메시지 발송 (Notion에서 진행 중인 태스크 조회)
@@ -181,26 +137,25 @@ def send_team_scrum(
         notion: Notion Client
         slack_client: Slack WebClient
         email_to_user_id: 이메일 -> Slack User ID 매핑
-        team_handle: 팀 핸들 (예: "fe", "be", "ie")
-        team_name: 팀 이름 (예: "FE", "BE", "IE")
+        squad: 스쿼드 설정
+        channel_id: 스크럼 채널 ID
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
-        db_config: Notion DB 설정 (기본값: MAIN_DB_CONFIG)
     """
     # 메인 메시지
-    text = f"{team_name}팀 스크럼"
+    text = f"{squad.display_name}팀 스크럼"
 
     if dry_run:
-        print(f"\n[{team_name}팀 스크럼]")
+        print(f"\n[{squad.display_name}팀 스크럼]")
         print(text)
 
     # 팀 멤버의 진행 중인 태스크 조회
-    team_members = get_team_members(slack_client, team_handle)
+    team_members = get_team_members(slack_client, squad.slack_usergroup_id)
     team_emails = [
         email for email, user_id in email_to_user_id.items() if user_id in team_members
     ]
 
     # Notion에서 진행 중인 태스크 조회
-    in_progress_tasks = get_in_progress_tasks(notion, team_emails, db_config)
+    in_progress_tasks = get_in_progress_tasks(notion, team_emails, squad.notion_db)
 
     # 이메일별로 태스크 그룹화
     email_to_tasks = {}
@@ -219,12 +174,15 @@ def send_team_scrum(
         # 담당자 이름 (첫 번째 태스크에서 가져옴)
         assignee_name = tasks[0]["assignee_name"]
 
+        # PR 경고 활성화 여부
+        pr_warning_enabled = (
+            squad.pr_warning and squad.notion_db.properties.pr is not None
+        )
+
         # 인원별 메시지 생성
         person_message = f"{assignee_name}\n"
-        # PR 경고 비활성화 여부 (기획팀이거나 PR 프로퍼티가 없는 DB)
-        is_planning_team = team_handle == "기획" or db_config.pr_property is None
         for task in tasks:
-            task_line = format_task_line(task, is_planning_team)
+            task_line = format_task_line(task, pr_warning_enabled)
             person_message += f"{task_line}\n"
 
         thread_messages.append(person_message.strip())
@@ -239,7 +197,7 @@ def send_team_scrum(
     else:
         # 실제 메시지 발송
         response = slack_client.chat_postMessage(
-            channel=SCRUM_CHANNEL_ID,
+            channel=channel_id,
             text=text,
         )
         thread_ts = response["ts"]
@@ -247,61 +205,62 @@ def send_team_scrum(
         # 인원별 메시지를 스레드에 발송
         for msg in thread_messages:
             slack_client.chat_postMessage(
-                channel=SCRUM_CHANNEL_ID,
+                channel=channel_id,
                 thread_ts=thread_ts,
                 text=msg,
             )
 
 
-def send_personal_scrum(slack_client: WebClient, dry_run: bool = False):
+def send_personal_scrum(
+    slack_client: WebClient,
+    personal: PersonalScrum,
+    channel_id: str,
+    dry_run: bool = False,
+):
     """
-    이창환 개인 스크럼 메시지 발송
+    개인 스크럼 메시지 발송
 
     Args:
         slack_client: Slack WebClient
+        personal: 개인 스크럼 설정
+        channel_id: 스크럼 채널 ID
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
-    text = "이창환 스크럼"
+    text = f"{personal.name} 스크럼"
 
     if dry_run:
-        print(f"\n[이창환 스크럼]")
+        print(f"\n[{personal.name} 스크럼]")
         print(text)
     else:
         slack_client.chat_postMessage(
-            channel=SCRUM_CHANNEL_ID,
+            channel=channel_id,
             text=text,
         )
 
 
-def get_team_members(slack_client: WebClient, team_handle: str) -> list[str]:
+def get_team_members(slack_client: WebClient, slack_usergroup_id: str) -> list[str]:
     """
-    팀 핸들로 팀 멤버의 Slack User ID 목록 조회
+    Slack 사용자 그룹 ID로 팀 멤버의 Slack User ID 목록 조회
 
     Args:
         slack_client: Slack WebClient
-        team_handle: 팀 핸들 (예: "fe", "be", "ie")
+        slack_usergroup_id: Slack 사용자 그룹 ID
 
     Returns:
         list[str]: Slack User ID 목록
     """
-    # 사용자 그룹 ID 조회
-    group_id = ALL_TEAM_USERGROUP_IDS.get(team_handle)
-    if not group_id:
-        return []
-
-    # 그룹 멤버 조회
     try:
-        response = slack_client.usergroups_users_list(usergroup=group_id)
+        response = slack_client.usergroups_users_list(usergroup=slack_usergroup_id)
         return response.get("users", [])
     except Exception as e:
-        print(f"Error fetching team members for {team_handle}: {e}")
+        print(f"Error fetching team members for {slack_usergroup_id}: {e}")
         return []
 
 
 def get_in_progress_tasks(
     notion: NotionClient,
     team_emails: list[str],
-    db_config: NotionDBConfig = MAIN_DB_CONFIG,
+    db_config: NotionDBConfig,
 ) -> list[dict[str, Any]]:
     """
     Notion에서 팀 멤버들의 진행 중인 태스크 조회
@@ -314,9 +273,9 @@ def get_in_progress_tasks(
     Returns:
         list[dict]: 태스크 정보 목록
     """
-    # 진행 중 상태의 태스크 조회 (DB별 상태값 사용)
+    # 진행 중 상태의 태스크 조회
     status_filters = [
-        {"property": db_config.status_property, "status": {"equals": status}}
+        {"property": db_config.properties.status, "status": {"equals": status}}
         for status in db_config.in_progress_statuses
     ]
     results = notion.data_sources.query(
@@ -329,7 +288,7 @@ def get_in_progress_tasks(
     tasks = []
     for result in results.get("results", []):
         # 담당자 확인
-        people = result["properties"][db_config.assignee_property].get("people", [])
+        people = result["properties"][db_config.properties.assignee].get("people", [])
         if not people:
             continue
 
@@ -343,13 +302,13 @@ def get_in_progress_tasks(
 
         # 태스크 정보 추출
         try:
-            title_prop = result["properties"][db_config.title_property]["title"]
+            title_prop = result["properties"][db_config.properties.title]["title"]
             title = title_prop[0]["text"]["content"] if title_prop else "제목 없음"
         except (KeyError, IndexError):
             title = "제목 없음"
 
         # 마감일
-        date_value = result["properties"][db_config.date_property].get("date")
+        date_value = result["properties"][db_config.properties.timeline].get("date")
         deadline = (
             date_value["end"]
             if date_value and date_value.get("end")
@@ -358,8 +317,8 @@ def get_in_progress_tasks(
 
         # GitHub PR 연결 여부
         has_pr = False
-        if db_config.pr_property:
-            github_prs = result["properties"][db_config.pr_property]["relation"]
+        if db_config.properties.pr:
+            github_prs = result["properties"][db_config.properties.pr]["relation"]
             has_pr = len(github_prs) > 0
 
         # 담당자 이름
@@ -379,13 +338,13 @@ def get_in_progress_tasks(
     return tasks
 
 
-def format_task_line(task: dict[str, Any], is_planning_team: bool = False) -> str:
+def format_task_line(task: dict[str, Any], pr_warning_enabled: bool = True) -> str:
     """
     태스크 정보를 한 줄 형식으로 포맷팅 (인원별 그룹화에 사용)
 
     Args:
         task: 태스크 정보
-        is_planning_team: 기획팀 여부 (True인 경우 PR 경고 표시 안 함)
+        pr_warning_enabled: PR 경고 표시 여부
 
     Returns:
         str: 포맷팅된 한 줄 메시지
@@ -410,8 +369,8 @@ def format_task_line(task: dict[str, Any], is_planning_team: bool = False) -> st
         else:
             deadline_text = f" 마감일 지남 ({abs(days_until_deadline)}일)."
 
-        # PR 없음 경고 (마감 1일 전 또는 당일, 기획팀 제외)
-        if days_until_deadline <= 1 and not task["has_pr"] and not is_planning_team:
+        # PR 없음 경고 (마감 1일 전 또는 당일, PR 경고 활성화된 경우)
+        if days_until_deadline <= 1 and not task["has_pr"] and pr_warning_enabled:
             warning_text = " PR이 없으므로 일정 조정이 필요합니다."
 
     # 메시지 포맷
