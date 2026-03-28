@@ -1,0 +1,56 @@
+channel_id: "C09277NGUET"
+
+notion_databases:
+  main:
+    data_source_id: "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
+    properties:
+      title: "제목"
+      status: "상태"
+      assignee: "담당자"
+      timeline: "타임라인"
+      pr: "GitHub 풀 리퀘스트"
+    in_progress_statuses: ["진행", "리뷰"]
+
+  explore:
+    data_source_id: "3141cc82-0da6-8103-913c-000ba234b439"
+    properties:
+      title: "작업"
+      status: "진행 상태"
+      assignee: "담당자"
+      timeline: "마감일"
+    in_progress_statuses: ["진행 중", "테스트 중"]
+
+squads:
+  - handle: "기획"
+    display_name: "기획"
+    slack_usergroup_id: "S092KHHE0AF"
+    notion_db: main
+    pr_warning: false
+
+  - handle: "fe"
+    display_name: "FE"
+    slack_usergroup_id: "S07V4G2QJJY"
+    notion_db: main
+    pr_warning: true
+
+  - handle: "be"
+    display_name: "BE"
+    slack_usergroup_id: "S085DBK2TFD"
+    notion_db: main
+    pr_warning: true
+
+  - handle: "ie"
+    display_name: "IE"
+    slack_usergroup_id: "S08628PEEUQ"
+    notion_db: main
+    pr_warning: true
+
+  - handle: "탐색"
+    display_name: "탐색"
+    slack_usergroup_id: "S0AJD6M5LH4"
+    notion_db: explore
+    pr_warning: false
+
+personal_scrums:
+  - name: "이창환"
+    slack_user_id: "U02HT4EU4VD"
