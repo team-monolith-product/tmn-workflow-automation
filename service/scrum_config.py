@@ -40,6 +40,7 @@ class ScrumSquad:
     handle: str
     display_name: str
     slack_usergroup_id: str
+    slack_channel_id: str
     notion_db: NotionDBConfig
     pr_warning: bool = True
 
@@ -50,13 +51,13 @@ class PersonalScrum:
 
     name: str
     slack_user_id: str
+    slack_channel_id: str
 
 
 @dataclass(frozen=True)
 class ScrumConfig:
     """스크럼 전체 설정"""
 
-    channel_id: str
     notion_databases: dict[str, NotionDBConfig]
     squads: list[ScrumSquad]
     personal_scrums: list[PersonalScrum]
@@ -95,6 +96,7 @@ def _parse_config(raw: dict) -> ScrumConfig:
                 handle=squad_raw["handle"],
                 display_name=squad_raw["display_name"],
                 slack_usergroup_id=squad_raw["slack_usergroup_id"],
+                slack_channel_id=squad_raw["slack_channel_id"],
                 notion_db=notion_databases[db_name],
                 pr_warning=squad_raw.get("pr_warning", True),
             )
@@ -102,12 +104,15 @@ def _parse_config(raw: dict) -> ScrumConfig:
 
     # Personal scrums
     personal_scrums = [
-        PersonalScrum(name=p["name"], slack_user_id=p["slack_user_id"])
+        PersonalScrum(
+            name=p["name"],
+            slack_user_id=p["slack_user_id"],
+            slack_channel_id=p["slack_channel_id"],
+        )
         for p in raw.get("personal_scrums", [])
     ]
 
     return ScrumConfig(
-        channel_id=raw["channel_id"],
         notion_databases=notion_databases,
         squads=squads,
         personal_scrums=personal_scrums,
