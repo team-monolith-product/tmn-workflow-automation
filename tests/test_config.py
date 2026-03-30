@@ -62,8 +62,9 @@ def test_notion_db_properties():
 
     hackathon = config.notion_databases["hackathon"]
     assert hackathon.properties.title == "이름"
-    assert hackathon.properties.start_date is None
-    assert hackathon.properties.end_date is None
+    assert hackathon.properties.timeline == "타임라인"
+    assert hackathon.properties.start_date == "시작일"
+    assert hackathon.properties.end_date == "종료일"
     assert hackathon.properties.pr == "GitHub 풀 리퀘스트"
     assert hackathon.pending_statuses == ["대기"]
     assert hackathon.in_progress_statuses == ["진행", "리뷰"]
