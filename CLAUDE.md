@@ -45,6 +45,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Architecture**: Follow service layer pattern for separation of concerns
 
 ## Automated Workflows
-- GitHub Actions are used for running scripts on schedule
-- Workflow files are stored in `.github/workflows/` directory
-- Each workflow corresponds to a script in the root directory
+- APScheduler(`AsyncIOScheduler`)가 `app.py` 프로세스 내에서 크론 작업을 실행
+- 스케줄 설정은 `config.yaml`의 `scheduled_jobs` 섹션에 KST 시간으로 정의
+- 스케줄러 코드는 `scheduler.py`에 위치
+- 각 스크립트는 독립 실행 가능: `python scripts/foo.py` (--dry-run 지원)
+- GitHub Actions는 CI/CD 전용 (pytest, black, Docker build)

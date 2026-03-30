@@ -33,3 +33,4 @@ matplotlib
 anthropic
 sentry-sdk[fastapi]
 PyYAML
+apscheduler
