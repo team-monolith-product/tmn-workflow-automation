@@ -28,7 +28,7 @@ def test_load_actual_config():
     config = load_scrum_config(config_path)
 
     assert isinstance(config, ScrumConfig)
-    assert len(config.notion_databases) == 3
+    assert len(config.notion_databases) == 4
     assert "main" in config.notion_databases
     assert "hackathon" in config.notion_databases
     assert "explore" in config.notion_databases
@@ -44,7 +44,12 @@ def test_squad_order_preserved():
     handles = [s.handle for s in config.squads]
     assert handles == ["코들", "해커톤", "탐색", "ie"]
     display_names = [s.display_name for s in config.squads]
-    assert display_names == ["코들 스쿼드", "해커톤 스쿼드", "탐색 스쿼드", "인프라팀"]
+    assert display_names == [
+        ":codle_bird: 코들 스쿼드",
+        ":runner: 해커톤 스쿼드",
+        ":earth_asia: 탐색 스쿼드",
+        ":building_construction: 인프라 팀",
+    ]
 
 
 def test_squad_channel_ids():
@@ -131,6 +136,6 @@ def test_personal_scrum():
     config_path = str(Path(__file__).parent.parent / "scrum_config.yaml")
     config = load_scrum_config(config_path)
 
-    assert config.personal_scrums[0].name == "이창환"
+    assert config.personal_scrums[0].name == "CTO"
     assert config.personal_scrums[0].slack_user_id == "U02HT4EU4VD"
     assert config.personal_scrums[0].slack_channel_id == "C09277NGUET"
