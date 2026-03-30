@@ -17,11 +17,11 @@ from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
 from service.business_days import count_business_days
-from service.scrum_config import (
+from service.config import (
     NotionDBConfig,
     PersonalScrum,
-    ScrumSquad,
-    load_scrum_config,
+    ScrumSquadConfig,
+    load_config,
 )
 from service.slack import get_email_to_user_id
 
@@ -39,7 +39,7 @@ def main():
     )
     args = parser.parse_args()
 
-    config = load_scrum_config()
+    config = load_config()
 
     notion = NotionClient(
         auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
@@ -52,15 +52,17 @@ def main():
     if args.dry_run:
         print("=== DRY RUN MODE ===")
 
+    scrum = config.scrum
+
     # 스쿼드 채널 목록 (인트로 메시지에서 다른 채널 안내용)
-    squad_channel_ids = list(dict.fromkeys(s.slack_channel_id for s in config.squads))
+    squad_channel_ids = list(dict.fromkeys(s.channel_id for s in scrum.squads))
 
     # 1. 각 스쿼드 채널에 안내 메시지 발송
     for channel_id in squad_channel_ids:
         send_intro_message(slack_client, channel_id, squad_channel_ids, args.dry_run)
 
     # 2. 스쿼드별 스크럼
-    for squad in config.squads:
+    for squad in scrum.squads:
         send_team_scrum(
             notion,
             slack_client,
@@ -70,7 +72,7 @@ def main():
         )
 
     # 3. 개인 스크럼
-    for personal in config.personal_scrums:
+    for personal in scrum.personal_scrums:
         send_personal_scrum(slack_client, personal, args.dry_run)
 
     if args.dry_run:
@@ -139,7 +141,7 @@ def send_team_scrum(
     notion: NotionClient,
     slack_client: WebClient,
     email_to_user_id: dict[str, str],
-    squad: ScrumSquad,
+    squad: ScrumSquadConfig,
     dry_run: bool = False,
 ):
     """
@@ -160,13 +162,15 @@ def send_team_scrum(
         print(text)
 
     # 팀 멤버의 진행 중인 태스크 조회
-    team_members = get_team_members(slack_client, squad.slack_usergroup_id)
+    team_members = get_team_members(slack_client, squad.squad.slack_usergroup_id)
     team_emails = [
         email for email, user_id in email_to_user_id.items() if user_id in team_members
     ]
 
     # Notion에서 진행 중인 태스크 조회
-    in_progress_tasks = get_in_progress_tasks(notion, team_emails, squad.notion_db)
+    in_progress_tasks = get_in_progress_tasks(
+        notion, team_emails, squad.squad.notion_db
+    )
 
     # 이메일별로 태스크 그룹화
     email_to_tasks = {}
@@ -187,7 +191,7 @@ def send_team_scrum(
 
         # PR 경고 활성화 여부
         pr_warning_enabled = (
-            squad.pr_warning and squad.notion_db.properties.pr is not None
+            squad.pr_warning and squad.squad.notion_db.properties.pr is not None
         )
 
         # 인원별 메시지 생성

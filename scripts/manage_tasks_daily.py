@@ -16,19 +16,23 @@ from slack_sdk import WebClient
 
 from api.wantedspace import get_workevent
 from service.business_days import get_nth_business_day_from
+from service.config import NotionDBConfig, load_config
 from service.holidays import get_public_holidays
 from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
 load_dotenv()
 
-MAIN_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
-CONTENTS_DATA_SOURCE_ID: str = "fecd7fca-8280-4f02-b78f-7fa720f53aa6"
-MAIN_CHANNEL_ID: str = "C087PDC9VG8"
-CONTENTS_CHANNEL_ID: str = "C091ZUBTCKU"
+ALERT_FUNCTIONS: dict[str, callable] = {}
+
+
+def _register(fn):
+    ALERT_FUNCTIONS[fn.__name__] = fn
+    return fn
 
 
 def main():
+    config = load_config()
     notion = NotionClient(
         auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
     )
@@ -36,94 +40,21 @@ def main():
 
     email_to_user_id = get_email_to_user_id(slack_client)
 
-    # 메인 작업 DB 처리
-    send_intro_message(slack_client, MAIN_CHANNEL_ID)
-    alert_overdue_tasks(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_pending_but_started_tasks(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_no_due_tasks(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_no_tasks(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-        "e",
-    )
-    alert_no_upcoming_tasks(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-        "e",
-        exclude_group_handles=["ie"],
-    )
-    # https://www.notion.so/team-mono/25Y-11M-2a11cc820da68051bab8ea146ee3001e?source=copy_link#2a41cc820da680daa823ff847717f6bf
-    # alert_no_후속_작업(
-    #     notion,
-    #     slack_client,
-    #     MAIN_DATA_SOURCE_ID,
-    #     MAIN_CHANNEL_ID,
-    #     email_to_user_id,
-    # )
-    alert_schedule_feasibility(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-        "e",
-    )
+    for pipeline in config.task_alerts.pipelines:
+        send_intro_message(slack_client, pipeline.channel_id)
 
-    # 콘텐츠 DB 처리
-    send_intro_message(slack_client, CONTENTS_CHANNEL_ID)
-    alert_overdue_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_pending_but_started_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_no_due_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-    )
-    alert_no_tasks(
-        notion,
-        slack_client,
-        CONTENTS_DATA_SOURCE_ID,
-        CONTENTS_CHANNEL_ID,
-        email_to_user_id,
-        "콘텐츠",
-    )
+        for squad in pipeline.squads:
+            db = squad.notion_db
+            for alert_name in pipeline.alerts:
+                alert_fn = ALERT_FUNCTIONS[alert_name]
+                alert_fn(
+                    notion=notion,
+                    slack_client=slack_client,
+                    db_config=db,
+                    channel_id=pipeline.channel_id,
+                    email_to_user_id=email_to_user_id,
+                    group_handle=squad.handle,
+                )
 
 
 def send_intro_message(
@@ -148,43 +79,34 @@ def send_intro_message(
     slack_client.chat_postMessage(channel=channel_id, text=intro_message)
 
 
+@_register
 def alert_overdue_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
+    **kwargs,
 ):
-    """
-    대기 및 진행 중인 작업 중 종료일이 지난 작업을 슬랙으로 알림
+    """대기 및 진행 중인 작업 중 종료일이 지난 작업을 슬랙으로 알림"""
+    if not db_config.properties.end_date:
+        return
 
-    Args:
-        notion (NotionClient): Notion
-        slack_client (WebClient): Slack
-        data_source_id (str): Notion data_source id
-        channel_id (str): Slack channel id
-        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-
-    Returns:
-        None
-    """
     today = datetime.now().date()
+    props = db_config.properties
+    all_active = db_config.pending_statuses + db_config.in_progress_statuses
 
-    # 대기 또는 진행 상태이면서 타임라인 종료일이 today보다 과거인 페이지 검색
+    status_filters = [
+        {"property": props.status, "status": {"equals": s}} for s in all_active
+    ]
     results = notion.data_sources.query(
         **{
-            "data_source_id": data_source_id,
+            "data_source_id": db_config.data_source_id,
             "filter": {
                 "and": [
+                    {"or": status_filters},
                     {
-                        "or": [
-                            {"property": "상태", "status": {"equals": "대기"}},
-                            {"property": "상태", "status": {"equals": "진행"}},
-                            {"property": "상태", "status": {"equals": "리뷰"}},
-                        ]
-                    },
-                    {
-                        "property": "종료일",
+                        "property": props.end_date,
                         "formula": {"date": {"before": today.isoformat()}},
                     },
                 ]
@@ -194,11 +116,11 @@ def alert_overdue_tasks(
 
     for result in results.get("results", []):
         try:
-            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
         except (KeyError, IndexError):
             task_name = "제목 없음"
         page_url = result["url"]
-        people = result["properties"]["담당자"]["people"]
+        people = result["properties"][props.assignee]["people"]
         if people:
             person = people[0].get("person")
             if person:
@@ -216,37 +138,38 @@ def alert_overdue_tasks(
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
+@_register
 def alert_pending_but_started_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
+    **kwargs,
 ):
-    """
-    시작일이 지났으나 아직 대기 상태인 작업을 슬랙으로 알림
+    """시작일이 지났으나 아직 대기 상태인 작업을 슬랙으로 알림"""
+    if not db_config.properties.start_date or not db_config.pending_statuses:
+        return
 
-    Args:
-        notion (NotionClient): Notion
-        slack_client (WebClient): Slack
-        data_source_id (str): Notion data_source id
-        channel_id (str): Slack channel id
-        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-
-    Returns:
-        None
-    """
     today = datetime.now().date()
+    props = db_config.properties
 
-    # 대기 상태이면서 시작일이 today보다 과거인 페이지 검색
+    pending_filters = [
+        {"property": props.status, "status": {"equals": s}}
+        for s in db_config.pending_statuses
+    ]
     results = notion.data_sources.query(
         **{
-            "data_source_id": data_source_id,
+            "data_source_id": db_config.data_source_id,
             "filter": {
                 "and": [
-                    {"property": "상태", "status": {"equals": "대기"}},
+                    (
+                        {"or": pending_filters}
+                        if len(pending_filters) > 1
+                        else pending_filters[0]
+                    ),
                     {
-                        "property": "시작일",
+                        "property": props.start_date,
                         "formula": {"date": {"before": today.isoformat()}},
                     },
                 ]
@@ -256,11 +179,11 @@ def alert_pending_but_started_tasks(
 
     for result in results.get("results", []):
         try:
-            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
         except (KeyError, IndexError):
             task_name = "제목 없음"
         page_url = result["url"]
-        people = result["properties"]["담당자"]["people"]
+        people = result["properties"][props.assignee]["people"]
         if people:
             person = people[0].get("person")
             if person:
@@ -278,40 +201,29 @@ def alert_pending_but_started_tasks(
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
+@_register
 def alert_no_due_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
+    **kwargs,
 ):
-    """
-    기간 산정 없이 진행 중인 작업을 슬랙으로 알림
+    """기간 산정 없이 진행 중인 작업을 슬랙으로 알림"""
+    props = db_config.properties
 
-    Args:
-        notion (NotionClient): Notion
-        slack_client (WebClient): Slack
-        data_source_id (str): Notion data_source id
-        channel_id (str): Slack channel id
-        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-
-    Returns:
-        None
-    """
-
-    # '진행' 또는 '리뷰' 상태이면서 타임라인이 없는 페이지 검색
+    in_progress_filters = [
+        {"property": props.status, "status": {"equals": s}}
+        for s in db_config.in_progress_statuses
+    ]
     results = notion.data_sources.query(
         **{
-            "data_source_id": data_source_id,
+            "data_source_id": db_config.data_source_id,
             "filter": {
                 "and": [
-                    {
-                        "or": [
-                            {"property": "상태", "status": {"equals": "진행"}},
-                            {"property": "상태", "status": {"equals": "리뷰"}},
-                        ]
-                    },
-                    {"property": "타임라인", "date": {"is_empty": True}},
+                    {"or": in_progress_filters},
+                    {"property": props.timeline, "date": {"is_empty": True}},
                 ]
             },
         }
@@ -319,11 +231,11 @@ def alert_no_due_tasks(
 
     for result in results.get("results", []):
         try:
-            task_name = result["properties"]["제목"]["title"][0]["text"]["content"]
+            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
         except (KeyError, IndexError):
             task_name = "제목 없음"
         page_url = result["url"]
-        people = result["properties"]["담당자"]["people"]
+        people = result["properties"][props.assignee]["people"]
         if people:
             person = people[0].get("person")
             if person:
@@ -344,44 +256,33 @@ def alert_no_due_tasks(
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
+@_register
 def alert_no_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
+    **kwargs,
 ):
-    """
-    아무 작업도 진행 중이지 않은 작업자를 슬랙으로 알림
+    """아무 작업도 진행 중이지 않은 작업자를 슬랙으로 알림"""
+    props = db_config.properties
 
-    Args:
-        notion (NotionClient): Notion
-        slack_client (WebClient): Slack
-        data_source_id (str): Notion data_source id
-        channel_id (str): Slack channel id
-        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-        group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
-
-    Returns:
-        None
-    """
-    # 1. 현재 '진행' 혹은 '리뷰' 상태인 작업의 담당자 이메일들을 모두 가져옵니다.
+    in_progress_filters = [
+        {"property": props.status, "status": {"equals": s}}
+        for s in db_config.in_progress_statuses
+    ]
     in_progress_tasks = notion.data_sources.query(
         **{
-            "data_source_id": data_source_id,
-            "filter": {
-                "or": [
-                    {"property": "상태", "status": {"equals": "진행"}},
-                    {"property": "상태", "status": {"equals": "리뷰"}},
-                ]
-            },
+            "data_source_id": db_config.data_source_id,
+            "filter": {"or": in_progress_filters},
         }
     )
 
     assigned_emails = set()
     for task in in_progress_tasks.get("results", []):
-        people = task["properties"]["담당자"].get("people", [])
+        people = task["properties"][props.assignee].get("people", [])
         for person in people:
             person_info = person.get("person")
             if person_info:
@@ -441,56 +342,43 @@ def alert_no_tasks(
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
+@_register
 def alert_no_upcoming_tasks(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
-    exclude_group_handles: list[str] | None = None,
+    **kwargs,
 ):
-    """
-    5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림
+    """5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림"""
+    props = db_config.properties
+    if not props.start_date or not props.end_date:
+        return
 
-    Args:
-        notion (NotionClient): Notion
-        slack_client (WebClient): Slack
-        data_source_id (str): Notion data_source id
-        channel_id (str): Slack channel id
-        email_to_user_id (dict): 이메일 주소를 슬랙 id로 매핑한 딕셔너리
-        group_handle (str): Slack 사용자 그룹 핸들 (예: "e", "콘텐츠")
-        exclude_group_handles (list[str] | None): 제외할 Slack 사용자 그룹 핸들 목록 (예: ["ie"])
-
-    Returns:
-        None
-    """
     # 예진님 Slack ID
     YEJIN_SLACK_ID = "U075PUFNGHX"
 
     # 영업일 기준 5일 후 날짜 계산
     target_date = get_nth_business_day_from(datetime.now().date(), 5)
 
-    # 5일 후에 진행 중일 것으로 예상되는 작업들을 찾습니다.
-    # 시작일 <= 5일 후 AND 종료일 >= 5일 후 AND 상태가 완료/보류가 아닌 작업
+    all_active = db_config.pending_statuses + db_config.in_progress_statuses
+    status_filters = [
+        {"property": props.status, "status": {"equals": s}} for s in all_active
+    ]
     upcoming_tasks = notion.data_sources.query(
         **{
-            "data_source_id": data_source_id,
+            "data_source_id": db_config.data_source_id,
             "filter": {
                 "and": [
+                    {"or": status_filters},
                     {
-                        "or": [
-                            {"property": "상태", "status": {"equals": "대기"}},
-                            {"property": "상태", "status": {"equals": "진행"}},
-                            {"property": "상태", "status": {"equals": "리뷰"}},
-                        ]
-                    },
-                    {
-                        "property": "시작일",
+                        "property": props.start_date,
                         "formula": {"date": {"on_or_before": target_date.isoformat()}},
                     },
                     {
-                        "property": "종료일",
+                        "property": props.end_date,
                         "formula": {"date": {"on_or_after": target_date.isoformat()}},
                     },
                 ]
@@ -498,10 +386,9 @@ def alert_no_upcoming_tasks(
         }
     )
 
-    # 5일 후에 작업이 예정된 담당자 이메일 수집
     assigned_emails = set()
     for task in upcoming_tasks.get("results", []):
-        people = task["properties"]["담당자"].get("people", [])
+        people = task["properties"][props.assignee].get("people", [])
         for person in people:
             person_info = person.get("person")
             if person_info:
@@ -526,21 +413,6 @@ def alert_no_upcoming_tasks(
 
     group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
     group_user_ids = set(group_users_response.get("users", []))
-
-    # 제외할 그룹 멤버 필터링
-    if exclude_group_handles:
-        for exclude_handle in exclude_group_handles:
-            exclude_usergroup_id = None
-            for group in usergroups_response["usergroups"]:
-                if group["handle"] == exclude_handle:
-                    exclude_usergroup_id = group["id"]
-                    break
-            if exclude_usergroup_id:
-                exclude_response = slack_client.usergroups_users_list(
-                    usergroup=exclude_usergroup_id
-                )
-                exclude_user_ids = set(exclude_response.get("users", []))
-                group_user_ids -= exclude_user_ids
 
     # "slack user id -> email" 매핑 생성
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
@@ -672,28 +544,21 @@ def alert_no_후속_작업(
         slack_client.chat_postMessage(channel=channel_id, text=text)
 
 
+@_register
 def alert_schedule_feasibility(
     notion: NotionClient,
     slack_client: WebClient,
-    data_source_id: str,
+    db_config: NotionDBConfig,
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
     dry_run: bool = False,
+    **kwargs,
 ):
-    """
-    각 담당자의 일정 실현 가능성을 LLM으로 평가하여 문제가 있는 경우 알림
-
-    Args:
-        notion: Notion 클라이언트
-        slack_client: Slack 클라이언트
-        data_source_id: 노션 데이터 소스 ID
-        channel_id: Slack 채널 ID
-        email_to_user_id: 이메일-Slack ID 매핑
-        group_handle: Slack 사용자 그룹 핸들
-        dry_run: True이면 Slack 전송 없이 콘솔 출력만
-    """
+    """각 담당자의 일정 실현 가능성을 LLM으로 평가하여 문제가 있는 경우 알림"""
     today = datetime.now().date()
+    props = db_config.properties
+    all_active = db_config.pending_statuses + db_config.in_progress_statuses
 
     # 1. 대상 그룹의 멤버 이메일 목록 가져오기
     usergroup_id = None
@@ -720,25 +585,22 @@ def alert_schedule_feasibility(
     if dry_run:
         print(f"[dry-run] 대상 그룹: {group_handle}, 멤버 수: {len(target_emails)}")
 
-    # 2. 진행 중이거나 예정된 작업 조회 (대기/진행/리뷰 상태 + 타임라인 있음) - pagination 처리
+    # 2. 진행 중이거나 예정된 작업 조회 (활성 상태 + 타임라인 있음) - pagination 처리
     all_results = []
+    status_filters = [
+        {"property": props.status, "status": {"equals": s}} for s in all_active
+    ]
     query_filter = {
         "and": [
-            {
-                "or": [
-                    {"property": "상태", "status": {"equals": "대기"}},
-                    {"property": "상태", "status": {"equals": "진행"}},
-                    {"property": "상태", "status": {"equals": "리뷰"}},
-                ]
-            },
-            {"property": "타임라인", "date": {"is_not_empty": True}},
+            {"or": status_filters},
+            {"property": props.timeline, "date": {"is_not_empty": True}},
         ]
     }
     has_more = True
     next_cursor = None
 
     while has_more:
-        kwargs = {"data_source_id": data_source_id, "filter": query_filter}
+        kwargs = {"data_source_id": db_config.data_source_id, "filter": query_filter}
         if next_cursor:
             kwargs["start_cursor"] = next_cursor
 
@@ -751,7 +613,7 @@ def alert_schedule_feasibility(
     assignee_tasks: dict[str, list[dict]] = defaultdict(list)
 
     for result in all_results:
-        task_info = _extract_task_info(result)
+        task_info = _extract_task_info(result, props)
         assignee_email = task_info.get("assignee_email")
 
         if not assignee_email or assignee_email not in target_emails:
@@ -824,39 +686,42 @@ def alert_schedule_feasibility(
                 )
 
 
-def _extract_task_info(result: dict) -> dict:
+def _extract_task_info(result: dict, props) -> dict:
     """노션 쿼리 결과에서 작업 정보를 추출"""
     try:
-        title = result["properties"]["제목"]["title"][0]["text"]["content"]
+        title = result["properties"][props.title]["title"][0]["text"]["content"]
     except (KeyError, IndexError):
         title = "제목 없음"
 
     status = (
-        result["properties"].get("상태", {}).get("status", {}).get("name", "알 수 없음")
+        result["properties"]
+        .get(props.status, {})
+        .get("status", {})
+        .get("name", "알 수 없음")
     )
 
-    timeline = result["properties"].get("타임라인", {}).get("date", {})
+    timeline = result["properties"].get(props.timeline, {}).get("date", {})
     start_date = timeline.get("start") if timeline else None
     end_date = timeline.get("end") if timeline else None
 
     # 시작일/종료일이 formula 타입일 수 있음
-    if not start_date:
-        start_prop = result["properties"].get("시작일", {})
+    if not start_date and props.start_date:
+        start_prop = result["properties"].get(props.start_date, {})
         if start_prop.get("type") == "formula":
             formula = start_prop.get("formula", {})
             start_date = formula.get("string") or formula.get("date", {}).get("start")
         elif start_prop.get("type") == "date":
             start_date = start_prop.get("date", {}).get("start")
 
-    if not end_date:
-        end_prop = result["properties"].get("종료일", {})
+    if not end_date and props.end_date:
+        end_prop = result["properties"].get(props.end_date, {})
         if end_prop.get("type") == "formula":
             formula = end_prop.get("formula", {})
             end_date = formula.get("string") or formula.get("date", {}).get("start")
         elif end_prop.get("type") == "date":
             end_date = end_prop.get("date", {}).get("start")
 
-    people = result["properties"].get("담당자", {}).get("people", [])
+    people = result["properties"].get(props.assignee, {}).get("people", [])
     assignee_email = None
     assignee_name = None
     if people:
@@ -1093,21 +958,25 @@ def _send_schedule_alert(
 
 def run_schedule_feasibility_only(dry_run: bool = False):
     """일정 실현 가능성 평가만 실행 (테스트용)"""
+    config = load_config()
     notion = NotionClient(
         auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
     )
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
     email_to_user_id = get_email_to_user_id(slack_client)
 
-    alert_schedule_feasibility(
-        notion,
-        slack_client,
-        MAIN_DATA_SOURCE_ID,
-        MAIN_CHANNEL_ID,
-        email_to_user_id,
-        "e",
-        dry_run=dry_run,
-    )
+    for pipeline in config.task_alerts.pipelines:
+        for squad in pipeline.squads:
+            if "alert_schedule_feasibility" in pipeline.alerts:
+                alert_schedule_feasibility(
+                    notion=notion,
+                    slack_client=slack_client,
+                    db_config=squad.notion_db,
+                    channel_id=pipeline.channel_id,
+                    email_to_user_id=email_to_user_id,
+                    group_handle=squad.handle,
+                    dry_run=dry_run,
+                )
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 
-from service.scrum_config import load_scrum_config
+from service.config import load_config
 
 # 환경 변수 로드
 load_dotenv()
@@ -24,20 +24,21 @@ def main():
     """메인 함수"""
     print("=== 스크럼 멘션 스케줄러 시작 ===")
 
-    config = load_scrum_config()
+    config = load_config()
+    scrum = config.scrum
     slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
     # config에서 팀별 멘션 구성 (display_name -> mention, channel_id)
     team_entries = {}
-    for squad in config.squads:
+    for squad in scrum.squads:
         team_entries[squad.display_name] = {
-            "mention": f"<!subteam^{squad.slack_usergroup_id}>",
-            "channel_id": squad.slack_channel_id,
+            "mention": f"<!subteam^{squad.squad.slack_usergroup_id}>",
+            "channel_id": squad.channel_id,
         }
-    for personal in config.personal_scrums:
+    for personal in scrum.personal_scrums:
         team_entries[personal.name] = {
             "mention": f"<@{personal.slack_user_id}>",
-            "channel_id": personal.slack_channel_id,
+            "channel_id": personal.channel_id,
         }
 
     # 채널별로 검색할 팀 이름 그룹화
