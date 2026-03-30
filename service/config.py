@@ -100,6 +100,20 @@ class TaskAlertsConfig:
     pipelines: list[TaskAlertPipeline]
 
 
+# --- 스케줄 작업 ---
+
+
+@dataclass(frozen=True)
+class ScheduledJobConfig:
+    """스케줄 작업 설정"""
+
+    name: str
+    module: str
+    function: str
+    cron: dict[str, str | int]
+    business_day_only: bool = False
+
+
 # --- 전체 ---
 
 
@@ -111,6 +125,7 @@ class AppConfig:
     squads: list[Squad]
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
+    scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
 
 
 def _parse_config(raw: dict) -> AppConfig:
@@ -200,11 +215,24 @@ def _parse_config(raw: dict) -> AppConfig:
         )
     task_alerts = TaskAlertsConfig(pipelines=pipelines)
 
+    # Scheduled jobs
+    scheduled_jobs = [
+        ScheduledJobConfig(
+            name=job["name"],
+            module=job["module"],
+            function=job["function"],
+            cron=job["cron"],
+            business_day_only=job.get("business_day_only", False),
+        )
+        for job in raw.get("scheduled_jobs", [])
+    ]
+
     return AppConfig(
         notion_databases=notion_databases,
         squads=squads,
         scrum=scrum,
         task_alerts=task_alerts,
+        scheduled_jobs=scheduled_jobs,
     )
 
 

@@ -15,6 +15,7 @@ from app.general import register_general_handlers
 from app.contents import register_contents_handlers
 from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
+from scheduler import start_scheduler
 
 # 환경 변수 로드
 load_dotenv()
@@ -48,6 +49,9 @@ register_justin_handlers(app_justin)
 
 
 async def main():
+    # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
+    start_scheduler()
+
     # Assistant 등록
     app.use(assistant)
 

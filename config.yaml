@@ -129,3 +129,85 @@ task_alerts:
         - alert_pending_but_started_tasks
         - alert_no_due_tasks
         - alert_no_tasks
+
+scheduled_jobs:
+  - name: validate_customer_reports
+    module: scripts.validate_customer_reports
+    function: main
+    cron:
+      hour: 8
+      minute: 0
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: manage_tasks_daily
+    module: scripts.manage_tasks_daily
+    function: main
+    cron:
+      hour: 8
+      minute: 15
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: notify_upcoming_workevent
+    module: scripts.notify_upcoming_workevent
+    function: main
+    cron:
+      hour: 8
+      minute: 30
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: notify_worktime_left
+    module: scripts.notify_worktime_left
+    function: main
+    cron:
+      hour: 8
+      minute: 45
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: collect_review_stats
+    module: scripts.collect_review_stats
+    function: main
+    cron:
+      hour: 9
+      minute: 0
+      day_of_week: mon-fri
+    business_day_only: false
+
+  - name: collect_coding_rule_feedbacks
+    module: scripts.collect_coding_rule_feedbacks
+    function: main
+    cron:
+      hour: 9
+      minute: 15
+      day_of_week: mon
+    business_day_only: false
+
+  - name: post_scrum_message
+    module: scripts.post_scrum_message
+    function: main
+    cron:
+      hour: 16
+      minute: 0
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: summarize_deployment
+    module: app.summarize_deployment
+    function: summarize_deployment
+    cron:
+      hour: 16
+      minute: 30
+      day_of_week: mon-fri
+    business_day_only: false
+
+  - name: schedule_scrum_mention
+    module: scripts.schedule_scrum_mention
+    function: main
+    cron:
+      hour: 16
+      minute: 30
+      day_of_week: mon-fri
+    business_day_only: true
