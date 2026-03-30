@@ -51,10 +51,13 @@ def main():
 
     if args.dry_run:
         print("=== DRY RUN MODE ===")
-        print(f"채널: {config.channel_id}\n")
 
-    # 1. 안내 메시지 발송
-    send_intro_message(slack_client, config.channel_id, args.dry_run)
+    # 스쿼드 채널 목록 (인트로 메시지에서 다른 채널 안내용)
+    squad_channel_ids = list(dict.fromkeys(s.slack_channel_id for s in config.squads))
+
+    # 1. 각 스쿼드 채널에 안내 메시지 발송
+    for channel_id in squad_channel_ids:
+        send_intro_message(slack_client, channel_id, squad_channel_ids, args.dry_run)
 
     # 2. 스쿼드별 스크럼
     for squad in config.squads:
@@ -63,34 +66,44 @@ def main():
             slack_client,
             email_to_user_id,
             squad,
-            config.channel_id,
             args.dry_run,
         )
 
     # 3. 개인 스크럼
     for personal in config.personal_scrums:
-        send_personal_scrum(slack_client, personal, config.channel_id, args.dry_run)
+        send_personal_scrum(slack_client, personal, args.dry_run)
 
     if args.dry_run:
         print("\n=== DRY RUN COMPLETED ===")
 
 
-def send_intro_message(slack_client: WebClient, channel_id: str, dry_run: bool = False):
+def send_intro_message(
+    slack_client: WebClient,
+    channel_id: str,
+    all_channel_ids: list[str],
+    dry_run: bool = False,
+):
     """
     안내 메시지 발송
 
     Args:
         slack_client: Slack WebClient
-        channel_id: 스크럼 채널 ID
+        channel_id: 발송 대상 채널 ID
+        all_channel_ids: 전체 스쿼드 채널 ID 목록 (다른 채널 안내용)
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
     intro_text = "오늘 스크럼을 시작합니다. 4:40까지 작성 부탁드립니다!"
 
-    detail_text = """스크럼의 목적은 팀내의 진행상황을 확인하고, 장애를 파악하는 것입니다.
+    # 다른 스쿼드 채널 링크 생성
+    other_channels = " ".join(
+        f"<#{cid}>" for cid in all_channel_ids if cid != channel_id
+    )
+
+    detail_text = f"""스크럼의 목적은 팀내의 진행상황을 확인하고, 장애를 파악하는 것입니다.
 팀원이 스크럼 중 장애를 보고하면 각 마스터(김예원 엄은상 이창환)는
 장애를 최소화 하기 위해 스크럼 후 다른 팀의 협조로 연계해주시면 되겠습니다.
 다른 팀 스크럼이 궁금하시면 본인 팀의 스크럼이 끝나고 서면으로 남겨진 내용을 자유롭게 확인하시면 됩니다.
-#a_스크럼_제품 #a_스크럼_고객 #a_스크럼_콘텐츠
+{other_channels}
 다른 팀의 지원이 필요하시면 본인 팀 스크럼 때, 마스터를 통해 지원을 요청 주시면 됩니다.
 (사실 스크럼이 아니더라도 업무 중 자유롭게 요청 주셔도 됩니다.)
 ---------------------------------------------------------------------------
@@ -103,7 +116,7 @@ def send_intro_message(slack_client: WebClient, channel_id: str, dry_run: bool =
 - AAA 이슈로 B팀과 협업 요청"""
 
     if dry_run:
-        print(f"\n[안내 메시지]")
+        print(f"\n[안내 메시지] 채널: {channel_id}")
         print(intro_text)
         print(f"  └─ 스레드: {detail_text[:100]}...")
     else:
@@ -127,7 +140,6 @@ def send_team_scrum(
     slack_client: WebClient,
     email_to_user_id: dict[str, str],
     squad: ScrumSquad,
-    channel_id: str,
     dry_run: bool = False,
 ):
     """
@@ -138,14 +150,13 @@ def send_team_scrum(
         slack_client: Slack WebClient
         email_to_user_id: 이메일 -> Slack User ID 매핑
         squad: 스쿼드 설정
-        channel_id: 스크럼 채널 ID
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
     # 메인 메시지
-    text = f"{squad.display_name}팀 스크럼"
+    text = f"{squad.display_name}"
 
     if dry_run:
-        print(f"\n[{squad.display_name}팀 스크럼]")
+        print(f"\n[{squad.display_name}] 채널: {squad.slack_channel_id}")
         print(text)
 
     # 팀 멤버의 진행 중인 태스크 조회
@@ -197,7 +208,7 @@ def send_team_scrum(
     else:
         # 실제 메시지 발송
         response = slack_client.chat_postMessage(
-            channel=channel_id,
+            channel=squad.slack_channel_id,
             text=text,
         )
         thread_ts = response["ts"]
@@ -205,7 +216,7 @@ def send_team_scrum(
         # 인원별 메시지를 스레드에 발송
         for msg in thread_messages:
             slack_client.chat_postMessage(
-                channel=channel_id,
+                channel=squad.slack_channel_id,
                 thread_ts=thread_ts,
                 text=msg,
             )
@@ -214,7 +225,6 @@ def send_team_scrum(
 def send_personal_scrum(
     slack_client: WebClient,
     personal: PersonalScrum,
-    channel_id: str,
     dry_run: bool = False,
 ):
     """
@@ -223,17 +233,16 @@ def send_personal_scrum(
     Args:
         slack_client: Slack WebClient
         personal: 개인 스크럼 설정
-        channel_id: 스크럼 채널 ID
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
-    text = f"{personal.name} 스크럼"
+    text = personal.name
 
     if dry_run:
-        print(f"\n[{personal.name} 스크럼]")
+        print(f"\n[{personal.name}] 채널: {personal.slack_channel_id}")
         print(text)
     else:
         slack_client.chat_postMessage(
-            channel=channel_id,
+            channel=personal.slack_channel_id,
             text=text,
         )
 

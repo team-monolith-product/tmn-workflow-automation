@@ -28,11 +28,11 @@ def test_load_actual_config():
     config = load_scrum_config(config_path)
 
     assert isinstance(config, ScrumConfig)
-    assert config.channel_id == "C09277NGUET"
-    assert len(config.notion_databases) == 2
+    assert len(config.notion_databases) == 4
     assert "main" in config.notion_databases
+    assert "hackathon" in config.notion_databases
     assert "explore" in config.notion_databases
-    assert len(config.squads) == 5
+    assert len(config.squads) == 4
     assert len(config.personal_scrums) == 1
 
 
@@ -42,7 +42,23 @@ def test_squad_order_preserved():
     config = load_scrum_config(config_path)
 
     handles = [s.handle for s in config.squads]
-    assert handles == ["기획", "fe", "be", "ie", "탐색"]
+    assert handles == ["코들", "해커톤", "탐색", "ie"]
+    display_names = [s.display_name for s in config.squads]
+    assert display_names == [
+        ":codle_bird: 코들 스쿼드",
+        ":runner: 해커톤 스쿼드",
+        ":earth_asia: 탐색 스쿼드",
+        ":building_construction: 인프라 팀",
+    ]
+
+
+def test_squad_channel_ids():
+    """스쿼드별 채널 ID가 올바르게 로드되는지 검증"""
+    config_path = str(Path(__file__).parent.parent / "scrum_config.yaml")
+    config = load_scrum_config(config_path)
+
+    for squad in config.squads:
+        assert squad.slack_channel_id == "C09277NGUET"
 
 
 def test_notion_db_reference():
@@ -50,12 +66,24 @@ def test_notion_db_reference():
     config_path = str(Path(__file__).parent.parent / "scrum_config.yaml")
     config = load_scrum_config(config_path)
 
-    fe_squad = next(s for s in config.squads if s.handle == "fe")
-    explore_squad = next(s for s in config.squads if s.handle == "탐색")
+    squad_map = {s.handle: s for s in config.squads}
+    assert squad_map["코들"].notion_db.name == "main"
+    assert squad_map["해커톤"].notion_db.name == "hackathon"
+    assert squad_map["탐색"].notion_db.name == "explore"
+    assert squad_map["탐색"].notion_db.properties.pr is None
 
-    assert fe_squad.notion_db.name == "main"
-    assert explore_squad.notion_db.name == "explore"
-    assert explore_squad.notion_db.properties.pr is None
+
+def test_hackathon_db_properties():
+    """해커톤 DB의 프로퍼티가 올바르게 매핑되는지 검증"""
+    config_path = str(Path(__file__).parent.parent / "scrum_config.yaml")
+    config = load_scrum_config(config_path)
+
+    hackathon_db = config.notion_databases["hackathon"]
+    assert hackathon_db.properties.title == "이름"
+    assert hackathon_db.properties.status == "상태"
+    assert hackathon_db.properties.timeline == "마감일"
+    assert hackathon_db.properties.pr is None
+    assert hackathon_db.in_progress_statuses == ["진행 중"]
 
 
 def test_pr_warning_config():
@@ -64,21 +92,22 @@ def test_pr_warning_config():
     config = load_scrum_config(config_path)
 
     squad_map = {s.handle: s for s in config.squads}
-    assert squad_map["기획"].pr_warning is False
-    assert squad_map["fe"].pr_warning is True
+    assert squad_map["코들"].pr_warning is True
+    assert squad_map["해커톤"].pr_warning is False
     assert squad_map["탐색"].pr_warning is False
+    assert squad_map["ie"].pr_warning is True
 
 
 def test_invalid_db_reference():
     """존재하지 않는 notion_db 참조 시 ValueError"""
     raw = {
-        "channel_id": "C000",
         "notion_databases": {},
         "squads": [
             {
                 "handle": "test",
                 "display_name": "Test",
                 "slack_usergroup_id": "S000",
+                "slack_channel_id": "C000",
                 "notion_db": "nonexistent",
             }
         ],
@@ -107,5 +136,6 @@ def test_personal_scrum():
     config_path = str(Path(__file__).parent.parent / "scrum_config.yaml")
     config = load_scrum_config(config_path)
 
-    assert config.personal_scrums[0].name == "이창환"
+    assert config.personal_scrums[0].name == "CTO"
     assert config.personal_scrums[0].slack_user_id == "U02HT4EU4VD"
+    assert config.personal_scrums[0].slack_channel_id == "C09277NGUET"
