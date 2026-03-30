@@ -66,7 +66,9 @@ class TestStartScheduler:
         with (
             patch.object(scheduler_module, "load_config", return_value=mock_config),
             patch.object(
-                scheduler_module, "importlib", MagicMock(import_module=MagicMock(return_value=mock_module))
+                scheduler_module,
+                "importlib",
+                MagicMock(import_module=MagicMock(return_value=mock_module)),
             ),
         ):
             start_scheduler()
