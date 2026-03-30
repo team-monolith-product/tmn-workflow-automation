@@ -19,8 +19,9 @@ notion_databases:
       status: "상태"
       assignee: "담당자"
       timeline: "마감일"
-    pending_statuses: ["시작 전"]
-    in_progress_statuses: ["진행 중"]
+      pr: "GitHub 풀 리퀘스트"
+    pending_statuses: ["대기"]
+    in_progress_statuses: ["진행", "리뷰"]
 
   infra:
     data_source_id: "3321cc82-0da6-80bf-b9b9-000b75cd1933"
@@ -29,8 +30,6 @@ notion_databases:
       status: "상태"
       assignee: "담당자"
       timeline: "타임라인"
-      start_date: "시작일"
-      end_date: "종료일"
       pr: "GitHub 풀 리퀘스트"
     pending_statuses: ["대기"]
     in_progress_statuses: ["진행", "리뷰"]
@@ -88,7 +87,7 @@ scrum:
     - handle: "해커톤"
       display_name: ":runner: 해커톤 스쿼드"
       channel_id: "C09277NGUET"
-      pr_warning: false
+      pr_warning: true
 
     - handle: "탐색"
       display_name: ":earth_asia: 탐색 스쿼드"

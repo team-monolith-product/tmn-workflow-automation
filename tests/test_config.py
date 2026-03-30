@@ -64,9 +64,9 @@ def test_notion_db_properties():
     assert hackathon.properties.title == "이름"
     assert hackathon.properties.start_date is None
     assert hackathon.properties.end_date is None
-    assert hackathon.properties.pr is None
-    assert hackathon.pending_statuses == ["시작 전"]
-    assert hackathon.in_progress_statuses == ["진행 중"]
+    assert hackathon.properties.pr == "GitHub 풀 리퀘스트"
+    assert hackathon.pending_statuses == ["대기"]
+    assert hackathon.in_progress_statuses == ["진행", "리뷰"]
 
 
 def test_scrum_config():
