@@ -33,12 +33,12 @@ from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 import dotenv
 
+from service.config import NotionDBConfig, load_config
 from service.slack import get_email_to_user_id
 
 dotenv.load_dotenv()
 
 
-NOTION_DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
 SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
 
 
@@ -98,69 +98,70 @@ def format_pr_link(pr_info: dict[str, Any]) -> tuple[str, str | None]:
         return pr_url, None
 
 
+def _query_deployment_tasks(
+    notion: NotionClient, db_config: NotionDBConfig, today_str: str
+) -> list[dict]:
+    """DB에서 오늘 배포 예정 과업을 조회"""
+    props = db_config.properties
+
+    shared_filters = [
+        {"property": props.status, "status": {"does_not_equal": "중단"}},
+    ]
+
+    # "배포 예정 날짜"가 있는 DB (main)는 복합 조건, 없는 DB는 타임라인 end_date 사용
+    if props.end_date:
+        date_conditions = [
+            [{"property": "배포 예정 날짜", "date": {"equals": today_str}}],
+            [
+                {"property": "배포 예정 날짜", "date": {"is_empty": True}},
+                {"property": props.end_date, "date": {"equals": today_str}},
+            ],
+        ]
+        or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
+        query_filter = {"or": or_filters}
+    else:
+        # end_date formula가 없는 DB: 타임라인 end == 오늘
+        query_filter = {
+            "and": shared_filters
+            + [{"property": props.timeline, "date": {"equals": today_str}}]
+        }
+
+    result = notion.data_sources.query(
+        **{"data_source_id": db_config.data_source_id, "filter": query_filter}
+    )
+    return result.get("results", [])
+
+
 def summarize_deployment(
     caller_slack_user_id: str | None = None,
 ):
     """
-    1) Notion DB에서 오늘 배포 예정인 과업 목록 조회
+    1) Notion DB에서 오늘 배포 예정인 과업 목록 조회 (제품 본부 전체)
     2) 담당자를 이메일로 매핑해서 Slack 멘션
     3) GitHub PR 링크 파싱
     4) 한 번에 정리된 메시지를 Slack에 전송
     """
+    config = load_config()
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"])
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     email_to_user_id = get_email_to_user_id(slack_client)
 
-    today_str = datetime.now().date().isoformat()  # "YYYY-MM-DD"
+    today_str = datetime.now().date().isoformat()
 
-    # 1) 오늘 배포할 과업 목록 조회
-    #    - 상태 필터링
-    #      '중단' 이 아닌 과업
-    #    - PR 필터링 (메시지 구성 시)
-    #      closed가 아닌 PR이 존재하는 과업만 포함
-    shared_filters = [
-        {
-            "property": "상태",
-            "status": {"does_not_equal": "중단"},
-        },
-    ]
-
-    #    - 날짜 필터링
-    #      '배포 예정 날짜' ?? '종료일' == 오늘
-    #      <=> {('배포 예정 날짜' == 오늘) OR ('배포 예정 날짜' == NULL AND '종료일' == 오늘)}
-    date_conditions = [
-        # '배포 예정 날짜' == 오늘
-        [
-            {
-                "property": "배포 예정 날짜",
-                "date": {"equals": today_str},
-            }
-        ],
-        # '배포 예정 날짜' == NULL AND '종료일' == 오늘
-        [
-            {"property": "배포 예정 날짜", "date": {"is_empty": True}},
-            {
-                "property": "종료일",
-                "date": {"equals": today_str},
-            },
-        ],
-    ]
-
-    # Notion API에서 Compound filter confitions 를 최대 2 Levels deep으로 지원합니다.
-    # 이에 따라, 구성요소 필터링을 분배법칙으로 OR 연산의 operand 각각에 적용합니다.
-    # 참조: https://developers.notion.com/reference/post-data_source-query-filter#compound-filter-conditions
-    or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
-
-    query_result = notion.data_sources.query(
-        **{
-            "data_source_id": NOTION_DATA_SOURCE_ID,
-            "filter": {
-                "or": or_filters,
-            },
-        }
+    # 제품 본부 파이프라인의 스쿼드 DB에서 배포 예정 과업 조회
+    product_pipeline = next(
+        p for p in config.task_alerts.pipelines if p.name == "제품 본부"
     )
-
-    tasks = query_result.get("results", [])
+    tasks = []
+    db_by_task_url: dict[str, NotionDBConfig] = {}
+    for squad in product_pipeline.squads:
+        db = squad.notion_db
+        if not db.properties.pr:
+            continue
+        squad_tasks = _query_deployment_tasks(notion, db, today_str)
+        for task in squad_tasks:
+            db_by_task_url[task["url"]] = db
+        tasks.extend(squad_tasks)
     if not tasks:
         # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
         slack_client.chat_postMessage(
@@ -181,10 +182,11 @@ def summarize_deployment(
 
     task_index = 0
     for task in tasks:
-        props = task["properties"]
+        task_props = task["properties"]
+        db = db_by_task_url[task["url"]]
 
         # 4) GitHub PR 링크 정보
-        pr_link_property: dict[str, Any] = props.get("GitHub 풀 리퀘스트", {})
+        pr_link_property: dict[str, Any] = task_props.get(db.properties.pr, {})
         pr_relations: list[dict[str, Any]] = pr_link_property.get("relation", [])
         pr_links_info: list[dict[str, Any]] = get_pr_links(notion, pr_relations)
 
@@ -195,7 +197,7 @@ def summarize_deployment(
         task_index += 1
 
         # 2) 담당자(people 속성)에서 이메일을 추출하여 Slack 멘션 처리
-        assignees = props.get("담당자", {}).get("people", [])
+        assignees = task_props.get(db.properties.assignee, {}).get("people", [])
         if assignees:
             notion_email = assignees[0].get("person", {}).get("email")
             if notion_email:
@@ -210,7 +212,7 @@ def summarize_deployment(
             assignee_mention = "Unassigned"
 
         # 3) 과업 제목, 노션 페이지 링크
-        title_prop = props.get("제목", {})
+        title_prop = task_props.get(db.properties.title, {})
         if "title" in title_prop and title_prop["title"]:
             task_title = title_prop["title"][0]["plain_text"]
         else:
