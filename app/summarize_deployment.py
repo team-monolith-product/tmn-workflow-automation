@@ -108,23 +108,16 @@ def _query_deployment_tasks(
         {"property": props.status, "status": {"does_not_equal": "중단"}},
     ]
 
-    # "배포 예정 날짜"가 있는 DB (main)는 복합 조건, 없는 DB는 타임라인 end_date 사용
-    if props.end_date:
-        date_conditions = [
-            [{"property": "배포 예정 날짜", "date": {"equals": today_str}}],
-            [
-                {"property": "배포 예정 날짜", "date": {"is_empty": True}},
-                {"property": props.end_date, "date": {"equals": today_str}},
-            ],
+    # 종료일 == 오늘인 과업 조회
+    query_filter = {
+        "and": shared_filters
+        + [
+            {
+                "property": props.end_date,
+                "formula": {"date": {"equals": today_str}},
+            }
         ]
-        or_filters = [{"and": cond + shared_filters} for cond in date_conditions]
-        query_filter = {"or": or_filters}
-    else:
-        # end_date formula가 없는 DB: 타임라인 end == 오늘
-        query_filter = {
-            "and": shared_filters
-            + [{"property": props.timeline, "date": {"equals": today_str}}]
-        }
+    }
 
     result = notion.data_sources.query(
         **{"data_source_id": db_config.data_source_id, "filter": query_filter}
