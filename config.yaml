@@ -1,0 +1,127 @@
+notion_databases:
+  main:
+    data_source_id: "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
+    properties:
+      title: "제목"
+      status: "상태"
+      assignee: "담당자"
+      timeline: "타임라인"
+      start_date: "시작일"
+      end_date: "종료일"
+      pr: "GitHub 풀 리퀘스트"
+    pending_statuses: ["대기"]
+    in_progress_statuses: ["진행", "리뷰"]
+
+  hackathon:
+    data_source_id: "3281cc82-0da6-80fa-a459-000b0b93b641"
+    properties:
+      title: "이름"
+      status: "상태"
+      assignee: "담당자"
+      timeline: "마감일"
+      pr: "GitHub 풀 리퀘스트"
+    pending_statuses: ["대기"]
+    in_progress_statuses: ["진행", "리뷰"]
+
+  infra:
+    data_source_id: "3321cc82-0da6-80bf-b9b9-000b75cd1933"
+    properties:
+      title: "이름"
+      status: "상태"
+      assignee: "담당자"
+      timeline: "타임라인"
+      pr: "GitHub 풀 리퀘스트"
+    pending_statuses: ["대기"]
+    in_progress_statuses: ["진행", "리뷰"]
+
+  explore:
+    data_source_id: "3141cc82-0da6-8103-913c-000ba234b439"
+    properties:
+      title: "작업"
+      status: "진행 상태"
+      assignee: "담당자"
+      timeline: "마감일"
+    pending_statuses: []
+    in_progress_statuses: ["진행 중", "테스트 중"]
+
+  contents:
+    data_source_id: "fecd7fca-8280-4f02-b78f-7fa720f53aa6"
+    properties:
+      title: "제목"
+      status: "상태"
+      assignee: "담당자"
+      timeline: "타임라인"
+      start_date: "시작일"
+      end_date: "종료일"
+    pending_statuses: ["대기"]
+    in_progress_statuses: ["진행", "리뷰"]
+
+squads:
+  - handle: "코들"
+    slack_usergroup_id: "S0APF17S6TC"
+    notion_db: main
+
+  - handle: "해커톤"
+    slack_usergroup_id: "S0APF182Q74"
+    notion_db: hackathon
+
+  - handle: "탐색"
+    slack_usergroup_id: "S0AJD6M5LH4"
+    notion_db: explore
+
+  - handle: "ie"
+    slack_usergroup_id: "S08628PEEUQ"
+    notion_db: infra
+
+  - handle: "콘텐츠"
+    slack_usergroup_id: "S08LHAA2HL3"
+    notion_db: contents
+
+scrum:
+  squads:
+    - handle: "코들"
+      display_name: ":codle_bird: 코들 스쿼드"
+      channel_id: "C09277NGUET"
+      pr_warning: true
+
+    - handle: "해커톤"
+      display_name: ":runner: 해커톤 스쿼드"
+      channel_id: "C09277NGUET"
+      pr_warning: true
+
+    - handle: "탐색"
+      display_name: ":earth_asia: 탐색 스쿼드"
+      channel_id: "C09277NGUET"
+      pr_warning: false
+
+    - handle: "ie"
+      display_name: ":building_construction: 인프라 팀"
+      channel_id: "C09277NGUET"
+      pr_warning: true
+
+  personal_scrums:
+    - name: "CTO"
+      slack_user_id: "U02HT4EU4VD"
+      channel_id: "C09277NGUET"
+
+task_alerts:
+  pipelines:
+    - name: "제품 본부"
+      channel_id: "C087PDC9VG8"
+      squads: ["코들", "해커톤", "ie"]
+      alerts:
+        - alert_overdue_tasks
+        - alert_pending_but_started_tasks
+        - alert_no_due_tasks
+        - alert_no_tasks
+        - alert_no_upcoming_tasks
+        - alert_schedule_feasibility
+
+    - name: "콘텐츠 본부"
+      channel_id: "C091ZUBTCKU"
+      squads: ["콘텐츠"]
+      alerts:
+        - alert_overdue_tasks
+        - alert_pending_but_started_tasks
+        - alert_no_due_tasks
+        - alert_no_tasks
