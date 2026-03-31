@@ -29,19 +29,37 @@ ALERT_FUNCTIONS: dict[str, callable] = {}
 DIRECT_SEND_ALERTS = {"alert_schedule_feasibility"}
 
 
+class DryRunSlackClient:
+    """dry-run 모드에서 Slack 메시지를 콘솔에 출력하는 래퍼"""
+
+    def __init__(self, real_client: WebClient):
+        self._client = real_client
+        self._ts_counter = 0
+
+    def chat_postMessage(self, *, channel, text, thread_ts=None, **kwargs):
+        prefix = f"  [thread {thread_ts}]" if thread_ts else ""
+        print(f"[dry-run]{prefix} {text}")
+        self._ts_counter += 1
+        return {"ts": f"dry.{self._ts_counter}"}
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
 def _register(fn):
     ALERT_FUNCTIONS[fn.__name__] = fn
     return fn
 
 
-def main():
+def main(dry_run: bool = False):
     config = load_config()
     notion = NotionClient(
         auth=os.environ.get("NOTION_TOKEN"), notion_version="2025-09-03"
     )
-    slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+    real_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+    slack_client = DryRunSlackClient(real_client) if dry_run else real_client
 
-    email_to_user_id = get_email_to_user_id(slack_client)
+    email_to_user_id = get_email_to_user_id(real_client)
 
     for pipeline in config.task_alerts.pipelines:
         for ps in pipeline.pipeline_squads:
@@ -91,7 +109,7 @@ def main():
 
 
 def _send_squad_summary(
-    slack_client: WebClient,
+    slack_client,
     channel_id: str,
     squad,
     items: list[tuple[str | None, str]],
@@ -108,16 +126,24 @@ def _send_squad_summary(
     if not by_person:
         return
 
-    sections = [f"{squad.display_name} 일일 작업 검토"]
+    # 스쿼드 헤더 메시지
+    slack_client.chat_postMessage(
+        channel=channel_id,
+        text=f"{squad.display_name} 일일 작업 검토",
+    )
 
+    # 담당자별 메시지 + 스레드 댓글
     for user_id, texts in by_person.items():
-        lines = [f"\n<@{user_id}> 님 아래 작업을 확인해주세요."]
-        for text in texts:
-            lines.append(f"• {text}")
-        sections.append("\n".join(lines))
-
-    message = "\n————————————————\n".join(sections)
-    slack_client.chat_postMessage(channel=channel_id, text=message)
+        response = slack_client.chat_postMessage(
+            channel=channel_id,
+            text=f"<@{user_id}> 님 아래 작업을 확인해주세요.",
+        )
+        thread_text = "\n".join(f"• {text}" for text in texts)
+        slack_client.chat_postMessage(
+            channel=channel_id,
+            text=thread_text,
+            thread_ts=response["ts"],
+        )
 
 
 def _get_usergroup_members(
@@ -974,4 +1000,4 @@ if __name__ == "__main__":
     if args.schedule_only:
         run_schedule_feasibility_only(dry_run=args.dry_run)
     else:
-        main()
+        main(dry_run=args.dry_run)
