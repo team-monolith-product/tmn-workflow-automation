@@ -348,9 +348,7 @@ def alert_no_tasks(
 
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
     team_emails = [
-        user_id_to_email[uid]
-        for uid in group_user_ids
-        if uid in user_id_to_email
+        user_id_to_email[uid] for uid in group_user_ids if uid in user_id_to_email
     ]
 
     unassigned_emails = set(team_emails) - assigned_emails
@@ -359,7 +357,10 @@ def alert_no_tasks(
     for email in unassigned_emails:
         slack_user_id = email_to_user_id.get(email)
         items.append(
-            (slack_user_id, "현재 진행중인 작업이 없습니다. 혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다.")
+            (
+                slack_user_id,
+                "현재 진행중인 작업이 없습니다. 혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다.",
+            )
         )
     return items
 
@@ -423,9 +424,7 @@ def alert_no_upcoming_tasks(
 
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
     team_emails = [
-        user_id_to_email[uid]
-        for uid in group_user_ids
-        if uid in user_id_to_email
+        user_id_to_email[uid] for uid in group_user_ids if uid in user_id_to_email
     ]
 
     # 5일 후 당일 종일 연차인 멤버 제외

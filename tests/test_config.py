@@ -93,7 +93,11 @@ def test_task_alert_pipelines():
     product = config.task_alerts.pipelines[0]
     assert product.name == "제품 본부"
     assert product.channel_id == "C087PDC9VG8"
-    assert [ps.squad.handle for ps in product.pipeline_squads] == ["코들", "해커톤", "ie"]
+    assert [ps.squad.handle for ps in product.pipeline_squads] == [
+        "코들",
+        "해커톤",
+        "ie",
+    ]
     codle = product.pipeline_squads[0]
     assert "alert_overdue_tasks" in codle.alerts
     assert "alert_no_upcoming_tasks" in codle.alerts
@@ -141,11 +145,7 @@ def test_invalid_scrum_handle_reference():
             }
         },
         "squads": [{"handle": "a", "slack_usergroup_id": "S1", "notion_db": "db1"}],
-        "scrum": {
-            "squads": [
-                {"handle": "nonexistent", "channel_id": "C0"}
-            ]
-        },
+        "scrum": {"squads": [{"handle": "nonexistent", "channel_id": "C0"}]},
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(raw, f)
