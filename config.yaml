@@ -83,7 +83,7 @@ squads:
     display_name: ":building_construction: 인프라 팀"
     slack_usergroup_id: "S08628PEEUQ"
     notion_db: infra
-    pm_slack_user_id: "U02HT4EU4VD"  # 이창환
+    pm_slack_user_id: "U02PFUPCJNM"  # 류호선
 
   - handle: "콘텐츠"
     display_name: ":pencil2: 콘텐츠 본부"
