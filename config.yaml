@@ -64,18 +64,22 @@ squads:
   - handle: "코들"
     slack_usergroup_id: "S0APF17S6TC"
     notion_db: main
+    pm_slack_user_id: "U075PUFNGHX"  # 예진
 
   - handle: "해커톤"
     slack_usergroup_id: "S0APF182Q74"
     notion_db: hackathon
+    pm_slack_user_id: "U02HT4EU4VD"  # 이창환
 
   - handle: "탐색"
     slack_usergroup_id: "S0AJD6M5LH4"
     notion_db: explore
+    pm_slack_user_id: "U02JLCWGETT"  # 배영빈
 
   - handle: "ie"
     slack_usergroup_id: "S08628PEEUQ"
     notion_db: infra
+    pm_slack_user_id: "U02HT4EU4VD"  # 이창환
 
   - handle: "콘텐츠"
     slack_usergroup_id: "S08LHAA2HL3"

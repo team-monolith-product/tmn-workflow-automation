@@ -48,6 +48,7 @@ class Squad:
     handle: str
     slack_usergroup_id: str
     notion_db: NotionDBConfig
+    pm_slack_user_id: str | None = None
 
 
 # --- 스크럼 ---
@@ -164,6 +165,7 @@ def _parse_config(raw: dict) -> AppConfig:
             handle=squad_raw["handle"],
             slack_usergroup_id=squad_raw["slack_usergroup_id"],
             notion_db=notion_databases[db_name],
+            pm_slack_user_id=squad_raw.get("pm_slack_user_id"),
         )
         squads.append(squad)
         squad_by_handle[squad.handle] = squad

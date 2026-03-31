@@ -54,6 +54,7 @@ def main():
                     channel_id=pipeline.channel_id,
                     email_to_user_id=email_to_user_id,
                     group_handle=squad.handle,
+                    pm_slack_user_id=squad.pm_slack_user_id,
                 )
 
 
@@ -350,15 +351,16 @@ def alert_no_upcoming_tasks(
     channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
+    pm_slack_user_id: str | None = None,
     **kwargs,
 ):
-    """5일 후에 예정된 작업이 없는 작업자를 예진님에게 알림"""
+    """5일 후에 예정된 작업이 없는 작업자를 PM에게 알림"""
     props = db_config.properties
     if not props.start_date or not props.end_date:
         return
 
-    # 예진님 Slack ID
-    YEJIN_SLACK_ID = "U075PUFNGHX"
+    if not pm_slack_user_id:
+        return
 
     # 영업일 기준 5일 후 날짜 계산
     target_date = get_nth_business_day_from(datetime.now().date(), 5)
@@ -454,7 +456,7 @@ def alert_no_upcoming_tasks(
         weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
         target_weekday = weekday_names[target_date.weekday()]
         text = (
-            f"<@{YEJIN_SLACK_ID}> 5일 후 {target_date.month}/{target_date.day}({target_weekday})에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
+            f"<@{pm_slack_user_id}> 5일 후 {target_date.month}/{target_date.day}({target_weekday})에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
             "로드맵 점검 부탁드립니다."
         )
         slack_client.chat_postMessage(channel=channel_id, text=text)
