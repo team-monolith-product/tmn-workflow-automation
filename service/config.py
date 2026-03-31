@@ -46,8 +46,10 @@ class Squad:
     """조직 단위 스쿼드"""
 
     handle: str
+    display_name: str
     slack_usergroup_id: str
     notion_db: NotionDBConfig
+    pm_slack_user_id: str | None = None
 
 
 # --- 스크럼 ---
@@ -58,7 +60,6 @@ class ScrumSquadConfig:
     """스크럼 참여 스쿼드 설정"""
 
     squad: Squad
-    display_name: str
     channel_id: str
     pr_warning: bool = True
 
@@ -84,13 +85,20 @@ class ScrumConfig:
 
 
 @dataclass(frozen=True)
+class PipelineSquad:
+    """파이프라인 내 스쿼드별 알림 설정"""
+
+    squad: Squad
+    alerts: list[str]
+
+
+@dataclass(frozen=True)
 class TaskAlertPipeline:
     """작업 알림 파이프라인"""
 
     name: str
     channel_id: str
-    squads: list[Squad]
-    alerts: list[str]
+    pipeline_squads: list[PipelineSquad]
 
 
 @dataclass(frozen=True)
@@ -162,8 +170,10 @@ def _parse_config(raw: dict) -> AppConfig:
             )
         squad = Squad(
             handle=squad_raw["handle"],
+            display_name=squad_raw.get("display_name", squad_raw["handle"]),
             slack_usergroup_id=squad_raw["slack_usergroup_id"],
             notion_db=notion_databases[db_name],
+            pm_slack_user_id=squad_raw.get("pm_slack_user_id"),
         )
         squads.append(squad)
         squad_by_handle[squad.handle] = squad
@@ -178,7 +188,6 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum_squads.append(
             ScrumSquadConfig(
                 squad=squad_by_handle[handle],
-                display_name=ss_raw["display_name"],
                 channel_id=ss_raw["channel_id"],
                 pr_warning=ss_raw.get("pr_warning", True),
             )
@@ -197,20 +206,25 @@ def _parse_config(raw: dict) -> AppConfig:
     ta_raw = raw.get("task_alerts", {})
     pipelines = []
     for pl_raw in ta_raw.get("pipelines", []):
-        pl_squads = []
-        for handle in pl_raw.get("squads", []):
+        pipeline_squads = []
+        for sq_raw in pl_raw.get("squads", []):
+            handle = sq_raw["handle"]
             if handle not in squad_by_handle:
                 raise ValueError(
                     f"task_alerts pipeline '{pl_raw['name']}'의 "
                     f"squad handle '{handle}'이 squads에 없습니다."
                 )
-            pl_squads.append(squad_by_handle[handle])
+            pipeline_squads.append(
+                PipelineSquad(
+                    squad=squad_by_handle[handle],
+                    alerts=sq_raw.get("alerts", []),
+                )
+            )
         pipelines.append(
             TaskAlertPipeline(
                 name=pl_raw["name"],
                 channel_id=pl_raw["channel_id"],
-                squads=pl_squads,
-                alerts=pl_raw.get("alerts", []),
+                pipeline_squads=pipeline_squads,
             )
         )
     task_alerts = TaskAlertsConfig(pipelines=pipelines)

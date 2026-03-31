@@ -31,7 +31,7 @@ def main():
     # config에서 팀별 멘션 구성 (display_name -> mention, channel_id)
     team_entries = {}
     for squad in scrum.squads:
-        team_entries[squad.display_name] = {
+        team_entries[squad.squad.display_name] = {
             "mention": f"<!subteam^{squad.squad.slack_usergroup_id}>",
             "channel_id": squad.channel_id,
         }

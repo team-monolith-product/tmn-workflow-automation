@@ -78,7 +78,7 @@ def test_scrum_config():
     assert handles == ["코들", "해커톤", "탐색", "ie"]
 
     codle = config.scrum.squads[0]
-    assert codle.display_name == ":codle_bird: 코들 스쿼드"
+    assert codle.squad.display_name == ":codle_bird: 코들 스쿼드"
     assert codle.channel_id == "C09277NGUET"
     assert codle.pr_warning is True
     assert codle.squad.notion_db.name == "main"
@@ -93,14 +93,21 @@ def test_task_alert_pipelines():
     product = config.task_alerts.pipelines[0]
     assert product.name == "제품 본부"
     assert product.channel_id == "C087PDC9VG8"
-    assert [s.handle for s in product.squads] == ["코들", "해커톤", "ie"]
-    assert "alert_overdue_tasks" in product.alerts
-    assert "alert_schedule_feasibility" in product.alerts
+    assert [ps.squad.handle for ps in product.pipeline_squads] == [
+        "코들",
+        "해커톤",
+        "ie",
+    ]
+    codle = product.pipeline_squads[0]
+    assert "alert_overdue_tasks" in codle.alerts
+    assert "alert_no_upcoming_tasks" in codle.alerts
+    ie = product.pipeline_squads[2]
+    assert "alert_no_upcoming_tasks" not in ie.alerts
 
     contents = config.task_alerts.pipelines[1]
     assert contents.name == "콘텐츠 본부"
-    assert [s.handle for s in contents.squads] == ["콘텐츠"]
-    assert "alert_schedule_feasibility" not in contents.alerts
+    assert [ps.squad.handle for ps in contents.pipeline_squads] == ["콘텐츠"]
+    assert "alert_schedule_feasibility" not in contents.pipeline_squads[0].alerts
 
 
 def test_invalid_squad_db_reference():
@@ -138,11 +145,7 @@ def test_invalid_scrum_handle_reference():
             }
         },
         "squads": [{"handle": "a", "slack_usergroup_id": "S1", "notion_db": "db1"}],
-        "scrum": {
-            "squads": [
-                {"handle": "nonexistent", "display_name": "X", "channel_id": "C0"}
-            ]
-        },
+        "scrum": {"squads": [{"handle": "nonexistent", "channel_id": "C0"}]},
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(raw, f)

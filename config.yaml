@@ -62,44 +62,49 @@ notion_databases:
 
 squads:
   - handle: "코들"
+    display_name: ":codle_bird: 코들 스쿼드"
     slack_usergroup_id: "S0APF17S6TC"
     notion_db: main
+    pm_slack_user_id: "U075PUFNGHX"  # 예진
 
   - handle: "해커톤"
+    display_name: ":runner: 해커톤 스쿼드"
     slack_usergroup_id: "S0APF182Q74"
     notion_db: hackathon
+    pm_slack_user_id: "U02HT4EU4VD"  # 이창환
 
   - handle: "탐색"
+    display_name: ":earth_asia: 탐색 스쿼드"
     slack_usergroup_id: "S0AJD6M5LH4"
     notion_db: explore
+    pm_slack_user_id: "U02JLCWGETT"  # 배영빈
 
   - handle: "ie"
+    display_name: ":building_construction: 인프라 팀"
     slack_usergroup_id: "S08628PEEUQ"
     notion_db: infra
+    pm_slack_user_id: "U02PFUPCJNM"  # 류호선
 
   - handle: "콘텐츠"
+    display_name: ":pencil2: 콘텐츠 본부"
     slack_usergroup_id: "S08LHAA2HL3"
     notion_db: contents
 
 scrum:
   squads:
     - handle: "코들"
-      display_name: ":codle_bird: 코들 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: true
 
     - handle: "해커톤"
-      display_name: ":runner: 해커톤 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: true
 
     - handle: "탐색"
-      display_name: ":earth_asia: 탐색 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: false
 
     - handle: "ie"
-      display_name: ":building_construction: 인프라 팀"
       channel_id: "C09277NGUET"
       pr_warning: true
 
@@ -112,23 +117,36 @@ task_alerts:
   pipelines:
     - name: "제품 본부"
       channel_id: "C087PDC9VG8"
-      squads: ["코들", "해커톤", "ie"]
-      alerts:
-        - alert_overdue_tasks
-        - alert_pending_but_started_tasks
-        - alert_no_due_tasks
-        - alert_no_tasks
-        - alert_no_upcoming_tasks
-        - alert_schedule_feasibility
+      squads:
+        - handle: "코들"
+          alerts:
+            - alert_overdue_tasks
+            - alert_pending_but_started_tasks
+            - alert_no_due_tasks
+            - alert_no_tasks
+            - alert_no_upcoming_tasks
+        - handle: "해커톤"
+          alerts:
+            - alert_overdue_tasks
+            - alert_pending_but_started_tasks
+            - alert_no_due_tasks
+            - alert_no_tasks
+        - handle: "ie"
+          alerts:
+            - alert_overdue_tasks
+            - alert_pending_but_started_tasks
+            - alert_no_due_tasks
+            - alert_no_tasks
 
     - name: "콘텐츠 본부"
       channel_id: "C091ZUBTCKU"
-      squads: ["콘텐츠"]
-      alerts:
-        - alert_overdue_tasks
-        - alert_pending_but_started_tasks
-        - alert_no_due_tasks
-        - alert_no_tasks
+      squads:
+        - handle: "콘텐츠"
+          alerts:
+            - alert_overdue_tasks
+            - alert_pending_but_started_tasks
+            - alert_no_due_tasks
+            - alert_no_tasks
 
 scheduled_jobs:
   - name: validate_customer_reports
