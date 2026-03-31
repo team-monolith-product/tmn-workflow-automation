@@ -23,4 +23,6 @@ def get_rest_de_info(year: int, month: int):
         "numOfRows": "100",
     }
     response = requests.get(url, params=params, timeout=10)
+    # HTTP 오류 시 명확한 예외 발생 (예: 401 Unauthorized)
+    response.raise_for_status()
     return response.json()

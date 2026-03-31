@@ -23,9 +23,9 @@ def get_public_holidays(year: int, month: int) -> set[str]:
     Note:
         - 근로자의 날(5/1)은 공공데이터에 없으므로 수동 추가
     """
-    data = get_rest_de_info(year, month)
     holidays = set()
     try:
+        data = get_rest_de_info(year, month)
         items = data["response"]["body"]["items"]
         if "item" in items:
             item = items["item"]
@@ -42,8 +42,7 @@ def get_public_holidays(year: int, month: int) -> set[str]:
                     date_str = f"{locdate[:4]}-{locdate[4:6]}-{locdate[6:]}"
                     holidays.add(date_str)
     except Exception as e:
-        print("[ERROR] Parsing holiday info:", e)
-        print("Response data:", data)
+        print(f"[ERROR] 공휴일 조회 실패 (year={year}, month={month}):", e)
 
     # 수동으로 특정 휴일 추가
     if month == 5:
