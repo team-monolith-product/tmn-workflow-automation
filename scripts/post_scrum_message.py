@@ -155,10 +155,10 @@ def send_team_scrum(
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
     # 메인 메시지
-    text = f"{squad.display_name}"
+    text = f"{squad.squad.display_name}"
 
     if dry_run:
-        print(f"\n[{squad.display_name}] 채널: {squad.slack_channel_id}")
+        print(f"\n[{squad.squad.display_name}] 채널: {squad.slack_channel_id}")
         print(text)
 
     # 팀 멤버의 진행 중인 태스크 조회

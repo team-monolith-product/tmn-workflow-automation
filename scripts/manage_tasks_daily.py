@@ -25,6 +25,9 @@ load_dotenv()
 
 ALERT_FUNCTIONS: dict[str, callable] = {}
 
+# alert_schedule_feasibility는 스레드 메시지를 직접 보내므로 별도 관리
+DIRECT_SEND_ALERTS = {"alert_schedule_feasibility"}
+
 
 def _register(fn):
     ALERT_FUNCTIONS[fn.__name__] = fn
@@ -41,11 +44,40 @@ def main():
     email_to_user_id = get_email_to_user_id(slack_client)
 
     for pipeline in config.task_alerts.pipelines:
-        send_intro_message(slack_client, pipeline.channel_id)
-
         for ps in pipeline.pipeline_squads:
             squad = ps.squad
+
+            # 그룹핑 대상 alert 수집
+            items: list[tuple[str | None, str]] = []
             for alert_name in ps.alerts:
+                if alert_name in DIRECT_SEND_ALERTS:
+                    continue
+                alert_fn = ALERT_FUNCTIONS[alert_name]
+                result = alert_fn(
+                    notion=notion,
+                    slack_client=slack_client,
+                    db_config=squad.notion_db,
+                    channel_id=pipeline.channel_id,
+                    email_to_user_id=email_to_user_id,
+                    group_handle=squad.handle,
+                    pm_slack_user_id=squad.pm_slack_user_id,
+                )
+                if result:
+                    items.extend(result)
+
+            # 담당자별 그룹핑 후 메시지 전송
+            if items:
+                _send_squad_summary(
+                    slack_client,
+                    pipeline.channel_id,
+                    squad,
+                    items,
+                )
+
+            # 별도 전송 alert 실행 (alert_schedule_feasibility 등)
+            for alert_name in ps.alerts:
+                if alert_name not in DIRECT_SEND_ALERTS:
+                    continue
                 alert_fn = ALERT_FUNCTIONS[alert_name]
                 alert_fn(
                     notion=notion,
@@ -58,40 +90,77 @@ def main():
                 )
 
 
-def send_intro_message(
+def _send_squad_summary(
     slack_client: WebClient,
     channel_id: str,
+    squad,
+    items: list[tuple[str | None, str]],
 ):
-    """
-    지연된 작업에 대한 인트로 메시지를 전송하는 함수
+    """스쿼드별 alert을 담당자별로 그룹핑하여 하나의 메시지로 전송"""
+    # 담당자별 그룹핑 (None → PM)
+    by_person: dict[str, list[str]] = defaultdict(list)
+    for slack_user_id, text in items:
+        if slack_user_id:
+            by_person[slack_user_id].append(text)
+        elif squad.pm_slack_user_id:
+            by_person[squad.pm_slack_user_id].append(text)
 
-    Args:
-        slack_client (WebClient): Slack
-        channel_id (str): Slack channel id
+    if not by_person:
+        return
 
-    Returns:
-        None
-    """
-    intro_message = (
-        "좋은 아침입니다! \n"
-        "아래 지연된 작업에 대해 적절한 사유를 댓글로 남기고, 로봇을 통해 일정을 변경해주시길 부탁드립니다.\n"
-        "항상 협조해 주셔서 감사합니다."
-    )
-    slack_client.chat_postMessage(channel=channel_id, text=intro_message)
+    sections = [f"{squad.display_name} 일일 작업 검토"]
+
+    for user_id, texts in by_person.items():
+        lines = [f"\n<@{user_id}> 님 아래 작업을 확인해주세요."]
+        for text in texts:
+            lines.append(f"• {text}")
+        sections.append("\n".join(lines))
+
+    message = "\n————————————————\n".join(sections)
+    slack_client.chat_postMessage(channel=channel_id, text=message)
+
+
+def _get_usergroup_members(
+    slack_client: WebClient, group_handle: str
+) -> list[str] | None:
+    """Slack usergroup의 멤버 ID 목록 반환"""
+    usergroups_response = slack_client.usergroups_list()
+    for group in usergroups_response["usergroups"]:
+        if group["handle"] == group_handle:
+            response = slack_client.usergroups_users_list(usergroup=group["id"])
+            return response.get("users", [])
+    print(f"[alert] 그룹 @{group_handle}를 찾을 수 없습니다.")
+    return None
+
+
+def _extract_task_assignee(
+    result: dict, props, email_to_user_id: dict
+) -> tuple[str, str, str | None]:
+    """노션 결과에서 작업명, URL, 담당자 Slack ID를 추출"""
+    try:
+        task_name = result["properties"][props.title]["title"][0]["text"]["content"]
+    except (KeyError, IndexError):
+        task_name = "제목 없음"
+    page_url = result["url"]
+    people = result["properties"][props.assignee]["people"]
+    slack_user_id = None
+    if people:
+        person = people[0].get("person")
+        if person:
+            slack_user_id = email_to_user_id.get(person["email"])
+    return task_name, page_url, slack_user_id
 
 
 @_register
 def alert_overdue_tasks(
     notion: NotionClient,
-    slack_client: WebClient,
     db_config: NotionDBConfig,
-    channel_id: str,
     email_to_user_id: dict,
     **kwargs,
-):
-    """대기 및 진행 중인 작업 중 종료일이 지난 작업을 슬랙으로 알림"""
+) -> list[tuple[str | None, str]]:
+    """대기 및 진행 중인 작업 중 종료일이 지난 작업"""
     if not db_config.properties.end_date:
-        return
+        return []
 
     today = datetime.now().date()
     props = db_config.properties
@@ -115,42 +184,28 @@ def alert_overdue_tasks(
         }
     )
 
+    items = []
     for result in results.get("results", []):
-        try:
-            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
-        except (KeyError, IndexError):
-            task_name = "제목 없음"
-        page_url = result["url"]
-        people = result["properties"][props.assignee]["people"]
-        if people:
-            person = people[0].get("person")
-            if person:
-                assignee_email = person["email"]
-                slack_user_id = email_to_user_id.get(assignee_email)
-            else:
-                slack_user_id = None
-        else:
-            slack_user_id = None
-
-        if slack_user_id:
-            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났습니다. <@{slack_user_id}> 확인 부탁드립니다."
-        else:
-            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났으나 담당자를 확인할 수 없습니다."
-        slack_client.chat_postMessage(channel=channel_id, text=text)
+        task_name, page_url, slack_user_id = _extract_task_assignee(
+            result, props, email_to_user_id
+        )
+        text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지났습니다."
+        if not slack_user_id:
+            text += " (담당자 확인 불가)"
+        items.append((slack_user_id, text))
+    return items
 
 
 @_register
 def alert_pending_but_started_tasks(
     notion: NotionClient,
-    slack_client: WebClient,
     db_config: NotionDBConfig,
-    channel_id: str,
     email_to_user_id: dict,
     **kwargs,
-):
-    """시작일이 지났으나 아직 대기 상태인 작업을 슬랙으로 알림"""
+) -> list[tuple[str | None, str]]:
+    """시작일이 지났으나 아직 대기 상태인 작업"""
     if not db_config.properties.start_date or not db_config.pending_statuses:
-        return
+        return []
 
     today = datetime.now().date()
     props = db_config.properties
@@ -178,40 +233,26 @@ def alert_pending_but_started_tasks(
         }
     )
 
+    items = []
     for result in results.get("results", []):
-        try:
-            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
-        except (KeyError, IndexError):
-            task_name = "제목 없음"
-        page_url = result["url"]
-        people = result["properties"][props.assignee]["people"]
-        if people:
-            person = people[0].get("person")
-            if person:
-                assignee_email = person["email"]
-                slack_user_id = email_to_user_id.get(assignee_email)
-            else:
-                slack_user_id = None
-        else:
-            slack_user_id = None
-
-        if slack_user_id:
-            text = f"작업 <{page_url}|{task_name}>이(가) 시작일이 지났으나 아직 대기 상태입니다. <@{slack_user_id}> 확인 부탁드립니다."
-        else:
-            text = f"작업 <{page_url}|{task_name}>이(가) 시작일이 지났으나 아직 대기 상태이며, 담당자를 확인할 수 없습니다."
-        slack_client.chat_postMessage(channel=channel_id, text=text)
+        task_name, page_url, slack_user_id = _extract_task_assignee(
+            result, props, email_to_user_id
+        )
+        text = f"작업 <{page_url}|{task_name}>이(가) 시작일이 지났으나 아직 대기 상태입니다."
+        if not slack_user_id:
+            text += " (담당자 확인 불가)"
+        items.append((slack_user_id, text))
+    return items
 
 
 @_register
 def alert_no_due_tasks(
     notion: NotionClient,
-    slack_client: WebClient,
     db_config: NotionDBConfig,
-    channel_id: str,
     email_to_user_id: dict,
     **kwargs,
-):
-    """기간 산정 없이 진행 중인 작업을 슬랙으로 알림"""
+) -> list[tuple[str | None, str]]:
+    """기간 산정 없이 진행 중인 작업"""
     props = db_config.properties
 
     in_progress_filters = [
@@ -230,31 +271,16 @@ def alert_no_due_tasks(
         }
     )
 
+    items = []
     for result in results.get("results", []):
-        try:
-            task_name = result["properties"][props.title]["title"][0]["text"]["content"]
-        except (KeyError, IndexError):
-            task_name = "제목 없음"
-        page_url = result["url"]
-        people = result["properties"][props.assignee]["people"]
-        if people:
-            person = people[0].get("person")
-            if person:
-                assignee_email = person["email"]
-                slack_user_id = email_to_user_id.get(assignee_email)
-            else:
-                slack_user_id = None
-        else:
-            slack_user_id = None
-
-        if slack_user_id:
-            text = (
-                f"작업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있습니다."
-                f"<@{slack_user_id}> 확인 부탁드립니다."
-            )
-        else:
-            text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있으나 담당자를 확인할 수 없습니다."
-        slack_client.chat_postMessage(channel=channel_id, text=text)
+        task_name, page_url, slack_user_id = _extract_task_assignee(
+            result, props, email_to_user_id
+        )
+        text = f"작업 <{page_url}|{task_name}>이(가) 기한이 지정되지 않은채로 진행되고 있습니다."
+        if not slack_user_id:
+            text += " (담당자 확인 불가)"
+        items.append((slack_user_id, text))
+    return items
 
 
 @_register
@@ -262,12 +288,11 @@ def alert_no_tasks(
     notion: NotionClient,
     slack_client: WebClient,
     db_config: NotionDBConfig,
-    channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
     **kwargs,
-):
-    """아무 작업도 진행 중이지 않은 작업자를 슬랙으로 알림"""
+) -> list[tuple[str | None, str]]:
+    """아무 작업도 진행 중이지 않은 작업자"""
     props = db_config.properties
 
     in_progress_filters = [
@@ -291,56 +316,26 @@ def alert_no_tasks(
                 if email:
                     assigned_emails.add(email)
 
-    # 2. Slack 사용자 그룹 목록 중에서 지정된 handle인 그룹을 찾습니다.
-    usergroup_id = None
-    usergroups_response = slack_client.usergroups_list()
-    for group in usergroups_response["usergroups"]:
-        # 지정된 handle인 사용자 그룹 찾아 ID 획득
-        if group["handle"] == group_handle:
-            usergroup_id = group["id"]
-            break
+    group_user_ids = _get_usergroup_members(slack_client, group_handle)
+    if group_user_ids is None:
+        return []
 
-    # 3. 찾은 사용자 그룹의 멤버들을 조회하여, 각 Slack user ID를 얻습니다.
-    if usergroup_id is None:
-        slack_client.chat_postMessage(
-            channel=channel_id,
-            text=f"그룹 @{group_handle}를 찾을 수 없습니다. 확인부탁드립니다.",
-        )
-        return
-
-    group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
-    group_user_ids = group_users_response.get("users", [])
-
-    # 4. email_to_user_id는 "email -> slack user id" 매핑이므로,
-    #    그 반대("slack user id -> email") 매핑을 쉽게 얻기 위해 역으로 변환합니다.
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
+    team_emails = [
+        user_id_to_email[uid]
+        for uid in group_user_ids
+        if uid in user_id_to_email
+    ]
 
-    # 5. 그룹에 실제 등록된 멤버의 이메일 목록
-    team_emails = []
-    for user_id in group_user_ids:
-        email = user_id_to_email.get(user_id)
-        if email:
-            team_emails.append(email)
-
-    # 6. "아무 작업도 진행 중이지 않은" ⇒ 팀 멤버 중 assigned_emails에 없는 이메일
     unassigned_emails = set(team_emails) - assigned_emails
 
-    # 7. unassigned_emails에 속한 멤버들에게 알림 보내기
+    items = []
     for email in unassigned_emails:
         slack_user_id = email_to_user_id.get(email)
-        if slack_user_id:
-            text = (
-                f"<@{slack_user_id}> 현재 진행중인 작업이 없습니다. "
-                "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다."
-            )
-        else:
-            # 혹시라도 email_to_user_id에 매핑되어 있지 않은 경우 처리
-            text = (
-                f"{email}님께서 현재 진행중인 작업이 없습니다. "
-                "혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다. "
-                "또한 이메일 매핑이 누락된 원인을 파악해주시길 바랍니다."
-            )
-        slack_client.chat_postMessage(channel=channel_id, text=text)
+        items.append(
+            (slack_user_id, "현재 진행중인 작업이 없습니다. 혹시 진행해야 할 업무가 누락되지 않았는지 확인 부탁드립니다.")
+        )
+    return items
 
 
 @_register
@@ -348,21 +343,19 @@ def alert_no_upcoming_tasks(
     notion: NotionClient,
     slack_client: WebClient,
     db_config: NotionDBConfig,
-    channel_id: str,
     email_to_user_id: dict,
     group_handle: str,
     pm_slack_user_id: str | None = None,
     **kwargs,
-):
+) -> list[tuple[str | None, str]]:
     """5일 후에 예정된 작업이 없는 작업자를 PM에게 알림"""
     props = db_config.properties
     if not props.start_date or not props.end_date:
-        return
+        return []
 
     if not pm_slack_user_id:
-        return
+        return []
 
-    # 영업일 기준 5일 후 날짜 계산
     target_date = get_nth_business_day_from(datetime.now().date(), 5)
 
     all_active = db_config.pending_statuses + db_config.in_progress_statuses
@@ -398,33 +391,16 @@ def alert_no_upcoming_tasks(
                 if email:
                     assigned_emails.add(email)
 
-    # Slack 사용자 그룹에서 지정된 handle인 그룹을 찾습니다.
-    usergroup_id = None
-    usergroups_response = slack_client.usergroups_list()
-    for group in usergroups_response["usergroups"]:
-        if group["handle"] == group_handle:
-            usergroup_id = group["id"]
-            break
+    group_user_ids = _get_usergroup_members(slack_client, group_handle)
+    if group_user_ids is None:
+        return []
 
-    if usergroup_id is None:
-        slack_client.chat_postMessage(
-            channel=channel_id,
-            text=f"그룹 @{group_handle}를 찾을 수 없습니다. 확인부탁드립니다.",
-        )
-        return
-
-    group_users_response = slack_client.usergroups_users_list(usergroup=usergroup_id)
-    group_user_ids = set(group_users_response.get("users", []))
-
-    # "slack user id -> email" 매핑 생성
     user_id_to_email = {v: k for k, v in email_to_user_id.items()}
-
-    # 그룹에 등록된 멤버의 이메일 목록
-    team_emails = []
-    for user_id in group_user_ids:
-        email = user_id_to_email.get(user_id)
-        if email:
-            team_emails.append(email)
+    team_emails = [
+        user_id_to_email[uid]
+        for uid in group_user_ids
+        if uid in user_id_to_email
+    ]
 
     # 5일 후 당일 종일 연차인 멤버 제외
     target_date_str = target_date.isoformat()
@@ -439,27 +415,27 @@ def alert_no_upcoming_tasks(
         email for email, days in vacation_days_by_email.items() if days >= 1.0
     }
 
-    # 5일 후에 예정된 작업이 없는 멤버 찾기 (연차자 제외)
     unassigned_emails = set(team_emails) - assigned_emails - on_leave_emails
 
-    # 예진님에게 알림 보내기
-    if unassigned_emails:
-        member_mentions = []
-        for email in unassigned_emails:
-            slack_user_id = email_to_user_id.get(email)
-            if slack_user_id:
-                member_mentions.append(f"<@{slack_user_id}>")
-            else:
-                member_mentions.append(email)
+    if not unassigned_emails:
+        return []
 
-        members_text = ", ".join(member_mentions)
-        weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
-        target_weekday = weekday_names[target_date.weekday()]
-        text = (
-            f"<@{pm_slack_user_id}> 5일 후 {target_date.month}/{target_date.day}({target_weekday})에 예정된 작업이 없는 멤버가 있습니다: {members_text}\n"
-            "로드맵 점검 부탁드립니다."
-        )
-        slack_client.chat_postMessage(channel=channel_id, text=text)
+    member_mentions = []
+    for email in unassigned_emails:
+        slack_user_id = email_to_user_id.get(email)
+        if slack_user_id:
+            member_mentions.append(f"<@{slack_user_id}>")
+        else:
+            member_mentions.append(email)
+
+    members_text = ", ".join(member_mentions)
+    weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
+    target_weekday = weekday_names[target_date.weekday()]
+    text = (
+        f"5일 후 {target_date.month}/{target_date.day}({target_weekday})에 "
+        f"예정된 작업이 없는 멤버가 있습니다: {members_text}\n로드맵 점검 부탁드립니다."
+    )
+    return [(pm_slack_user_id, text)]
 
 
 def alert_no_후속_작업(

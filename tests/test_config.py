@@ -78,7 +78,7 @@ def test_scrum_config():
     assert handles == ["코들", "해커톤", "탐색", "ie"]
 
     codle = config.scrum.squads[0]
-    assert codle.display_name == ":codle_bird: 코들 스쿼드"
+    assert codle.squad.display_name == ":codle_bird: 코들 스쿼드"
     assert codle.channel_id == "C09277NGUET"
     assert codle.pr_warning is True
     assert codle.squad.notion_db.name == "main"
@@ -143,7 +143,7 @@ def test_invalid_scrum_handle_reference():
         "squads": [{"handle": "a", "slack_usergroup_id": "S1", "notion_db": "db1"}],
         "scrum": {
             "squads": [
-                {"handle": "nonexistent", "display_name": "X", "channel_id": "C0"}
+                {"handle": "nonexistent", "channel_id": "C0"}
             ]
         },
     }

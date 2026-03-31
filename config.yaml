@@ -62,48 +62,49 @@ notion_databases:
 
 squads:
   - handle: "코들"
+    display_name: ":codle_bird: 코들 스쿼드"
     slack_usergroup_id: "S0APF17S6TC"
     notion_db: main
     pm_slack_user_id: "U075PUFNGHX"  # 예진
 
   - handle: "해커톤"
+    display_name: ":runner: 해커톤 스쿼드"
     slack_usergroup_id: "S0APF182Q74"
     notion_db: hackathon
     pm_slack_user_id: "U02HT4EU4VD"  # 이창환
 
   - handle: "탐색"
+    display_name: ":earth_asia: 탐색 스쿼드"
     slack_usergroup_id: "S0AJD6M5LH4"
     notion_db: explore
     pm_slack_user_id: "U02JLCWGETT"  # 배영빈
 
   - handle: "ie"
+    display_name: ":building_construction: 인프라 팀"
     slack_usergroup_id: "S08628PEEUQ"
     notion_db: infra
     pm_slack_user_id: "U02HT4EU4VD"  # 이창환
 
   - handle: "콘텐츠"
+    display_name: ":pencil2: 콘텐츠 본부"
     slack_usergroup_id: "S08LHAA2HL3"
     notion_db: contents
 
 scrum:
   squads:
     - handle: "코들"
-      display_name: ":codle_bird: 코들 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: true
 
     - handle: "해커톤"
-      display_name: ":runner: 해커톤 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: true
 
     - handle: "탐색"
-      display_name: ":earth_asia: 탐색 스쿼드"
       channel_id: "C09277NGUET"
       pr_warning: false
 
     - handle: "ie"
-      display_name: ":building_construction: 인프라 팀"
       channel_id: "C09277NGUET"
       pr_warning: true
 

@@ -46,6 +46,7 @@ class Squad:
     """조직 단위 스쿼드"""
 
     handle: str
+    display_name: str
     slack_usergroup_id: str
     notion_db: NotionDBConfig
     pm_slack_user_id: str | None = None
@@ -59,7 +60,6 @@ class ScrumSquadConfig:
     """스크럼 참여 스쿼드 설정"""
 
     squad: Squad
-    display_name: str
     channel_id: str
     pr_warning: bool = True
 
@@ -170,6 +170,7 @@ def _parse_config(raw: dict) -> AppConfig:
             )
         squad = Squad(
             handle=squad_raw["handle"],
+            display_name=squad_raw.get("display_name", squad_raw["handle"]),
             slack_usergroup_id=squad_raw["slack_usergroup_id"],
             notion_db=notion_databases[db_name],
             pm_slack_user_id=squad_raw.get("pm_slack_user_id"),
@@ -187,7 +188,6 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum_squads.append(
             ScrumSquadConfig(
                 squad=squad_by_handle[handle],
-                display_name=ss_raw["display_name"],
                 channel_id=ss_raw["channel_id"],
                 pr_warning=ss_raw.get("pr_warning", True),
             )
