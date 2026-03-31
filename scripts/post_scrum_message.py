@@ -158,7 +158,7 @@ def send_team_scrum(
     text = f"{squad.squad.display_name}"
 
     if dry_run:
-        print(f"\n[{squad.squad.display_name}] 채널: {squad.slack_channel_id}")
+        print(f"\n[{squad.squad.display_name}] 채널: {squad.channel_id}")
         print(text)
 
     # 팀 멤버의 진행 중인 태스크 조회
@@ -212,7 +212,7 @@ def send_team_scrum(
     else:
         # 실제 메시지 발송
         response = slack_client.chat_postMessage(
-            channel=squad.slack_channel_id,
+            channel=squad.channel_id,
             text=text,
         )
         thread_ts = response["ts"]
@@ -220,7 +220,7 @@ def send_team_scrum(
         # 인원별 메시지를 스레드에 발송
         for msg in thread_messages:
             slack_client.chat_postMessage(
-                channel=squad.slack_channel_id,
+                channel=squad.channel_id,
                 thread_ts=thread_ts,
                 text=msg,
             )
@@ -242,11 +242,11 @@ def send_personal_scrum(
     text = personal.name
 
     if dry_run:
-        print(f"\n[{personal.name}] 채널: {personal.slack_channel_id}")
+        print(f"\n[{personal.name}] 채널: {personal.channel_id}")
         print(text)
     else:
         slack_client.chat_postMessage(
-            channel=personal.slack_channel_id,
+            channel=personal.channel_id,
             text=text,
         )
 
