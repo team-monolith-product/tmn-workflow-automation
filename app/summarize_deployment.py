@@ -147,8 +147,8 @@ def summarize_deployment(
     )
     tasks = []
     db_by_task_url: dict[str, NotionDBConfig] = {}
-    for squad in product_pipeline.squads:
-        db = squad.notion_db
+    for ps in product_pipeline.pipeline_squads:
+        db = ps.squad.notion_db
         if not db.properties.pr:
             continue
         squad_tasks = _query_deployment_tasks(notion, db, today_str)

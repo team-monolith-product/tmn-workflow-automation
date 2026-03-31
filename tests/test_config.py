@@ -93,14 +93,17 @@ def test_task_alert_pipelines():
     product = config.task_alerts.pipelines[0]
     assert product.name == "제품 본부"
     assert product.channel_id == "C087PDC9VG8"
-    assert [s.handle for s in product.squads] == ["코들", "해커톤", "ie"]
-    assert "alert_overdue_tasks" in product.alerts
-    assert "alert_schedule_feasibility" in product.alerts
+    assert [ps.squad.handle for ps in product.pipeline_squads] == ["코들", "해커톤", "ie"]
+    ie = product.pipeline_squads[2]
+    assert "alert_overdue_tasks" in ie.alerts
+    assert "alert_no_upcoming_tasks" in ie.alerts
+    codle = product.pipeline_squads[0]
+    assert "alert_no_upcoming_tasks" not in codle.alerts
 
     contents = config.task_alerts.pipelines[1]
     assert contents.name == "콘텐츠 본부"
-    assert [s.handle for s in contents.squads] == ["콘텐츠"]
-    assert "alert_schedule_feasibility" not in contents.alerts
+    assert [ps.squad.handle for ps in contents.pipeline_squads] == ["콘텐츠"]
+    assert "alert_schedule_feasibility" not in contents.pipeline_squads[0].alerts
 
 
 def test_invalid_squad_db_reference():

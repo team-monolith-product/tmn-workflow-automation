@@ -43,14 +43,14 @@ def main():
     for pipeline in config.task_alerts.pipelines:
         send_intro_message(slack_client, pipeline.channel_id)
 
-        for squad in pipeline.squads:
-            db = squad.notion_db
-            for alert_name in pipeline.alerts:
+        for ps in pipeline.pipeline_squads:
+            squad = ps.squad
+            for alert_name in ps.alerts:
                 alert_fn = ALERT_FUNCTIONS[alert_name]
                 alert_fn(
                     notion=notion,
                     slack_client=slack_client,
-                    db_config=db,
+                    db_config=squad.notion_db,
                     channel_id=pipeline.channel_id,
                     email_to_user_id=email_to_user_id,
                     group_handle=squad.handle,
@@ -968,15 +968,15 @@ def run_schedule_feasibility_only(dry_run: bool = False):
     email_to_user_id = get_email_to_user_id(slack_client)
 
     for pipeline in config.task_alerts.pipelines:
-        for squad in pipeline.squads:
-            if "alert_schedule_feasibility" in pipeline.alerts:
+        for ps in pipeline.pipeline_squads:
+            if "alert_schedule_feasibility" in ps.alerts:
                 alert_schedule_feasibility(
                     notion=notion,
                     slack_client=slack_client,
-                    db_config=squad.notion_db,
+                    db_config=ps.squad.notion_db,
                     channel_id=pipeline.channel_id,
                     email_to_user_id=email_to_user_id,
-                    group_handle=squad.handle,
+                    group_handle=ps.squad.handle,
                     dry_run=dry_run,
                 )
 
