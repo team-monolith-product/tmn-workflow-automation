@@ -124,14 +124,12 @@ task_alerts:
             - alert_pending_but_started_tasks
             - alert_no_due_tasks
             - alert_no_tasks
-            - alert_schedule_feasibility
         - handle: "해커톤"
           alerts:
             - alert_overdue_tasks
             - alert_pending_but_started_tasks
             - alert_no_due_tasks
             - alert_no_tasks
-            - alert_schedule_feasibility
         - handle: "ie"
           alerts:
             - alert_overdue_tasks
@@ -139,7 +137,6 @@ task_alerts:
             - alert_no_due_tasks
             - alert_no_tasks
             - alert_no_upcoming_tasks
-            - alert_schedule_feasibility
 
     - name: "콘텐츠 본부"
       channel_id: "C091ZUBTCKU"
