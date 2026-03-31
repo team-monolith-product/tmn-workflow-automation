@@ -94,11 +94,11 @@ def test_task_alert_pipelines():
     assert product.name == "제품 본부"
     assert product.channel_id == "C087PDC9VG8"
     assert [ps.squad.handle for ps in product.pipeline_squads] == ["코들", "해커톤", "ie"]
-    ie = product.pipeline_squads[2]
-    assert "alert_overdue_tasks" in ie.alerts
-    assert "alert_no_upcoming_tasks" in ie.alerts
     codle = product.pipeline_squads[0]
-    assert "alert_no_upcoming_tasks" not in codle.alerts
+    assert "alert_overdue_tasks" in codle.alerts
+    assert "alert_no_upcoming_tasks" in codle.alerts
+    ie = product.pipeline_squads[2]
+    assert "alert_no_upcoming_tasks" not in ie.alerts
 
     contents = config.task_alerts.pipelines[1]
     assert contents.name == "콘텐츠 본부"
