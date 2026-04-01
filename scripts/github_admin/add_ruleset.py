@@ -266,7 +266,25 @@ def apply_ruleset_to_repos(
         repo_name = repo.name
 
         if skip_repos and repo_name in skip_repos:
-            print(f"  [SKIP] {repo_name}: config에서 {ruleset_key} 제외됨")
+            ruleset_name = ruleset_template["name"]
+            exists, ruleset_id = find_ruleset_by_name(
+                org_name, repo_name, ruleset_name
+            )
+            if exists and ruleset_id:
+                if dry_run:
+                    print(
+                        f"  [DRY-RUN] {repo_name}: "
+                        f"기존 {ruleset_name} 삭제 예정 (config에서 제외됨)"
+                    )
+                else:
+                    delete_ruleset(org_name, repo_name, ruleset_id)
+                    print(
+                        f"  [DELETE] {repo_name}: "
+                        f"기존 {ruleset_name} 삭제 완료 (config에서 제외됨)"
+                    )
+                success_count += 1
+            else:
+                print(f"  [SKIP] {repo_name}: config에서 {ruleset_key} 제외됨")
             continue
 
         try:
