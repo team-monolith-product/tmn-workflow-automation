@@ -6,12 +6,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import calendar
 import os
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 import tabulate
+
+KST = timezone(timedelta(hours=9))
 
 from api.wantedspace import get_workevent, get_worktime
 from service.holidays import get_public_holidays
@@ -60,7 +62,7 @@ def main():
     email_to_user_id = get_email_to_user_id(slack_client)
 
     # 오늘(시분초=0)
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 2) 이번 달 1일부터 "어제"까지 근무시간(WorkTime) 조회
     email_to_worktime = {}
@@ -225,7 +227,7 @@ def get_monthly_vacation_breakdown(year: int, month: int, workevent):
     - today_days (오늘)
     - future_days (앞으로)
     """
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
     _, last_day = calendar.monthrange(year, month)
     first_day_dt = datetime(year, month, 1)
     last_day_dt = datetime(year, month, last_day)
@@ -282,7 +284,7 @@ def get_monthly_vacation_breakdown(year: int, month: int, workevent):
         if frac <= 0:
             continue
 
-        dt = datetime(year, month, d)
+        dt = datetime(year, month, d, tzinfo=KST)
         if dt < today:
             used_days += frac
         elif dt == today:

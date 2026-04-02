@@ -8,11 +8,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import argparse
 import os
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Set, Tuple
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
+
+KST = timezone(timedelta(hours=9))
 
 from api.wantedspace import get_workevent, get_event_codes
 
@@ -195,7 +197,7 @@ def main():
     p.add_argument("--dry-run", action="store_true", help="콘솔 출력만")
     args = p.parse_args()
 
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
     end_dt = today + timedelta(days=args.days - 1)
 
     try:

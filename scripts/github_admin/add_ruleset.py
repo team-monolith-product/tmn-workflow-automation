@@ -267,9 +267,7 @@ def apply_ruleset_to_repos(
 
         if skip_repos and repo_name in skip_repos:
             ruleset_name = ruleset_template["name"]
-            exists, ruleset_id = find_ruleset_by_name(
-                org_name, repo_name, ruleset_name
-            )
+            exists, ruleset_id = find_ruleset_by_name(org_name, repo_name, ruleset_name)
             if exists and ruleset_id:
                 if dry_run:
                     print(
