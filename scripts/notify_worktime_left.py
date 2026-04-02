@@ -284,7 +284,7 @@ def get_monthly_vacation_breakdown(year: int, month: int, workevent):
         if frac <= 0:
             continue
 
-        dt = datetime(year, month, d)
+        dt = datetime(year, month, d, tzinfo=KST)
         if dt < today:
             used_days += frac
         elif dt == today:
