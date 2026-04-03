@@ -4,6 +4,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
+import importlib
 import logging
 
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
@@ -203,3 +204,26 @@ def register_general_handlers(app, assistant):
             summarize_deployment.summarize_deployment,
             caller_slack_user_id=body.get("user_id"),
         )
+
+    # 크론 작업들에 대한 슬래시 커맨드 일괄 등록
+    _CRON_COMMANDS = [
+        ("/validate-customer-reports", "scripts.validate_customer_reports", "main", "고객 보고서 검증"),
+        ("/manage-tasks-daily", "scripts.manage_tasks_daily", "main", "일일 작업 알림 처리"),
+        ("/notify-upcoming-workevent", "scripts.notify_upcoming_workevent", "main", "근태 예정 알림 생성"),
+        ("/notify-worktime-left", "scripts.notify_worktime_left", "main", "잔여 근무시간 계산"),
+        ("/collect-review-stats", "scripts.collect_review_stats", "main", "리뷰 통계 수집"),
+        ("/collect-coding-rule-feedbacks", "scripts.collect_coding_rule_feedbacks", "main", "코딩 규칙 피드백 수집"),
+        ("/post-scrum-message", "scripts.post_scrum_message", "main", "스크럼 메시지 발송"),
+        ("/schedule-scrum-mention", "scripts.schedule_scrum_mention", "main", "스크럼 멘션 발송"),
+    ]
+
+    def _register_cron_command(command_name, module_path, func_name, description):
+        @app.command(command_name)
+        async def handler(ack, body):
+            await ack(text=f"⏳ {description} 중입니다…")
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+            await asyncio.to_thread(func)
+
+    for cmd, mod, fn, desc in _CRON_COMMANDS:
+        _register_cron_command(cmd, mod, fn, desc)
