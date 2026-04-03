@@ -26,6 +26,12 @@ def _before_send(event, hint):
         _, exc_value, _ = hint["exc_info"]
         if isinstance(exc_value, ClientConnectionResetError):
             return None
+    # 로그 이벤트 필터 (Slack Bolt가 내부적으로 catch 후 로깅하는 경우)
+    message = (event.get("logentry") or {}).get("message", "")
+    if not message:
+        message = event.get("message", "")
+    if "ClientConnectionResetError" in message:
+        return None
     return event
 
 
