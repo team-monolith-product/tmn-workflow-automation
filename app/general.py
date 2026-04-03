@@ -4,12 +4,13 @@
 
 import asyncio
 from datetime import datetime, timedelta
+import importlib
 import logging
 
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
-from . import analyze_oom, route_bug, route_dev_env_infra_bug, summarize_deployment
+from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .common import (
     KST,
     answer,
@@ -187,19 +188,82 @@ def register_general_handlers(app, assistant):
             tools,
         )
 
-    @app.command("/summarize-deployment")
-    async def on_summarize_deployment(ack, body):
-        """
-        /summarize-deployment 명령어를 처리하는 핸들러
-        """
-        await ack(text="⏳ 배포 요약을 작성 중입니다…")
+    # 크론 작업들에 대한 슬래시 커맨드 일괄 등록
+    # 각 튜플: (command, module_path, func_name, description[, body_kwargs])
+    # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로
+    # 전달할 매핑입니다.  예: {"caller_slack_user_id": "user_id"} 이면
+    # func(caller_slack_user_id=body.get("user_id")) 로 호출됩니다.
+    _CRON_COMMANDS = [
+        (
+            "/validate-customer-reports",
+            "scripts.validate_customer_reports",
+            "main",
+            "고객 보고서 검증",
+        ),
+        (
+            "/manage-tasks-daily",
+            "scripts.manage_tasks_daily",
+            "main",
+            "일일 작업 알림 처리",
+        ),
+        (
+            "/notify-upcoming-workevent",
+            "scripts.notify_upcoming_workevent",
+            "main",
+            "근태 예정 알림 생성",
+        ),
+        (
+            "/notify-worktime-left",
+            "scripts.notify_worktime_left",
+            "main",
+            "잔여 근무시간 계산",
+        ),
+        (
+            "/collect-review-stats",
+            "scripts.collect_review_stats",
+            "main",
+            "리뷰 통계 수집",
+        ),
+        (
+            "/collect-coding-rule-feedbacks",
+            "scripts.collect_coding_rule_feedbacks",
+            "main",
+            "코딩 규칙 피드백 수집",
+        ),
+        (
+            "/post-scrum-message",
+            "scripts.post_scrum_message",
+            "main",
+            "스크럼 메시지 발송",
+        ),
+        (
+            "/schedule-scrum-mention",
+            "scripts.schedule_scrum_mention",
+            "main",
+            "스크럼 멘션 발송",
+        ),
+        (
+            "/summarize-deployment",
+            "app.summarize_deployment",
+            "summarize_deployment",
+            "배포 요약을 작성",
+            {"caller_slack_user_id": "user_id"},
+        ),
+    ]
 
-        # summarize_deployment 가 Blocking IO 이므로
-        # asyncio.to_thread 를 사용하여 비동기적으로 실행
-        # 그렇지 않으면 ack 응답이 3초안에 날아가지 않아
-        # dispatch_failed 오류가 발생함.
-        # https://chatgpt.com/share/6805f405-36b0-8002-a298-ac2cefb12b0b
-        await asyncio.to_thread(
-            summarize_deployment.summarize_deployment,
-            caller_slack_user_id=body.get("user_id"),
-        )
+    def _register_cron_command(
+        command_name, module_path, func_name, description, body_kwargs=None
+    ):
+        @app.command(command_name)
+        async def handler(ack, body):
+            await ack(text=f"⏳ {description} 중입니다…")
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+            kwargs = {
+                kwarg: body.get(body_key)
+                for kwarg, body_key in (body_kwargs or {}).items()
+            }
+            await asyncio.to_thread(func, **kwargs)
+
+    for cmd, mod, fn, desc, *rest in _CRON_COMMANDS:
+        _register_cron_command(cmd, mod, fn, desc, rest[0] if rest else None)
