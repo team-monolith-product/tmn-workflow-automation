@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import importlib
 import logging
 
+from cachetools import TTLCache
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -22,11 +23,43 @@ from .common import (
     get_create_notion_follow_up_task_tool,
     get_notion_page_tool,
 )
+from service.config import load_config, Squad
 
 # 상수들
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
-DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB
+DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB (기본값)
 PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
+
+# 유저그룹 멤버 캐시 (1시간 TTL)
+_cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
+
+
+async def _get_user_squad(
+    client: AsyncWebClient, user_id: str | None
+) -> Squad | None:
+    """사용자가 속한 스쿼드를 결정합니다.
+
+    각 스쿼드의 Slack usergroup 멤버 목록을 조회하여
+    사용자가 포함된 첫 번째 스쿼드를 반환합니다.
+    """
+    if user_id is None:
+        return None
+
+    config = load_config()
+    for squad in config.squads:
+        cache_key = f"usergroup_{squad.slack_usergroup_id}"
+        if cache_key not in _cache_usergroup_members:
+            try:
+                resp = await client.usergroups_users_list(
+                    usergroup=squad.slack_usergroup_id
+                )
+                _cache_usergroup_members[cache_key] = resp["users"]
+            except Exception:
+                # usergroup 조회 실패 시 빈 리스트로 처리
+                _cache_usergroup_members[cache_key] = []
+        if user_id in _cache_usergroup_members[cache_key]:
+            return squad
+    return None
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
@@ -76,20 +109,35 @@ def register_general_handlers(app, assistant):
             f"/archives/{channel}/p{thread_ts_for_link}"
         )
 
+        # 사용자의 스쿼드에 따라 대상 Notion DB 결정
+        squad = await _get_user_squad(app.client, user)
+        if squad and squad.notion_db.name != "main":
+            task_ds_id = squad.notion_db.data_source_id
+            title_prop = squad.notion_db.properties.title
+            project_ds_id = None
+        else:
+            task_ds_id = DATA_SOURCE_ID
+            title_prop = "제목"
+            project_ds_id = PROJECT_DATA_SOURCE_ID
+
         # General Agent 사용
         notion_tools = [
             get_create_notion_task_tool(
                 user,
                 slack_thread_url,
-                DATA_SOURCE_ID,
+                task_ds_id,
                 app.client,
-                PROJECT_DATA_SOURCE_ID,
+                project_ds_id,
+                title_prop,
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATA_SOURCE_ID),
-            get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
+            get_update_notion_task_status_tool(task_ds_id),
             get_notion_page_tool(),
         ]
+        # 후속 작업 도구는 메인 DB에서만 사용 (프로젝트/구성요소 속성 필요)
+        if project_ds_id:
+            notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+
         tools = [search_tool, get_web_page_from_url] + notion_tools
         await answer(thread_ts, channel, user, text, say, app.client, tools)
 
@@ -163,19 +211,33 @@ def register_general_handlers(app, assistant):
             f"/archives/{context.channel_id}/p{thread_ts_for_link}"
         )
 
+        # 사용자의 스쿼드에 따라 대상 Notion DB 결정
+        squad = await _get_user_squad(app.client, context.user_id)
+        if squad and squad.notion_db.name != "main":
+            task_ds_id = squad.notion_db.data_source_id
+            title_prop = squad.notion_db.properties.title
+            project_ds_id = None
+        else:
+            task_ds_id = DATA_SOURCE_ID
+            title_prop = "제목"
+            project_ds_id = PROJECT_DATA_SOURCE_ID
+
         notion_tools = [
             get_create_notion_task_tool(
                 context.user_id,
                 slack_thread_url,
-                DATA_SOURCE_ID,
+                task_ds_id,
                 app.client,
-                PROJECT_DATA_SOURCE_ID,
+                project_ds_id,
+                title_prop,
             ),
             get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(DATA_SOURCE_ID),
-            get_create_notion_follow_up_task_tool(DATA_SOURCE_ID),
+            get_update_notion_task_status_tool(task_ds_id),
             get_notion_page_tool(),
         ]
+        if project_ds_id:
+            notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+
         tools = [search_tool, get_web_page_from_url] + notion_tools
 
         await answer(
