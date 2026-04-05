@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
@@ -293,9 +293,19 @@ def get_create_notion_task_tool(
     slack_thread_url: str,
     data_source_id: str,
     client,
-    project_data_source_id: str,
+    project_data_source_id: str | None = None,
+    title_property_name: str = "제목",
 ):
-    """노션 작업 생성 도구를 반환합니다."""
+    """노션 작업 생성 도구를 반환합니다.
+
+    Args:
+        user_id: 슬랙 사용자 ID
+        slack_thread_url: 슬랙 스레드 URL
+        data_source_id: 대상 노션 데이터 소스 ID
+        client: 슬랙 클라이언트
+        project_data_source_id: 프로젝트 DB 데이터 소스 ID (없으면 프로젝트 필드 생략)
+        title_property_name: 대상 DB의 제목 프로퍼티 이름
+    """
 
     async def get_assignee_id():
         if user_id is None:
@@ -307,34 +317,50 @@ def get_create_notion_task_tool(
         user_email = user_profile.get("profile", {}).get("email")
         return await _get_notion_assignee_id(user_email)
 
-    # 데이터 소스에서 실제 옵션들을 가져와서 Pydantic 모델 생성
+    # 데이터 소스에서 실제 옵션들을 가져와서 동적으로 스키마 구성
     task_type_options = get_task_type_options(notion, data_source_id)
     component_options = get_component_options(notion, data_source_id)
 
-    # 프로젝트 데이터 소스에서 진행 중인 프로젝트들 조회
-    active_projects = get_active_projects(notion, project_data_source_id)
+    active_projects: dict[str, str] = {}
+    if project_data_source_id:
+        active_projects = get_active_projects(notion, project_data_source_id)
     project_names = list(active_projects.keys())
 
-    # 동적으로 Field 생성하여 enum constraint 추가
-    task_type_field = Field(
-        description=f"작업의 유형. 가능한 값: {', '.join(task_type_options)}",
-        json_schema_extra={"enum": task_type_options},
-    )
+    # 대상 DB에 존재하는 속성만 입력 스키마에 포함
+    fields: dict = {
+        "title": (str, Field(description="작업의 제목")),
+    }
 
-    component_field = Field(
-        description=f"작업의 구성요소. 가능한 값: {', '.join(component_options)}",
-        json_schema_extra={"enum": component_options},
-    )
-
-    class CreateNotionTaskInput(BaseModel):
-        title: str = Field(description="작업의 제목")
-        task_type: str = task_type_field
-        component: str = component_field
-        project: str = Field(
-            description=f"작업이 속한 프로젝트. 가능한 값: {', '.join(project_names)}",
-            json_schema_extra={"enum": project_names},
+    if task_type_options:
+        fields["task_type"] = (
+            str,
+            Field(
+                description=f"작업의 유형. 가능한 값: {', '.join(task_type_options)}",
+                json_schema_extra={"enum": task_type_options},
+            ),
         )
-        blocks: str | None = Field(
+
+    if component_options:
+        fields["component"] = (
+            str,
+            Field(
+                description=f"작업의 구성요소. 가능한 값: {', '.join(component_options)}",
+                json_schema_extra={"enum": component_options},
+            ),
+        )
+
+    if project_names:
+        fields["project"] = (
+            str,
+            Field(
+                description=f"작업이 속한 프로젝트. 가능한 값: {', '.join(project_names)}",
+                json_schema_extra={"enum": project_names},
+            ),
+        )
+
+    fields["blocks"] = (
+        str | None,
+        Field(
             default=None,
             description=(
                 "작업 본문을 구성할 마크다운 형식의 문자열. 다음과 같은 템플릿을 활용하라.\n"
@@ -354,14 +380,17 @@ def get_create_notion_task_tool(
                 "- 올바른 예 2: '1. 번호\\n   1) 번호 하위' (같은 타입 중첩 OK)\n"
                 "- 올바른 예 3: 중첩 대신 별도 섹션으로 분리\n"
             ),
-        )
+        ),
+    )
+
+    CreateNotionTaskInput = create_model("CreateNotionTaskInput", **fields)
 
     @tool("create_notion_task", args_schema=CreateNotionTaskInput)
     async def create_notion_task(
         title: str,
-        task_type: str,
-        component: str,
-        project: str,
+        task_type: str | None = None,
+        component: str | None = None,
+        project: str | None = None,
         blocks: str | None = None,
     ) -> str:
         """
@@ -375,12 +404,16 @@ def get_create_notion_task_tool(
         notion_assignee_id = await get_assignee_id()
 
         properties = {
-            "제목": {"title": [{"text": {"content": title}}]},
-            "유형": {"select": {"name": task_type}},
-            "구성요소": {"multi_select": [{"name": component}]},
-            "프로젝트": {"relation": [{"id": active_projects[project]}]},
+            title_property_name: {"title": [{"text": {"content": title}}]},
             "상태": {"status": {"name": "대기"}},
         }
+
+        if task_type and task_type_options:
+            properties["유형"] = {"select": {"name": task_type}}
+        if component and component_options:
+            properties["구성요소"] = {"multi_select": [{"name": component}]}
+        if project and active_projects:
+            properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
 
         if notion_assignee_id:
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
