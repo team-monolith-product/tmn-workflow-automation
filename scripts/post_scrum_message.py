@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+import sentry_sdk
 from dotenv import load_dotenv
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
@@ -63,17 +64,25 @@ def main():
 
     # 2. 스쿼드별 스크럼
     for squad in scrum.squads:
-        send_team_scrum(
-            notion,
-            slack_client,
-            email_to_user_id,
-            squad,
-            args.dry_run,
-        )
+        try:
+            send_team_scrum(
+                notion,
+                slack_client,
+                email_to_user_id,
+                squad,
+                args.dry_run,
+            )
+        except Exception as e:
+            sentry_sdk.capture_exception(e)
+            print(f"Error in send_team_scrum for {squad.squad.display_name}: {e}")
 
     # 3. 개인 스크럼
     for personal in scrum.personal_scrums:
-        send_personal_scrum(slack_client, personal, args.dry_run)
+        try:
+            send_personal_scrum(slack_client, personal, args.dry_run)
+        except Exception as e:
+            sentry_sdk.capture_exception(e)
+            print(f"Error in send_personal_scrum for {personal.name}: {e}")
 
     if args.dry_run:
         print("\n=== DRY RUN COMPLETED ===")
