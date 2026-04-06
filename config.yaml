@@ -44,7 +44,7 @@ notion_databases:
       title: "작업"
       status: "진행 상태"
       assignee: "담당자"
-      timeline: "작업 일정"
+      timeline: "타임라인"
     pending_statuses: []
     in_progress_statuses: ["진행 중", "테스트 중"]
 
