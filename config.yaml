@@ -148,6 +148,13 @@ task_alerts:
             - alert_no_due_tasks
             - alert_no_tasks
 
+deployment_rotation:
+  channel_id: "C02VA2LLXH9"
+  members:
+    - "U02JLCWGETT"  # 배영빈
+    - "U07RP7U3FPU"
+    - "U02PFUPCJNM"  # 류호선
+
 scheduled_jobs:
   - name: validate_customer_reports
     module: scripts.validate_customer_reports
@@ -229,3 +236,12 @@ scheduled_jobs:
       minute: 30
       day_of_week: mon-fri
     business_day_only: true
+
+  - name: announce_deployment_rotation
+    module: scripts.announce_deployment_rotation
+    function: main
+    cron:
+      hour: 9
+      minute: 0
+      day: 1
+    business_day_only: false

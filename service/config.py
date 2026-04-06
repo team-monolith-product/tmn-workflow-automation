@@ -108,6 +108,17 @@ class TaskAlertsConfig:
     pipelines: list[TaskAlertPipeline]
 
 
+# --- 배포 담당자 로테이션 ---
+
+
+@dataclass(frozen=True)
+class DeploymentRotationConfig:
+    """배포 담당자 로테이션 설정"""
+
+    channel_id: str
+    members: list[str]
+
+
 # --- 스케줄 작업 ---
 
 
@@ -133,6 +144,7 @@ class AppConfig:
     squads: list[Squad]
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
+    deployment_rotation: DeploymentRotationConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
 
 
@@ -229,6 +241,15 @@ def _parse_config(raw: dict) -> AppConfig:
         )
     task_alerts = TaskAlertsConfig(pipelines=pipelines)
 
+    # Deployment rotation
+    dr_raw = raw.get("deployment_rotation")
+    deployment_rotation = None
+    if dr_raw:
+        deployment_rotation = DeploymentRotationConfig(
+            channel_id=dr_raw["channel_id"],
+            members=dr_raw["members"],
+        )
+
     # Scheduled jobs
     scheduled_jobs = [
         ScheduledJobConfig(
@@ -246,6 +267,7 @@ def _parse_config(raw: dict) -> AppConfig:
         squads=squads,
         scrum=scrum,
         task_alerts=task_alerts,
+        deployment_rotation=deployment_rotation,
         scheduled_jobs=scheduled_jobs,
     )
 
