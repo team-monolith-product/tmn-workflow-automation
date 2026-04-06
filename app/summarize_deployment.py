@@ -34,6 +34,7 @@ from slack_sdk import WebClient
 import dotenv
 
 from service.config import NotionDBConfig, load_config
+from service.deployment_rotation import get_todays_deployer
 from service.slack import get_email_to_user_id
 
 dotenv.load_dotenv()
@@ -141,6 +142,13 @@ def summarize_deployment(
 
     today_str = datetime.now().date().isoformat()
 
+    # 오늘의 배포 담당자 계산
+    deployer_mention = ""
+    if config.deployment_rotation:
+        deployer = get_todays_deployer(config.deployment_rotation.members)
+        if deployer:
+            deployer_mention = f" (배포 담당자: <@{deployer}>)"
+
     # 제품 본부 파이프라인의 스쿼드 DB에서 배포 예정 과업 조회
     product_pipeline = next(
         p for p in config.task_alerts.pipelines if p.name == "제품 본부"
@@ -159,7 +167,7 @@ def summarize_deployment(
         # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
+            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
         )
         print("No tasks scheduled for deployment today.")
         return
@@ -169,9 +177,11 @@ def summarize_deployment(
 
     # 메시지 헤더 & 호출자 멘션
     if caller_slack_user_id:
-        message = f"오늘 배포 예정 과업! (by <@{caller_slack_user_id}>)\n"
+        message = (
+            f"오늘 배포 예정 과업!{deployer_mention} (by <@{caller_slack_user_id}>)\n"
+        )
     else:
-        message = "오늘 배포 예정 과업!\n"
+        message = f"오늘 배포 예정 과업!{deployer_mention}\n"
 
     task_index = 0
     for task in tasks:
@@ -235,7 +245,7 @@ def summarize_deployment(
     if task_index == 0:
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
+            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
         )
         print("No tasks with open PRs scheduled for deployment today.")
         return

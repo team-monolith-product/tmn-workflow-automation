@@ -310,6 +310,12 @@ def register_general_handlers(app, assistant):
             "배포 요약을 작성",
             {"caller_slack_user_id": "user_id"},
         ),
+        (
+            "/announce-deployment-rotation",
+            "scripts.announce_deployment_rotation",
+            "main",
+            "배포 담당자 공지",
+        ),
     ]
 
     def _register_cron_command(
