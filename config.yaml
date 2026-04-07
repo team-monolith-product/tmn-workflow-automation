@@ -152,8 +152,9 @@ deployment_rotation:
   channel_id: "C02VA2LLXH9"
   members:
     - "U02JLCWGETT"  # 배영빈
-    - "U07RP7U3FPU"
+    - "U07RP7U3FPU"  # 박기영
     - "U02PFUPCJNM"  # 류호선
+  fixed_days: 3  # 월화수 고정 (members 순서대로), 나머지 요일만 로테이션
 
 scheduled_jobs:
   - name: validate_customer_reports

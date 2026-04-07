@@ -88,3 +88,48 @@ def test_schedule_different_months():
     # 12개월 중 최소 2가지 이상의 다른 스케줄이 있어야 함
     unique = len(set(tuple(s.items()) for s in schedules))
     assert unique >= 2
+
+
+# --- fixed_days 테스트 ---
+
+
+def test_fixed_days_assigns_in_order():
+    """fixed_days=3이면 월/화/수가 members[0]/[1]/[2]에 고정 배정"""
+    schedule = get_weekday_schedule(2026, 4, MEMBERS, fixed_days=3)
+    assert schedule[0] == MEMBERS[0]  # 월 -> U_A
+    assert schedule[1] == MEMBERS[1]  # 화 -> U_B
+    assert schedule[2] == MEMBERS[2]  # 수 -> U_C
+
+
+def test_fixed_days_rotation_for_remaining():
+    """fixed_days=3이면 목/금만 로테이션으로 배정"""
+    schedule = get_weekday_schedule(2026, 4, MEMBERS, fixed_days=3)
+    # 목/금은 로테이션 오프셋에 따라 결정
+    offset = _get_rotation_offset(2026, 4, len(MEMBERS))
+    assert schedule[3] == MEMBERS[(0 + offset) % len(MEMBERS)]  # 목
+    assert schedule[4] == MEMBERS[(1 + offset) % len(MEMBERS)]  # 금
+
+
+def test_fixed_days_consistency():
+    """같은 월에서 fixed_days 스케줄은 항상 동일"""
+    s1 = get_weekday_schedule(2026, 4, MEMBERS, fixed_days=3)
+    s2 = get_weekday_schedule(2026, 4, MEMBERS, fixed_days=3)
+    assert s1 == s2
+
+
+def test_todays_deployer_with_fixed_days():
+    """fixed_days 적용 시 오늘의 배포 담당자가 올바르게 반환"""
+    # 2026-04-06은 월요일 (weekday=0), fixed_days=3이면 members[0] 고정
+    with patch("service.deployment_rotation.date") as mock_date, patch(
+        "service.deployment_rotation.is_business_day", return_value=True
+    ):
+        mock_date.today.return_value = date(2026, 4, 6)
+        result = get_todays_deployer(MEMBERS, fixed_days=3)
+        assert result == MEMBERS[0]
+
+
+def test_fixed_days_zero_is_full_rotation():
+    """fixed_days=0이면 기존 전체 로테이션과 동일"""
+    schedule_default = get_weekday_schedule(2026, 4, MEMBERS)
+    schedule_zero = get_weekday_schedule(2026, 4, MEMBERS, fixed_days=0)
+    assert schedule_default == schedule_zero

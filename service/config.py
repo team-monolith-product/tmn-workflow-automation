@@ -117,6 +117,7 @@ class DeploymentRotationConfig:
 
     channel_id: str
     members: list[str]
+    fixed_days: int = 0
 
 
 # --- 스케줄 작업 ---
@@ -248,6 +249,7 @@ def _parse_config(raw: dict) -> AppConfig:
         deployment_rotation = DeploymentRotationConfig(
             channel_id=dr_raw["channel_id"],
             members=dr_raw["members"],
+            fixed_days=dr_raw.get("fixed_days", 0),
         )
 
     # Scheduled jobs

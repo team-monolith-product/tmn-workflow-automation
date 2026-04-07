@@ -145,7 +145,10 @@ def summarize_deployment(
     # 오늘의 배포 담당자 계산
     deployer_mention = ""
     if config.deployment_rotation:
-        deployer = get_todays_deployer(config.deployment_rotation.members)
+        deployer = get_todays_deployer(
+            config.deployment_rotation.members,
+            config.deployment_rotation.fixed_days,
+        )
         if deployer:
             deployer_mention = f" (배포 담당자: <@{deployer}>)"
 

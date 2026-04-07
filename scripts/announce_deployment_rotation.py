@@ -30,7 +30,7 @@ def main():
 
     today = date.today()
     year, month = today.year, today.month
-    schedule = get_weekday_schedule(year, month, rotation.members)
+    schedule = get_weekday_schedule(year, month, rotation.members, rotation.fixed_days)
 
     lines = [f"\U0001f4cb {month}월 배포 담당자 안내\n"]
     for weekday_idx in range(5):
