@@ -79,6 +79,7 @@ class ScrumConfig:
 
     squads: list[ScrumSquadConfig]
     personal_scrums: list[PersonalScrum]
+    pr_warning_excluded_members: list[str] = field(default_factory=list)
 
 
 # --- 작업 알림 ---
@@ -213,7 +214,11 @@ def _parse_config(raw: dict) -> AppConfig:
         )
         for p in scrum_raw.get("personal_scrums", [])
     ]
-    scrum = ScrumConfig(squads=scrum_squads, personal_scrums=personal_scrums)
+    scrum = ScrumConfig(
+        squads=scrum_squads,
+        personal_scrums=personal_scrums,
+        pr_warning_excluded_members=scrum_raw.get("pr_warning_excluded_members", []),
+    )
 
     # Task alerts
     ta_raw = raw.get("task_alerts", {})

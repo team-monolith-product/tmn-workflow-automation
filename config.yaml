@@ -91,6 +91,10 @@ squads:
     notion_db: contents
 
 scrum:
+  pr_warning_excluded_members:
+    - "U075PUFNGHX"  # 예진 이 (코들 PM)
+    - "U02FXQMJ88G"  # 전종현 (기획자)
+
   squads:
     - handle: "코들"
       channel_id: "C09277NGUET"
