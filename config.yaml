@@ -93,7 +93,7 @@ squads:
 scrum:
   pr_warning_excluded_members:
     - "U075PUFNGHX"  # 예진 이 (코들 PM)
-    # 전종현 (해커톤 기획자) - user ID 확인 후 추가 예정
+    - "U02FXQMJ88G"  # 전종현 (기획자)
 
   squads:
     - handle: "코들"
