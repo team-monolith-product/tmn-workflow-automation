@@ -180,12 +180,28 @@ def get_data_source_schema(client: NotionClient, data_source_id: str):
     return data_source
 
 
+def get_status_property_name(client: NotionClient, data_source_id: str) -> str | None:
+    """
+    노션 데이터 소스에서 status 타입 속성의 이름을 찾는다.
+    DB마다 상태 속성명이 다를 수 있으므로 (예: "상태", "진행 상태") 스키마에서 동적으로 조회한다.
+    """
+    ds_schema = get_data_source_schema(client, data_source_id)
+    for prop_name, prop_value in ds_schema["properties"].items():
+        if prop_value.get("type") == "status":
+            return prop_name
+    return None
+
+
 def get_status_options(client: NotionClient, data_source_id: str) -> list[str]:
     """
     노션 데이터 소스에서 상태 속성의 가능한 옵션들을 조회한다.
     """
+    status_prop_name = get_status_property_name(client, data_source_id)
+    if not status_prop_name:
+        return []
+
     ds_schema = get_data_source_schema(client, data_source_id)
-    status_property = ds_schema["properties"].get("상태", {})
+    status_property = ds_schema["properties"][status_prop_name]
 
     if "status" in status_property:
         options = status_property["status"].get("options", [])
@@ -307,6 +323,8 @@ def get_create_notion_task_tool(
         title_property_name: 대상 DB의 제목 프로퍼티 이름
     """
 
+    status_property_name = get_status_property_name(notion, data_source_id)
+
     async def get_assignee_id():
         if user_id is None:
             return None
@@ -405,8 +423,9 @@ def get_create_notion_task_tool(
 
         properties = {
             title_property_name: {"title": [{"text": {"content": title}}]},
-            "상태": {"status": {"name": "대기"}},
         }
+        if status_property_name:
+            properties[status_property_name] = {"status": {"name": "대기"}}
 
         if task_type and task_type_options:
             properties["유형"] = {"select": {"name": task_type}}
@@ -499,6 +518,8 @@ def get_update_notion_task_deadline_tool():
 def get_update_notion_task_status_tool(data_source_id: str):
     """노션 작업 상태 업데이트 도구를 반환합니다."""
 
+    status_prop_name = get_status_property_name(notion, data_source_id)
+
     # 데이터 소스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
     status_options = get_status_options(notion, data_source_id)
 
@@ -522,7 +543,8 @@ def get_update_notion_task_status_tool(data_source_id: str):
         상태 옵션은 실제 노션 데이터베이스에서 동적으로 가져옵니다.
         """
         notion.pages.update(
-            page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
+            page_id=page_id,
+            properties={status_prop_name: {"status": {"name": new_status}}},
         )
 
     return update_notion_task_status
