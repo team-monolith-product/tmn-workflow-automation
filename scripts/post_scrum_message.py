@@ -70,6 +70,7 @@ def main():
                 slack_client,
                 email_to_user_id,
                 squad,
+                scrum.pr_warning_excluded_members,
                 args.dry_run,
             )
         except Exception as e:
@@ -151,6 +152,7 @@ def send_team_scrum(
     slack_client: WebClient,
     email_to_user_id: dict[str, str],
     squad: ScrumSquadConfig,
+    pr_warning_excluded_members: list[str],
     dry_run: bool = False,
 ):
     """
@@ -161,6 +163,7 @@ def send_team_scrum(
         slack_client: Slack WebClient
         email_to_user_id: 이메일 -> Slack User ID 매핑
         squad: 스쿼드 설정
+        pr_warning_excluded_members: PR 경고 제외 대상 Slack User ID 목록
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
     # 메인 메시지
@@ -198,9 +201,15 @@ def send_team_scrum(
         # 담당자 이름 (첫 번째 태스크에서 가져옴)
         assignee_name = tasks[0]["assignee_name"]
 
+        # 기획자/PM은 PR 경고에서 제외
+        user_id = email_to_user_id.get(email)
+        is_excluded = user_id in pr_warning_excluded_members
+
         # PR 경고 활성화 여부
         pr_warning_enabled = (
-            squad.pr_warning and squad.squad.notion_db.properties.pr is not None
+            squad.pr_warning
+            and squad.squad.notion_db.properties.pr is not None
+            and not is_excluded
         )
 
         # 인원별 메시지 생성
