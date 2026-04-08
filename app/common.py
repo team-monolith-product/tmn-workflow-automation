@@ -180,23 +180,42 @@ def get_data_source_schema(client: NotionClient, data_source_id: str):
     return data_source
 
 
-def get_status_property_name(client: NotionClient, data_source_id: str) -> str | None:
+def get_status_property_info(
+    client: NotionClient, data_source_id: str
+) -> tuple[str | None, str | None]:
     """
-    노션 데이터 소스에서 status 타입 속성의 이름을 찾는다.
-    DB마다 상태 속성명이 다를 수 있으므로 (예: "상태", "진행 상태") 스키마에서 동적으로 조회한다.
+    노션 데이터 소스에서 status 타입 속성의 이름과 기본 상태(To-do 그룹의 첫 번째 옵션)를 반환한다.
+    DB마다 상태 속성명과 옵션이 다를 수 있으므로 스키마에서 동적으로 조회한다.
+
+    Returns:
+        (속성 이름, 기본 상태 이름) 튜플. 속성이 없으면 (None, None).
     """
     ds_schema = get_data_source_schema(client, data_source_id)
     for prop_name, prop_value in ds_schema["properties"].items():
         if prop_value.get("type") == "status":
-            return prop_name
-    return None
+            # To-do 그룹의 첫 번째 옵션을 기본 상태로 사용
+            default_status = None
+            status_config = prop_value.get("status", {})
+            groups = status_config.get("groups", [])
+            options = status_config.get("options", [])
+            option_map = {opt["id"]: opt["name"] for opt in options}
+
+            for group in groups:
+                if group.get("id") == "todo-status-group":
+                    todo_option_ids = group.get("option_ids", [])
+                    if todo_option_ids:
+                        default_status = option_map.get(todo_option_ids[0])
+                    break
+
+            return prop_name, default_status
+    return None, None
 
 
 def get_status_options(client: NotionClient, data_source_id: str) -> list[str]:
     """
     노션 데이터 소스에서 상태 속성의 가능한 옵션들을 조회한다.
     """
-    status_prop_name = get_status_property_name(client, data_source_id)
+    status_prop_name, _ = get_status_property_info(client, data_source_id)
     if not status_prop_name:
         return []
 
@@ -323,7 +342,9 @@ def get_create_notion_task_tool(
         title_property_name: 대상 DB의 제목 프로퍼티 이름
     """
 
-    status_property_name = get_status_property_name(notion, data_source_id)
+    status_property_name, default_status = get_status_property_info(
+        notion, data_source_id
+    )
 
     async def get_assignee_id():
         if user_id is None:
@@ -424,8 +445,8 @@ def get_create_notion_task_tool(
         properties = {
             title_property_name: {"title": [{"text": {"content": title}}]},
         }
-        if status_property_name:
-            properties[status_property_name] = {"status": {"name": "대기"}}
+        if status_property_name and default_status:
+            properties[status_property_name] = {"status": {"name": default_status}}
 
         if task_type and task_type_options:
             properties["유형"] = {"select": {"name": task_type}}
@@ -518,7 +539,7 @@ def get_update_notion_task_deadline_tool():
 def get_update_notion_task_status_tool(data_source_id: str):
     """노션 작업 상태 업데이트 도구를 반환합니다."""
 
-    status_prop_name = get_status_property_name(notion, data_source_id)
+    status_prop_name, _ = get_status_property_info(notion, data_source_id)
 
     # 데이터 소스에서 실제 상태 옵션들을 가져와서 Pydantic 모델 생성
     status_options = get_status_options(notion, data_source_id)

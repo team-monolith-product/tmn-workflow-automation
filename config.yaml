@@ -42,7 +42,7 @@ notion_databases:
     data_source_id: "3141cc82-0da6-8103-913c-000ba234b439"
     properties:
       title: "작업"
-      status: "진행 상태"
+      status: "상태"
       assignee: "담당자"
       timeline: "타임라인"
     pending_statuses: []
