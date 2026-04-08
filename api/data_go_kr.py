@@ -23,4 +23,5 @@ def get_rest_de_info(year: int, month: int):
         "numOfRows": "100",
     }
     response = requests.get(url, params=params, timeout=10)
+    response.raise_for_status()
     return response.json()
