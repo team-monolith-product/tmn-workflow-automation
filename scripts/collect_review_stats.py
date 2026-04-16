@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -16,7 +17,6 @@ import tabulate
 
 from service.github import (
     fetch_pull_requests_parallel,
-    fetch_pr_timeline_events_parallel,
 )
 
 # wide chars 모드 활성화 (한글 폭 계산에 wcwidth 사용)
@@ -614,71 +614,75 @@ def fetch_all_pr_data(
             all_pull_requests.extend(filtered_prs)
             repo_stats[repo_full_name] = len(filtered_prs)
 
-    # service/github의 fetch_pr_timeline_events_parallel 함수 사용
-    pr_id_to_events = fetch_pr_timeline_events_parallel(all_pull_requests)
-
-    # 각 PR 객체에 타임라인 이벤트 캐싱
-    for pr in all_pull_requests:
-        # 모든 PR에 대해 타임라인 이벤트가 있어야 함을 강제
-        if pr.id not in pr_id_to_events:
-            raise ValueError(
-                f"PR {pr.number}({pr.id})의 타임라인 이벤트를 찾을 수 없습니다"
-            )
-
-        # 정상적인 경우 캐싱 진행
-        events = []
-        for event in pr_id_to_events[pr.id]:
-            # 기존 get_pr_timeline_events 함수와 동일한 형식으로 변환
-            event_type = event.event
-            event_time = event.created_at
-
-            # 리뷰 요청/제거 이벤트
-            if event_type in ("review_requested", "review_request_removed"):
-                if "requested_reviewer" not in event.raw_data:
-                    # Team 이 요청되는 경우 requested_team 만 존재
-                    continue
-
-                reviewer = event.raw_data["requested_reviewer"]["login"]
-                events.append(
-                    {
-                        "type": event_type,
-                        "time": event_time,
-                        "reviewer": reviewer,
-                    }
-                )
-
-            elif event_type in ("reviewed"):
-                # reviewed 이벤트는 다른 이벤트와 규격이 다릅니다.
-                # actor 대신 user를 쓰고, created_at 대신 submitted_at을 사용합니다.
-                reviewer = event.raw_data["user"]["login"]
-                event_time = datetime.strptime(
-                    event.raw_data["submitted_at"], "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=timezone.utc)
-
-                events.append(
-                    {
-                        "type": event_type,
-                        "time": event_time,
-                        "reviewer": reviewer,
-                    }
-                )
-
-            # Ready for review 이벤트
-            elif event_type == "ready_for_review":
-                events.append(
-                    {
-                        "type": "ready_for_review",
-                        "time": event_time,
-                    }
-                )
-
-        # 시간순 정렬
-        events.sort(key=lambda e: e["time"])
-
-        # 캐싱
-        pr._timeline_events = events
+    # 타임라인 이벤트를 워커 안에서 즉시 단순 dict로 변환하여 PyGithub 객체를
+    # 모든 PR 분량만큼 동시에 메모리에 들고 있지 않도록 함 (OOM 방지)
+    if all_pull_requests:
+        max_workers = min(50, len(all_pull_requests))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for pr, events in zip(
+                all_pull_requests,
+                executor.map(_fetch_simplified_timeline_events, all_pull_requests),
+            ):
+                pr._timeline_events = events
 
     return all_pull_requests, repo_stats
+
+
+def _fetch_simplified_timeline_events(pr: PullRequest) -> list[dict]:
+    """
+    단일 PR의 타임라인 이벤트를 가져와 통계 계산에 필요한 형태로 변환합니다.
+
+    워커 스레드 안에서 변환까지 끝내고 단순 dict 리스트만 반환하므로,
+    PyGithub TimelineEvent 객체와 raw_data가 함수 종료 시 즉시 GC 대상이 되어
+    피크 메모리 사용량을 크게 줄입니다.
+    """
+    issue = pr.as_issue()
+    timeline = issue.get_timeline()
+
+    events = []
+    for event in timeline:
+        event_type = event.event
+
+        # 리뷰 요청/제거 이벤트
+        if event_type in ("review_requested", "review_request_removed"):
+            if "requested_reviewer" not in event.raw_data:
+                # Team 이 요청되는 경우 requested_team 만 존재
+                continue
+
+            events.append(
+                {
+                    "type": event_type,
+                    "time": event.created_at,
+                    "reviewer": event.raw_data["requested_reviewer"]["login"],
+                }
+            )
+
+        elif event_type == "reviewed":
+            # reviewed 이벤트는 다른 이벤트와 규격이 다릅니다.
+            # actor 대신 user를 쓰고, created_at 대신 submitted_at을 사용합니다.
+            events.append(
+                {
+                    "type": event_type,
+                    "time": datetime.strptime(
+                        event.raw_data["submitted_at"], "%Y-%m-%dT%H:%M:%SZ"
+                    ).replace(tzinfo=timezone.utc),
+                    "reviewer": event.raw_data["user"]["login"],
+                }
+            )
+
+        # Ready for review 이벤트
+        elif event_type == "ready_for_review":
+            events.append(
+                {
+                    "type": "ready_for_review",
+                    "time": event.created_at,
+                }
+            )
+
+    # 시간순 정렬
+    events.sort(key=lambda e: e["time"])
+
+    return events
 
 
 def main():
