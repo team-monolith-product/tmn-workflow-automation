@@ -22,5 +22,9 @@
   "enk-opencode-hub-helm": {
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
+  },
+  "tmn-codle-cli": {
+    "skip": ["ruleset.json"],
+    "add": ["ruleset_main_with_actions_bypass.json"]
   }
 }
