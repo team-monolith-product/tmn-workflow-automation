@@ -32,6 +32,10 @@ def _before_send(event, hint):
         message = event.get("message", "")
     if "ClientConnectionResetError" in message:
         return None
+    # Slack Socket Mode 세션 타임아웃/재연결 실패 로그 필터
+    # (세션 ID가 매번 달라 이슈가 각각 생성되어 노이즈가 큼)
+    if "Failed to check the current session" in message:
+        return None
     return event
 
 
