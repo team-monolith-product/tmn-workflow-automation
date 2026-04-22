@@ -8,6 +8,9 @@
   "tmn-cc-settings": {
     "skip": ["ruleset.json"]
   },
+  "tmn-component-screenshot": {
+    "skip": ["ruleset.json"]
+  },
   "*-memory": {
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
