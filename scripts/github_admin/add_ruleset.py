@@ -143,10 +143,16 @@ def expand_repo_config(
     expanded: dict[str, dict] = {}
     # repo 이름 → 매칭된 config 키 추적 (중복 감지용)
     source: dict[str, str] = {}
+    repo_name_set = set(repo_names)
     for pattern, conf in config.items():
         if any(c in pattern for c in "*?["):
             matched = [name for name in repo_names if fnmatch.fnmatch(name, pattern)]
         else:
+            if pattern not in repo_name_set:
+                raise ValueError(
+                    f'config의 repo "{pattern}"이 org에 존재하지 않습니다. '
+                    f"오타를 확인하세요."
+                )
             matched = [pattern]
         for name in matched:
             if name in source:
@@ -279,8 +285,8 @@ def apply_ruleset_to_repo(
 
 
 def apply_ruleset_to_repos(
-    org,
     org_name: str,
+    all_repo_names: list[str],
     ruleset_key: str,
     ruleset_template: dict,
     dry_run: bool,
@@ -290,8 +296,8 @@ def apply_ruleset_to_repos(
     모든 리포지토리에 ruleset을 적용하는 함수 (항상 덮어쓰기)
 
     Args:
-        org: PyGithub Organization 객체
         org_name: Organization 이름
+        all_repo_names: org의 전체 repo 이름 목록
         ruleset_key: AVAILABLE_RULESETS의 키 (예: "main", "develop")
         ruleset_template: Ruleset 설정 딕셔너리
         dry_run: dry-run 모드 여부
@@ -303,8 +309,7 @@ def apply_ruleset_to_repos(
     success_count = 0
     error_count = 0
 
-    for repo in get_all_repos(org):
-        repo_name = repo.name
+    for repo_name in all_repo_names:
 
         if skip_repos and repo_name in skip_repos:
             ruleset_name = ruleset_template["name"]
@@ -447,8 +452,8 @@ def main():
         print("-" * 50)
 
         success, error = apply_ruleset_to_repos(
-            org,
             org_name,
+            all_repo_names,
             ruleset_key,
             ruleset_template,
             args.dry_run,
