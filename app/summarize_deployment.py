@@ -159,8 +159,6 @@ def summarize_deployment(
     tasks = []
     db_by_task_url: dict[str, NotionDBConfig] = {}
     for ps in product_pipeline.pipeline_squads:
-        if ps.squad.handle == "해커톤":
-            continue
         db = ps.squad.notion_db
         if not db.properties.pr:
             continue
