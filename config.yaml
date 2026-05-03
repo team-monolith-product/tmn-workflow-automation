@@ -235,7 +235,7 @@ scheduled_jobs:
       hour: 16
       minute: 30
       day_of_week: mon-fri
-    business_day_only: false
+    business_day_only: true
 
   - name: schedule_scrum_mention
     module: scripts.schedule_scrum_mention
