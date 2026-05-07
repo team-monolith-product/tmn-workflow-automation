@@ -255,6 +255,15 @@ scheduled_jobs:
       day_of_week: mon-fri
     business_day_only: true
 
+  - name: notify_codle_lead_missing
+    module: scripts.notify_codle_lead_missing
+    function: main
+    cron:
+      hour: 9
+      minute: 0
+      day_of_week: mon-fri
+    business_day_only: true
+
   - name: announce_deployment_rotation
     module: scripts.announce_deployment_rotation
     function: main
