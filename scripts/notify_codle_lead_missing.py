@@ -53,7 +53,10 @@ def query_lead_missing(notion: NotionClient) -> list[dict]:
                         "property": "phone_number",
                         "phone_number": {"is_not_empty": True},
                     },
-                    {"property": "\ud83d\udc69\u200d\ud83c\udfeb \ub9ac\ub4dc", "relation": {"is_empty": True}},
+                    {
+                        "property": "\ud83d\udc69\u200d\ud83c\udfeb \ub9ac\ub4dc",
+                        "relation": {"is_empty": True},
+                    },
                 ]
             },
         }
@@ -103,7 +106,9 @@ def build_message(entries: list[dict]) -> str:
         lines.append(f"\u2022 <{entry['url']}|{entry['user_name']}>{school}")
 
     lines.append("")
-    lines.append(f"<{view_url}|\ub178\uc158\uc5d0\uc11c \uc804\uccb4 \ubaa9\ub85d \ubcf4\uae30>")
+    lines.append(
+        f"<{view_url}|\ub178\uc158\uc5d0\uc11c \uc804\uccb4 \ubaa9\ub85d \ubcf4\uae30>"
+    )
 
     return "\n".join(lines)
 
