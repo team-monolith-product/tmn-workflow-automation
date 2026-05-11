@@ -1,6 +1,5 @@
 from app.route_deal import parse_form_submission
 
-
 SAMPLE_MESSAGE_MULTI_PLAN = (
     "코들 문의 신청 새 제출 *제출 시각*\n"
     "2026-05-11 15:08 *학교명*\n"
@@ -88,10 +87,7 @@ def test_parse_multi_plan():
     assert result["plans"][1]["students"] == 30
     assert result["total_students"] == 60
     assert result["total_price"] == 7128000
-    assert (
-        result["admin_link"]
-        == "https://admin.codle.io/form_submissions/8/show"
-    )
+    assert result["admin_link"] == "https://admin.codle.io/form_submissions/8/show"
 
 
 def test_parse_single_plan():

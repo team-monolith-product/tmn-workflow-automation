@@ -148,9 +148,7 @@ async def route_deal(
         {"type": "bookmark", "bookmark": {"url": slack_message_url}},
     ]
     if data["admin_link"]:
-        children.append(
-            {"type": "bookmark", "bookmark": {"url": data["admin_link"]}}
-        )
+        children.append({"type": "bookmark", "bookmark": {"url": data["admin_link"]}})
 
     detail_lines = []
     if data["phone"]:
@@ -193,6 +191,4 @@ async def route_deal(
         ),
         thread_ts=message_ts,
     )
-    print(
-        f"route_deal: Notion 딜 생성 완료. title={title}, url={page_url}"
-    )
+    print(f"route_deal: Notion 딜 생성 완료. title={title}, url={page_url}")
