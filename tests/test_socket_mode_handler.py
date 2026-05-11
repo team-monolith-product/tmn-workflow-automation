@@ -33,9 +33,7 @@ def mock_client():
 @pytest.fixture
 def handler():
     app = MagicMock()
-    h = AsyncImmediateAckSocketModeHandler.__new__(
-        AsyncImmediateAckSocketModeHandler
-    )
+    h = AsyncImmediateAckSocketModeHandler.__new__(AsyncImmediateAckSocketModeHandler)
     h.app = app
     return h
 
@@ -61,9 +59,7 @@ async def test_events_api_acks_immediately(handler, mock_client):
         await dispatch_can_finish.wait()
         return MagicMock(status=200, body="", headers={})
 
-    with patch(
-        "app.socket_mode_handler.run_async_bolt_app", side_effect=slow_dispatch
-    ):
+    with patch("app.socket_mode_handler.run_async_bolt_app", side_effect=slow_dispatch):
         await handler.handle(mock_client, req)
 
         # handle()이 반환된 시점에서 이미 ack가 전송되어야 함
@@ -112,7 +108,11 @@ async def test_interactive_uses_normal_flow(handler, mock_client):
     """interactive 요청도 기존 동작을 유지합니다."""
     req = _make_request("interactive")
 
-    bolt_resp = MagicMock(status=200, body='{"text": "ok"}', headers={"content-type": ["application/json"]})
+    bolt_resp = MagicMock(
+        status=200,
+        body='{"text": "ok"}',
+        headers={"content-type": ["application/json"]},
+    )
 
     with patch(
         "app.socket_mode_handler.run_async_bolt_app",
@@ -160,9 +160,7 @@ async def test_background_tasks_tracked(handler, mock_client):
         await finish_event.wait()
         return MagicMock(status=200, body="", headers={})
 
-    with patch(
-        "app.socket_mode_handler.run_async_bolt_app", side_effect=slow_dispatch
-    ):
+    with patch("app.socket_mode_handler.run_async_bolt_app", side_effect=slow_dispatch):
         await handler.handle(mock_client, req)
         await asyncio.sleep(0.01)
 
