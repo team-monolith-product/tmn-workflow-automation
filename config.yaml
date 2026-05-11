@@ -235,7 +235,7 @@ scheduled_jobs:
       hour: 16
       minute: 30
       day_of_week: mon-fri
-    business_day_only: false
+    business_day_only: true
 
   - name: schedule_scrum_mention
     module: scripts.schedule_scrum_mention
@@ -243,6 +243,15 @@ scheduled_jobs:
     cron:
       hour: 16
       minute: 30
+      day_of_week: mon-fri
+    business_day_only: true
+
+  - name: notify_typeform_no_communication
+    module: scripts.notify_typeform_no_communication
+    function: main
+    cron:
+      hour: 9
+      minute: 0
       day_of_week: mon-fri
     business_day_only: true
 
