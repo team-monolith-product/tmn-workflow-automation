@@ -21,6 +21,7 @@ import anthropic
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from .common import slack_users_list, notion_page_to_markdown
+from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 
 KST = ZoneInfo("Asia/Seoul")
@@ -166,6 +167,9 @@ def register_justin_handlers(app):
         - Notion 링크가 있으면 → 미팅 보고서 피드백
         - PDF 첨부파일이 있으면 → 제안서 피드백 (네이티브 PDF)
         """
+        if is_duplicate_event(body):
+            return
+
         event = body.get("event")
         if event is None:
             return
