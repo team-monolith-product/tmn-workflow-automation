@@ -3,11 +3,13 @@
 """
 
 from datetime import datetime
+
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from .common import KST, slack_users_list
+from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.athena_tools import get_execute_athena_query_tool
 from .tools.chart_tools import get_execute_python_with_chart_tool
@@ -28,6 +30,9 @@ def register_data_handlers(app_data):
         """
         슬랙에서 데이터 봇을 멘션하여 데이터 분석을 시작하면 호출되는 이벤트
         """
+        if is_duplicate_event(body):
+            return
+
         event = body.get("event")
 
         if event is None:

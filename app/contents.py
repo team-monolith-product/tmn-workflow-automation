@@ -2,6 +2,7 @@
 콘텐츠 비서 봇 전용 로직
 """
 
+from .event_dedup import is_duplicate_event
 from .common import (
     answer,
     search_tool,
@@ -31,6 +32,9 @@ def register_contents_handlers(app_contents):
         """
         슬랙에서 콘텐츠 비서를 멘션하여 대화를 시작하면 호출되는 이벤트
         """
+        if is_duplicate_event(body):
+            return
+
         event = body.get("event")
 
         if event is None:
