@@ -49,7 +49,7 @@
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
   },
-  "66r": {
+  "66r-app-next": {
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
   }
