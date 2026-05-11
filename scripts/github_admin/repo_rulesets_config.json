@@ -48,5 +48,9 @@
   "tmn-n8n": {
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
+  },
+  "66r-*": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
   }
 }
