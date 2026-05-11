@@ -1,4 +1,4 @@
-from app.route_deal import (
+from app.create_deal import (
     get_fillable_properties,
     build_schema_description,
     format_sample_rows,
@@ -209,13 +209,29 @@ def test_build_notion_properties_all_null():
     props = get_fillable_properties(SAMPLE_DATA_SOURCE)
     result = build_notion_properties(ai_result, props, "bot-user-id")
 
-    # Only 담당자 should be set (always set to bot user)
+    # 담당자 is set to caller
     assert "담당자" in result
     assert "Name" not in result
     assert "견적금액" not in result
     assert "단계" not in result
     assert "모델" not in result
     assert "인원" not in result
+
+
+def test_build_notion_properties_no_assignee():
+    ai_result = {
+        "Name": "테스트학교 - 홍길동",
+        "견적금액": None,
+        "단계": None,
+        "모델": [],
+        "인원": None,
+        "사용학기": None,
+    }
+    props = get_fillable_properties(SAMPLE_DATA_SOURCE)
+    result = build_notion_properties(ai_result, props, None)
+
+    assert "Name" in result
+    assert "담당자" not in result  # None assignee → no 담당자
 
 
 def test_build_notion_properties_partial():

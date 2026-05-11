@@ -11,7 +11,7 @@ from cachetools import TTLCache
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
-from . import analyze_oom, route_bug, route_deal, route_dev_env_infra_bug
+from . import analyze_oom, create_deal, route_bug, route_dev_env_infra_bug
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -103,6 +103,11 @@ def register_general_handlers(app, assistant):
             await analyze_oom.analyze_oom_alert(app.client, body, say)
             return
 
+        # 딜 채널에서 멘션 시: 스레드 내용을 분석하여 Notion 딜 페이지 생성
+        if channel == SLACK_DEAL_FORM_CHANNEL_ID:
+            await create_deal.create_deal(app.client, body)
+            return
+
         # Slack 스레드 링크 만들기
         slack_workspace = "monolith-keb2010"
         thread_ts_for_link = (event.get("thread_ts") or body["event"]["ts"]).replace(
@@ -190,18 +195,6 @@ def register_general_handlers(app, assistant):
             if thread_ts is None or thread_ts == message_ts:
                 print("Routing dev env infra bug report")
                 await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
-        elif channel == SLACK_DEAL_FORM_CHANNEL_ID:
-            subtype = event.get("subtype")
-            if subtype != "bot_message":
-                return
-
-            thread_ts = event.get("thread_ts")
-            message_ts = event.get("ts")
-
-            if thread_ts is None or thread_ts == message_ts:
-                print("Routing deal form submission")
-                await route_deal.route_deal(app.client, body)
-
     @assistant.thread_started
     async def start_assistant_thread(say, _set_suggested_prompts):
         """

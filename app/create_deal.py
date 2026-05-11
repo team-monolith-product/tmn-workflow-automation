@@ -1,8 +1,9 @@
 """
-코들 문의 신청 폼 제출 메시지를 AI로 분석하여 Notion '딜' DB에 자동으로 항목을 생성합니다.
+봇 멘션을 통해 슬랙 스레드 내용을 AI로 분석하여 Notion '딜' DB에 페이지를 생성합니다.
 
-스레드 내용을 전부 읽고, Notion DB 스키마와 샘플 데이터를 AI에 전달하여
-속성값을 동적으로 결정합니다.
+작업 생성 플로우와 동일하게, 사용자가 봇을 멘션하면 스레드를 읽고
+Notion DB 스키마와 샘플 데이터를 기반으로 속성값을 결정합니다.
+담당자는 봇 호출자로 설정됩니다.
 """
 
 import json
@@ -11,6 +12,8 @@ import os
 from notion_client import Client as NotionClient
 from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
+
+from .common import slack_users_list, notion_users_list
 
 DEAL_DATA_SOURCE_ID = "3221cc82-0da6-8059-b2a3-000bbc7eb6b5"
 
@@ -233,7 +236,7 @@ def analyze_thread_for_deal(
 def build_notion_properties(
     ai_result: dict,
     fillable_props: dict,
-    bot_user_id: str,
+    assignee_notion_id: str | None,
 ) -> dict:
     """AI 결과를 Notion API 형식의 properties로 변환합니다."""
     properties = {}
@@ -264,28 +267,56 @@ def build_notion_properties(
         elif prop_type == "date" and value:
             properties[name] = {"date": {"start": str(value)}}
 
-    # 담당자는 항상 봇 사용자로 설정
-    properties["담당자"] = {"people": [{"id": bot_user_id}]}
+    # 담당자는 봇 호출자로 설정
+    if assignee_notion_id:
+        properties["담당자"] = {"people": [{"id": assignee_notion_id}]}
 
     return properties
 
 
-async def route_deal(
+async def _resolve_notion_user_id(
+    slack_client: AsyncWebClient, slack_user_id: str
+) -> str | None:
+    """슬랙 사용자 ID를 Notion 사용자 ID로 변환합니다."""
+    # 슬랙에서 이메일 조회
+    user_info_list = await slack_users_list(slack_client)
+    user_dict = {u["id"]: u for u in user_info_list["members"]}
+    user_profile = user_dict.get(slack_user_id, {})
+    user_email = user_profile.get("profile", {}).get("email")
+    if not user_email:
+        return None
+
+    # 노션에서 이메일로 사용자 매칭
+    notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
+    notion_users = await notion_users_list(notion)
+    matched = next(
+        (
+            u
+            for u in notion_users["results"]
+            if u["type"] == "person" and u["person"]["email"] == user_email
+        ),
+        None,
+    )
+    return matched["id"] if matched else None
+
+
+async def create_deal(
     slack_client: AsyncWebClient,
     body: dict,
 ) -> None:
-    """코들 문의 신청 메시지를 AI로 분석하여 Notion 딜 DB에 항목을 생성합니다."""
+    """봇 멘션을 받아 스레드를 분석하고 Notion 딜 DB에 페이지를 생성합니다."""
     event = body.get("event", {})
-    message_text = event.get("text", "")
     channel_id = event.get("channel")
-    message_ts = event.get("ts")
+    caller_user_id = event.get("user")
+    # 스레드에서 멘션된 경우 thread_ts가 부모 메시지, 아니면 자신의 ts 사용
+    thread_ts = event.get("thread_ts") or event.get("ts")
 
     # 1. 스레드의 모든 메시지 수집
-    thread_messages = [message_text]
+    thread_messages = []
     try:
         thread_response = await slack_client.conversations_replies(
             channel=channel_id,
-            ts=message_ts,
+            ts=thread_ts,
         )
         thread_messages = [
             msg.get("text", "")
@@ -293,7 +324,8 @@ async def route_deal(
             if msg.get("text")
         ]
     except Exception:
-        pass  # 스레드가 없으면 원본 메시지만 사용
+        # 스레드 조회 실패 시 이벤트 텍스트만 사용
+        thread_messages = [event.get("text", "")]
 
     # 2. Notion DB 스키마 조회
     notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
@@ -315,12 +347,18 @@ async def route_deal(
     ai_result = analyze_thread_for_deal(
         thread_messages, fillable_props, schema_description, sample_rows_text
     )
-    print(f"route_deal: AI 분석 결과: {json.dumps(ai_result, ensure_ascii=False)}")
+    print(f"create_deal: AI 분석 결과: {json.dumps(ai_result, ensure_ascii=False)}")
 
-    # 5. Notion 페이지 생성
-    bot_user = notion.users.me()
-    properties = build_notion_properties(ai_result, fillable_props, bot_user["id"])
+    # 5. 봇 호출자를 Notion 사용자로 변환하여 담당자 설정
+    assignee_notion_id = None
+    if caller_user_id:
+        assignee_notion_id = await _resolve_notion_user_id(
+            slack_client, caller_user_id
+        )
 
+    properties = build_notion_properties(ai_result, fillable_props, assignee_notion_id)
+
+    # 6. Notion 페이지 생성
     response = notion.pages.create(
         parent={"data_source_id": DEAL_DATA_SOURCE_ID},
         properties=properties,
@@ -328,17 +366,18 @@ async def route_deal(
     page_url = response["url"]
     page_id = response["id"]
 
-    # 6. 본문에 슬랙 메시지 북마크 추가
+    # 7. 본문에 슬랙 메시지 북마크 추가
+    thread_ts_for_link = thread_ts.replace(".", "")
     slack_message_url = (
         f"https://monolith-keb2010.slack.com"
-        f"/archives/{channel_id}/p{message_ts.replace('.', '')}"
+        f"/archives/{channel_id}/p{thread_ts_for_link}"
     )
     notion.blocks.children.append(
         block_id=page_id,
         children=[{"type": "bookmark", "bookmark": {"url": slack_message_url}}],
     )
 
-    # 7. 스레드에 확인 메시지
+    # 8. 스레드에 확인 메시지
     title = ai_result.get("Name") or "(제목 없음)"
     filled_fields = [k for k, v in ai_result.items() if v is not None and k != "Name"]
     filled_summary = ", ".join(filled_fields) if filled_fields else "없음"
@@ -351,6 +390,6 @@ async def route_deal(
             f"• 채워진 항목: {filled_summary}\n"
             f"• <{page_url}|Notion에서 보기>"
         ),
-        thread_ts=message_ts,
+        thread_ts=thread_ts,
     )
-    print(f"route_deal: Notion 딜 생성 완료. title={title}, url={page_url}")
+    print(f"create_deal: Notion 딜 생성 완료. title={title}, url={page_url}")
