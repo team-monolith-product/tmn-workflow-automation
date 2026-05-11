@@ -11,7 +11,7 @@ from cachetools import TTLCache
 from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
-from . import analyze_oom, route_bug, route_dev_env_infra_bug
+from . import analyze_oom, route_bug, route_deal, route_dev_env_infra_bug
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -65,6 +65,7 @@ SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
 SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
 SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
+SLACK_DEAL_FORM_CHANNEL_ID = "C0B0Z76KFGF"
 
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
@@ -189,6 +190,17 @@ def register_general_handlers(app, assistant):
             if thread_ts is None or thread_ts == message_ts:
                 print("Routing dev env infra bug report")
                 await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
+        elif channel == SLACK_DEAL_FORM_CHANNEL_ID:
+            subtype = event.get("subtype")
+            if subtype != "bot_message":
+                return
+
+            thread_ts = event.get("thread_ts")
+            message_ts = event.get("ts")
+
+            if thread_ts is None or thread_ts == message_ts:
+                print("Routing deal form submission")
+                await route_deal.route_deal(app.client, body)
 
     @assistant.thread_started
     async def start_assistant_thread(say, _set_suggested_prompts):
