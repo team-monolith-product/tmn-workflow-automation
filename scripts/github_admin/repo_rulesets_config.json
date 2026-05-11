@@ -26,6 +26,22 @@
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
   },
+  "enk-hackathon-vite": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
+  "enk-landing-vite": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
+  "enk-hackathon-rails": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
+  "enk-user-rails": {
+    "skip": ["ruleset.json", "ruleset_develop.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
   "enk-plan-md": {
     "skip": ["ruleset.json"]
   }
