@@ -352,9 +352,7 @@ async def create_deal(
     # 5. 봇 호출자를 Notion 사용자로 변환하여 담당자 설정
     assignee_notion_id = None
     if caller_user_id:
-        assignee_notion_id = await _resolve_notion_user_id(
-            slack_client, caller_user_id
-        )
+        assignee_notion_id = await _resolve_notion_user_id(slack_client, caller_user_id)
 
     properties = build_notion_properties(ai_result, fillable_props, assignee_notion_id)
 
