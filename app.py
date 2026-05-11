@@ -9,7 +9,7 @@ import sentry_sdk
 from aiohttp import ClientConnectionResetError
 from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp, AsyncAssistant
-from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
+from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
 from app.general import register_general_handlers
 from app.contents import register_contents_handlers
@@ -65,19 +65,19 @@ async def main():
     # Assistant 등록
     app.use(assistant)
 
-    # Async Socket Mode Handler
-    handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+    # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
+    handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     bot_coroutine = handler.start_async()
 
-    contents_coroutine = AsyncSocketModeHandler(
+    contents_coroutine = AsyncImmediateAckSocketModeHandler(
         app_contents, os.environ["SLACK_APP_TOKEN_CONTENTS"]
     ).start_async()
 
-    data_coroutine = AsyncSocketModeHandler(
+    data_coroutine = AsyncImmediateAckSocketModeHandler(
         app_data, os.environ["SLACK_APP_TOKEN_DATA"]
     ).start_async()
 
-    justin_coroutine = AsyncSocketModeHandler(
+    justin_coroutine = AsyncImmediateAckSocketModeHandler(
         app_justin, os.environ["SLACK_APP_TOKEN_JUSTIN"]
     ).start_async()
 
