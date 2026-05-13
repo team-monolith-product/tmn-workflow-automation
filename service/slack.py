@@ -2,9 +2,46 @@
 Slack API를 활용하는 Service Layer입니다.
 """
 
+import time
 from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.web.async_client import AsyncWebClient
+
+
+def find_thread_ts_by_text(
+    slack_client: WebClient,
+    channel_id: str,
+    search_texts: list[str],
+    hours: int = 12,
+) -> dict[str, str]:
+    """
+    채널에서 최근 N시간 이내 메시지 중 search_texts 항목을 포함한 메시지의 ts를 찾는다.
+
+    Args:
+        slack_client: Slack WebClient
+        channel_id: 검색 대상 채널 ID
+        search_texts: 메시지 본문에 포함되어야 할 텍스트 목록
+        hours: 검색 시간 범위 (시간 단위)
+
+    Returns:
+        dict[str, str]: search_text -> thread_ts 매핑 (못 찾은 항목은 키 없음)
+    """
+    oldest = time.time() - 3600 * hours
+    response = slack_client.conversations_history(
+        channel=channel_id,
+        oldest=str(int(oldest)),
+        limit=200,
+    )
+
+    found: dict[str, str] = {}
+    for message in response.get("messages", []):
+        text = message.get("text", "")
+        for search_text in search_texts:
+            if search_text in found:
+                continue
+            if search_text in text:
+                found[search_text] = message["ts"]
+    return found
 
 
 def get_email_to_user_id(slack_client: WebClient) -> dict[str, str]:
