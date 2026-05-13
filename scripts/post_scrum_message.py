@@ -1,5 +1,5 @@
 """
-매일 16:00에 스크럼 메시지를 Slack 채널에 발송하는 스크립트
+매일 16:00에 9시 스크럼 스레드에 진행 중인 Notion 태스크 요약을 답글로 발송하는 스크립트
 """
 
 import sys
@@ -20,11 +20,10 @@ from slack_sdk import WebClient
 from service.business_days import count_business_days
 from service.config import (
     NotionDBConfig,
-    PersonalScrum,
     ScrumSquadConfig,
     load_config,
 )
-from service.slack import get_email_to_user_id
+from service.slack import find_thread_ts_by_text, get_email_to_user_id
 
 # 환경 변수 로드
 load_dotenv()
@@ -32,7 +31,7 @@ load_dotenv()
 
 def main():
     """메인 함수"""
-    parser = argparse.ArgumentParser(description="스크럼 메시지 발송 스크립트")
+    parser = argparse.ArgumentParser(description="스크럼 태스크 요약 답글 스크립트")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -55,17 +54,10 @@ def main():
 
     scrum = config.scrum
 
-    # 스쿼드 채널 목록 (인트로 메시지에서 다른 채널 안내용)
-    squad_channel_ids = list(dict.fromkeys(s.channel_id for s in scrum.squads))
-
-    # 1. 각 스쿼드 채널에 안내 메시지 발송
-    for channel_id in squad_channel_ids:
-        send_intro_message(slack_client, channel_id, squad_channel_ids, args.dry_run)
-
-    # 2. 스쿼드별 스크럼
+    # 스쿼드별 태스크 요약 답글
     for squad in scrum.squads:
         try:
-            send_team_scrum(
+            reply_team_scrum_tasks(
                 notion,
                 slack_client,
                 email_to_user_id,
@@ -75,79 +67,15 @@ def main():
             )
         except Exception as e:
             sentry_sdk.capture_exception(e)
-            print(f"Error in send_team_scrum for {squad.squad.display_name}: {e}")
-
-    # 3. 개인 스크럼
-    for personal in scrum.personal_scrums:
-        try:
-            send_personal_scrum(slack_client, personal, args.dry_run)
-        except Exception as e:
-            sentry_sdk.capture_exception(e)
-            print(f"Error in send_personal_scrum for {personal.name}: {e}")
+            print(
+                f"Error in reply_team_scrum_tasks for {squad.squad.display_name}: {e}"
+            )
 
     if args.dry_run:
         print("\n=== DRY RUN COMPLETED ===")
 
 
-def send_intro_message(
-    slack_client: WebClient,
-    channel_id: str,
-    all_channel_ids: list[str],
-    dry_run: bool = False,
-):
-    """
-    안내 메시지 발송
-
-    Args:
-        slack_client: Slack WebClient
-        channel_id: 발송 대상 채널 ID
-        all_channel_ids: 전체 스쿼드 채널 ID 목록 (다른 채널 안내용)
-        dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
-    """
-    intro_text = "오늘 스크럼을 시작합니다. 4:40까지 작성 부탁드립니다!"
-
-    # 다른 스쿼드 채널 링크 생성
-    other_channels = " ".join(
-        f"<#{cid}>" for cid in all_channel_ids if cid != channel_id
-    )
-
-    detail_text = f"""스크럼의 목적은 팀내의 진행상황을 확인하고, 장애를 파악하는 것입니다.
-팀원이 스크럼 중 장애를 보고하면 각 마스터(김예원 엄은상 이창환)는
-장애를 최소화 하기 위해 스크럼 후 다른 팀의 협조로 연계해주시면 되겠습니다.
-다른 팀 스크럼이 궁금하시면 본인 팀의 스크럼이 끝나고 서면으로 남겨진 내용을 자유롭게 확인하시면 됩니다.
-{other_channels}
-다른 팀의 지원이 필요하시면 본인 팀 스크럼 때, 마스터를 통해 지원을 요청 주시면 됩니다.
-(사실 스크럼이 아니더라도 업무 중 자유롭게 요청 주셔도 됩니다.)
----------------------------------------------------------------------------
-오늘 한 일:
-- XXX 운영 진행
-내일 할 일:
-- YYY 건에 대한 대응
-오늘의 이슈:
-- ZZZ 문제 발생, 해결 방안 모색 중
-- AAA 이슈로 B팀과 협업 요청"""
-
-    if dry_run:
-        print(f"\n[안내 메시지] 채널: {channel_id}")
-        print(intro_text)
-        print(f"  └─ 스레드: {detail_text[:100]}...")
-    else:
-        # 메인 메시지 발송
-        response = slack_client.chat_postMessage(
-            channel=channel_id,
-            text=intro_text,
-        )
-
-        # 스레드에 상세 안내 추가
-        thread_ts = response["ts"]
-        slack_client.chat_postMessage(
-            channel=channel_id,
-            thread_ts=thread_ts,
-            text=detail_text,
-        )
-
-
-def send_team_scrum(
+def reply_team_scrum_tasks(
     notion: NotionClient,
     slack_client: WebClient,
     email_to_user_id: dict[str, str],
@@ -156,7 +84,7 @@ def send_team_scrum(
     dry_run: bool = False,
 ):
     """
-    팀별 스크럼 메시지 발송 (Notion에서 진행 중인 태스크 조회)
+    팀 스크럼 스레드에 진행 중인 Notion 태스크 요약을 답글로 발송
 
     Args:
         notion: Notion Client
@@ -166,31 +94,21 @@ def send_team_scrum(
         pr_warning_excluded_members: PR 경고 제외 대상 Slack User ID 목록
         dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
     """
-    # 메인 메시지
-    text = f"{squad.squad.display_name}"
-
-    if dry_run:
-        print(f"\n[{squad.squad.display_name}] 채널: {squad.channel_id}")
-        print(text)
-
     # 팀 멤버의 진행 중인 태스크 조회
     team_members = get_team_members(slack_client, squad.squad.slack_usergroup_id)
     team_emails = [
         email for email, user_id in email_to_user_id.items() if user_id in team_members
     ]
 
-    # Notion에서 진행 중인 태스크 조회
     in_progress_tasks = get_in_progress_tasks(
         notion, team_emails, squad.squad.notion_db
     )
 
     # 이메일별로 태스크 그룹화
-    email_to_tasks = {}
+    email_to_tasks: dict[str, list[dict[str, Any]]] = {}
     for task in in_progress_tasks:
         email = task["email"]
-        if email not in email_to_tasks:
-            email_to_tasks[email] = []
-        email_to_tasks[email].append(task)
+        email_to_tasks.setdefault(email, []).append(task)
 
     # 인원별로 메시지 포맷팅
     thread_messages = []
@@ -198,21 +116,16 @@ def send_team_scrum(
         if not tasks:
             continue
 
-        # 담당자 이름 (첫 번째 태스크에서 가져옴)
         assignee_name = tasks[0]["assignee_name"]
-
-        # 기획자/PM은 PR 경고에서 제외
         user_id = email_to_user_id.get(email)
         is_excluded = user_id in pr_warning_excluded_members
 
-        # PR 경고 활성화 여부
         pr_warning_enabled = (
             squad.pr_warning
             and squad.squad.notion_db.properties.pr is not None
             and not is_excluded
         )
 
-        # 인원별 메시지 생성
         person_message = f"{assignee_name}\n"
         for task in tasks:
             task_line = format_task_line(task, pr_warning_enabled)
@@ -221,51 +134,30 @@ def send_team_scrum(
         thread_messages.append(person_message.strip())
 
     if dry_run:
-        # Dry run 모드에서는 콘솔에만 출력
+        print(f"\n[{squad.squad.display_name}] 채널: {squad.channel_id}")
         if thread_messages:
             for msg in thread_messages:
                 print(f"  └─ {msg}")
         else:
             print(f"  └─ (진행 중인 태스크 없음)")
-    else:
-        # 실제 메시지 발송
-        response = slack_client.chat_postMessage(
-            channel=squad.channel_id,
-            text=text,
+        return
+
+    # 9시 스크럼 스레드 ts 찾기
+    found = find_thread_ts_by_text(
+        slack_client, squad.channel_id, [squad.squad.display_name]
+    )
+    thread_ts = found.get(squad.squad.display_name)
+    if not thread_ts:
+        print(
+            f"[{squad.squad.display_name}] 스크럼 스레드를 찾지 못해 답글을 건너뜁니다."
         )
-        thread_ts = response["ts"]
+        return
 
-        # 인원별 메시지를 스레드에 발송
-        for msg in thread_messages:
-            slack_client.chat_postMessage(
-                channel=squad.channel_id,
-                thread_ts=thread_ts,
-                text=msg,
-            )
-
-
-def send_personal_scrum(
-    slack_client: WebClient,
-    personal: PersonalScrum,
-    dry_run: bool = False,
-):
-    """
-    개인 스크럼 메시지 발송
-
-    Args:
-        slack_client: Slack WebClient
-        personal: 개인 스크럼 설정
-        dry_run: True면 Slack에 메시지를 보내지 않고 콘솔에만 출력
-    """
-    text = personal.name
-
-    if dry_run:
-        print(f"\n[{personal.name}] 채널: {personal.channel_id}")
-        print(text)
-    else:
+    for msg in thread_messages:
         slack_client.chat_postMessage(
-            channel=personal.channel_id,
-            text=text,
+            channel=squad.channel_id,
+            thread_ts=thread_ts,
+            text=msg,
         )
 
 

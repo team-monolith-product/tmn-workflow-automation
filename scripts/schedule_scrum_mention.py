@@ -46,9 +46,9 @@ def main():
     for team_name, entry in team_entries.items():
         channel_to_team_names[entry["channel_id"]].append(team_name)
 
-    # 16:00에 보낸 스크럼 메시지 찾기 (최근 2시간 이내)
+    # 9시에 보낸 스크럼 메시지 찾기 (최근 12시간 이내)
     now = time.time()
-    oldest = now - 3600 * 2  # 2시간 전
+    oldest = now - 3600 * 12  # 12시간 전
 
     print(f"현재 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
     print(
