@@ -1,6 +1,7 @@
 notion_databases:
   main:
     data_source_id: "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"
+    project_data_source_id: "1023943f-84d1-4223-a5a6-0c26e22d09f0"
     properties:
       title: "제목"
       status: "상태"
@@ -27,6 +28,7 @@ notion_databases:
 
   infra:
     data_source_id: "3321cc82-0da6-80bf-b9b9-000b75cd1933"
+    project_data_source_id: "1023943f-84d1-4223-a5a6-0c26e22d09f0"
     properties:
       title: "이름"
       status: "상태"

@@ -222,6 +222,20 @@ def get_component_options(client: NotionClient, data_source_id: str) -> list[str
     return []
 
 
+def get_area_options(client: NotionClient, data_source_id: str) -> list[str]:
+    """
+    노션 데이터 소스에서 영역 속성의 가능한 옵션들을 조회한다.
+    """
+    ds_schema = get_data_source_schema(client, data_source_id)
+    area_property = ds_schema["properties"].get("영역", {})
+
+    if "multi_select" in area_property:
+        options = area_property["multi_select"].get("options", [])
+        return [option["name"] for option in options]
+
+    return []
+
+
 def get_active_projects(
     client: NotionClient, project_data_source_id: str
 ) -> dict[str, str]:
@@ -320,6 +334,7 @@ def get_create_notion_task_tool(
     # 데이터 소스에서 실제 옵션들을 가져와서 동적으로 스키마 구성
     task_type_options = get_task_type_options(notion, data_source_id)
     component_options = get_component_options(notion, data_source_id)
+    area_options = get_area_options(notion, data_source_id)
 
     active_projects: dict[str, str] = {}
     if project_data_source_id:
@@ -346,6 +361,15 @@ def get_create_notion_task_tool(
             Field(
                 description=f"작업의 구성요소. 가능한 값: {', '.join(component_options)}",
                 json_schema_extra={"enum": component_options},
+            ),
+        )
+
+    if area_options:
+        fields["area"] = (
+            str,
+            Field(
+                description=f"작업의 영역. 반드시 지정해야 합니다. 가능한 값: {', '.join(area_options)}",
+                json_schema_extra={"enum": area_options},
             ),
         )
 
@@ -390,6 +414,7 @@ def get_create_notion_task_tool(
         title: str,
         task_type: str | None = None,
         component: str | None = None,
+        area: str | None = None,
         project: str | None = None,
         blocks: str | None = None,
     ) -> str:
@@ -412,6 +437,8 @@ def get_create_notion_task_tool(
             properties["유형"] = {"select": {"name": task_type}}
         if component and component_options:
             properties["구성요소"] = {"multi_select": [{"name": component}]}
+        if area and area_options:
+            properties["영역"] = {"multi_select": [{"name": area}]}
         if project and active_projects:
             properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
 

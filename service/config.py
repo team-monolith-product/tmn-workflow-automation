@@ -36,6 +36,7 @@ class NotionDBConfig:
     properties: NotionDBProperties
     pending_statuses: list[str] = field(default_factory=list)
     in_progress_statuses: list[str] = field(default_factory=list)
+    project_data_source_id: str | None = None
 
 
 # --- 조직 SOT ---
@@ -170,6 +171,7 @@ def _parse_config(raw: dict) -> AppConfig:
             ),
             pending_statuses=db_raw.get("pending_statuses", []),
             in_progress_statuses=db_raw.get("in_progress_statuses", []),
+            project_data_source_id=db_raw.get("project_data_source_id"),
         )
 
     # Squads (조직 SOT)
