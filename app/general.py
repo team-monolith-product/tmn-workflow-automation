@@ -26,11 +26,6 @@ from .common import (
 )
 from service.config import load_config, Squad
 
-# 상수들
-# Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
-DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB (기본값)
-PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
-
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
 
@@ -114,14 +109,15 @@ def register_general_handlers(app, assistant):
 
         # 사용자의 스쿼드에 따라 대상 Notion DB 결정
         squad = await _get_user_squad(app.client, user)
-        if squad and squad.notion_db.name != "main":
-            task_ds_id = squad.notion_db.data_source_id
-            title_prop = squad.notion_db.properties.title
-            project_ds_id = None
+        if squad:
+            db_config = squad.notion_db
         else:
-            task_ds_id = DATA_SOURCE_ID
-            title_prop = "제목"
-            project_ds_id = PROJECT_DATA_SOURCE_ID
+            config = load_config()
+            db_config = config.notion_databases["main"]
+
+        task_ds_id = db_config.data_source_id
+        title_prop = db_config.properties.title
+        project_ds_id = db_config.project_data_source_id
 
         # General Agent 사용
         notion_tools = [
@@ -219,14 +215,15 @@ def register_general_handlers(app, assistant):
 
         # 사용자의 스쿼드에 따라 대상 Notion DB 결정
         squad = await _get_user_squad(app.client, context.user_id)
-        if squad and squad.notion_db.name != "main":
-            task_ds_id = squad.notion_db.data_source_id
-            title_prop = squad.notion_db.properties.title
-            project_ds_id = None
+        if squad:
+            db_config = squad.notion_db
         else:
-            task_ds_id = DATA_SOURCE_ID
-            title_prop = "제목"
-            project_ds_id = PROJECT_DATA_SOURCE_ID
+            config = load_config()
+            db_config = config.notion_databases["main"]
+
+        task_ds_id = db_config.data_source_id
+        title_prop = db_config.properties.title
+        project_ds_id = db_config.project_data_source_id
 
         notion_tools = [
             get_create_notion_task_tool(
