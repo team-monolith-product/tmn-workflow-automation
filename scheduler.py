@@ -37,6 +37,12 @@ def _make_job_callable(func, job_name: str, business_day_only: bool):
     return wrapper
 
 
+def _inject_scheduler(module, scheduler):
+    """동적 잡 등록이 필요한 모듈에 스케줄러 인스턴스를 주입한다."""
+    if hasattr(module, "set_scheduler"):
+        module.set_scheduler(scheduler)
+
+
 def start_scheduler():
     """스케줄러를 생성하고 config.yaml의 작업을 등록한 뒤 시작"""
     config = load_config()
@@ -45,6 +51,9 @@ def start_scheduler():
     for job_config in config.scheduled_jobs:
         module = importlib.import_module(job_config.module)
         func = getattr(module, job_config.function)
+
+        _inject_scheduler(module, scheduler)
+
         wrapped = _make_job_callable(
             func, job_config.name, job_config.business_day_only
         )

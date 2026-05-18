@@ -272,3 +272,11 @@ scheduled_jobs:
       minute: 0
       day: 1
     business_day_only: false
+
+  - name: discord_schedule_today_notices
+    module: scripts.discord_post_completion_notice
+    function: schedule_today_notices
+    cron:
+      hour: 7
+      minute: 0
+    business_day_only: false
