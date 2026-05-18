@@ -102,13 +102,15 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
             start_minutes = round(start_val * 1440)
             end_minutes = round(end_val * 1440)
 
-            schedules.append({
-                "date": date,
-                "start_hour": start_minutes // 60,
-                "start_min": start_minutes % 60,
-                "end_hour": end_minutes // 60,
-                "end_min": end_minutes % 60,
-            })
+            schedules.append(
+                {
+                    "date": date,
+                    "start_hour": start_minutes // 60,
+                    "start_min": start_minutes % 60,
+                    "end_hour": end_minutes // 60,
+                    "end_min": end_minutes % 60,
+                }
+            )
 
             col += 3
 
