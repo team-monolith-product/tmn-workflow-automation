@@ -50,7 +50,13 @@ def start_scheduler():
         )
 
         trigger = CronTrigger(timezone=TIMEZONE, **job_config.cron)
-        scheduler.add_job(wrapped, trigger, id=job_config.name, name=job_config.name)
+        scheduler.add_job(
+            wrapped,
+            trigger,
+            id=job_config.name,
+            name=job_config.name,
+            misfire_grace_time=3600,
+        )
         print(f"[scheduler] 작업 등록: {job_config.name} ({trigger})")
 
     scheduler.start()
