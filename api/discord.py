@@ -101,9 +101,7 @@ def get_recent_threads_in_forum(guild_id: str, forum_channel_id: str) -> list[di
     return [t for t in threads if t.get("parent_id") == forum_channel_id]
 
 
-def create_forum_thread(
-    channel_id: str, title: str, content: str
-) -> dict:
+def create_forum_thread(channel_id: str, title: str, content: str) -> dict:
     """
     포럼 채널에 새 게시물(스레드)을 생성한다.
 

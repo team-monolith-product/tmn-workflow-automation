@@ -39,7 +39,9 @@ SPREADSHEET_ID = os.environ.get(
 )
 WORKSHEET_ID = int(os.environ.get("GOOGLE_WORKSHEET_ID", "451387449"))
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1504338147155251220")
-TEMPLATE_CHANNEL_ID = os.environ.get("DISCORD_TEMPLATE_CHANNEL_ID", "1504375083546972230")
+TEMPLATE_CHANNEL_ID = os.environ.get(
+    "DISCORD_TEMPLATE_CHANNEL_ID", "1504375083546972230"
+)
 TEMPLATE_THREAD_IDS = [
     tid.strip()
     for tid in os.environ.get("DISCORD_TEMPLATE_THREAD_IDS", "").split(",")
@@ -202,7 +204,9 @@ def main(dry_run: bool = False, target_date: str | None = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="수업 종료 후 Discord 공지 자동 게시")
-    parser.add_argument("--dry-run", action="store_true", help="실제 전송 없이 콘솔 출력만")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="실제 전송 없이 콘솔 출력만"
+    )
     parser.add_argument("--date", type=str, help="대상 날짜 (YYYY-MM-DD 또는 MM-DD)")
     args = parser.parse_args()
     main(dry_run=args.dry_run, target_date=args.date)

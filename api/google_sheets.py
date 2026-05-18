@@ -91,13 +91,15 @@ def read_school_schedules(spreadsheet_id: str, worksheet_id: int) -> list[dict]:
             end = _serial_to_time(end_val)
 
             if date and start and end:
-                schedules.append({
-                    "date": date,
-                    "start_hour": start[0],
-                    "start_min": start[1],
-                    "end_hour": end[0],
-                    "end_min": end[1],
-                })
+                schedules.append(
+                    {
+                        "date": date,
+                        "start_hour": start[0],
+                        "start_min": start[1],
+                        "end_hour": end[0],
+                        "end_min": end[1],
+                    }
+                )
 
             col += 3
 
