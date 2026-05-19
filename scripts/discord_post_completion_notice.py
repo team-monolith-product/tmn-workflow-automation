@@ -217,20 +217,19 @@ def main(dry_run: bool = False, target_date: str | None = None):
             continue
 
         channel_id = channel["id"]
-        marker = format_marker(end_time)
-
-        # 멱등성: 이 학교 포럼에 같은 종료시각 prefix가 붙은 스레드가 있으면 batch 전체 스킵
-        already_posted = any(
-            t.get("name", "").startswith(marker)
+        existing_titles = {
+            t.get("name", "")
             for t in active_threads
             if t.get("parent_id") == channel_id
-        )
-        if already_posted:
-            print(f"  스킵 (이미 게시됨): {channel_name} - {marker}")
-            continue
+        }
 
+        # 멱등성: 동일 제목 스레드가 이미 있으면 그 템플릿만 스킵.
+        # 부분 실패 후 재시도 시 누락분만 생성하도록 per-template 검사.
         for tmpl in templates:
             new_title = make_title(tmpl["title"], end_time)
+            if new_title in existing_titles:
+                print(f"  스킵 (중복): {new_title}")
+                continue
             create_thread(channel_id, name=new_title, content=tmpl["content"])
             print(f"  생성: {new_title}")
 
