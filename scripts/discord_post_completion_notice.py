@@ -285,9 +285,7 @@ def process_school(
 
     channel_id = channel["id"]
     existing_titles = {
-        t.get("name", "")
-        for t in active_threads
-        if t.get("parent_id") == channel_id
+        t.get("name", "") for t in active_threads if t.get("parent_id") == channel_id
     }
 
     # 멱등성: 동일 제목 스레드가 이미 있으면 그 템플릿만 스킵.
