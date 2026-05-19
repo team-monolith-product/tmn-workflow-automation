@@ -17,6 +17,7 @@ import argparse
 import os
 from datetime import datetime, timedelta, timezone
 
+import redis
 from dotenv import load_dotenv
 
 from api.discord import (
@@ -48,9 +49,15 @@ TEMPLATE_THREAD_IDS = [
 ]
 LOG_CHANNEL_ID = os.environ.get("DISCORD_LOG_CHANNEL_ID", "1505927819094397038")
 
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
+
 KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 FORUM_CHANNEL_TYPE = 15
 SCHOOL_NAME_COL = 0
+
+# 채널 없음 알림 키 TTL (36시간)
+NO_CHANNEL_NOTIFIED_TTL = 36 * 60 * 60
 
 
 def parse_school_schedules(rows: list[list]) -> list[dict]:
@@ -84,7 +91,8 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
             start_val = row[col + 1]
             end_val = row[col + 2]
 
-            if date_val == "":
+            # 빈 슬롯 또는 부분 입력된 슬롯은 스킵
+            if date_val == "" or start_val == "" or end_val == "":
                 col += 3
                 continue
 
@@ -136,6 +144,27 @@ def fetch_thread_template(thread_id: str) -> dict:
 def fetch_templates() -> list[dict]:
     """모든 템플릿 스레드의 제목/본문을 가져온다."""
     return [fetch_thread_template(tid) for tid in TEMPLATE_THREAD_IDS]
+
+
+def get_redis_client() -> redis.Redis:
+    return redis.Redis(
+        host=REDIS_HOST,
+        password=REDIS_PASSWORD,
+        decode_responses=True,
+    )
+
+
+def notify_missing_channel_once(
+    redis_client: redis.Redis, school_name: str, today_str: str
+) -> bool:
+    """
+    채널 없음 알림을 하루 1회로 제한.
+    Returns: 알림을 새로 보냈으면 True, 이미 알린 적 있어 스킵했으면 False
+    """
+    key = f"discord_notice:no_channel:{today_str}:{school_name}"
+    # SET ... NX EX ttl: 키가 없을 때만 set, 있으면 None 반환
+    was_set = redis_client.set(key, "1", nx=True, ex=NO_CHANNEL_NOTIFIED_TTL)
+    return bool(was_set)
 
 
 def format_marker(end_time: datetime) -> str:
@@ -208,14 +237,18 @@ def main(dry_run: bool = False, target_date: str | None = None):
     channels = get_guild_channels(GUILD_ID)
     active_threads = get_active_threads(GUILD_ID).get("threads", [])
 
+    today_str = now.strftime("%y%m%d")
+    redis_client = get_redis_client()
+
     for school_name, end_time in targets:
         channel_name = f"{school_name}-공지"
         channel = find_forum_channel(channels, channel_name)
         if not channel:
-            msg = f"[채널 없음] {channel_name}"
-            print(f"  {msg}")
-            if LOG_CHANNEL_ID:
-                create_message(LOG_CHANNEL_ID, msg)
+            print(f"  [채널 없음] {channel_name}")
+            if LOG_CHANNEL_ID and notify_missing_channel_once(
+                redis_client, school_name, today_str
+            ):
+                create_message(LOG_CHANNEL_ID, f"[채널 없음] {channel_name}")
             continue
 
         channel_id = channel["id"]
