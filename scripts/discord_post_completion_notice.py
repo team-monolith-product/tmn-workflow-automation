@@ -175,7 +175,9 @@ def main(dry_run: bool = False, target_date: str | None = None):
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     print(f"[discord_post_completion_notice] 실행: {now.isoformat()}")
-    print(f"  윈도우: [{window_start.strftime('%Y-%m-%d %H:%M')}, {now.strftime('%H:%M')}]")
+    print(
+        f"  윈도우: [{window_start.strftime('%Y-%m-%d %H:%M')}, {now.strftime('%H:%M')}]"
+    )
 
     schools = read_school_schedules()
 
