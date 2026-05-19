@@ -240,33 +240,62 @@ def main(dry_run: bool = False, target_date: str | None = None):
     today_str = now.strftime("%y%m%d")
     redis_client = get_redis_client()
 
+    # 학교별 처리: 한 학교의 외부 호출 실패가 나머지 학교 처리를 막지 않도록 격리.
+    # 다음 cron에서 멱등성으로 catch-up되지만, 실패 사실은 LOG 채널에 알려야 함.
     for school_name, end_time in targets:
-        channel_name = f"{school_name}-공지"
-        channel = find_forum_channel(channels, channel_name)
-        if not channel:
-            print(f"  [채널 없음] {channel_name}")
-            if LOG_CHANNEL_ID and notify_missing_channel_once(
-                redis_client, school_name, today_str
-            ):
-                create_message(LOG_CHANNEL_ID, f"[채널 없음] {channel_name}")
+        try:
+            process_school(
+                school_name,
+                end_time,
+                channels,
+                active_threads,
+                templates,
+                redis_client,
+                today_str,
+            )
+        except Exception as e:
+            msg = f"[처리 실패] {school_name} {format_marker(end_time)}: {type(e).__name__}: {e}"
+            print(f"  {msg}")
+            if LOG_CHANNEL_ID:
+                create_message(LOG_CHANNEL_ID, msg)
+
+
+def process_school(
+    school_name: str,
+    end_time: datetime,
+    channels: list[dict],
+    active_threads: list[dict],
+    templates: list[dict],
+    redis_client: redis.Redis,
+    today_str: str,
+):
+    """한 학교의 공지 게시를 처리한다."""
+    channel_name = f"{school_name}-공지"
+    channel = find_forum_channel(channels, channel_name)
+    if not channel:
+        print(f"  [채널 없음] {channel_name}")
+        if LOG_CHANNEL_ID and notify_missing_channel_once(
+            redis_client, school_name, today_str
+        ):
+            create_message(LOG_CHANNEL_ID, f"[채널 없음] {channel_name}")
+        return
+
+    channel_id = channel["id"]
+    existing_titles = {
+        t.get("name", "")
+        for t in active_threads
+        if t.get("parent_id") == channel_id
+    }
+
+    # 멱등성: 동일 제목 스레드가 이미 있으면 그 템플릿만 스킵.
+    # 부분 실패 후 재시도 시 누락분만 생성하도록 per-template 검사.
+    for tmpl in templates:
+        new_title = make_title(tmpl["title"], end_time)
+        if new_title in existing_titles:
+            print(f"  스킵 (중복): {new_title}")
             continue
-
-        channel_id = channel["id"]
-        existing_titles = {
-            t.get("name", "")
-            for t in active_threads
-            if t.get("parent_id") == channel_id
-        }
-
-        # 멱등성: 동일 제목 스레드가 이미 있으면 그 템플릿만 스킵.
-        # 부분 실패 후 재시도 시 누락분만 생성하도록 per-template 검사.
-        for tmpl in templates:
-            new_title = make_title(tmpl["title"], end_time)
-            if new_title in existing_titles:
-                print(f"  스킵 (중복): {new_title}")
-                continue
-            create_thread(channel_id, name=new_title, content=tmpl["content"])
-            print(f"  생성: {new_title}")
+        create_thread(channel_id, name=new_title, content=tmpl["content"])
+        print(f"  생성: {new_title}")
 
 
 if __name__ == "__main__":
