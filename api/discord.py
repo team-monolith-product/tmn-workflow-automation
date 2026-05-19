@@ -7,6 +7,7 @@ import os
 import requests
 
 BASE_URL = "https://discord.com/api/v10"
+REQUEST_TIMEOUT = 10
 
 
 def _headers() -> dict[str, str]:
@@ -18,14 +19,22 @@ def _headers() -> dict[str, str]:
 
 def get_guild_channels(guild_id: str) -> list[dict]:
     """서버의 모든 채널 목록 조회"""
-    resp = requests.get(f"{BASE_URL}/guilds/{guild_id}/channels", headers=_headers())
+    resp = requests.get(
+        f"{BASE_URL}/guilds/{guild_id}/channels",
+        headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
+    )
     resp.raise_for_status()
     return resp.json()
 
 
 def get_channel(channel_id: str) -> dict:
     """채널(스레드 포함) 정보 조회"""
-    resp = requests.get(f"{BASE_URL}/channels/{channel_id}", headers=_headers())
+    resp = requests.get(
+        f"{BASE_URL}/channels/{channel_id}",
+        headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -35,6 +44,7 @@ def get_message(channel_id: str, message_id: str) -> dict:
     resp = requests.get(
         f"{BASE_URL}/channels/{channel_id}/messages/{message_id}",
         headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
@@ -45,6 +55,7 @@ def get_active_threads(guild_id: str) -> dict:
     resp = requests.get(
         f"{BASE_URL}/guilds/{guild_id}/threads/active",
         headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
@@ -60,6 +71,7 @@ def create_thread(channel_id: str, name: str, content: str) -> dict:
         f"{BASE_URL}/channels/{channel_id}/threads",
         headers=_headers(),
         json=payload,
+        timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
@@ -72,6 +84,7 @@ def create_message(channel_id: str, content: str) -> dict:
         f"{BASE_URL}/channels/{channel_id}/messages",
         headers=_headers(),
         json=payload,
+        timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()

@@ -3,9 +3,10 @@
 
 10분마다 실행되며:
 1. Google Sheets에서 학교별 수업 일정을 읽음
-2. (now - 15분, now] 윈도우에 종료시각이 들어가는 학교를 감지 (10분 주기 + 5분 여유)
+2. 오늘 자정 ~ now 윈도우에 종료시각이 들어가는 학교를 감지
+   (outage 후 복귀 시 그날 안이면 자동 catch-up)
 3. "{학교이름}-공지" 포럼 채널에 템플릿 기반 게시물 3개 작성
-4. 멱등성: 같은 제목의 활성 스레드가 이미 있으면 스킵
+4. 멱등성: 같은 제목의 활성 스레드가 이미 있으면 그 템플릿만 스킵 (per-template)
 """
 
 import sys
@@ -119,7 +120,9 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
 
 def read_school_schedules() -> list[dict]:
     """시트에서 학교별 일정을 읽어온다."""
-    rows = get_worksheet_values(SPREADSHEET_ID, WORKSHEET_ID)
+    rows = get_worksheet_values(
+        SPREADSHEET_ID, WORKSHEET_ID, value_render_option="UNFORMATTED_VALUE"
+    )
     return parse_school_schedules(rows)
 
 
