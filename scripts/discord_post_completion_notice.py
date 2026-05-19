@@ -48,10 +48,9 @@ TEMPLATE_THREAD_IDS = [
 ]
 LOG_CHANNEL_ID = os.environ.get("DISCORD_LOG_CHANNEL_ID", "1505927819094397038")
 
-DATE_PLACEHOLDER = "yymmdd"
+KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 FORUM_CHANNEL_TYPE = 15
 SCHOOL_NAME_COL = 0
-WINDOW_MINUTES = 15
 
 
 def parse_school_schedules(rows: list[list]) -> list[dict]:
@@ -139,19 +138,25 @@ def fetch_templates() -> list[dict]:
     return [fetch_thread_template(tid) for tid in TEMPLATE_THREAD_IDS]
 
 
+def format_marker(end_time: datetime) -> str:
+    """종료시각을 'M.d(E) HH:mm' 형식 문자열로 포맷."""
+    weekday = KOREAN_WEEKDAYS[end_time.weekday()]
+    return f"{end_time.month}.{end_time.day}({weekday}) {end_time:%H:%M}"
+
+
 def make_title(template_title: str, end_time: datetime) -> str:
-    """템플릿 제목에서 'yymmdd' 부분을 'yymmdd_hhmm'으로 치환."""
-    marker = end_time.strftime("%y%m%d_%H%M")
-    return template_title.replace(DATE_PLACEHOLDER, marker)
+    """템플릿 제목 앞에 종료시각 prefix를 붙인다."""
+    return f"{format_marker(end_time)} - {template_title}"
 
 
 def main(dry_run: bool = False, target_date: str | None = None):
     """
-    10분마다 호출되어 윈도우 안의 종료시각을 가진 학교에 공지를 게시한다.
+    10분마다 호출되어 오늘 이미 종료된 수업의 학교에 공지를 게시한다.
+    윈도우는 오늘 자정 ~ now. 멱등성으로 중복 방지하므로 outage 후 복귀 시 자동 catch-up.
 
     Args:
         dry_run: 실제 Discord 전송 없이 콘솔 출력만
-        target_date: 테스트용 날짜 지정 (YYYY-MM-DD or MM-DD). 지정 시 하루 전체 윈도우.
+        target_date: 테스트용 날짜 지정 (YYYY-MM-DD or MM-DD). 지정 시 그 날 하루 전체를 윈도우로.
     """
     now = datetime.now(KST)
 
@@ -166,12 +171,11 @@ def main(dry_run: bool = False, target_date: str | None = None):
             print(f"  잘못된 날짜 형식: {target_date} (YYYY-MM-DD 또는 MM-DD)")
             return
         now = datetime(year, month, day, 23, 59, 59, tzinfo=KST)
-        window_start = datetime(year, month, day, 0, 0, tzinfo=KST)
-    else:
-        window_start = now - timedelta(minutes=WINDOW_MINUTES)
+
+    window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     print(f"[discord_post_completion_notice] 실행: {now.isoformat()}")
-    print(f"  윈도우: ({window_start.strftime('%H:%M')}, {now.strftime('%H:%M')}]")
+    print(f"  윈도우: [{window_start.strftime('%Y-%m-%d %H:%M')}, {now.strftime('%H:%M')}]")
 
     schools = read_school_schedules()
 
@@ -192,11 +196,9 @@ def main(dry_run: bool = False, target_date: str | None = None):
     if dry_run:
         for school_name, end_time in targets:
             channel_name = f"{school_name}-공지"
-            marker = end_time.strftime("%y%m%d_%H%M")
+            marker = format_marker(end_time)
             print(f"  [DRY-RUN] {channel_name}")
-            print(f"    → {marker}_간식증빙사진")
-            print(f"    → {marker}_출석부사진")
-            print(f"    → {marker}_수업사진")
+            print(f"    → {marker} - <템플릿 제목>")
         return
 
     # 템플릿/채널/활성 스레드 한 번씩 조회
@@ -215,17 +217,20 @@ def main(dry_run: bool = False, target_date: str | None = None):
             continue
 
         channel_id = channel["id"]
-        existing_titles = {
-            t.get("name", "")
+        marker = format_marker(end_time)
+
+        # 멱등성: 이 학교 포럼에 같은 종료시각 prefix가 붙은 스레드가 있으면 batch 전체 스킵
+        already_posted = any(
+            t.get("name", "").startswith(marker)
             for t in active_threads
             if t.get("parent_id") == channel_id
-        }
+        )
+        if already_posted:
+            print(f"  스킵 (이미 게시됨): {channel_name} - {marker}")
+            continue
 
         for tmpl in templates:
             new_title = make_title(tmpl["title"], end_time)
-            if new_title in existing_titles:
-                print(f"  스킵 (중복): {new_title}")
-                continue
             create_thread(channel_id, name=new_title, content=tmpl["content"])
             print(f"  생성: {new_title}")
 
