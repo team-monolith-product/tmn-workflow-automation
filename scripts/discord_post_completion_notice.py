@@ -19,6 +19,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import redis
+import requests
 from dotenv import load_dotenv
 
 from api.discord import (
@@ -41,7 +42,8 @@ SHEETS_EPOCH = datetime(1899, 12, 30, tzinfo=KST)
 SPREADSHEET_ID = os.environ.get(
     "GOOGLE_SPREADSHEET_ID", "1ZP7wyxbwRO2AhyzForm7494C6bMbY_HAeNHV6-WbSnc"
 )
-WORKSHEET_ID = int(os.environ.get("GOOGLE_WORKSHEET_ID", "451387449"))
+# int 변환은 사용 시점으로 미뤄 모듈 import가 다른 잡까지 막지 않도록 함
+WORKSHEET_ID_RAW = os.environ.get("GOOGLE_WORKSHEET_ID", "451387449")
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1504338147155251220")
 TEMPLATE_THREAD_IDS = [
     tid.strip()
@@ -63,9 +65,14 @@ NO_CHANNEL_NOTIFIED_TTL = 36 * 60 * 60
 
 def parse_school_schedules(rows: list[list]) -> list[dict]:
     """
-    UNFORMATTED_VALUE로 읽은 시트 데이터를 학교별 일정 dict 리스트로 변환한다.
+    학교별 일정 시트 데이터를 학교별 일정 dict 리스트로 변환한다.
 
     시트 스키마: 학교명 | 날짜1 | 시작1 | 종료1 | 날짜2 | 시작2 | 종료2 | ...
+
+    Args:
+        rows: gspread `get_all_values(value_render_option="UNFORMATTED_VALUE")`로 읽은
+              데이터. 날짜 셀은 시리얼 정수, 시간 셀은 하루의 비율(float, 0.0~1.0).
+              FORMATTED_VALUE로 읽은 데이터를 넘기면 int(date_val)에서 ValueError.
 
     Returns:
         [
@@ -121,7 +128,7 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
 def read_school_schedules() -> list[dict]:
     """시트에서 학교별 일정을 읽어온다."""
     rows = get_worksheet_values(
-        SPREADSHEET_ID, WORKSHEET_ID, value_render_option="UNFORMATTED_VALUE"
+        SPREADSHEET_ID, int(WORKSHEET_ID_RAW), value_render_option="UNFORMATTED_VALUE"
     )
     return parse_school_schedules(rows)
 
@@ -243,8 +250,9 @@ def main(dry_run: bool = False, target_date: str | None = None):
     today_str = now.strftime("%y%m%d")
     redis_client = get_redis_client()
 
-    # 학교별 처리: 한 학교의 외부 호출 실패가 나머지 학교 처리를 막지 않도록 격리.
+    # 학교별 처리: Discord/Redis 호출의 일시적 실패가 나머지 학교 처리를 막지 않도록 격리.
     # 다음 cron에서 멱등성으로 catch-up되지만, 실패 사실은 LOG 채널에 알려야 함.
+    # 코드 버그는 잡지 않고 그대로 raise되도록 한정된 예외만 처리.
     for school_name, end_time in targets:
         try:
             process_school(
@@ -256,11 +264,15 @@ def main(dry_run: bool = False, target_date: str | None = None):
                 redis_client,
                 today_str,
             )
-        except Exception as e:
+        except (requests.RequestException, redis.RedisError) as e:
             msg = f"[처리 실패] {school_name} {format_marker(end_time)}: {type(e).__name__}: {e}"
             print(f"  {msg}")
             if LOG_CHANNEL_ID:
-                create_message(LOG_CHANNEL_ID, msg)
+                try:
+                    create_message(LOG_CHANNEL_ID, msg)
+                except requests.RequestException:
+                    # LOG 채널 알림 실패는 콘솔에만 남기고 진행
+                    print(f"  [LOG 알림 실패] {msg}")
 
 
 def process_school(
