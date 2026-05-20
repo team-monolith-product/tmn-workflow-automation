@@ -50,6 +50,18 @@ def get_message(channel_id: str, message_id: str) -> dict:
     return resp.json()
 
 
+def get_channel_messages(channel_id: str, limit: int = 100) -> list[dict]:
+    """채널의 최근 메시지 목록 조회 (최신순)"""
+    resp = requests.get(
+        f"{BASE_URL}/channels/{channel_id}/messages",
+        headers=_headers(),
+        params={"limit": limit},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def get_active_threads(guild_id: str) -> dict:
     """서버의 활성 스레드 목록 조회"""
     resp = requests.get(

@@ -18,7 +18,6 @@ import argparse
 import os
 from datetime import datetime, timedelta, timezone
 
-import redis
 import requests
 from dotenv import load_dotenv
 
@@ -27,6 +26,7 @@ from api.discord import (
     create_thread,
     get_active_threads,
     get_channel,
+    get_channel_messages,
     get_guild_channels,
     get_message,
 )
@@ -52,15 +52,12 @@ TEMPLATE_THREAD_IDS = [
 ]
 LOG_CHANNEL_ID = os.environ.get("DISCORD_LOG_CHANNEL_ID", "1505927819094397038")
 
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
-
 KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 FORUM_CHANNEL_TYPE = 15
 SCHOOL_NAME_COL = 0
+LOG_FETCH_LIMIT = 100
 
-# 채널 없음 알림 키 TTL (36시간)
-NO_CHANNEL_NOTIFIED_TTL = 36 * 60 * 60
+NO_CHANNEL_PREFIX = "[채널 없음]"
 
 
 def parse_school_schedules(rows: list[list]) -> list[dict]:
@@ -156,25 +153,24 @@ def fetch_templates() -> list[dict]:
     return [fetch_thread_template(tid) for tid in TEMPLATE_THREAD_IDS]
 
 
-def get_redis_client() -> redis.Redis:
-    return redis.Redis(
-        host=REDIS_HOST,
-        password=REDIS_PASSWORD,
-        decode_responses=True,
-    )
-
-
-def notify_missing_channel_once(
-    redis_client: redis.Redis, school_name: str, today_str: str
-) -> bool:
+def fetch_already_notified_missing(today_str: str) -> set[str]:
     """
-    채널 없음 알림을 하루 1회로 제한.
-    Returns: 알림을 새로 보냈으면 True, 이미 알린 적 있어 스킵했으면 False
+    LOG 채널의 최근 메시지를 조회하여 오늘 이미 '채널 없음' 알림이 보내진 학교 집합 반환.
+    멱등성을 Discord state로 처리하므로 외부 저장소 불필요.
     """
-    key = f"discord_notice:no_channel:{today_str}:{school_name}"
-    # SET ... NX EX ttl: 키가 없을 때만 set, 있으면 None 반환
-    was_set = redis_client.set(key, "1", nx=True, ex=NO_CHANNEL_NOTIFIED_TTL)
-    return bool(was_set)
+    if not LOG_CHANNEL_ID:
+        return set()
+    messages = get_channel_messages(LOG_CHANNEL_ID, limit=LOG_FETCH_LIMIT)
+    marker = f"{NO_CHANNEL_PREFIX} {today_str}"
+    notified = set()
+    for m in messages:
+        content = m.get("content", "")
+        if content.startswith(marker):
+            # "[채널 없음] yymmdd {학교명}-공지" → 학교명 추출
+            rest = content[len(marker) :].strip()
+            if rest.endswith("-공지"):
+                notified.add(rest[: -len("-공지")])
+    return notified
 
 
 def format_marker(end_time: datetime) -> str:
@@ -242,15 +238,15 @@ def main(dry_run: bool = False, target_date: str | None = None):
             print(f"    → {marker} - <템플릿 제목>")
         return
 
-    # 템플릿/채널/활성 스레드 한 번씩 조회
+    # 템플릿/채널/활성 스레드/이미 알린 학교 한 번씩 조회
     templates = fetch_templates()
     channels = get_guild_channels(GUILD_ID)
     active_threads = get_active_threads(GUILD_ID).get("threads", [])
 
     today_str = now.strftime("%y%m%d")
-    redis_client = get_redis_client()
+    notified_missing = fetch_already_notified_missing(today_str)
 
-    # 학교별 처리: Discord/Redis 호출의 일시적 실패가 나머지 학교 처리를 막지 않도록 격리.
+    # 학교별 처리: Discord 호출의 일시적 실패가 나머지 학교 처리를 막지 않도록 격리.
     # 다음 cron에서 멱등성으로 catch-up되지만, 실패 사실은 LOG 채널에 알려야 함.
     # 코드 버그는 잡지 않고 그대로 raise되도록 한정된 예외만 처리.
     for school_name, end_time in targets:
@@ -261,10 +257,10 @@ def main(dry_run: bool = False, target_date: str | None = None):
                 channels,
                 active_threads,
                 templates,
-                redis_client,
+                notified_missing,
                 today_str,
             )
-        except (requests.RequestException, redis.RedisError) as e:
+        except requests.RequestException as e:
             msg = f"[처리 실패] {school_name} {format_marker(end_time)}: {type(e).__name__}: {e}"
             print(f"  {msg}")
             if LOG_CHANNEL_ID:
@@ -281,7 +277,7 @@ def process_school(
     channels: list[dict],
     active_threads: list[dict],
     templates: list[dict],
-    redis_client: redis.Redis,
+    notified_missing: set[str],
     today_str: str,
 ):
     """한 학교의 공지 게시를 처리한다."""
@@ -289,10 +285,12 @@ def process_school(
     channel = find_forum_channel(channels, channel_name)
     if not channel:
         print(f"  [채널 없음] {channel_name}")
-        if LOG_CHANNEL_ID and notify_missing_channel_once(
-            redis_client, school_name, today_str
-        ):
-            create_message(LOG_CHANNEL_ID, f"[채널 없음] {channel_name}")
+        # 멱등성: LOG 채널의 오늘 알림에 이 학교가 이미 있으면 스킵
+        if LOG_CHANNEL_ID and school_name not in notified_missing:
+            create_message(
+                LOG_CHANNEL_ID, f"{NO_CHANNEL_PREFIX} {today_str} {channel_name}"
+            )
+            notified_missing.add(school_name)
         return
 
     channel_id = channel["id"]
