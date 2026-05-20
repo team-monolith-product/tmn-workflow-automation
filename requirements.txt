@@ -34,3 +34,5 @@ anthropic
 sentry-sdk[fastapi]
 PyYAML
 apscheduler
+gspread
+google-auth
