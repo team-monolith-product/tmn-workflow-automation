@@ -2,6 +2,7 @@
 데이터 봇 전용 로직
 """
 
+import asyncio
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
@@ -206,6 +207,7 @@ async def answer_data_analysis(
         temperature=0,
         reasoning=reasoning,
         output_version="responses/v1",
+        request_timeout=300,  # OpenAI API hang 시 5분 후 타임아웃
     )
 
     # 데이터 분석 전용 Tools
@@ -232,10 +234,20 @@ async def answer_data_analysis(
         say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
 
-    response = await agent_executor.ainvoke(
-        {"messages": messages},
-        {"callbacks": [tool_status_handler], "recursion_limit": 200},
-    )
+    try:
+        response = await asyncio.wait_for(
+            agent_executor.ainvoke(
+                {"messages": messages},
+                {"callbacks": [tool_status_handler], "recursion_limit": 200},
+            ),
+            timeout=600,  # 에이전트 전체 실행 10분 타임아웃
+        )
+    except asyncio.TimeoutError:
+        await say(
+            "⚠️ 에이전트 실행이 10분을 초과하여 중단되었습니다. 질문을 더 구체적으로 작성하거나 다시 시도해 주세요.",
+            thread_ts=thread_ts,
+        )
+        return
 
     # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
     # [{'type': 'reasoning', ...}, {'type': 'text', 'text': '실제 응답', ...}]

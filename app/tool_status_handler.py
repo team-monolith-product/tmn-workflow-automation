@@ -4,10 +4,10 @@
 
 import asyncio
 import os
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks import AsyncCallbackHandler
 
 
-class ToolStatusHandler(BaseCallbackHandler):
+class ToolStatusHandler(AsyncCallbackHandler):
     """
     Agent 툴 호출 상태를 Slack에 표시하는 핸들러
 
@@ -35,15 +35,8 @@ class ToolStatusHandler(BaseCallbackHandler):
         self.tool_history = (
             []
         )  # 실행된 툴 이력: {"run_id": str, "name": str, "params": str, "status": str}
-        self._lock = None  # 동시성 제어를 위한 lock (lazy init)
+        self._lock = asyncio.Lock()  # 동시성 제어를 위한 lock
         self.langsmith_run_id = None  # LangSmith trace의 최상위 run_id
-
-    @property
-    def lock(self):
-        """현재 event loop에서 Lock을 lazy하게 생성"""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
 
     def _format_status_text(self) -> str:
         """
@@ -140,7 +133,7 @@ class ToolStatusHandler(BaseCallbackHandler):
         tool_name = serialized["name"]
         run_id = kwargs.get("run_id")  # 툴 실행의 고유 ID
 
-        async with self.lock:
+        async with self._lock:
             self.tool_history.append(
                 {
                     "run_id": run_id,
@@ -190,7 +183,7 @@ class ToolStatusHandler(BaseCallbackHandler):
         run_id = kwargs.get("run_id")  # 완료된 툴의 고유 ID
 
         # Lock 안에서는 tool_history만 수정
-        async with self.lock:
+        async with self._lock:
             # run_id로 정확한 툴을 찾아 완료 상태로 변경
             for tool_info in self.tool_history:
                 if tool_info["run_id"] == run_id:
@@ -229,7 +222,7 @@ class ToolStatusHandler(BaseCallbackHandler):
         run_id = kwargs.get("run_id")  # 에러가 발생한 툴의 고유 ID
 
         # Lock 안에서는 tool_history만 수정
-        async with self.lock:
+        async with self._lock:
             # run_id로 정확한 툴을 찾아 에러 상태로 변경
             for tool_info in self.tool_history:
                 if tool_info["run_id"] == run_id:
