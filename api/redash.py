@@ -36,6 +36,21 @@ def get_headers() -> dict[str, str]:
     return {"Authorization": f"Key {get_api_key()}", "Content-Type": "application/json"}
 
 
+def _strip_query_data(data: dict) -> None:
+    """
+    Redash API 응답에서 latest_query_data를 제거합니다.
+    이 필드는 캐시된 전체 쿼리 결과셋을 포함하며, 대용량일 경우 OOM을 유발할 수 있습니다.
+    대시보드 응답의 경우 위젯 내 중첩된 쿼리에서도 제거합니다.
+    """
+    data.pop("latest_query_data", None)
+    for widget in data.get("widgets", []):
+        viz = widget.get("visualization")
+        if viz and isinstance(viz, dict):
+            query = viz.get("query")
+            if query and isinstance(query, dict):
+                query.pop("latest_query_data", None)
+
+
 def list_dashboards(query: str | None = None) -> dict:
     """
     대시보드 목록을 조회합니다.
@@ -64,12 +79,14 @@ def get_dashboard(dashboard_slug: str) -> dict:
         dashboard_slug: 대시보드 슬러그 (URL에 사용되는 식별자)
 
     Returns:
-        dict: 대시보드 상세 정보 (원본 Redash 응답)
+        dict: 대시보드 상세 정보 (latest_query_data 제외)
     """
     url = f"{get_base_url()}/api/dashboards/{dashboard_slug}"
     response = requests.get(url, headers=get_headers())
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    _strip_query_data(data)
+    return data
 
 
 def get_query(query_id: int) -> dict:
@@ -80,12 +97,14 @@ def get_query(query_id: int) -> dict:
         query_id: 쿼리 ID
 
     Returns:
-        dict: 쿼리 상세 정보 (원본 Redash 응답)
+        dict: 쿼리 상세 정보 (latest_query_data 제외)
     """
     url = f"{get_base_url()}/api/queries/{query_id}"
     response = requests.get(url, headers=get_headers())
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    _strip_query_data(data)
+    return data
 
 
 def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
