@@ -413,7 +413,9 @@ def get_create_notion_task_tool(
         if component and component_options:
             properties["구성요소"] = {"multi_select": [{"name": component}]}
         if project and active_projects:
-            properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
+            project_id = active_projects.get(project)
+            if project_id:
+                properties["프로젝트"] = {"relation": [{"id": project_id}]}
 
         if notion_assignee_id:
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
