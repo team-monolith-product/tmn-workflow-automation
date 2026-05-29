@@ -450,7 +450,9 @@ def get_create_notion_task_tool(
                         f"'{project}'는 유효하지 않은 프로젝트명입니다. "
                         f"가능한 값: {', '.join(active_projects.keys())}"
                     )
-                properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
+                properties["프로젝트"] = {
+                    "relation": [{"id": active_projects[project]}]
+                }
 
         if notion_assignee_id:
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
