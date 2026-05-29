@@ -121,6 +121,22 @@ class DeploymentRotationConfig:
     fixed_days: int = 0
 
 
+# --- 교육 외주 입찰공고 크롤러 ---
+
+
+@dataclass(frozen=True)
+class EducationBidCrawlerConfig:
+    """나라장터 교육 외주 입찰공고 수집·평가 설정"""
+
+    channel_id: str
+    business_profile: str
+    model: str = "gpt-5.2"
+    score_threshold: int = 60
+    lookback_days: int = 1
+    kinds: list[str] = field(default_factory=lambda: ["servc"])
+    batch_size: int = 20
+
+
 # --- 스케줄 작업 ---
 
 
@@ -147,6 +163,7 @@ class AppConfig:
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
     deployment_rotation: DeploymentRotationConfig | None = None
+    education_bid_crawler: EducationBidCrawlerConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
 
 
@@ -257,6 +274,20 @@ def _parse_config(raw: dict) -> AppConfig:
             fixed_days=dr_raw.get("fixed_days", 0),
         )
 
+    # Education bid crawler
+    ebc_raw = raw.get("education_bid_crawler")
+    education_bid_crawler = None
+    if ebc_raw:
+        education_bid_crawler = EducationBidCrawlerConfig(
+            channel_id=ebc_raw["channel_id"],
+            business_profile=ebc_raw["business_profile"],
+            model=ebc_raw.get("model", "gpt-5.2"),
+            score_threshold=ebc_raw.get("score_threshold", 60),
+            lookback_days=ebc_raw.get("lookback_days", 1),
+            kinds=ebc_raw.get("kinds", ["servc"]),
+            batch_size=ebc_raw.get("batch_size", 20),
+        )
+
     # Scheduled jobs
     scheduled_jobs = [
         ScheduledJobConfig(
@@ -275,6 +306,7 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum=scrum,
         task_alerts=task_alerts,
         deployment_rotation=deployment_rotation,
+        education_bid_crawler=education_bid_crawler,
         scheduled_jobs=scheduled_jobs,
     )
 
