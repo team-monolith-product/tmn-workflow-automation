@@ -20,7 +20,6 @@ from scripts.crawl_education_bids import (
 )
 from service.config import EducationBidCrawlerConfig
 
-
 # --- build_window ---
 
 
