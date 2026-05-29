@@ -295,6 +295,8 @@ def get_create_notion_task_tool(
     client,
     project_data_source_id: str | None = None,
     title_property_name: str = "제목",
+    all_databases: dict[str, dict[str, str]] | None = None,
+    default_db_name: str | None = None,
 ):
     """노션 작업 생성 도구를 반환합니다.
 
@@ -383,6 +385,23 @@ def get_create_notion_task_tool(
         ),
     )
 
+    if all_databases and len(all_databases) > 1:
+        db_names = list(all_databases.keys())
+        default_label = default_db_name or "main"
+        fields["target_database"] = (
+            str | None,
+            Field(
+                default=None,
+                description=(
+                    f"작업을 생성할 대상 데이터베이스. "
+                    f"지정하지 않으면 사용자의 기본 DB({default_label})를 사용합니다. "
+                    f"사용자가 '인프라 과업', 'INF 티커' 등 특정 DB를 지정하면 해당 DB를 선택하세요. "
+                    f"가능한 값: {', '.join(db_names)}"
+                ),
+                json_schema_extra={"enum": db_names},
+            ),
+        )
+
     CreateNotionTaskInput = create_model("CreateNotionTaskInput", **fields)
 
     @tool("create_notion_task", args_schema=CreateNotionTaskInput)
@@ -392,6 +411,7 @@ def get_create_notion_task_tool(
         component: str | None = None,
         project: str | None = None,
         blocks: str | None = None,
+        target_database: str | None = None,
     ) -> str:
         """
         노션에 새로운 작업 페이지를 생성합니다.
@@ -401,24 +421,36 @@ def get_create_notion_task_tool(
         Returns:
             생성된 노션 페이지의 URL
         """
+        # 대상 DB 결정: target_database가 지정되면 해당 DB 사용
+        if target_database and all_databases and target_database in all_databases:
+            actual_ds_id = all_databases[target_database]["data_source_id"]
+            actual_title_prop = all_databases[target_database]["title_property"]
+            is_override = target_database != default_db_name
+        else:
+            actual_ds_id = data_source_id
+            actual_title_prop = title_property_name
+            is_override = False
+
         notion_assignee_id = await get_assignee_id()
 
         properties = {
-            title_property_name: {"title": [{"text": {"content": title}}]},
+            actual_title_prop: {"title": [{"text": {"content": title}}]},
             "상태": {"status": {"name": "대기"}},
         }
 
-        if task_type and task_type_options:
-            properties["유형"] = {"select": {"name": task_type}}
-        if component and component_options:
-            properties["구성요소"] = {"multi_select": [{"name": component}]}
-        if project and active_projects:
-            if project not in active_projects:
-                raise ValueError(
-                    f"'{project}'는 유효하지 않은 프로젝트명입니다. "
-                    f"가능한 값: {', '.join(active_projects.keys())}"
-                )
-            properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
+        # DB를 오버라이드한 경우, 기본 DB 전용 속성(유형/구성요소/프로젝트)은 건너뜀
+        if not is_override:
+            if task_type and task_type_options:
+                properties["유형"] = {"select": {"name": task_type}}
+            if component and component_options:
+                properties["구성요소"] = {"multi_select": [{"name": component}]}
+            if project and active_projects:
+                if project not in active_projects:
+                    raise ValueError(
+                        f"'{project}'는 유효하지 않은 프로젝트명입니다. "
+                        f"가능한 값: {', '.join(active_projects.keys())}"
+                    )
+                properties["프로젝트"] = {"relation": [{"id": active_projects[project]}]}
 
         if notion_assignee_id:
             properties["담당자"] = {"people": [{"id": notion_assignee_id}]}
@@ -431,7 +463,7 @@ def get_create_notion_task_tool(
                 properties["아이디어 뱅크"] = {"checkbox": True}
 
         response = notion.pages.create(
-            parent={"data_source_id": data_source_id}, properties=properties
+            parent={"data_source_id": actual_ds_id}, properties=properties
         )
 
         page_id = response["id"]

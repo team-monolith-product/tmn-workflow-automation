@@ -118,10 +118,22 @@ def register_general_handlers(app, assistant):
             task_ds_id = squad.notion_db.data_source_id
             title_prop = squad.notion_db.properties.title
             project_ds_id = None
+            default_db_name = squad.notion_db.name
         else:
             task_ds_id = DATA_SOURCE_ID
             title_prop = "제목"
             project_ds_id = PROJECT_DATA_SOURCE_ID
+            default_db_name = "main"
+
+        # 모든 설정된 DB 정보를 빌드하여 LLM이 대상 DB를 선택할 수 있게 함
+        config = load_config()
+        all_databases = {
+            name: {
+                "data_source_id": db.data_source_id,
+                "title_property": db.properties.title,
+            }
+            for name, db in config.notion_databases.items()
+        }
 
         # General Agent 사용
         notion_tools = [
@@ -132,6 +144,8 @@ def register_general_handlers(app, assistant):
                 app.client,
                 project_ds_id,
                 title_prop,
+                all_databases=all_databases,
+                default_db_name=default_db_name,
             ),
             get_update_notion_task_deadline_tool(),
             get_update_notion_task_status_tool(task_ds_id),
@@ -223,10 +237,22 @@ def register_general_handlers(app, assistant):
             task_ds_id = squad.notion_db.data_source_id
             title_prop = squad.notion_db.properties.title
             project_ds_id = None
+            default_db_name = squad.notion_db.name
         else:
             task_ds_id = DATA_SOURCE_ID
             title_prop = "제목"
             project_ds_id = PROJECT_DATA_SOURCE_ID
+            default_db_name = "main"
+
+        # 모든 설정된 DB 정보를 빌드하여 LLM이 대상 DB를 선택할 수 있게 함
+        config = load_config()
+        all_databases = {
+            name: {
+                "data_source_id": db.data_source_id,
+                "title_property": db.properties.title,
+            }
+            for name, db in config.notion_databases.items()
+        }
 
         notion_tools = [
             get_create_notion_task_tool(
@@ -236,6 +262,8 @@ def register_general_handlers(app, assistant):
                 app.client,
                 project_ds_id,
                 title_prop,
+                all_databases=all_databases,
+                default_db_name=default_db_name,
             ),
             get_update_notion_task_deadline_tool(),
             get_update_notion_task_status_tool(task_ds_id),
