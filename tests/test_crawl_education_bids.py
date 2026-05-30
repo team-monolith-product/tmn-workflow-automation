@@ -1,339 +1,247 @@
 """
-교육 외주 입찰공고 크롤러 단위 테스트
+교육 외주 입찰 파이프라인 단계 테스트
 
-외부 API(G2B), LLM, Slack 호출은 모두 모킹하여 비즈니스 로직만 검증한다.
+네트워크·LLM 은 모킹/모듈 경계에서 차단하고 순수 변환 로직을 검증한다.
 """
 
 from datetime import date
 
-import pytest
+from service.edu_bid import stages, evaluate
+from service.edu_bid.knowledge import load_knowledge
+from service.edu_bid.schemas import Announcement, GateResult, Axes, EvalOut, BatchEval
 
-from scripts.crawl_education_bids import (
-    build_window,
-    extract_items,
-    summarize_item,
-    dedupe_by_notice,
-    evaluate_announcements,
-    format_slack_text,
-    run,
-    BidEvaluation,
-    BatchEvaluation,
-)
-from service.config import EducationBidCrawlerConfig
+
+def _ann(**over) -> Announcement:
+    base = dict(
+        source="g2b_servc",
+        kind="servc",
+        kind_label="용역",
+        bid_no="R1",
+        bid_ord="000",
+        title="t",
+        notice_inst="",
+        demand_inst="",
+        notice_dt="",
+        close_dt="",
+        opening_dt="",
+        estimated_price="",
+        budget_amt="",
+        url="",
+        award_method="",
+        contract_method="",
+        re_notice="N",
+        result_competition="N",
+        industry_limit="N",
+        region_limit_basis="",
+        tech_eval_rate="",
+        price_eval_rate="",
+        info_biz="N",
+        service_div="",
+        proc_class="",
+    )
+    base.update(over)
+    return Announcement(**base)
+
 
 # --- build_window ---
 
 
 def test_build_window_single_day():
-    """직전 1일 구간이 어제 00:00 ~ 어제 23:59 로 계산된다."""
-    bgn, end = build_window(date(2026, 5, 30), lookback_days=1)
-    assert bgn == "202605290000"
-    assert end == "202605292359"
+    assert stages.build_window(date(2026, 5, 30), 1) == ("202605290000", "202605292359")
 
 
-def test_build_window_multi_day():
-    """lookback_days=3 이면 3일 전부터 어제까지."""
-    bgn, end = build_window(date(2026, 5, 30), lookback_days=3)
-    assert bgn == "202605270000"
-    assert end == "202605292359"
+# --- to_announcement (실제 필드 매핑) ---
 
 
-# --- extract_items ---
-
-
-def test_extract_items_empty_string():
-    """결과 0건이면 items가 빈 문자열로 온다."""
-    payload = {
-        "response": {
-            "header": {"resultCode": "00"},
-            "body": {"items": "", "totalCount": 0},
-        }
-    }
-    items, total = extract_items(payload)
-    assert items == []
-    assert total == 0
-
-
-def test_extract_items_single_dict():
-    """단건이면 items가 dict 로 올 수 있다."""
-    payload = {
-        "response": {
-            "header": {"resultCode": "00"},
-            "body": {"items": {"item": {"bidNtceNm": "A"}}, "totalCount": 1},
-        }
-    }
-    items, total = extract_items(payload)
-    assert items == [{"bidNtceNm": "A"}]
-    assert total == 1
-
-
-def test_extract_items_list():
-    payload = {
-        "response": {
-            "header": {"resultCode": "00"},
-            "body": {
-                "items": [{"bidNtceNm": "A"}, {"bidNtceNm": "B"}],
-                "totalCount": 2,
-            },
-        }
-    }
-    items, total = extract_items(payload)
-    assert [i["bidNtceNm"] for i in items] == ["A", "B"]
-    assert total == 2
-
-
-def test_extract_items_error_code_raises():
-    """정상 코드가 아니면 RuntimeError."""
-    payload = {
-        "response": {
-            "header": {
-                "resultCode": "30",
-                "resultMsg": "SERVICE_KEY_IS_NOT_REGISTERED",
-            },
-            "body": {},
-        }
-    }
-    with pytest.raises(RuntimeError, match="resultCode=30"):
-        extract_items(payload)
-
-
-# --- summarize_item ---
-
-
-def test_summarize_item_field_fallback():
-    """결합형(bidNtceDt)·분리형(bidNtceDate) 스키마 모두 폴백된다."""
-    item_combined = {
-        "bidNtceNo": "20260101",
+def test_to_announcement_maps_signal_fields():
+    item = {
+        "bidNtceNo": "R26BK01550144",
+        "bidNtceOrd": "000",
         "bidNtceNm": "디지털교과서 플랫폼 고도화",
-        "dminsttNm": "충청남도교육청",
-        "bidNtceDt": "2026-05-29 10:00:00",
+        "dminsttNm": "충남교육청",
         "bidClseDt": "2026-06-10 17:00:00",
         "presmptPrce": "320000000",
-        "bidNtceDtlUrl": "http://example.com/1",
-        "_kind_label": "용역",
+        "bidNtceDtlUrl": "http://x/1",
+        "sucsfbidMthdNm": "협상에 의한 계약",
+        "arsltCmptYn": "N",
+        "indstrytyLmtYn": "Y",
+        "infoBizYn": "Y",
+        "ntceSpecDocUrl1": "http://spec/1",
+        "ntceSpecDocUrl2": "http://spec/2",
     }
-    s = summarize_item(item_combined)
-    assert s["title"] == "디지털교과서 플랫폼 고도화"
-    assert s["demand_inst"] == "충청남도교육청"
-    assert s["close_dt"] == "2026-06-10 17:00:00"
-    assert s["estimated_price"] == "320000000"
-    assert s["url"] == "http://example.com/1"
-
-    item_split = {
-        "bidNtceNm": "B",
-        "bidNtceDate": "20260529",
-        "bidNtceUrl": "http://x/2",
-    }
-    s2 = summarize_item(item_split)
-    assert s2["notice_dt"] == "20260529"
-    assert s2["url"] == "http://x/2"
+    a = stages.to_announcement(item, "g2b_servc", "servc", "용역")
+    assert a.title == "디지털교과서 플랫폼 고도화"
+    assert a.award_method == "협상에 의한 계약"
+    assert a.result_competition == "N"
+    assert a.industry_limit == "Y"
+    assert a.info_biz == "Y"
+    assert a.spec_doc_urls == ["http://spec/1", "http://spec/2"]
+    assert a.key == "R26BK01550144-000"
 
 
-# --- dedupe_by_notice ---
+# --- dedupe ---
 
 
 def test_dedupe_keeps_latest_order():
-    """같은 공고번호의 차수 000/001 중 최신(001)만 남고, 다른 공고는 유지."""
     items = [
-        {"bidNtceNo": "R1", "bidNtceOrd": "000", "bidNtceNm": "A 재공고전"},
-        {"bidNtceNo": "R1", "bidNtceOrd": "001", "bidNtceNm": "A 재공고"},
-        {"bidNtceNo": "R2", "bidNtceOrd": "000", "bidNtceNm": "B"},
+        _ann(bid_no="R1", bid_ord="000", title="A전"),
+        _ann(bid_no="R1", bid_ord="001", title="A후"),
+        _ann(bid_no="R2", bid_ord="000", title="B"),
     ]
-    out = dedupe_by_notice(items)
+    out = stages.dedupe_by_notice(items)
+    by_no = {a.bid_no: a for a in out}
     assert len(out) == 2
-    by_no = {i["bidNtceNo"]: i for i in out}
-    assert by_no["R1"]["bidNtceOrd"] == "001"
-    assert by_no["R2"]["bidNtceNm"] == "B"
+    assert by_no["R1"].bid_ord == "001"
 
 
-def test_dedupe_passthrough_without_no():
-    """공고번호가 없는 항목은 그대로 통과시킨다."""
-    items = [{"bidNtceNm": "no-number-1"}, {"bidNtceNm": "no-number-2"}]
-    out = dedupe_by_notice(items)
-    assert len(out) == 2
+# --- gate ---
 
 
-# --- evaluate_announcements (배치 인덱스 매핑) ---
+def test_gate_result_competition_near_miss_when_weak_performance():
+    """실적경쟁=Y + 실적원장 비어있음 → near_miss."""
+    g = stages.gate(_ann(result_competition="Y"), {"performance": []})
+    assert g.status == "near_miss"
+    assert any("실적제한경쟁" in r for r in g.reasons)
+
+
+def test_gate_pass_with_region_industry_flags():
+    g = stages.gate(
+        _ann(region_limit_basis="공고서 참조", industry_limit="Y"), {"performance": []}
+    )
+    assert g.status == "pass"
+    assert any("지역제한" in r for r in g.reasons)
+    assert any("업종제한" in r for r in g.reasons)
+
+
+# --- triage ---
+
+
+def test_triage_matches_capability_keyword():
+    kw_index = {"codle": ["코딩교육", "LMS"], "judge": ["자동채점"]}
+    matched = stages.triage(_ann(title="초중등 코딩교육 플랫폼 구축"), kw_index)
+    assert "codle" in matched and "judge" not in matched
+
+
+def test_triage_no_match():
+    kw_index = {"codle": ["코딩교육"]}
+    assert stages.triage(_ann(title="가로수 전지 용역"), kw_index) == []
+
+
+# --- decide (가중합·라벨) ---
+
+
+class _KN:
+    weights = {
+        "reuse": 0.4,
+        "winnability": 0.3,
+        "value": 0.2,
+        "performance_building": 0.1,
+    }
+    thresholds = {"recommend": 70, "review": 50, "future_target": 0}
+
+
+def test_decide_recommend_label():
+    axes = {"reuse": 90, "winnability": 80, "value": 60, "performance_building": 40}
+    d = stages.decide(_ann(), GateResult("pass"), axes, "low", ["codle"], "근거", _KN())
+    # 0.4*90+0.3*80+0.2*60+0.1*40 = 36+24+12+4 = 76
+    assert d.score == 76.0 and d.label == "입찰추천"
+
+
+def test_decide_near_miss_gate_overrides_to_future_target():
+    axes = {"reuse": 90, "winnability": 90, "value": 90, "performance_building": 90}
+    d = stages.decide(
+        _ann(), GateResult("near_miss", ["실적"]), axes, "high", [], "r", _KN()
+    )
+    assert d.label == "미래타깃"
+
+
+# --- format_report ---
+
+
+def test_format_report_sorts_and_filters():
+    from service.edu_bid.schemas import Decision
+
+    a_hi = _ann(title="추천건", estimated_price="300000000", demand_inst="A청")
+    a_rv = _ann(title="검토건", estimated_price="1000000", demand_inst="B청")
+    a_ex = _ann(title="제외건")
+    decisions = [
+        Decision(
+            a_rv,
+            GateResult("pass"),
+            {"reuse": 60, "winnability": 50, "value": 50, "performance_building": 40},
+            "low",
+            ["x"],
+            55.0,
+            "검토",
+            "r1",
+        ),
+        Decision(
+            a_hi,
+            GateResult("pass"),
+            {"reuse": 90, "winnability": 85, "value": 70, "performance_building": 60},
+            "none",
+            ["codle"],
+            82.0,
+            "입찰추천",
+            "r2",
+        ),
+        Decision(
+            a_ex,
+            GateResult("pass"),
+            {"reuse": 10, "winnability": 10, "value": 10, "performance_building": 10},
+            "high",
+            [],
+            10.0,
+            "제외",
+            "r3",
+        ),
+    ]
+    text = stages.format_report(decisions, ("202605290000", "202605292359"))
+    assert "후보 2건" in text  # 제외 제외됨
+    assert text.index("추천건") < text.index("검토건")  # 추천이 먼저
+    assert "300,000,000원" in text
+    assert "제외건" not in text
+
+
+# --- evaluate (배치 index 매핑, LLM 모킹) ---
 
 
 class _FakeLLM:
-    """배치별로 index 0..n-1 에 대해 점수를 돌려주는 가짜 structured LLM."""
-
-    def __init__(self, scorer):
-        self._scorer = scorer
-        self.calls = 0
-
     def invoke(self, prompt):
-        self.calls += 1
-        # 프롬프트의 [i] 라인 수만큼 평가 생성
         n = prompt.count("\n[")
-        evals = [
-            BidEvaluation(
-                index=i,
-                score=self._scorer(self.calls, i),
-                category="플랫폼개발",
-                reason="r",
-            )
-            for i in range(n)
-        ]
-        return BatchEvaluation(evaluations=evals)
+        return BatchEval(
+            evaluations=[
+                EvalOut(
+                    index=i,
+                    axes=Axes(
+                        reuse=80, winnability=70, value=60, performance_building=50
+                    ),
+                    quant_barrier="low",
+                    matched_assets=["codle"],
+                    rationale="r",
+                )
+                for i in range(n)
+            ]
+        )
 
 
-def test_evaluate_announcements_batches_and_global_index():
-    """배치 경계를 넘어 글로벌 index 로 올바르게 매핑된다."""
-    summaries = [
-        {
-            "title": f"t{i}",
-            "kind_label": "용역",
-            "demand_inst": "",
-            "notice_inst": "",
-            "estimated_price": "",
-        }
-        for i in range(5)
-    ]
-    # 배치마다 index 0 만 90점, 나머지 10점
-    fake = _FakeLLM(lambda call, i: 90 if i == 0 else 10)
-    result = evaluate_announcements(
-        summaries, "profile", "gpt-x", batch_size=2, llm=fake
-    )
-
-    assert fake.calls == 3  # 2+2+1
-    assert len(result) == 5
-    # 각 배치의 첫 항목(글로벌 0, 2, 4)이 90점
-    assert result[0].score == 90
-    assert result[2].score == 90
-    assert result[4].score == 90
-    assert result[1].score == 10
+def test_evaluate_batches_and_global_index():
+    kn = load_knowledge()  # 프롬프트 조립에 실제 지식 사용(네트워크 없음)
+    cands = [(_ann(title=f"코딩교육 {i}"), ["codle"]) for i in range(5)]
+    out = evaluate.evaluate(cands, kn, "gpt-x", batch_size=2, llm=_FakeLLM())
+    assert len(out) == 5
+    assert all(e.axes.reuse == 80 for e in out.values())
 
 
-def test_evaluate_announcements_empty():
-    assert evaluate_announcements([], "p", "m", 10, llm=_FakeLLM(lambda c, i: 0)) == {}
+def test_evaluate_empty():
+    assert evaluate.evaluate([], load_knowledge(), "m", 10, llm=_FakeLLM()) == {}
 
 
-# --- format_slack_text ---
+# --- knowledge 로딩 (실파일) ---
 
 
-def test_format_slack_text_sorted_and_formatted():
-    summaries = [
-        {
-            "title": "낮은 공고",
-            "kind_label": "용역",
-            "demand_inst": "A교육청",
-            "notice_inst": "",
-            "estimated_price": "1000000",
-            "close_dt": "2026-06-01",
-            "url": "http://x/low",
-        },
-        {
-            "title": "높은 공고",
-            "kind_label": "용역",
-            "demand_inst": "B교육청",
-            "notice_inst": "",
-            "estimated_price": "320000000",
-            "close_dt": "2026-06-10",
-            "url": "http://x/high",
-        },
-    ]
-    qualified = [
-        (
-            summaries[0],
-            BidEvaluation(index=0, score=70, category="콘텐츠제작", reason="근거L"),
-        ),
-        (
-            summaries[1],
-            BidEvaluation(index=1, score=90, category="플랫폼개발", reason="근거H"),
-        ),
-    ]
-    # run()에서 정렬하므로 여기선 입력 순서대로 출력됨 — 정렬은 run 테스트에서 검증
-    text = format_slack_text(qualified, ("202605290000", "202605292359"))
-    assert "교육 외주 적합 입찰공고 2건" in text
-    assert "320,000,000원" in text  # 천단위 콤마
-    assert "근거H" in text
-    assert "http://x/high" in text
-
-
-# --- run (통합: collect/llm/slack 모킹) ---
-
-
-def _cfg(**over):
-    base = dict(
-        channel_id="C123",
-        business_profile="우리는 에듀테크 회사",
-        model="gpt-x",
-        score_threshold=60,
-        lookback_days=1,
-        kinds=["servc"],
-        batch_size=20,
-    )
-    base.update(over)
-    return EducationBidCrawlerConfig(**base)
-
-
-def test_run_filters_threshold_and_sorts(monkeypatch, capsys):
-    """임계 미만은 제외, 적합 공고는 점수 내림차순으로 dry-run 출력."""
-    raw = [
-        {
-            "bidNtceNm": "고적합 플랫폼",
-            "dminsttNm": "B청",
-            "presmptPrce": "300000000",
-            "bidNtceDtlUrl": "u2",
-            "_kind_label": "용역",
-        },
-        {
-            "bidNtceNm": "저적합 비품",
-            "dminsttNm": "A청",
-            "presmptPrce": "1000",
-            "bidNtceDtlUrl": "u1",
-            "_kind_label": "용역",
-        },
-    ]
-    monkeypatch.setattr(
-        "scripts.crawl_education_bids.collect_announcements",
-        lambda kinds, bgn, end, session=None: raw,
-    )
-
-    def fake_eval(summaries, profile, model, batch_size, llm=None):
-        # title 에 '고적합'이면 90, 아니면 30
-        return {
-            i: BidEvaluation(
-                index=i,
-                score=90 if "고적합" in s["title"] else 30,
-                category="플랫폼개발",
-                reason="r",
-            )
-            for i, s in enumerate(summaries)
-        }
-
-    monkeypatch.setattr(
-        "scripts.crawl_education_bids.evaluate_announcements", fake_eval
-    )
-
-    run(_cfg(), date(2026, 5, 30), dry_run=True)
-    out = capsys.readouterr().out
-    assert "적합(60점 이상): 1건" in out
-    assert "고적합 플랫폼" in out
-    assert "저적합 비품" not in out  # 임계 미만 제외
-
-
-def test_run_no_qualified_skips_slack(monkeypatch):
-    """적합 공고가 없으면 Slack을 호출하지 않는다."""
-    raw = [{"bidNtceNm": "무관 공고", "_kind_label": "용역", "presmptPrce": ""}]
-    monkeypatch.setattr(
-        "scripts.crawl_education_bids.collect_announcements",
-        lambda kinds, bgn, end, session=None: raw,
-    )
-    monkeypatch.setattr(
-        "scripts.crawl_education_bids.evaluate_announcements",
-        lambda *a, **k: {
-            0: BidEvaluation(index=0, score=10, category="해당없음", reason="무관")
-        },
-    )
-
-    called = {"posted": False}
-
-    def _should_not_call(*a, **k):
-        called["posted"] = True
-
-    monkeypatch.setattr("scripts.crawl_education_bids.WebClient", _should_not_call)
-    run(_cfg(), date(2026, 5, 30), dry_run=False)
-    assert called["posted"] is False
+def test_load_knowledge_real_files():
+    kn = load_knowledge()
+    assert len(kn.assets) > 0
+    assert "reuse" in kn.weights
+    assert any(s["adapter"] == "g2b" for s in kn.enabled_sources)

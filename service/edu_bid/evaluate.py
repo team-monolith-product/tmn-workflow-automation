@@ -1,0 +1,119 @@
+"""
+S5 심층평가 — LLM 이 지식(역량·자격·전략)을 주입받아 4축으로 점수화.
+
+프롬프트는 지식 레이어에서 조립되므로, 회사가 변하면 코드가 아니라 YAML 만 바뀐다.
+"""
+
+from langchain_openai import ChatOpenAI
+
+from .schemas import Announcement, BatchEval, EvalOut
+
+
+def _assets_block(knowledge) -> str:
+    lines = []
+    for a in knowledge.assets:
+        covers = ", ".join(a.get("covers", []))
+        lines.append(
+            f"- [{a['id']}] {a['name']} (성숙도 {a.get('maturity')}): {covers}"
+        )
+    return "\n".join(lines)
+
+
+def _eligibility_block(knowledge) -> str:
+    e = knowledge.eligibility_ledger
+    cred = e.get("credentials", {})
+    perf = e.get("performance", []) or []
+    dp = ", ".join(cred.get("direct_production", []))
+    certs = ", ".join(c.get("name") for c in cred.get("certifications", []))
+    perf_state = (
+        f"{len(perf)}건"
+        if perf
+        else "정량 실적금액 약함(직접 용역계약 부족, RS·이용계약 위주)"
+    )
+    return (
+        f"- 소재지: {cred.get('region')}\n"
+        f"- 보유자격: SW사업자신고={cred.get('sw_business_report')}, 직접생산확인=[{dp}], 인증=[{certs}]\n"
+        f"- 정량 실적 상태: {perf_state}"
+    )
+
+
+def _strategy_block(knowledge) -> str:
+    s = knowledge.scoring_policy.get("strategy", {})
+    p = s.get("primary", {})
+    sec = s.get("secondary", {})
+    ts = knowledge.scoring_policy.get("ticket_size", {})
+    stance = knowledge.scoring_policy.get("award_method_stance", {})
+    stance_str = ", ".join(f"{k}:{v}" for k, v in stance.items())
+    return (
+        f"- 핵심전략(primary): {p.get('desc', '').strip()}\n"
+        f"- 보조전략(secondary): {sec.get('desc', '').strip()}\n"
+        f"- 체급 sweet spot: {ts.get('sweet_low')}~{ts.get('sweet_high')}원\n"
+        f"- 낙찰방식 stance: {stance_str}"
+    )
+
+
+def _announcement_line(i: int, ann: Announcement, matched: list[str]) -> str:
+    return (
+        f"[{i}] {ann.title} | 수요기관:{ann.demand_inst or ann.notice_inst or '미상'}"
+        f" | 추정가:{ann.estimated_price or '미상'} | 낙찰방식:{ann.award_method or '미상'}"
+        f" | 실적경쟁:{ann.result_competition or '?'} | 기술평가율:{ann.tech_eval_rate or '-'}"
+        f" | 가격평가율:{ann.price_eval_rate or '-'} | 재공고:{ann.re_notice or '?'}"
+        f" | 정보화:{ann.info_biz or '?'} | 트리아지매칭:{','.join(matched) or '없음'}"
+    )
+
+
+def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str:
+    lines = [
+        "당신은 팀모노리스(에듀테크)의 공공조달 사업개발 담당자다.",
+        "아래 회사 역량·자격·전략을 기준으로 각 입찰공고를 4축(0~100)으로 평가하라.",
+        "",
+        "# 우리 보유 자산(재사용 가능 역량)",
+        _assets_block(knowledge),
+        "",
+        "# 자격·실적 상태",
+        _eligibility_block(knowledge),
+        "",
+        "# 전략",
+        _strategy_block(knowledge),
+        "",
+        "# 평가 기준(축)",
+        "- reuse: 위 자산으로 요구를 저렴하게 충족하는 정도(매칭 자산이 핵심 기능을 덮을수록↑)",
+        "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑",
+        "- value: 체급 sweet spot 부합·후속 유지보수 가능성",
+        "- performance_building: 깨끗한 직접 용역계약으로 '정량 실적금액'을 쌓아주면↑(단순 이용/물품/RS면↓)",
+        "- quant_barrier: 정량 실적장벽 수준 none|low|med|high|unknown (실적경쟁=Y면 보통 high)",
+        "교육/이러닝/에듀테크/SW·AI교육/디지털교과서와 무관하면 reuse를 낮게.",
+        "",
+        "# 평가 대상",
+    ]
+    for i, (ann, matched) in enumerate(batch):
+        lines.append(_announcement_line(i, ann, matched))
+    lines.append("")
+    lines.append(
+        "각 공고마다 index, axes(reuse/winnability/value/performance_building), quant_barrier, matched_assets, rationale 를 채워라."
+    )
+    return "\n".join(lines)
+
+
+def evaluate(
+    candidates: list[tuple[Announcement, list[str]]],
+    knowledge,
+    model: str,
+    batch_size: int,
+    llm=None,
+) -> dict[int, EvalOut]:
+    """후보(공고, 트리아지매칭) 리스트를 배치 평가 → {전역index: EvalOut}."""
+    if not candidates:
+        return {}
+    client = llm or ChatOpenAI(model=model, temperature=0).with_structured_output(
+        BatchEval
+    )
+
+    results: dict[int, EvalOut] = {}
+    for start in range(0, len(candidates), batch_size):
+        batch = candidates[start : start + batch_size]
+        out: BatchEval = client.invoke(_build_prompt(knowledge, batch))
+        for ev in out.evaluations:
+            if 0 <= ev.index < len(batch):
+                results[start + ev.index] = ev
+    return results
