@@ -11,10 +11,11 @@ from .schemas import Announcement, BatchEval, EvalOut
 _CRITERIA = [
     "# 평가 기준(축)",
     "- reuse: 위 자산으로 요구를 저렴하게 충족하는 정도(매칭 자산이 핵심 기능을 덮을수록↑)",
-    "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑",
+    "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑. 단 wired_risk(내정위험)가 높으면 winnability를 크게↓.",
     "- value: 체급 sweet spot 부합·후속 유지보수 가능성",
     "- performance_building: 깨끗한 직접 용역계약으로 '정량 실적금액'을 쌓아주면↑(단순 이용/물품/RS면↓)",
     "- quant_barrier: 정량 실적장벽 수준 none|low|med|high|unknown (실적경쟁=Y/실적요건 명시면 보통 high)",
+    "- wired_risk: 사전영업·내정 가능성 none|low|med|high|unknown. ↑신호: 제목이 '고도화/연장/유지관리/재계약'(기존 운영업체 유리), 규격이 특정 제품·특정 실적·특정 인증을 콕 집음(lock-in), 단독·촉박 일정. ↓신호: 재공고/유찰(내정 깨짐), '신규 구축', 기능 중심 일반 규격.",
     "교육/이러닝/에듀테크/SW·AI교육/디지털교과서와 무관하면 reuse를 낮게.",
 ]
 
@@ -98,7 +99,7 @@ def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str
         lines.append(_announcement_line(i, ann, matched))
     lines.append("")
     lines.append(
-        "각 공고마다 index, axes(reuse/winnability/value/performance_building), quant_barrier, matched_assets, rationale 를 채워라."
+        "각 공고마다 index, axes(reuse/winnability/value/performance_building), quant_barrier, wired_risk, matched_assets, rationale 를 채워라."
     )
     return "\n".join(lines)
 
@@ -152,7 +153,8 @@ def _build_deep_prompt(
         "# 규격서 본문(발췌)",
         spec_text,
         "",
-        "index=0 으로 axes, quant_barrier, matched_assets, rationale 를 채워라. rationale 엔 규격서의 실제 과업 근거를 명시.",
+        "특히 규격서에서 '특정 제품·특정 업체 실적·특정 인증·기존 시스템 연속성'을 콕 집는 독소조항이 있으면 wired_risk를 높게(내정 정황).",
+        "index=0 으로 axes, quant_barrier, wired_risk, matched_assets, rationale 를 채워라. rationale 엔 규격서의 실제 과업 근거와 내정/lock-in 정황을 명시.",
     ]
     return "\n".join(lines)
 

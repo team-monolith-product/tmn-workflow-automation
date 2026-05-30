@@ -99,16 +99,16 @@ def main():
 
     def table(rows):
         L.append(
-            "| 게시일 | 점수 | 정독 | 사업유형 | 공고명 | 수요기관 | 추정가격 | 정량장벽 | 낙찰 | 링크 |"
+            "| 게시일 | 점수 | 정독 | 사업유형 | 공고명 | 수요기관 | 추정가격 | 정량장벽 | 내정위험 | 낙찰 | 링크 |"
         )
-        L.append("|---|---|---|---|---|---|---|---|---|---|")
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|")
         for d, dec in rows:
             a = dec.announcement
             L.append(
                 f"| {d.strftime('%m-%d')} | {dec.score} | {'O' if dec.enriched else ''} "
                 f"| {a.work_type} | {a.title.replace('|','/')} "
                 f"| {(a.demand_inst or a.notice_inst or '미상').replace('|','/')} "
-                f"| {_won(a.estimated_price)} | {dec.quant_barrier} "
+                f"| {_won(a.estimated_price)} | {dec.quant_barrier} | {dec.wired_risk} "
                 f"| {(a.award_method or '미상').replace('|','/')} | {a.url} |"
             )
 
@@ -134,7 +134,7 @@ def main():
             f"- 사업유형: {a.work_type} | 수요기관: {a.demand_inst or a.notice_inst or '미상'} | 추정가격: {_won(a.estimated_price)} | 마감: {a.close_dt or '미상'}"
         )
         L.append(
-            f"- 축: 재사용 {dec.axes.get('reuse')} / 수주 {dec.axes.get('winnability')} / 가치 {dec.axes.get('value')} / 실적적립 {dec.axes.get('performance_building')} | 정량장벽 {dec.quant_barrier}"
+            f"- 축: 재사용 {dec.axes.get('reuse')} / 수주 {dec.axes.get('winnability')} / 가치 {dec.axes.get('value')} / 실적적립 {dec.axes.get('performance_building')} | 정량장벽 {dec.quant_barrier} | 내정위험 {dec.wired_risk}"
         )
         L.append(
             f"- 매칭 자산: {', '.join(dec.matched_assets) if dec.matched_assets else '-'}"

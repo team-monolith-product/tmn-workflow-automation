@@ -37,8 +37,9 @@ award_method_stance:
 # 수주가능성(winnability) 세부 신호 — S5가 종합 판단
 winnability_signals:
   quant_barrier: low_is_better     # 실적제한 없음/낮음, 정량배점 작음 → 가점 (현 실적약점 회피). 핵심 전략 1
-  award_method: 위 stance 적용
-  competition: 재공고·유찰 → 가점 (경쟁 옅음)
+  wired_risk: low_is_better        # 내정위험(사전영업·규격 lock-in·기존업체 유리) 높으면 들러리 → 큰 감점
+  award_method: 위 stance 적용     # 협상계약 선호하되, 협상계약은 내정 가능성도 큼 → wired_risk로 보정
+  competition: 재공고·유찰 → 가점 (내정 깨짐/경쟁 옅음)
   agency_familiarity: 교육청·대학·KERIS·교육 유관기관 → 가점
 
 # 가중치: 핵심 전략 1(장벽 낮음 × 재사용)을 반영해 reuse·winnability를 주축으로.

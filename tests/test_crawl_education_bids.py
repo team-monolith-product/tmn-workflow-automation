@@ -162,15 +162,17 @@ class _KN:
 
 def test_decide_recommend_label():
     axes = {"reuse": 90, "winnability": 80, "value": 60, "performance_building": 40}
-    d = stages.decide(_ann(), GateResult("pass"), axes, "low", ["codle"], "근거", _KN())
+    d = stages.decide(
+        _ann(), GateResult("pass"), axes, "low", "low", ["codle"], "근거", _KN()
+    )
     # 0.4*90+0.3*80+0.2*60+0.1*40 = 36+24+12+4 = 76
-    assert d.score == 76.0 and d.label == "입찰추천"
+    assert d.score == 76.0 and d.label == "입찰추천" and d.wired_risk == "low"
 
 
 def test_decide_near_miss_gate_overrides_to_future_target():
     axes = {"reuse": 90, "winnability": 90, "value": 90, "performance_building": 90}
     d = stages.decide(
-        _ann(), GateResult("near_miss", ["실적"]), axes, "high", [], "r", _KN()
+        _ann(), GateResult("near_miss", ["실적"]), axes, "high", "high", [], "r", _KN()
     )
     assert d.label == "미래타깃"
 
@@ -237,6 +239,7 @@ class _FakeLLM:
                         reuse=80, winnability=70, value=60, performance_building=50
                     ),
                     quant_barrier="low",
+                    wired_risk="low",
                     matched_assets=["codle"],
                     rationale="r",
                 )

@@ -84,6 +84,9 @@ class EvalOut(BaseModel):
     quant_barrier: str = Field(
         description="정량(실적) 장벽: none | low | med | high | unknown"
     )
+    wired_risk: str = Field(
+        description="내정위험(사전영업·규격 lock-in·기존업체 유리로 사실상 정해진 정도): none | low | med | high | unknown"
+    )
     matched_assets: list[str] = Field(
         default_factory=list, description="실제 적용 가능한 우리 자산 id"
     )
@@ -106,4 +109,5 @@ class Decision:
     score: float
     label: str  # 입찰추천 | 검토 | 미래타깃 | 제외
     rationale: str
+    wired_risk: str = "unknown"  # 내정위험 (none/low/med/high/unknown)
     enriched: bool = False  # S4 규격서 정독 후 재평가되었는지

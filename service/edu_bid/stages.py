@@ -185,6 +185,7 @@ def decide(
     gate_result: GateResult,
     axes: dict,
     quant_barrier: str,
+    wired_risk: str,
     matched_assets: list[str],
     rationale: str,
     knowledge,
@@ -214,6 +215,7 @@ def decide(
         score=round(score, 1),
         label=label,
         rationale=rationale,
+        wired_risk=wired_risk,
     )
 
 
@@ -245,7 +247,7 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
         lines.append(
             f" · 사업유형: {a.work_type or '?'} | 축: 재사용 {d.axes.get('reuse')} / 수주 {d.axes.get('winnability')}"
             f" / 가치 {d.axes.get('value')} / 실적적립 {d.axes.get('performance_building')}"
-            f" | 정량장벽 {d.quant_barrier} | 낙찰 {a.award_method or '미상'}"
+            f" | 정량장벽 {d.quant_barrier} | 내정위험 {d.wired_risk} | 낙찰 {a.award_method or '미상'}"
         )
         lines.append(f" · 자산: {assets}")
         lines.append(f" · 근거: {d.rationale}")
