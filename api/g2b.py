@@ -13,7 +13,7 @@
 import os
 import requests
 
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 
 # 업무구분(kind) → 입찰공고목록 오퍼레이션명
 BID_LIST_OPERATIONS = {

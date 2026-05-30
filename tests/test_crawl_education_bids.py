@@ -12,6 +12,7 @@ from scripts.crawl_education_bids import (
     build_window,
     extract_items,
     summarize_item,
+    dedupe_by_notice,
     evaluate_announcements,
     format_slack_text,
     run,
@@ -127,6 +128,30 @@ def test_summarize_item_field_fallback():
     s2 = summarize_item(item_split)
     assert s2["notice_dt"] == "20260529"
     assert s2["url"] == "http://x/2"
+
+
+# --- dedupe_by_notice ---
+
+
+def test_dedupe_keeps_latest_order():
+    """같은 공고번호의 차수 000/001 중 최신(001)만 남고, 다른 공고는 유지."""
+    items = [
+        {"bidNtceNo": "R1", "bidNtceOrd": "000", "bidNtceNm": "A 재공고전"},
+        {"bidNtceNo": "R1", "bidNtceOrd": "001", "bidNtceNm": "A 재공고"},
+        {"bidNtceNo": "R2", "bidNtceOrd": "000", "bidNtceNm": "B"},
+    ]
+    out = dedupe_by_notice(items)
+    assert len(out) == 2
+    by_no = {i["bidNtceNo"]: i for i in out}
+    assert by_no["R1"]["bidNtceOrd"] == "001"
+    assert by_no["R2"]["bidNtceNm"] == "B"
+
+
+def test_dedupe_passthrough_without_no():
+    """공고번호가 없는 항목은 그대로 통과시킨다."""
+    items = [{"bidNtceNm": "no-number-1"}, {"bidNtceNm": "no-number-2"}]
+    out = dedupe_by_notice(items)
+    assert len(out) == 2
 
 
 # --- evaluate_announcements (배치 인덱스 매핑) ---

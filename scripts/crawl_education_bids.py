@@ -19,9 +19,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
+import time as _time
 import argparse
 from datetime import date, datetime, time, timedelta
 
+import requests
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -34,6 +36,8 @@ load_dotenv()
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 50  # 무한 페이지네이션 방지
+_FETCH_RETRIES = 4  # 게이트웨이 일시 오류(403/5xx) 페이지 단위 재시도 횟수
+_FETCH_RETRY_WAIT = 2.0  # 재시도 간격(초)
 
 
 # --- LLM 평가 스키마 ---
@@ -105,6 +109,36 @@ def extract_items(payload: dict) -> tuple[list[dict], int]:
     return [], total
 
 
+def _fetch_page_with_retry(kind, inqry_bgn, inqry_end, page, session):
+    """한 페이지를 조회하되 게이트웨이 일시 오류(403/5xx)는 짧게 재시도한다.
+
+    data.go.kr 게이트웨이는 다중 노드라, 활용신청 승인 전파 중이거나 일시적으로
+    일부 노드가 403/5xx를 반환하는 경우가 관측된다. 페이지 단위 재시도로 수집
+    전체가 중단되지 않게 한다.
+    """
+    last_exc = None
+    for attempt in range(_FETCH_RETRIES):
+        try:
+            return get_bid_pblanc_list(
+                kind,
+                inqry_bgn,
+                inqry_end,
+                page_no=page,
+                num_of_rows=_PAGE_SIZE,
+                session=session,
+            )
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status != 403 and not (status and 500 <= status < 600):
+                raise
+            last_exc = exc
+            print(
+                f"[edu-bid] {kind} p{page} 일시 오류 {status} 재시도 {attempt + 1}/{_FETCH_RETRIES}"
+            )
+            _time.sleep(_FETCH_RETRY_WAIT)
+    raise last_exc
+
+
 def collect_announcements(
     kinds: list[str], inqry_bgn: str, inqry_end: str, session=None
 ) -> list[dict]:
@@ -113,14 +147,7 @@ def collect_announcements(
     for kind in kinds:
         page = 1
         while page <= _MAX_PAGES:
-            payload = get_bid_pblanc_list(
-                kind,
-                inqry_bgn,
-                inqry_end,
-                page_no=page,
-                num_of_rows=_PAGE_SIZE,
-                session=session,
-            )
+            payload = _fetch_page_with_retry(kind, inqry_bgn, inqry_end, page, session)
             items, total = extract_items(payload)
             for item in items:
                 item["_kind"] = kind
@@ -130,6 +157,32 @@ def collect_announcements(
                 break
             page += 1
     return collected
+
+
+def dedupe_by_notice(raw_items: list[dict]) -> list[dict]:
+    """같은 공고번호(bidNtceNo)의 여러 차수(bidNtceOrd)는 최신 차수만 남긴다.
+
+    재공고·변경으로 같은 공고가 차수만 달리해 중복 노출되는 것을 방지한다.
+    공고번호가 없는 항목은 그대로 둔다.
+    """
+    latest: dict[str, dict] = {}
+    passthrough: list[dict] = []
+    for item in raw_items:
+        no = _first(item, "bidNtceNo", "bidno")
+        if not no:
+            passthrough.append(item)
+            continue
+        ord_str = _first(item, "bidNtceOrd")
+        ord_val = int(ord_str) if ord_str.isdigit() else -1
+        prev = latest.get(no)
+        if prev is None:
+            latest[no] = item
+        else:
+            prev_ord_str = _first(prev, "bidNtceOrd")
+            prev_ord = int(prev_ord_str) if prev_ord_str.isdigit() else -1
+            if ord_val >= prev_ord:
+                latest[no] = item
+    return list(latest.values()) + passthrough
 
 
 def _first(item: dict, *keys: str) -> str:
@@ -241,12 +294,23 @@ def format_slack_text(
 # --- 엔트리포인트 ---
 
 
-def run(cfg: EducationBidCrawlerConfig, today: date, dry_run: bool, session=None):
+def run(
+    cfg: EducationBidCrawlerConfig,
+    today: date,
+    dry_run: bool,
+    session=None,
+    limit: int | None = None,
+):
     window = build_window(today, cfg.lookback_days)
     print(f"[edu-bid] 조회 구간: {window[0]} ~ {window[1]} / kinds={cfg.kinds}")
 
     raw_items = collect_announcements(cfg.kinds, window[0], window[1], session=session)
     print(f"[edu-bid] 수집 공고: {len(raw_items)}건")
+    raw_items = dedupe_by_notice(raw_items)
+    print(f"[edu-bid] 차수 dedup 후: {len(raw_items)}건")
+    if limit is not None:
+        raw_items = raw_items[:limit]
+        print(f"[edu-bid] --limit 적용: 앞 {len(raw_items)}건만 평가")
     if not raw_items:
         print("[edu-bid] 공고 없음. 종료.")
         return
@@ -286,6 +350,9 @@ def main():
     parser.add_argument(
         "--dry-run", action="store_true", help="Slack 전송 없이 콘솔 출력"
     )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="평가할 공고 수 상한(테스트용)"
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -294,7 +361,7 @@ def main():
         print("education_bid_crawler 설정이 config.yaml에 없습니다.")
         return
 
-    run(cfg, date.today(), dry_run=args.dry_run)
+    run(cfg, date.today(), dry_run=args.dry_run, limit=args.limit)
 
 
 if __name__ == "__main__":
