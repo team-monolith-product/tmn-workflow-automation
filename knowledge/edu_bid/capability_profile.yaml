@@ -25,11 +25,11 @@ assets:
     name: 공교육 다중 IdP 연동 (웨일스페이스·시도교육청 SAML·티처빌·네이버웍스)
     repos: [jce-user-rails, omniauth-whalespace]
     covers:
-      - 네이버 웨일 스페이스 OAuth2 (재사용 OmniAuth gem, MIT 공개)
-      - SAML 2.0 SP(AIEP, 시도교육청 통합플랫폼) — IdP 메타데이터·ACS·SLO
-      - 티처빌·네이버웍스·Google/MS Workspace 학교계정 로그인
-    keywords: [웨일스페이스, 간편인증, 교육청 연동, SAML, 통합인증, 티처빌, 학교계정, 단일로그인]
-    maturity: beta   # 코드 완성, 일부 테넌트는 결합 대기(시크릿 공란)
+      - 네이버 웨일 스페이스 OAuth2 — 실유저 운영 중 (재사용 OmniAuth gem, MIT 공개)
+      - SAML 2.0 SP(AIEP, 시도교육청 통합플랫폼) — 실유저 운영 중, IdP 메타데이터·ACS·SLO
+      - 티처빌(연동 완료, 현재 실유저 없음)·네이버웍스·Google/MS Workspace 학교계정
+    keywords: [웨일스페이스, 간편인증, 교육청 연동, AIEP, SAML, 통합인증, 티처빌, 학교계정, 단일로그인]
+    maturity: production   # 웨일·SAML(AIEP 교육청) 실유저 운영. 티처빌은 연동만(실유저 없음)
     edu_bid_relevance: high
     evidence: jce-user-rails app/services/aiep/{idp,sp}_metadata_service.rb, app/apis/{whalespace,teacherville,naverworks}_api, omniauth-whalespace/lib/omniauth/strategies/whalespace.rb
 
@@ -40,7 +40,8 @@ assets:
       - NCP 정부클라우드(gov-ntruss) NKS+VPC+VPN+Vault+ArgoCD 운영
       - 발행사·교육청 전용 멀티테넌시 프로비저닝, AWS 다중리전 병행
       - 18종 서비스 Helm 차트 배포(class/user/admin-rails, codle-react, ai-fastapi, jupyter-hub, scratch/entry/makecode, codap, keris-sso)
-    keywords: [정부클라우드, NCP, 네이버클라우드, 공교육 인프라, 망분리, CSAP, 멀티테넌트, 보안인증]
+      - 글로벌 진출 파일럿 — 중동(mes1) 운영 후 영국 리전 이전(정세). 해외 구축 경험
+    keywords: [정부클라우드, NCP, 네이버클라우드, 공교육 인프라, 망분리, CSAP, 멀티테넌트, 보안인증, 글로벌]
     maturity: production
     edu_bid_relevance: high
     evidence: ped-terraform/ncloud/live/prd, jce-service-helm(18 charts, ncloud-prd 이미지 2026-03)

@@ -1,24 +1,53 @@
 # 팀모노리스 자격·실적 원장 (지식 레이어, append-only)
 # 하드 게이트(S2)의 근거이자, 수주할 때마다 실적이 쌓이는 살아있는 원장.
 # - S8(결과원장)이 수주 건을 performance 에 append 하면 다음부터 더 많은 게이트가 열린다.
-# - totals_by_domain 은 performance 에서 파생 계산(별도 기입 불필요).
-version: 1
+# - 실적은 "있다/없다"가 아니라 계약 성격으로 종류가 갈린다. contract_type 으로 분류 기록.
+version: 2
 updated: 2026-05-30
 
 credentials:
-  sw_business_report: true       # SW사업자 신고 (보유 확인)
-  direct_production_cert: true   # 직접생산증명 (보유 확인)
-  region: null                   # TODO: 본사 소재지(지역제한 판정용). 예: 서울특별시
+  sw_business_report: true        # 소프트웨어사업자 신고 (보유)
+  region: 서울특별시               # 본사 소재지 (지역제한 게이트용)
+
+  # 중소기업자간 경쟁 직접생산확인 — 보유 세부품명.
+  # 이 품명의 중기간경쟁 공고는 직접생산 게이트 통과.
+  direct_production:
+    - 패키지소프트웨어개발및도입서비스
+    - 정보시스템개발서비스
+    - 소프트웨어유지및지원서비스
+    - 정보시스템유지관리서비스
+    - 인터넷지원개발서비스
+    - 기타행사기획및대행서비스
+
+  # 가점·필수 인증 (적격심사 정량점수 / 일부 공고 참가요건)
+  certifications:
+    - name: CSAP             # 클라우드보안인증
+      held: true
+      expires: 2026-10       # 갱신 필요 — 계약기간이 만료 이후면 게이트 주의/플래그
+    - name: 기업부설연구소
+      held: true
+    - name: 벤처기업확인
+      held: true
 
 # 실적 원장: 수주·수행 건을 한 줄씩 추가 (append-only).
-# 현재 교육분야 실적은 보유하나 약함 → 파이프라인의 전략 목표 중 하나가 이 원장을 키우는 것.
-# TODO: 기존 수행 실적을 아래 형식으로 채울 것. (임의 생성 금지 — 실제 건만)
+# TODO: 실제 계약 건만 기입(임의 생성 금지). 각 건에 contract_type 필수.
+#   contract_type: 구축개발 | 운영 | 유지관리 | SW공급이용  (입찰 실적요건 매칭 기준)
 performance: []
 # 예시 형식:
 # performance:
-#   - project: ○○ 코딩교육 플랫폼 구축·운영
-#     domain: SW교육          # SW교육 | 에듀테크플랫폼 | 교육콘텐츠 | 교원연수 | ...
-#     amount: 120000000       # 계약금액(원)
+#   - project: ○○ AI디지털교과서 통합플랫폼 연동 구축
+#     contract_type: 구축개발     # 이게 무엇이냐로 어떤 입찰에 쓸 수 있는지 갈림
+#     domain: AIDT연동            # AIDT연동 | SW교육플랫폼 | 코딩교육운영 | 교육콘텐츠 | ...
+#     amount: 120000000          # 계약금액(원)
 #     year: 2025
-#     client: ○○교육청
-#     ref: 계약번호 또는 증빙
+#     client: 금성출판사          # 발주처(민간 발행사면 원청)
+#     prime: true                # 원도급(true)/하도급(false)/공동수급(지분율 기재)
+#     evidence: 실적증명서|계약서+세금계산서  # 증빙 종류
+
+# ── 확정 대기 단서 (코드/배포 정황 → 계약유형·금액·연도 확인 후 performance 로 이관) ──
+pending_confirmation:
+  - clue: KERIS AIDT 통합플랫폼 SSO·로스터 연동 운영 (GID teammonolith_01)
+    publishers: [YBM, 금성출판사, 잇플]   # ks=금성출판사 확인됨
+    need: 발행사별 계약유형(위탁개발/구축 vs 플랫폼 이용)·금액·연도·원/하도급
+  - clue: 글로벌 진출 파일럿 — 중동(mes1) 운영 후 영국 리전 이전(중동정세). 일부 파일럿 프로젝트 수행
+    need: 해외 구축/운영 실적으로 정리 가능한지(발주처·계약유형)
