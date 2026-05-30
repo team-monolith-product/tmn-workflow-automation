@@ -20,6 +20,7 @@ class Knowledge:
     eligibility_ledger: dict
     scoring_policy: dict
     source_registry: dict
+    work_types: dict
 
     @property
     def assets(self) -> list[dict]:
@@ -50,4 +51,5 @@ def load_knowledge(knowledge_dir: str | None = None) -> Knowledge:
         eligibility_ledger=_load("eligibility_ledger.yaml", base),
         scoring_policy=_load("scoring_policy.yaml", base),
         source_registry=_load("source_registry.yaml", base),
+        work_types=_load("work_types.yaml", base),
     )

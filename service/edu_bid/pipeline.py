@@ -47,6 +47,21 @@ def run(
             candidates.append((a, matched))
     print(f"[edu-bid] 트리아지 통과: {len(candidates)}건")
 
+    # S3.5 사업유형 분류 + 무관 유형 사전 제외(비용 절감)
+    drop_types = set(kn.work_types.get("drop_for_eval", []))
+    kept: list[tuple] = []
+    dropped_wt = 0
+    for a, matched in candidates:
+        a.work_type = stages.classify_work_type(a, kn.work_types)
+        if a.work_type in drop_types:
+            dropped_wt += 1
+        else:
+            kept.append((a, matched))
+    candidates = kept
+    print(
+        f"[edu-bid] 사업유형 무관 제외: {dropped_wt}건 / 남은 후보: {len(candidates)}건"
+    )
+
     # S2 게이트 — 참가 불가(fail)는 평가 전에 제외해 LLM 비용 절감.
     # near_miss/pass 만 평가 대상으로 넘긴다.
     eligibility = kn.eligibility_ledger

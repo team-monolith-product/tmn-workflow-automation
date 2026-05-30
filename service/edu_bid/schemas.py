@@ -38,7 +38,10 @@ class Announcement:
     price_eval_rate: str  # 입찰가격평가비율 (bidPrceEvlRt)
     info_biz: str  # 정보화사업여부 (infoBizYn)
     service_div: str  # 용역구분명 (srvceDivNm)
-    proc_class: str  # 조달 분류 (pubPrcrmntClsfcNm)
+    proc_class: str  # 조달 소분류 (pubPrcrmntClsfcNm)
+    proc_mid: str = ""  # 조달 중분류 (pubPrcrmntMidClsfcNm)
+    proc_large: str = ""  # 조달 대분류 (pubPrcrmntLrgClsfcNm)
+    work_type: str = ""  # 사업유형 태그 (S3에서 분류, 개발/운영/교육운영/...)
     spec_docs: list[dict] = field(default_factory=list)  # 규격서 첨부 [{name, url}]
     raw: dict = field(default_factory=dict)
 

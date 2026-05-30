@@ -67,6 +67,8 @@ def to_announcement(
         info_biz=_first(item, "infoBizYn"),
         service_div=_first(item, "srvceDivNm"),
         proc_class=_first(item, "pubPrcrmntClsfcNm"),
+        proc_mid=_first(item, "pubPrcrmntMidClsfcNm"),
+        proc_large=_first(item, "pubPrcrmntLrgClsfcNm"),
         spec_docs=spec_docs,
         raw=item,
     )
@@ -152,6 +154,25 @@ def triage(ann: Announcement, keyword_index: dict[str, list[str]]) -> list[str]:
     return matched
 
 
+# --- S3.5 사업유형 분류 ---
+
+
+def classify_work_type(ann: Announcement, work_types: dict) -> str:
+    """조달 품목분류 + 제목 키워드로 사업유형을 태깅한다.
+
+    order 순서대로, 각 유형에서 제목 키워드(우선) → 조달분류명(소/중/대) 매칭.
+    """
+    rules = work_types.get("rules", {})
+    proc_text = " ".join([ann.proc_class, ann.proc_mid, ann.proc_large])
+    for wt in work_types.get("order", []):
+        if any(kw in ann.title for kw in rules.get(wt, {}).get("title", [])):
+            return wt
+    for wt in work_types.get("order", []):
+        if any(p in proc_text for p in rules.get(wt, {}).get("proc", [])):
+            return wt
+    return work_types.get("default", "기타")
+
+
 # --- S6 결정 ---
 
 
@@ -222,7 +243,7 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
             f" · 수요기관: {a.demand_inst or a.notice_inst or '미상'} | 추정가격: {price_disp} | 마감: {a.close_dt or '미상'}"
         )
         lines.append(
-            f" · 축: 재사용 {d.axes.get('reuse')} / 수주 {d.axes.get('winnability')}"
+            f" · 사업유형: {a.work_type or '?'} | 축: 재사용 {d.axes.get('reuse')} / 수주 {d.axes.get('winnability')}"
             f" / 가치 {d.axes.get('value')} / 실적적립 {d.axes.get('performance_building')}"
             f" | 정량장벽 {d.quant_barrier} | 낙찰 {a.award_method or '미상'}"
         )

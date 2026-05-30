@@ -297,6 +297,31 @@ def test_enrich_skips_failed_download(monkeypatch):
     assert enrich.enrich(a) == ""  # 실패해도 예외 없이 빈 문자열
 
 
+# --- classify_work_type (S3.5) ---
+
+
+def test_classify_work_type():
+    wt = load_knowledge().work_types
+    assert (
+        stages.classify_work_type(
+            _ann(title="LMS 고도화", proc_class="정보시스템개발서비스"), wt
+        )
+        == "개발"
+    )
+    assert (
+        stages.classify_work_type(
+            _ann(title="AI 부트캠프 위탁운영", proc_class="기타교육서비스"), wt
+        )
+        == "교육운영"
+    )
+    assert (
+        stages.classify_work_type(
+            _ann(title="가로수 전지 용역", proc_large="폐기물 처리 및 재활용서비스"), wt
+        )
+        == "무관"
+    )
+
+
 # --- sources 캐시 (S0) ---
 
 

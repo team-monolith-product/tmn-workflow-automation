@@ -64,7 +64,8 @@ def _strategy_block(knowledge) -> str:
 
 def _announcement_line(i: int, ann: Announcement, matched: list[str]) -> str:
     return (
-        f"[{i}] {ann.title} | 수요기관:{ann.demand_inst or ann.notice_inst or '미상'}"
+        f"[{i}] {ann.title} | 사업유형:{ann.work_type or '?'}"
+        f" | 수요기관:{ann.demand_inst or ann.notice_inst or '미상'}"
         f" | 추정가:{ann.estimated_price or '미상'} | 낙찰방식:{ann.award_method or '미상'}"
         f" | 실적경쟁:{ann.result_competition or '?'} | 기술평가율:{ann.tech_eval_rate or '-'}"
         f" | 가격평가율:{ann.price_eval_rate or '-'} | 재공고:{ann.re_notice or '?'}"
