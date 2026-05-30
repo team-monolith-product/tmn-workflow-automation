@@ -46,28 +46,49 @@ def run(
             candidates.append((a, matched))
     print(f"[edu-bid] 트리아지 통과: {len(candidates)}건")
 
-    if limit is not None:
-        candidates = candidates[:limit]
-        print(f"[edu-bid] --limit 적용: {len(candidates)}건만 평가")
-    if not candidates:
-        print("[edu-bid] 후보 없음. 종료.")
-        return []
-
-    # S5 평가
-    evals = evaluate.evaluate(candidates, kn, model, batch_size)
-
-    # S2 게이트 + S6 결정
+    # S2 게이트 — 참가 불가(fail)는 평가 전에 제외해 LLM 비용 절감.
+    # near_miss/pass 만 평가 대상으로 넘긴다.
     eligibility = kn.eligibility_ledger
-    decisions: list[Decision] = []
-    for i, (ann, matched) in enumerate(candidates):
+    decisions: list[Decision] = []  # 사전 제외분 포함
+    gated: list[tuple] = []  # (ann, matched, gate)
+    for ann, matched in candidates:
+        g = stages.gate(ann, eligibility)
+        if g.status == "fail":
+            decisions.append(
+                Decision(
+                    announcement=ann,
+                    gate=g,
+                    axes={},
+                    quant_barrier="n/a",
+                    matched_assets=matched,
+                    score=0.0,
+                    label="제외",
+                    rationale=g.reasons[0] if g.reasons else "게이트 탈락",
+                )
+            )
+        else:
+            gated.append((ann, matched, g))
+    print(
+        f"[edu-bid] 게이트 제외(참가불가): {len(decisions)}건 / 평가대상: {len(gated)}건"
+    )
+
+    if limit is not None:
+        gated = gated[:limit]
+        print(f"[edu-bid] --limit 적용: {len(gated)}건만 평가")
+    if not gated:
+        print("[edu-bid] 평가 대상 없음. 종료.")
+        return decisions
+
+    # S5 평가 + S6 결정 (게이트는 이미 계산됨)
+    evals = evaluate.evaluate([(a, m) for a, m, _ in gated], kn, model, batch_size)
+    for i, (ann, matched, g) in enumerate(gated):
         ev = evals.get(i)
         if ev is None:
             continue
-        gate_result = stages.gate(ann, eligibility)
         decisions.append(
             stages.decide(
                 ann,
-                gate_result,
+                g,
                 ev.axes.model_dump(),
                 ev.quant_barrier,
                 ev.matched_assets or matched,
