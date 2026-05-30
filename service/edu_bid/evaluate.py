@@ -33,7 +33,8 @@ def _eligibility_block(knowledge) -> str:
     e = knowledge.eligibility_ledger
     cred = e.get("credentials", {})
     perf = e.get("performance", []) or []
-    dp = ", ".join(cred.get("direct_production", []))
+    dp = ", ".join(d["name"] for d in cred.get("direct_production", []))
+    inds = ", ".join(r["name"] for r in cred.get("industry_registrations", []))
     certs = ", ".join(c.get("name") for c in cred.get("certifications", []))
     perf_state = (
         f"{len(perf)}건"
@@ -41,8 +42,10 @@ def _eligibility_block(knowledge) -> str:
         else "정량 실적금액 약함(직접 용역계약 부족, RS·이용계약 위주)"
     )
     return (
-        f"- 소재지: {cred.get('region')}\n"
-        f"- 보유자격: SW사업자신고={cred.get('sw_business_report')}, 직접생산확인=[{dp}], 인증=[{certs}]\n"
+        f"- 소재지: {cred.get('region')} | SW사업자신고={cred.get('sw_business_report')}\n"
+        f"- 업종등록(참가자격): [{inds}]\n"
+        f"- 직접생산확인: [{dp}]\n"
+        f"- 인증: [{certs}]\n"
         f"- 정량 실적 상태: {perf_state}"
     )
 
