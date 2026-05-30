@@ -9,7 +9,6 @@ from datetime import date, datetime, time, timedelta
 
 from .schemas import Announcement, GateResult, Decision
 
-
 # --- 공통 ---
 
 
