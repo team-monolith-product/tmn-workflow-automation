@@ -11,9 +11,9 @@ from pathlib import Path
 
 import requests
 
-from api.g2b import get_bid_pblanc_list, KIND_LABELS
+from api.g2b import get_bid_pblanc_list, get_pre_spec_list, KIND_LABELS
 from .schemas import Announcement
-from .stages import to_announcement
+from .stages import to_announcement, to_announcement_prespec
 
 _PAGE_SIZE = 100
 _MAX_PAGES = 50
@@ -72,8 +72,24 @@ def _fetch_page(kind: str, bgn: str, end: str, page: int, session) -> dict:
     raise last_exc
 
 
+def _paginate(fetch_fn, kind: str, bgn: str, end: str, session) -> list[dict]:
+    """fetch_fn(kind, bgn, end, page_no, num_of_rows, session=) 로 구간 전체 수집."""
+    out: list[dict] = []
+    page = 1
+    while page <= _MAX_PAGES:
+        payload = fetch_fn(
+            kind, bgn, end, page_no=page, num_of_rows=_PAGE_SIZE, session=session
+        )
+        items, total = _extract_items(payload)
+        out.extend(items)
+        if not items or len(out) >= total:
+            break
+        page += 1
+    return out
+
+
 def _fetch_g2b_raw(kind: str, bgn: str, end: str, session) -> list[dict]:
-    """업무구분 구간 내 raw item 전체를 페이지네이션하며 수집(정규화 전)."""
+    """본공고 raw item 전체 (403/5xx 재시도는 _fetch_page 가 처리)."""
     out: list[dict] = []
     page = 1
     while page <= _MAX_PAGES:
@@ -86,11 +102,36 @@ def _fetch_g2b_raw(kind: str, bgn: str, end: str, session) -> list[dict]:
     return out
 
 
-def _collect_g2b(
+_ADAPTERS = ("g2b", "g2b_presearch")
+
+
+def _adapter_meta(adapter: str):
+    """어댑터별 (정규화 함수, 업무구분 라벨 접미)."""
+    if adapter == "g2b":
+        return to_announcement, ""
+    if adapter == "g2b_presearch":
+        return to_announcement_prespec, "(사전규격)"
+    raise ValueError(f"미지원 어댑터: {adapter}")
+
+
+def _fetch_adapter_raw(
+    adapter: str, kind: str, bgn: str, end: str, session
+) -> list[dict]:
+    """어댑터별 raw 수집. 이름으로 분기해 호출(테스트에서 패치 가능)."""
+    if adapter == "g2b":
+        return _fetch_g2b_raw(kind, bgn, end, session)
+    if adapter == "g2b_presearch":
+        return _paginate(get_pre_spec_list, kind, bgn, end, session)
+    raise ValueError(f"미지원 어댑터: {adapter}")
+
+
+def _collect_adapter(
     source: dict, bgn: str, end: str, session, use_cache: bool
 ) -> list[Announcement]:
     kind = source["kind"]
     source_id = source["id"]
+    adapter = source["adapter"]
+    normalize, label_suffix = _adapter_meta(adapter)
     cache = _cache_path(source_id, bgn, end)
 
     if use_cache and cache.exists():
@@ -99,7 +140,7 @@ def _collect_g2b(
             f"[edu-bid] 캐시 사용 {source_id} {bgn}~{end}: {len(raw_items)}건 (API 미호출)"
         )
     else:
-        raw_items = _fetch_g2b_raw(kind, bgn, end, session)
+        raw_items = _fetch_adapter_raw(adapter, kind, bgn, end, session)
         if use_cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(
@@ -107,7 +148,8 @@ def _collect_g2b(
             )
             print(f"[edu-bid] 캐시 저장 {source_id} {bgn}~{end}: {len(raw_items)}건")
 
-    return [to_announcement(it, source_id, kind, KIND_LABELS[kind]) for it in raw_items]
+    label = KIND_LABELS[kind] + label_suffix
+    return [normalize(it, source_id, kind, label) for it in raw_items]
 
 
 def collect(
@@ -118,8 +160,8 @@ def collect(
     collected: list[Announcement] = []
     for source in knowledge.enabled_sources:
         adapter = source.get("adapter")
-        if adapter == "g2b":
-            collected.extend(_collect_g2b(source, bgn, end, session, use_cache))
+        if adapter in _ADAPTERS:
+            collected.extend(_collect_adapter(source, bgn, end, session, use_cache))
         else:
             print(
                 f"[edu-bid] 미지원 어댑터 '{adapter}' (source={source.get('id')}) 건너뜀"

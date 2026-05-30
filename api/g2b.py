@@ -34,6 +34,55 @@ KIND_LABELS = {
 # 조회구분(inqryDiv): 1=공고게시일시 기준, 2=개찰일시 기준
 INQRY_DIV_NOTICE_DATE = "1"
 
+# 사전규격정보서비스 (데이터 15129437) — Base 가 /ao/ 로 본공고(/ad/)와 다름.
+PRESPEC_BASE_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService"
+PRESPEC_LIST_OPERATIONS = {
+    "servc": "getPublicPrcureThngInfoServc",  # 용역
+    "thng": "getPublicPrcureThngInfoThng",  # 물품
+    "cnstwk": "getPublicPrcureThngInfoCnstwk",  # 공사
+    "frgcpt": "getPublicPrcureThngInfoFrgcpt",  # 외자
+}
+
+
+def get_pre_spec_list(
+    kind: str,
+    inqry_bgn: str,
+    inqry_end: str,
+    page_no: int = 1,
+    num_of_rows: int = 100,
+    inqry_div: str = INQRY_DIV_NOTICE_DATE,
+    timeout: int = 20,
+    session: requests.Session | None = None,
+) -> dict:
+    """사전규격 목록을 업무구분별로 1페이지 조회한다 (raw JSON 반환).
+
+    본공고 전 단계. 인증키는 본공고와 동일 계정 키를 공유한다(서비스 15129437 활용신청 후).
+    """
+    if kind not in PRESPEC_LIST_OPERATIONS:
+        raise ValueError(
+            f"알 수 없는 업무구분 '{kind}'. 가능: {sorted(PRESPEC_LIST_OPERATIONS)}"
+        )
+    service_key = os.environ.get("DATA_GO_KR_BID_KEY")
+    if not service_key:
+        raise RuntimeError(
+            "DATA_GO_KR_BID_KEY 환경변수가 없습니다. "
+            "공공데이터포털 '조달청_나라장터 사전규격정보서비스'(15129437) 활용신청 후 키를 설정하세요."
+        )
+    http = session or requests
+    url = f"{PRESPEC_BASE_URL}/{PRESPEC_LIST_OPERATIONS[kind]}"
+    params = {
+        "serviceKey": service_key,
+        "inqryDiv": inqry_div,
+        "inqryBgnDt": inqry_bgn,
+        "inqryEndDt": inqry_end,
+        "pageNo": str(page_no),
+        "numOfRows": str(num_of_rows),
+        "type": "json",
+    }
+    resp = http.get(url, params=params, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
 
 def get_bid_pblanc_list(
     kind: str,

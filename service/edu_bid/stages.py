@@ -74,6 +74,61 @@ def to_announcement(
     )
 
 
+def to_announcement_prespec(
+    item: dict, source: str, kind: str, kind_label: str
+) -> Announcement:
+    """사전규격 raw item → Announcement (본공고와 필드가 달라 별도 매핑).
+
+    사전규격은 공고 전 단계라 낙찰방식·실적경쟁 등은 없다. 대신 의견등록 마감(영업 윈도우)과
+    규격서 파일을 제공한다. 세부품명(prdctDtlList)을 proc_class 로 써서 work_type 분류에 활용.
+    """
+    spec_docs = [
+        {"name": f"규격서{i}", "url": item[f"specDocFileUrl{i}"]}
+        for i in range(1, 6)
+        if item.get(f"specDocFileUrl{i}")
+    ]
+    # prdctDtlList: "[순번^물품분류번호^세부품명]" (다건 가능) → 첫 세부품명
+    detail = _first(item, "prdctDtlList")
+    proc_class = ""
+    if "^" in detail:
+        parts = detail.strip("[]").split("]")[0].split("^")
+        if len(parts) >= 3:
+            proc_class = parts[2]
+    opinion_close = _first(item, "opninRgstClseDt")
+    return Announcement(
+        source=source,
+        kind=kind,
+        kind_label=kind_label,
+        bid_no=_first(item, "bfSpecRgstNo"),
+        bid_ord="0",
+        title=_first(item, "prdctClsfcNoNm"),
+        notice_inst=_first(item, "orderInsttNm"),
+        demand_inst=_first(item, "rlDminsttNm"),
+        notice_dt=_first(item, "rcptDt"),
+        close_dt=opinion_close,
+        opening_dt="",
+        estimated_price=_first(item, "asignBdgtAmt"),
+        budget_amt=_first(item, "asignBdgtAmt"),
+        url=spec_docs[0]["url"] if spec_docs else "",
+        award_method="",
+        contract_method="",
+        re_notice="",
+        result_competition="",
+        industry_limit="",
+        region_limit_basis="",
+        tech_eval_rate="",
+        price_eval_rate="",
+        info_biz=_first(item, "swBizObjYn"),
+        service_div=_first(item, "bsnsDivNm"),
+        proc_class=proc_class,
+        stage="presearch",
+        opinion_close_dt=opinion_close,
+        pre_spec_no=_first(item, "bfSpecRgstNo"),
+        spec_docs=spec_docs,
+        raw=item,
+    )
+
+
 def dedupe_by_notice(anns: list[Announcement]) -> list[Announcement]:
     """같은 공고번호의 여러 차수는 최신 차수만 남긴다."""
     latest: dict[str, Announcement] = {}
@@ -240,9 +295,17 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
         )
         assets = ", ".join(d.matched_assets) if d.matched_assets else "-"
         tag = " :page_facing_up:정독" if d.enriched else ""
-        lines.append(f"*[{d.label}·{d.score}점]{tag} {a.title}* ({a.kind_label})")
+        stage_tag = " :hourglass:사전규격" if a.stage == "presearch" else ""
         lines.append(
-            f" · 수요기관: {a.demand_inst or a.notice_inst or '미상'} | 추정가격: {price_disp} | 마감: {a.close_dt or '미상'}"
+            f"*[{d.label}·{d.score}점]{tag}{stage_tag} {a.title}* ({a.kind_label})"
+        )
+        deadline = (
+            f"의견마감: {a.opinion_close_dt or '미상'}"
+            if a.stage == "presearch"
+            else f"마감: {a.close_dt or '미상'}"
+        )
+        lines.append(
+            f" · 수요기관: {a.demand_inst or a.notice_inst or '미상'} | 추정가격: {price_disp} | {deadline}"
         )
         lines.append(
             f" · 사업유형: {a.work_type or '?'} | 축: 재사용 {d.axes.get('reuse')} / 수주 {d.axes.get('winnability')}"

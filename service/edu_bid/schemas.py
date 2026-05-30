@@ -42,6 +42,9 @@ class Announcement:
     proc_mid: str = ""  # 조달 중분류 (pubPrcrmntMidClsfcNm)
     proc_large: str = ""  # 조달 대분류 (pubPrcrmntLrgClsfcNm)
     work_type: str = ""  # 사업유형 태그 (S3에서 분류, 개발/운영/교육운영/...)
+    stage: str = "notice"  # notice=본공고 | presearch=사전규격
+    opinion_close_dt: str = ""  # 사전규격 의견등록 마감일시 (영업·의견제출 윈도우)
+    pre_spec_no: str = ""  # 사전규격등록번호 (bfSpecRgstNo)
     spec_docs: list[dict] = field(default_factory=list)  # 규격서 첨부 [{name, url}]
     raw: dict = field(default_factory=dict)
 

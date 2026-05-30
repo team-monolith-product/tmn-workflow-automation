@@ -15,6 +15,10 @@ sources:
     adapter: g2b
     kind: cnstwk
     enabled: false
+  - id: g2b_presearch_servc  # 나라장터 사전규격 용역 (본공고 전 단계, 의견제출 윈도우)
+    adapter: g2b_presearch
+    kind: servc
+    enabled: true
   - id: s2b                # 학교장터 (오픈API 없음 → 크롤러 어댑터 필요, 미구현)
     adapter: s2b
     enabled: false

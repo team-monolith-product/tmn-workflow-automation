@@ -83,6 +83,38 @@ def test_to_announcement_maps_signal_fields():
     assert a.key == "R26BK01550144-000"
 
 
+# --- to_announcement_prespec (사전규격) ---
+
+
+def test_to_announcement_prespec_maps_fields():
+    item = {
+        "bfSpecRgstNo": "R26BD00232047",
+        "prdctClsfcNoNm": "AI 코딩교육 플랫폼 구축",
+        "orderInsttNm": "조달청 광주지방조달청",
+        "rlDminsttNm": "○○대학교",
+        "asignBdgtAmt": "161526000",
+        "rcptDt": "2026-05-26 07:40:57",
+        "opninRgstClseDt": "2026-05-31 23:59:00",
+        "swBizObjYn": "Y",
+        "bsnsDivNm": "일반용역",
+        "prdctDtlList": "[1^8111159901^정보시스템개발서비스]",
+        "specDocFileUrl1": "http://spec/1",
+    }
+    a = stages.to_announcement_prespec(
+        item, "g2b_presearch_servc", "servc", "용역(사전규격)"
+    )
+    assert a.stage == "presearch"
+    assert a.title == "AI 코딩교육 플랫폼 구축"
+    assert a.demand_inst == "○○대학교"
+    assert a.estimated_price == "161526000"
+    assert a.opinion_close_dt == "2026-05-31 23:59:00"
+    assert a.pre_spec_no == "R26BD00232047"
+    assert a.proc_class == "정보시스템개발서비스"  # prdctDtlList 세부품명
+    assert a.spec_docs == [{"name": "규격서1", "url": "http://spec/1"}]
+    # 사전규격엔 낙찰방식 없음 → 게이트 수의시담/실적 룰 비적용
+    assert a.award_method == "" and a.result_competition == ""
+
+
 # --- dedupe ---
 
 
