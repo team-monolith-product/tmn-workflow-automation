@@ -5,7 +5,9 @@ S0 수집 — source_registry 의 활성 소스에서 공고를 모은다.
 source_registry 에 enabled 로 등록하면 된다.
 """
 
+import json
 import time
+from pathlib import Path
 
 import requests
 
@@ -17,6 +19,13 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 50
 _FETCH_RETRIES = 4
 _FETCH_RETRY_WAIT = 2.0
+
+# 날짜·소스 단위 원본 캐시 (조회 구간은 지나간 하루라 불변 → TTL 불필요)
+_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache" / "edu_bid"
+
+
+def _cache_path(source_id: str, bgn: str, end: str) -> Path:
+    return _CACHE_DIR / f"{source_id}_{bgn}_{end}.json"
 
 
 def _extract_items(payload: dict) -> tuple[list[dict], int]:
@@ -63,30 +72,54 @@ def _fetch_page(kind: str, bgn: str, end: str, page: int, session) -> dict:
     raise last_exc
 
 
-def _collect_g2b(source: dict, bgn: str, end: str, session) -> list[Announcement]:
-    kind = source["kind"]
-    source_id = source["id"]
-    out: list[Announcement] = []
+def _fetch_g2b_raw(kind: str, bgn: str, end: str, session) -> list[dict]:
+    """업무구분 구간 내 raw item 전체를 페이지네이션하며 수집(정규화 전)."""
+    out: list[dict] = []
     page = 1
     while page <= _MAX_PAGES:
         payload = _fetch_page(kind, bgn, end, page, session)
         items, total = _extract_items(payload)
-        for it in items:
-            out.append(to_announcement(it, source_id, kind, KIND_LABELS[kind]))
+        out.extend(items)
         if not items or len(out) >= total:
             break
         page += 1
     return out
 
 
-def collect(knowledge, window: tuple[str, str], session=None) -> list[Announcement]:
-    """활성 소스 전부에서 공고를 수집한다."""
+def _collect_g2b(
+    source: dict, bgn: str, end: str, session, use_cache: bool
+) -> list[Announcement]:
+    kind = source["kind"]
+    source_id = source["id"]
+    cache = _cache_path(source_id, bgn, end)
+
+    if use_cache and cache.exists():
+        raw_items = json.loads(cache.read_text(encoding="utf-8"))
+        print(
+            f"[edu-bid] 캐시 사용 {source_id} {bgn}~{end}: {len(raw_items)}건 (API 미호출)"
+        )
+    else:
+        raw_items = _fetch_g2b_raw(kind, bgn, end, session)
+        if use_cache:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(
+                json.dumps(raw_items, ensure_ascii=False), encoding="utf-8"
+            )
+            print(f"[edu-bid] 캐시 저장 {source_id} {bgn}~{end}: {len(raw_items)}건")
+
+    return [to_announcement(it, source_id, kind, KIND_LABELS[kind]) for it in raw_items]
+
+
+def collect(
+    knowledge, window: tuple[str, str], session=None, use_cache: bool = True
+) -> list[Announcement]:
+    """활성 소스 전부에서 공고를 수집한다. 날짜·소스 단위 원본 캐시 사용."""
     bgn, end = window
     collected: list[Announcement] = []
     for source in knowledge.enabled_sources:
         adapter = source.get("adapter")
         if adapter == "g2b":
-            collected.extend(_collect_g2b(source, bgn, end, session))
+            collected.extend(_collect_g2b(source, bgn, end, session, use_cache))
         else:
             print(
                 f"[edu-bid] 미지원 어댑터 '{adapter}' (source={source.get('id')}) 건너뜀"

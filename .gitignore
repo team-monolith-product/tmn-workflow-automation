@@ -8,3 +8,6 @@ backup_*.json
 **/.claude/settings.local.json
 
 .idea
+
+# 교육 입찰 API 원본 캐시 (날짜·소스 단위)
+.cache/

@@ -297,6 +297,31 @@ def test_enrich_skips_failed_download(monkeypatch):
     assert enrich.enrich(a) == ""  # 실패해도 예외 없이 빈 문자열
 
 
+# --- sources 캐시 (S0) ---
+
+
+def test_collect_caches_raw_per_window(monkeypatch, tmp_path):
+    from service.edu_bid import sources
+
+    monkeypatch.setattr(sources, "_CACHE_DIR", tmp_path)
+    calls = {"n": 0}
+
+    def fake_fetch(kind, bgn, end, session):
+        calls["n"] += 1
+        return [{"bidNtceNo": "R1", "bidNtceNm": "코딩교육 플랫폼"}]
+
+    monkeypatch.setattr(sources, "_fetch_g2b_raw", fake_fetch)
+
+    class _KnSrc:
+        enabled_sources = [{"adapter": "g2b", "kind": "servc", "id": "g2b_servc"}]
+
+    win = ("202605290000", "202605292359")
+    first = sources.collect(_KnSrc(), win)
+    second = sources.collect(_KnSrc(), win)  # 캐시 적중 → API 미호출
+    assert calls["n"] == 1  # 두 번째는 캐시
+    assert first[0].title == second[0].title == "코딩교육 플랫폼"
+
+
 # --- knowledge 로딩 (실파일) ---
 
 

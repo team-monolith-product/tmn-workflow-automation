@@ -23,6 +23,7 @@ def run(
     dry_run: bool,
     limit: int | None = None,
     do_enrich: bool = True,
+    use_cache: bool = True,
     session=None,
     knowledge=None,
 ) -> list[Decision]:
@@ -33,7 +34,7 @@ def run(
     )
 
     # S0 수집 + S1 정규화/dedupe
-    anns = sources.collect(kn, window, session=session)
+    anns = sources.collect(kn, window, session=session, use_cache=use_cache)
     anns = stages.dedupe_by_notice(anns)
     print(f"[edu-bid] 수집·dedupe: {len(anns)}건")
 
