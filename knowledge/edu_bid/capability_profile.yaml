@@ -1,0 +1,36 @@
+# 팀모노리스 역량·자산 프로필 (지식 레이어)
+# 재사용·수행 가능한 자산 목록. 자산이 늘거나 성숙도가 바뀌면 갱신한다.
+# - S3(트리아지) 키워드 매핑, S5(심층평가) 재사용률 판정의 기준선.
+# - maturity 는 초안 추정값. 실제에 맞게 교정할 것. (production | beta | poc)
+version: 1
+updated: 2026-05-30
+assets:
+  - id: codle
+    name: 코들 K12 코딩·SW교육 플랫폼(LMS)
+    covers: [LMS, 교사저작, 학생관리, 채점리포트, 코스운영]
+    keywords: [코딩교육, SW교육, 소프트웨어교육, 교수학습플랫폼, 에듀테크, 학습관리시스템, LMS]
+    maturity: production
+
+  - id: jupyter_judge
+    name: JupyterHub 클라우드 실습환경 + 자동채점(judge)
+    covers: [클라우드 코딩실습, 온라인 평가, 자동채점, 실습환경 제공]
+    keywords: [코딩실습, 자동채점, 온라인평가, 클라우드 실습환경, 프로그래밍 평가, 실습플랫폼]
+    maturity: production
+
+  - id: block_coding
+    name: entry/pxt 블록코딩·피지컬컴퓨팅
+    covers: [블록코딩 에디터, 피지컬컴퓨팅, 초등 SW교육 도구]
+    keywords: [블록코딩, 초등 SW, 피지컬컴퓨팅, 마이크로비트, 엔트리, 스크래치]
+    maturity: production
+
+  - id: ai_tutor
+    name: 생성형 AI 학습보조·튜터
+    covers: [AI 학습보조, 생성형 AI 교육 솔루션]
+    keywords: [AI 디지털교과서, AI 튜터, 생성형 AI, AI 교육, 지능형 학습]
+    maturity: beta   # TODO: 실제 성숙도 확인
+
+  - id: content
+    name: SW·AI 교육 콘텐츠 저작
+    covers: [교육콘텐츠 개발, 커리큘럼 설계, 교재개발]
+    keywords: [교육콘텐츠, 교재개발, 커리큘럼, 콘텐츠 개발, 학습자료]
+    maturity: production
