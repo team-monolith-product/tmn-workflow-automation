@@ -11,11 +11,11 @@ from .schemas import Announcement, BatchEval, EvalOut
 _CRITERIA = [
     "# 평가 기준(축)",
     "- reuse: 위 자산으로 요구를 저렴하게 충족하는 정도(매칭 자산이 핵심 기능을 덮을수록↑)",
-    "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑. 단 wired_risk(내정위험)가 높으면 winnability를 크게↓.",
+    "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑. wired_risk가 high일 때만 크게↓(med는 소폭, low/none은 감점 없음).",
     "- value: 체급 sweet spot 부합·후속 유지보수 가능성",
     "- performance_building: 깨끗한 직접 용역계약으로 '정량 실적금액'을 쌓아주면↑(단순 이용/물품/RS면↓)",
     "- quant_barrier: 정량 실적장벽 수준 none|low|med|high|unknown (실적경쟁=Y/실적요건 명시면 보통 high)",
-    "- wired_risk: 사전영업·내정 가능성 none|low|med|high|unknown. ↑신호: 제목이 '고도화/연장/유지관리/재계약'(기존 운영업체 유리), 규격이 특정 제품·특정 실적·특정 인증을 콕 집음(lock-in), 단독·촉박 일정. ↓신호: 재공고/유찰(내정 깨짐), '신규 구축', 기능 중심 일반 규격.",
+    "- wired_risk: 사전영업·내정 가능성 none|low|med|high|unknown. 중요: '협상에 의한 계약'이라는 낙찰방식 자체는 내정 신호가 아니다(지식기반 용역의 표준). 그것만으로 올리지 말 것. 제목의 '고도화/연장'만으로도 올리지 말 것(정상 신규 경쟁일 수 있음). med/high 는 규격서에 구체적 독소조항이 있을 때만: 특정 제품·특정 업체 지정, 기존 시스템과 동일 벤더 기술지원 확약서 요구, 한두 업체만 충족할 좁은 실적·인증 요건. 근거 없으면 low, 규격 미확인이면 unknown.",
     "교육/이러닝/에듀테크/SW·AI교육/디지털교과서와 무관하면 reuse를 낮게.",
 ]
 
@@ -153,8 +153,8 @@ def _build_deep_prompt(
         "# 규격서 본문(발췌)",
         spec_text,
         "",
-        "특히 규격서에서 '특정 제품·특정 업체 실적·특정 인증·기존 시스템 연속성'을 콕 집는 독소조항이 있으면 wired_risk를 높게(내정 정황).",
-        "index=0 으로 axes, quant_barrier, wired_risk, matched_assets, rationale 를 채워라. rationale 엔 규격서의 실제 과업 근거와 내정/lock-in 정황을 명시.",
+        "규격서에서 '특정 제품·특정 업체 실적·특정 인증·기존 시스템 동일벤더 확약서'를 콕 집는 독소조항이 실제로 있을 때만 wired_risk를 med/high로. 협상계약·고도화라는 사실만으로는 올리지 말 것(근거 없으면 low).",
+        "index=0 으로 axes, quant_barrier, wired_risk, matched_assets, rationale 를 채워라. rationale 엔 규격서의 실제 과업 근거와 (있다면) lock-in 정황을 명시.",
     ]
     return "\n".join(lines)
 
