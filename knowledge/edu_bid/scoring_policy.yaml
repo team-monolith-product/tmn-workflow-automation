@@ -1,34 +1,58 @@
 # 점수·결정 정책 (지식 레이어)
 # 전략 가중치. 사업 단계가 바뀌면 갱신한다.
 # - S5(심층평가) 프롬프트 가중, S6(결정) 임계에 사용.
-version: 1
+version: 3
 updated: 2026-05-30
+
+# ───────── 핵심 전략 (현 단계: 실적 약함) ─────────
+strategy:
+  primary:
+    id: low_barrier_high_reuse
+    desc: >
+      정량(실적) 점수 요구가 낮거나 없는 공고 중, 우리 보유 자산으로 저렴하게
+      만들 수 있는(재사용률 높은) 건을 최우선으로 한다.
+    rationale: >
+      실적이 약해 정량 배점에선 불리하다. 그러니 정량 장벽이 낮은 무대를 골라,
+      재사용률(낮은 한계원가)로 가격·수행 양면에서 이긴다.
+  secondary:
+    id: performance_building
+    desc: >
+      정량 실적금액(깨끗한 직접 용역계약 = 계약금액 명시·실적증명 가능)을 쌓아주는 건은,
+      당장 마진이 작아도 미래 장벽 해소 투자로 가점한다. (RS·이용계약 매출은 정량실적 안 됨)
+  phase_note: 실적이 충분해지면 primary의 '장벽 낮음' 가중을 낮추고 사업가치 비중을 올린다.
 
 # 체급 sweet spot: 5천만~10억 (소형+중형). 이 밖은 감점.
 ticket_size:
-  min: 50000000          # 이 미만은 수익성 약 → 감점
+  min: 50000000
   sweet_low: 50000000
-  sweet_high: 1000000000 # 10억 초과는 대기업·대형SI 경쟁 → 감점
+  sweet_high: 1000000000
 
 # 낙찰방식 stance: 재사용률이 높으면 가격경쟁에서도 이길 수 있으므로 적격심사도 조건부 참여.
 award_method_stance:
-  협상에의한계약: prefer            # 기술평가 중심 = 우리 무대
+  협상에의한계약: prefer            # 정성 기술평가 중심 = 정량 장벽 낮음 = 우리 무대
   제한경쟁: prefer
-  적격심사: conditional_on_reuse    # 재사용률 높을수록 가격경쟁력으로 참여
+  적격심사: conditional_on_reuse    # 실적 만점기준이 낮고 재사용률 높으면 참여
   최저가: conditional_on_reuse
 
-# 가중치: 균형(EV × 전략가치). 재사용률은 공통 1급 신호.
+# 수주가능성(winnability) 세부 신호 — S5가 종합 판단
+winnability_signals:
+  quant_barrier: low_is_better     # 실적제한 없음/낮음, 정량배점 작음 → 가점 (현 실적약점 회피). 핵심 전략 1
+  award_method: 위 stance 적용
+  competition: 재공고·유찰 → 가점 (경쟁 옅음)
+  agency_familiarity: 교육청·대학·KERIS·교육 유관기관 → 가점
+
+# 가중치: 핵심 전략 1(장벽 낮음 × 재사용)을 반영해 reuse·winnability를 주축으로.
 weights:
-  reuse: 0.35                # 재사용률(효율·마진)
-  winnability: 0.30          # 수주가능성(낙찰방식·경쟁·재공고·기관친숙도)
-  value: 0.20               # 사업가치(체급·LTV)
-  performance_building: 0.15 # 실적 적립 가치(현 실적 약점 보강 투자) — 실적 충분해지면 ↓
+  reuse: 0.35                # 재사용률(효율·마진) — 1급 신호
+  winnability: 0.35          # 수주가능성(정량장벽 낮음 포함) — 현 단계 핵심
+  value: 0.15               # 사업가치(체급·LTV)
+  performance_building: 0.15 # 정량 실적 적립 가치 — 실적 충분해지면 ↓
 
 # 결정 임계 (0~100 종합점수 기준)
 thresholds:
-  recommend: 70    # 입찰추천
-  review: 50       # 검토
-  future_target: 0 # 그 미만 + near-miss 게이트면 미래타깃
+  recommend: 70
+  review: 50
+  future_target: 0
 
 # 실적요건 near-miss: 요건의 이 비율 이상이면 fail 대신 '미래타깃'으로 추적
 near_miss_ratio: 0.7
