@@ -37,8 +37,10 @@ def to_announcement(
     item: dict, source: str, kind: str, kind_label: str
 ) -> Announcement:
     """G2B raw item → Announcement (필드 누락에 견고하게 폴백)."""
-    spec_urls = [
-        item[k] for k in (f"ntceSpecDocUrl{i}" for i in range(1, 11)) if item.get(k)
+    spec_docs = [
+        {"name": item.get(f"ntceSpecFileNm{i}", ""), "url": item[f"ntceSpecDocUrl{i}"]}
+        for i in range(1, 11)
+        if item.get(f"ntceSpecDocUrl{i}")
     ]
     return Announcement(
         source=source,
@@ -66,7 +68,7 @@ def to_announcement(
         info_biz=_first(item, "infoBizYn"),
         service_div=_first(item, "srvceDivNm"),
         proc_class=_first(item, "pubPrcrmntClsfcNm"),
-        spec_doc_urls=spec_urls,
+        spec_docs=spec_docs,
         raw=item,
     )
 
@@ -207,7 +209,8 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
             f"{price:,}원" if price is not None else (a.estimated_price or "미상")
         )
         assets = ", ".join(d.matched_assets) if d.matched_assets else "-"
-        lines.append(f"*[{d.label}·{d.score}점] {a.title}* ({a.kind_label})")
+        tag = " :page_facing_up:정독" if d.enriched else ""
+        lines.append(f"*[{d.label}·{d.score}점]{tag} {a.title}* ({a.kind_label})")
         lines.append(
             f" · 수요기관: {a.demand_inst or a.notice_inst or '미상'} | 추정가격: {price_disp} | 마감: {a.close_dt or '미상'}"
         )

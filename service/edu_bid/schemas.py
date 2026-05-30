@@ -39,7 +39,7 @@ class Announcement:
     info_biz: str  # 정보화사업여부 (infoBizYn)
     service_div: str  # 용역구분명 (srvceDivNm)
     proc_class: str  # 조달 분류 (pubPrcrmntClsfcNm)
-    spec_doc_urls: list[str] = field(default_factory=list)  # 규격서 첨부 URL
+    spec_docs: list[dict] = field(default_factory=list)  # 규격서 첨부 [{name, url}]
     raw: dict = field(default_factory=dict)
 
     @property
@@ -103,3 +103,4 @@ class Decision:
     score: float
     label: str  # 입찰추천 | 검토 | 미래타깃 | 제외
     rationale: str
+    enriched: bool = False  # S4 규격서 정독 후 재평가되었는지

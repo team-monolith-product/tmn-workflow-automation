@@ -39,6 +39,9 @@ def main():
     parser.add_argument(
         "--limit", type=int, default=None, help="평가할 공고 수 상한(테스트용)"
     )
+    parser.add_argument(
+        "--no-enrich", action="store_true", help="S4 규격서 정독 건너뜀"
+    )
     args = parser.parse_args()
 
     cfg = load_config().education_bid_crawler
@@ -54,6 +57,7 @@ def main():
         today=date.today(),
         dry_run=args.dry_run,
         limit=args.limit,
+        do_enrich=not args.no_enrich,
         knowledge=knowledge,
     )
 

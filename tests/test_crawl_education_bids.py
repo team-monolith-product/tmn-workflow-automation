@@ -66,6 +66,7 @@ def test_to_announcement_maps_signal_fields():
         "arsltCmptYn": "N",
         "indstrytyLmtYn": "Y",
         "infoBizYn": "Y",
+        "ntceSpecFileNm1": "제안요청서.hwp",
         "ntceSpecDocUrl1": "http://spec/1",
         "ntceSpecDocUrl2": "http://spec/2",
     }
@@ -75,7 +76,10 @@ def test_to_announcement_maps_signal_fields():
     assert a.result_competition == "N"
     assert a.industry_limit == "Y"
     assert a.info_biz == "Y"
-    assert a.spec_doc_urls == ["http://spec/1", "http://spec/2"]
+    assert a.spec_docs == [
+        {"name": "제안요청서.hwp", "url": "http://spec/1"},
+        {"name": "", "url": "http://spec/2"},
+    ]
     assert a.key == "R26BK01550144-000"
 
 
@@ -235,6 +239,46 @@ def test_evaluate_batches_and_global_index():
 
 def test_evaluate_empty():
     assert evaluate.evaluate([], load_knowledge(), "m", 10, llm=_FakeLLM()) == {}
+
+
+# --- enrich (S4) ---
+
+
+def test_clean_text_strips_record_tag_noise():
+    from service.edu_bid import enrich
+
+    # HWP 레코드 태그 깨짐(捤獥 등 CJK 한자)은 제거되고 한글/숫자는 보존
+    out = enrich.clean_text("捤獥 사업범위 1. 과업 内容 abc 123")
+    assert "사업범위" in out and "과업" in out and "abc" in out and "123" in out
+    assert "捤獥" not in out and "内" not in out
+
+
+def test_enrich_ranks_and_budgets(monkeypatch):
+    from service.edu_bid import enrich
+
+    a = _ann(
+        spec_docs=[
+            {"name": "1. 공고문.pdf", "url": "u_pdf"},
+            {"name": "2. 제안요청서.hwp", "url": "u_rfp"},
+        ]
+    )
+    # 제안요청서가 먼저 정독되도록 우선순위 확인 + 다운로드/추출 모킹
+    monkeypatch.setattr(enrich, "_download", lambda url, session: url.encode())
+    monkeypatch.setattr(enrich, "extract_text", lambda content, name: f"본문<{name}>")
+    text = enrich.enrich(a, char_budget=1000)
+    assert text.index("제안요청서") < text.index("공고문")  # RFP 먼저
+
+
+def test_enrich_skips_failed_download(monkeypatch):
+    from service.edu_bid import enrich
+
+    a = _ann(spec_docs=[{"name": "x.hwp", "url": "u"}])
+
+    def boom(url, session):
+        raise RuntimeError("net")
+
+    monkeypatch.setattr(enrich, "_download", boom)
+    assert enrich.enrich(a) == ""  # 실패해도 예외 없이 빈 문자열
 
 
 # --- knowledge 로딩 (실파일) ---

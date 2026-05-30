@@ -8,6 +8,16 @@ from langchain_openai import ChatOpenAI
 
 from .schemas import Announcement, BatchEval, EvalOut
 
+_CRITERIA = [
+    "# 평가 기준(축)",
+    "- reuse: 위 자산으로 요구를 저렴하게 충족하는 정도(매칭 자산이 핵심 기능을 덮을수록↑)",
+    "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑",
+    "- value: 체급 sweet spot 부합·후속 유지보수 가능성",
+    "- performance_building: 깨끗한 직접 용역계약으로 '정량 실적금액'을 쌓아주면↑(단순 이용/물품/RS면↓)",
+    "- quant_barrier: 정량 실적장벽 수준 none|low|med|high|unknown (실적경쟁=Y/실적요건 명시면 보통 high)",
+    "교육/이러닝/에듀테크/SW·AI교육/디지털교과서와 무관하면 reuse를 낮게.",
+]
+
 
 def _assets_block(knowledge) -> str:
     lines = []
@@ -76,13 +86,7 @@ def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str
         "# 전략",
         _strategy_block(knowledge),
         "",
-        "# 평가 기준(축)",
-        "- reuse: 위 자산으로 요구를 저렴하게 충족하는 정도(매칭 자산이 핵심 기능을 덮을수록↑)",
-        "- winnability: 정량(실적)장벽이 낮을수록↑(실적경쟁=Y, 가격평가율 높고 실적 요구면↓), 협상·기술평가 무대면↑, 재공고/유찰↑, 교육기관 발주↑",
-        "- value: 체급 sweet spot 부합·후속 유지보수 가능성",
-        "- performance_building: 깨끗한 직접 용역계약으로 '정량 실적금액'을 쌓아주면↑(단순 이용/물품/RS면↓)",
-        "- quant_barrier: 정량 실적장벽 수준 none|low|med|high|unknown (실적경쟁=Y면 보통 high)",
-        "교육/이러닝/에듀테크/SW·AI교육/디지털교과서와 무관하면 reuse를 낮게.",
+        *_CRITERIA,
         "",
         "# 평가 대상",
     ]
@@ -117,3 +121,48 @@ def evaluate(
             if 0 <= ev.index < len(batch):
                 results[start + ev.index] = ev
     return results
+
+
+def _build_deep_prompt(
+    knowledge, ann: Announcement, matched: list[str], spec_text: str
+) -> str:
+    lines = [
+        "당신은 팀모노리스(에듀테크)의 공공조달 사업개발 담당자다.",
+        "아래 회사 역량·자격·전략과 '규격서 본문'을 근거로 이 공고를 4축(0~100)으로 평가하라.",
+        "규격서의 실제 과업범위·요구사항·평가배점·실적/지역요건을 우선 근거로 삼아라.",
+        "",
+        "# 우리 보유 자산(재사용 가능 역량)",
+        _assets_block(knowledge),
+        "",
+        "# 자격·실적 상태",
+        _eligibility_block(knowledge),
+        "",
+        "# 전략",
+        _strategy_block(knowledge),
+        "",
+        *_CRITERIA,
+        "",
+        "# 공고 메타",
+        _announcement_line(0, ann, matched),
+        "",
+        "# 규격서 본문(발췌)",
+        spec_text,
+        "",
+        "index=0 으로 axes, quant_barrier, matched_assets, rationale 를 채워라. rationale 엔 규격서의 실제 과업 근거를 명시.",
+    ]
+    return "\n".join(lines)
+
+
+def evaluate_deep(
+    ann: Announcement,
+    matched: list[str],
+    spec_text: str,
+    knowledge,
+    model: str,
+    llm=None,
+) -> EvalOut:
+    """규격서 본문까지 읽고 1건을 심층 재평가."""
+    client = llm or ChatOpenAI(model=model, temperature=0).with_structured_output(
+        EvalOut
+    )
+    return client.invoke(_build_deep_prompt(knowledge, ann, matched, spec_text))
