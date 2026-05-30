@@ -30,24 +30,37 @@ credentials:
       held: true
 
 # 실적 원장: 수주·수행 건을 한 줄씩 추가 (append-only).
-# TODO: 실제 계약 건만 기입(임의 생성 금지). 각 건에 contract_type 필수.
-#   contract_type: 구축개발 | 운영 | 유지관리 | SW공급이용  (입찰 실적요건 매칭 기준)
+# 분류는 세금계산서가 아니라 "계약 실질(계약서 과업)"이 정한다. RS(수익배분) 같은
+# 대가 지급방식은 분류를 바꾸지 않지만, 정량 실적금액 산정을 약하게 만든다.
+# → 한 건의 가치를 둘로 나눠 기록한다:
+#   reference_strength : 기술 레퍼런스(정성) 강도 (협상계약 기술평가·제안서용)
+#   perf_amount        : 정량 실적금액으로 증명 가능한 금액 (실적제한·적격심사용)
+#   perf_usable        : 그 금액을 실적요건에 쓸 수 있는지 (yes|uncertain|no)
+# TODO: 실제 계약 건만 기입(임의 생성 금지).
+#   contract_type: 구축개발 | 구축개발(RS) | 운영 | 유지관리 | SW공급이용
 performance: []
 # 예시 형식:
 # performance:
 #   - project: ○○ AI디지털교과서 통합플랫폼 연동 구축
-#     contract_type: 구축개발     # 이게 무엇이냐로 어떤 입찰에 쓸 수 있는지 갈림
-#     domain: AIDT연동            # AIDT연동 | SW교육플랫폼 | 코딩교육운영 | 교육콘텐츠 | ...
-#     amount: 120000000          # 계약금액(원)
+#     contract_type: 구축개발(RS)   # 구축했으나 대가는 매출배분
+#     domain: AIDT연동
+#     client: 금성출판사            # 민간 발행사(원청)
 #     year: 2025
-#     client: 금성출판사          # 발주처(민간 발행사면 원청)
-#     prime: true                # 원도급(true)/하도급(false)/공동수급(지분율 기재)
-#     evidence: 실적증명서|계약서+세금계산서  # 증빙 종류
+#     prime: true
+#     reference_strength: high      # 기술 레퍼런스로는 최상급
+#     perf_amount: null             # 구축비 거의 미수령 → 정량 실적금액 산정 약함
+#     perf_usable: uncertain        # 계약서 문구·세금계산서 품목·실적증명서 발급여부로 결정
+#     evidence_todo: [계약서 과업문구, 세금계산서 품목명, 발행사 수행실적증명서, SW산업협회 수행실적확인]
 
-# ── 확정 대기 단서 (코드/배포 정황 → 계약유형·금액·연도 확인 후 performance 로 이관) ──
+# ── 확정 대기 단서 (코드/배포 정황 → 확인 후 performance 로 이관) ──
 pending_confirmation:
-  - clue: KERIS AIDT 통합플랫폼 SSO·로스터 연동 운영 (GID teammonolith_01)
+  - clue: KERIS AIDT 통합플랫폼 SSO·로스터 연동 구축·운영 (GID teammonolith_01)
     publishers: [YBM, 금성출판사, 잇플]   # ks=금성출판사 확인됨
-    need: 발행사별 계약유형(위탁개발/구축 vs 플랫폼 이용)·금액·연도·원/하도급
-  - clue: 글로벌 진출 파일럿 — 중동(mes1) 운영 후 영국 리전 이전(중동정세). 일부 파일럿 프로젝트 수행
-    need: 해외 구축/운영 실적으로 정리 가능한지(발주처·계약유형)
+    contract_reality: RS(수익배분) — 구축비 거의 미수령
+    note: >
+      기술 레퍼런스(정성)로는 최상급이나, RS라 정량 실적금액 산정이 약함.
+      구축 실적금액으로 쓰려면 (1) 계약서가 '구축/개발 용역'으로 명시 (2) 세금계산서
+      품목이 사용료/라이선스가 아닌 용역 (3) 발행사 수행실적증명서 발급 — 3개 확인 필요.
+    need: 발행사별 계약유형·연도·perf_amount(증명 가능 금액)·perf_usable
+  - clue: 글로벌 진출 파일럿 — 중동(mes1) 운영 후 영국 리전 이전(중동정세). 일부 파일럿 수행
+    need: 해외 구축/운영 실적으로 정리 가능한지(발주처·계약유형·금액)
