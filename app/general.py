@@ -45,6 +45,11 @@ async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad 
         return None
 
     config = load_config()
+
+    # 사용자별 오버라이드 확인 (복수 스쿼드 소속 시 우선 스쿼드 지정)
+    if user_id in config.squad_overrides:
+        return config.squad_overrides[user_id]
+
     for squad in config.squads:
         cache_key = f"usergroup_{squad.slack_usergroup_id}"
         if cache_key not in _cache_usergroup_members:
