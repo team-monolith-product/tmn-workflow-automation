@@ -17,10 +17,11 @@ _SHORTLIST_LABELS = ("입찰추천", "검토", "미래타깃")
 def run(
     *,
     model: str,
-    lookback_days: int,
     batch_size: int,
     today: date,
     dry_run: bool,
+    lookback_days: int = 1,
+    window: tuple[str, str] | None = None,
     limit: int | None = None,
     do_enrich: bool = True,
     use_cache: bool = True,
@@ -28,7 +29,7 @@ def run(
     knowledge=None,
 ) -> list[Decision]:
     kn = knowledge or load_knowledge()
-    window = stages.build_window(today, lookback_days)
+    window = window or stages.build_window(today, lookback_days)
     print(
         f"[edu-bid] 구간 {window[0]}~{window[1]} / 소스 {[s['id'] for s in kn.enabled_sources]}"
     )

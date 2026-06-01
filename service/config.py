@@ -129,10 +129,7 @@ class EducationBidCrawlerConfig:
     """나라장터 교육 외주 입찰공고 수집·평가 설정"""
 
     channel_id: str
-    business_profile: str
     model: str = "gpt-5.2"
-    score_threshold: int = 60
-    lookback_days: int = 1
     kinds: list[str] = field(default_factory=lambda: ["servc"])
     batch_size: int = 20
 
@@ -280,10 +277,7 @@ def _parse_config(raw: dict) -> AppConfig:
     if ebc_raw:
         education_bid_crawler = EducationBidCrawlerConfig(
             channel_id=ebc_raw["channel_id"],
-            business_profile=ebc_raw["business_profile"],
             model=ebc_raw.get("model", "gpt-5.2"),
-            score_threshold=ebc_raw.get("score_threshold", 60),
-            lookback_days=ebc_raw.get("lookback_days", 1),
             kinds=ebc_raw.get("kinds", ["servc"]),
             batch_size=ebc_raw.get("batch_size", 20),
         )

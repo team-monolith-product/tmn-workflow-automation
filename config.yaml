@@ -285,28 +285,17 @@ scheduled_jobs:
     function: main
     cron:
       hour: 9
-      minute: 30
+      minute: 20            # 9시대 타 작업(00·15분)과 겹치지 않게
       day_of_week: mon-fri
-    business_day_only: true
+    business_day_only: true  # 공휴일 스킵. 윈도우는 직전 영업일 9:20 이후를 포괄
 
 # 나라장터(G2B) 교육 외주 입찰공고 수집·평가
-# - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급)
-# - channel_id, business_profile 은 운영에 맞게 반드시 수정
+# - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급, 클러스터 시크릿)
+# - 역량·자격·전략·점수정책 등 변동 지식은 knowledge/edu_bid/*.yaml 에서 관리
+# - 조회 구간은 '직전 실행 이후 ~ 현재'를 무상태로 계산(stages.build_incremental_window)
 education_bid_crawler:
-  channel_id: "REPLACE_WITH_SLACK_CHANNEL_ID"  # TODO: 교육 외주 공고 알림 채널 ID
+  channel_id: "C0B7CQ19DS6"    # 슬랙 t_제품_공공입찰
   model: "gpt-5.2"
-  score_threshold: 60          # 0~100, 이 점수 이상만 Slack 보고
-  lookback_days: 1             # 직전 N일 게시 공고 조회 (일 1회 실행 기준)
   batch_size: 20               # LLM 1회 호출당 평가 공고 수
   kinds:                       # 조회할 업무구분 (servc=용역, thng=물품, cnstwk=공사, frgcpt=외자)
     - servc
-  business_profile: |          # TODO: 실제 회사 역량·관심영역에 맞게 수정
-    우리는 교육 분야 외주(공공조달/B2G) 사업을 수행하는 에듀테크 회사다.
-    주력 역량:
-    - SW/코딩교육 플랫폼 및 LMS(학습관리시스템) 설계·개발·고도화
-    - 디지털교과서·이러닝 콘텐츠 제작 및 인터랙티브 학습 도구 개발
-    - AI 기반 학습 분석·튜터링 등 교육용 AI 솔루션
-    - 초·중·고 및 대학 대상 SW/AI 교육 운영 및 강의 콘텐츠 개발
-    적합한 공고: 위 역량으로 수행 가능한 교육 정보화, 이러닝, 에듀테크 플랫폼/콘텐츠,
-    SW·AI 교육 운영 용역.
-    부적합: 단순 시설공사, 교구·비품 납품, 교육과 무관한 일반 SI/행정 용역.

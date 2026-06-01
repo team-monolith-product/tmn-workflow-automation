@@ -7,6 +7,8 @@ S1 정규화/dedupe, S2 게이트, S3 트리아지, S6 결정, S7 보고.
 
 from datetime import date, datetime, time, timedelta
 
+from service.business_days import previous_business_day
+
 from .schemas import Announcement, GateResult, Decision
 
 # --- 공통 ---
@@ -27,6 +29,18 @@ def build_window(today: date, lookback_days: int) -> tuple[str, str]:
     end_dt = end_dt - timedelta(minutes=1)
     fmt = "%Y%m%d%H%M"
     return bgn_dt.strftime(fmt), end_dt.strftime(fmt)
+
+
+def build_incremental_window(now: datetime) -> tuple[str, str]:
+    """직전 실행 이후 게시분을 보는 무상태 구간.
+
+    [직전 영업일의 now 시각, now] 을 YYYYMMDDHHMM 으로 반환한다.
+    매 영업일 같은 시각에 돌면 구간이 빈틈·중복 없이 이어진다.
+    월요일이면 시작점이 (공휴일을 건너뛴) 직전 금요일 같은 시각이 되어 주말 게시분을 포괄한다.
+    """
+    bgn_dt = datetime.combine(previous_business_day(now.date()), now.time())
+    fmt = "%Y%m%d%H%M"
+    return bgn_dt.strftime(fmt), now.strftime(fmt)
 
 
 # --- S1 정규화 ---

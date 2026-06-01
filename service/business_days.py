@@ -34,6 +34,14 @@ def is_business_day(target_date: date, exclude_holidays: bool = True) -> bool:
     return True
 
 
+def previous_business_day(target_date: date, exclude_holidays: bool = True) -> date:
+    """target_date 직전(미포함)의 가장 가까운 영업일을 반환."""
+    d = target_date - timedelta(days=1)
+    while not is_business_day(d, exclude_holidays):
+        d -= timedelta(days=1)
+    return d
+
+
 def count_business_days(
     start_date: date,
     end_date: date,

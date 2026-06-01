@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 import argparse
-from datetime import date
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -27,6 +27,8 @@ from service.edu_bid import pipeline, stages
 from service.edu_bid.knowledge import load_knowledge
 
 load_dotenv()
+
+KST = timezone(timedelta(hours=9))
 
 
 def main():
@@ -52,12 +54,16 @@ def main():
         print("education_bid_crawler 설정이 config.yaml에 없습니다.")
         return
 
+    # 직전 영업일 같은 시각 ~ 현재. 월요일이면 전 영업일(금요일) 이후 = 주말 게시분 포함.
+    now = datetime.now(KST)
+    window = stages.build_incremental_window(now)
+
     knowledge = load_knowledge()
     decisions = pipeline.run(
         model=cfg.model,
-        lookback_days=cfg.lookback_days,
         batch_size=cfg.batch_size,
-        today=date.today(),
+        today=now.date(),
+        window=window,
         dry_run=args.dry_run,
         limit=args.limit,
         do_enrich=not args.no_enrich,
@@ -65,7 +71,6 @@ def main():
         knowledge=knowledge,
     )
 
-    window = stages.build_window(date.today(), cfg.lookback_days)
     text = stages.format_report(decisions, window)
     reportable = [d for d in decisions if d.label in ("입찰추천", "검토", "미래타깃")]
     if not reportable:
