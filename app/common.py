@@ -3,10 +3,11 @@
 """
 
 import os
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, create_model, field_validator
 
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
@@ -558,12 +559,25 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
 
     class CreateNotionFollowUpTaskInput(BaseModel):
         parent_page_id: str = Field(
-            description="선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
+            description="선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...'). Slack 유저 ID(U로 시작)가 아닌 노션 페이지 ID를 사용해야 합니다."
         )
         component: str = Field(
             description=f"후속 작업의 구성요소. 가능한 값: {', '.join(component_options)}",
             json_schema_extra={"enum": component_options},
         )
+
+        @field_validator("parent_page_id")
+        @classmethod
+        def validate_notion_page_id(cls, v: str) -> str:
+            v = v.strip()
+            uuid_pattern = r"^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$"
+            if not re.match(uuid_pattern, v):
+                raise ValueError(
+                    f"'{v}'은(는) 유효한 노션 페이지 ID가 아닙니다. "
+                    "노션 페이지 ID는 32자리 hex 문자열(예: '12d1cc820da680ba82d1e6d560aaf4c3')이어야 합니다. "
+                    "Slack 유저 ID(U로 시작)나 다른 형식의 ID를 사용하지 마세요."
+                )
+            return v
 
     @tool("create_notion_follow_up_task", args_schema=CreateNotionFollowUpTaskInput)
     def create_notion_follow_up_task(parent_page_id: str, component: str) -> str:
