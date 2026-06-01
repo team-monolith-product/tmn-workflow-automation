@@ -144,6 +144,7 @@ class AppConfig:
 
     notion_databases: dict[str, NotionDBConfig]
     squads: list[Squad]
+    squad_overrides: dict[str, Squad]
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
     deployment_rotation: DeploymentRotationConfig | None = None
@@ -191,6 +192,16 @@ def _parse_config(raw: dict) -> AppConfig:
         )
         squads.append(squad)
         squad_by_handle[squad.handle] = squad
+
+    # Squad overrides (사용자별 우선 스쿼드)
+    squad_overrides: dict[str, Squad] = {}
+    for user_id, handle in raw.get("squad_overrides", {}).items():
+        if handle not in squad_by_handle:
+            raise ValueError(
+                f"squad_overrides의 '{user_id}'가 참조하는 "
+                f"squad handle '{handle}'이 squads에 없습니다."
+            )
+        squad_overrides[user_id] = squad_by_handle[handle]
 
     # Scrum
     scrum_raw = raw.get("scrum", {})
@@ -272,6 +283,7 @@ def _parse_config(raw: dict) -> AppConfig:
     return AppConfig(
         notion_databases=notion_databases,
         squads=squads,
+        squad_overrides=squad_overrides,
         scrum=scrum,
         task_alerts=task_alerts,
         deployment_rotation=deployment_rotation,

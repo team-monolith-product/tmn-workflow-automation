@@ -114,6 +114,40 @@ def test_task_alert_pipelines():
     assert "alert_schedule_feasibility" not in contents.pipeline_squads[0].alerts
 
 
+def test_squad_overrides():
+    """squad_overrides가 올바르게 파싱되는지 검증"""
+    config = load_config(CONFIG_PATH)
+
+    assert "U07RP7U3FPU" in config.squad_overrides
+    assert config.squad_overrides["U07RP7U3FPU"].handle == "ie"
+    assert config.squad_overrides["U07RP7U3FPU"].notion_db.name == "infra"
+
+
+def test_invalid_squad_override_reference():
+    """squad_overrides에서 존재하지 않는 squad handle 참조 시 ValueError"""
+    raw = {
+        "notion_databases": {
+            "db1": {
+                "data_source_id": "x",
+                "properties": {
+                    "title": "t",
+                    "status": "s",
+                    "assignee": "a",
+                    "timeline": "tl",
+                },
+            }
+        },
+        "squads": [{"handle": "a", "slack_usergroup_id": "S1", "notion_db": "db1"}],
+        "squad_overrides": {"U000": "nonexistent"},
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(raw, f)
+        f.flush()
+        with pytest.raises(ValueError, match="nonexistent"):
+            load_config(f.name)
+    os.unlink(f.name)
+
+
 def test_invalid_squad_db_reference():
     """존재하지 않는 notion_db 참조 시 ValueError"""
     raw = {

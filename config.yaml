@@ -90,6 +90,10 @@ squads:
     slack_usergroup_id: "S08LHAA2HL3"
     notion_db: contents
 
+# 복수 스쿼드에 소속된 사용자의 우선 스쿼드 지정
+squad_overrides:
+  "U07RP7U3FPU": "ie"  # 박기영: 인프라 팀 우선
+
 scrum:
   pr_warning_excluded_members:
     - "U075PUFNGHX"  # 예진 이 (코들 PM)
