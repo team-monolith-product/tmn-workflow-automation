@@ -570,7 +570,9 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
         @classmethod
         def validate_notion_page_id(cls, v: str) -> str:
             v = v.strip()
-            uuid_pattern = r"^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$"
+            uuid_pattern = (
+                r"^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$"
+            )
             if not re.match(uuid_pattern, v):
                 raise ValueError(
                     f"'{v}'은(는) 유효한 노션 페이지 ID가 아닙니다. "
