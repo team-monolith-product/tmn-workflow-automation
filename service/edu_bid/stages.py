@@ -5,7 +5,7 @@ S1 정규화/dedupe, S2 게이트, S3 트리아지, S6 결정, S7 보고.
 모두 입력→출력 결정적 변환이라 단위 테스트가 쉽다.
 """
 
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from .schemas import (
     Announcement,
@@ -27,15 +27,6 @@ def _first(item: dict, *keys: str) -> str:
         if v not in (None, ""):
             return str(v)
     return ""
-
-
-def build_window(today: date, lookback_days: int) -> tuple[str, str]:
-    """[today - lookback_days, today) 게시일 구간을 YYYYMMDDHHMM 으로."""
-    end_dt = datetime.combine(today, time.min)
-    bgn_dt = end_dt - timedelta(days=lookback_days)
-    end_dt = end_dt - timedelta(minutes=1)
-    fmt = "%Y%m%d%H%M"
-    return bgn_dt.strftime(fmt), end_dt.strftime(fmt)
 
 
 def build_incremental_window(now: datetime) -> tuple[str, str]:

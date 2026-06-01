@@ -63,7 +63,6 @@ def main():
     decisions = pipeline.run(
         model=cfg.model,
         batch_size=cfg.batch_size,
-        today=now.date(),
         window=window,
         limit=args.limit,
         do_enrich=not args.no_enrich,

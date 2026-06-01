@@ -4,8 +4,6 @@
 네트워크·LLM 은 모킹/모듈 경계에서 차단하고 순수 변환 로직을 검증한다.
 """
 
-from datetime import date
-
 from service.edu_bid import stages, evaluate
 from service.edu_bid.knowledge import load_knowledge
 from service.edu_bid.schemas import Announcement, GateResult, Axes, EvalOut, BatchEval
@@ -35,13 +33,6 @@ def _ann(**over) -> Announcement:
     )
     base.update(over)
     return Announcement(**base)
-
-
-# --- build_window ---
-
-
-def test_build_window_single_day():
-    assert stages.build_window(date(2026, 5, 30), 1) == ("202605290000", "202605292359")
 
 
 # --- to_announcement (실제 필드 매핑) ---
