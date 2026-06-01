@@ -170,7 +170,7 @@ def summarize_deployment(
         # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
+            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(`/wa summarize-deployment` 명령어를 사용해보세요!)",
         )
         print("No tasks scheduled for deployment today.")
         return
@@ -248,7 +248,7 @@ def summarize_deployment(
     if task_index == 0:
         slack_client.chat_postMessage(
             channel=SLACK_CHANNEL_ID,
-            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(/summarize-deployment 명령어를 사용해보세요!)",
+            text=f"오늘 예정된 배포가 없네요.{deployer_mention} 놓치신 과업은 없으실까요?\n(`/wa summarize-deployment` 명령어를 사용해보세요!)",
         )
         print("No tasks with open PRs scheduled for deployment today.")
         return
@@ -259,7 +259,7 @@ def summarize_deployment(
         for repo in sorted(repos_to_deploy):
             message += f"• {repo}\n"
 
-    message += "\n(/summarize-deployment 명령어를 사용해보세요!)\n"
+    message += "\n(`/wa summarize-deployment` 명령어를 사용해보세요!)\n"
 
     # 최종 메시지 전송
     slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=message)
