@@ -1,0 +1,24 @@
+# 수집 소스 레지스트리 (지식 레이어)
+# S0(수집)이 읽어 어댑터를 켠다. 새 소스 = 어댑터 추가 + 한 줄 등록.
+version: 1
+updated: 2026-05-30
+sources:
+  - id: g2b_servc          # 나라장터 용역
+    adapter: g2b
+    kind: servc
+    enabled: true
+  - id: g2b_thng           # 나라장터 물품
+    adapter: g2b
+    kind: thng
+    enabled: false
+  - id: g2b_cnstwk         # 나라장터 공사
+    adapter: g2b
+    kind: cnstwk
+    enabled: false
+  - id: g2b_presearch_servc  # 나라장터 사전규격 용역 (본공고 전 단계, 의견제출 윈도우)
+    adapter: g2b_presearch
+    kind: servc
+    enabled: true
+  - id: s2b                # 학교장터 (오픈API 없음 → 크롤러 어댑터 필요, 미구현)
+    adapter: s2b
+    enabled: false

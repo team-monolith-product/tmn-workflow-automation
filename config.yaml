@@ -283,3 +283,21 @@ scheduled_jobs:
     cron:
       minute: "*/10"
     business_day_only: false
+
+  - name: crawl_education_bids
+    module: scripts.crawl_education_bids
+    function: main
+    cron:
+      hour: 9
+      minute: 20            # 9시대 타 작업(00·15분)과 겹치지 않게
+    # 주말·공휴일 포함 매일 실행. 새 공고 없으면 Slack 전송은 자동 생략됨.
+
+# 나라장터(G2B) 교육 외주 입찰공고 수집·평가
+# - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급, 클러스터 시크릿)
+# - 역량·자격·전략·점수정책 등 변동 지식은 knowledge/edu_bid/*.yaml 에서 관리
+# - 조회 구간은 '어제 같은 시각 ~ 현재'를 무상태로 계산(stages.build_incremental_window)
+# - 조회할 업무구분·소스는 knowledge/edu_bid/source_registry.yaml 의 enabled 로 관리
+education_bid_crawler:
+  channel_id: "C0B7CQ19DS6"    # 슬랙 t_제품_공공입찰
+  model: "gpt-5.5"
+  batch_size: 20               # LLM 1회 호출당 평가 공고 수

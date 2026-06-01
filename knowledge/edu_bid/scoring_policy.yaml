@@ -1,0 +1,39 @@
+# 점수·결정 정책 (지식 레이어)
+# S5(심층평가) 프롬프트와 S6(결정) 임계에 주입된다. 사업 단계가 바뀌면 갱신한다.
+version: 4
+updated: 2026-06-01
+
+# 핵심·보조 전략 — desc 가 S5 프롬프트에 그대로 주입된다.
+strategy:
+  primary:
+    desc: >
+      정량(실적) 점수 요구가 낮거나 없는 공고 중, 우리 보유 자산으로 저렴하게
+      만들 수 있는(재사용률 높은) 건을 최우선으로 한다.
+  secondary:
+    desc: >
+      정량 실적금액(깨끗한 직접 용역계약 = 계약금액 명시·실적증명 가능)을 쌓아주는 건은,
+      당장 마진이 작아도 미래 장벽 해소 투자로 가점한다. (RS·이용계약 매출은 정량실적 안 됨)
+
+# 체급 sweet spot (5천만~10억) — S5 프롬프트에 주입.
+ticket_size:
+  sweet_low: 50000000
+  sweet_high: 1000000000
+
+# 낙찰방식 stance — S5 프롬프트에 주입.
+award_method_stance:
+  협상에의한계약: prefer
+  제한경쟁: prefer
+  적격심사: conditional_on_reuse
+  최저가: conditional_on_reuse
+
+# 4축 가중치 (S6 종합점수)
+weights:
+  reuse: 0.35
+  winnability: 0.35
+  value: 0.15
+  performance_building: 0.15
+
+# 결정 임계 (0~100 종합점수)
+thresholds:
+  recommend: 70
+  review: 50
