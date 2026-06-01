@@ -256,94 +256,105 @@ def register_general_handlers(app, assistant):
             tools,
         )
 
-    # 크론 작업들에 대한 슬래시 커맨드 일괄 등록
-    # 각 튜플: (command, module_path, func_name, description[, body_kwargs])
-    # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로
-    # 전달할 매핑입니다.  예: {"caller_slack_user_id": "user_id"} 이면
-    # func(caller_slack_user_id=body.get("user_id")) 로 호출됩니다.
-    _CRON_COMMANDS = [
+    # 자동화 작업 표 — 단일 진입 커맨드 `/wa <작업>` 로 라우팅한다.
+    # 슬랙 앱 UI 에는 `/wa` 하나만 등록하면 되고, 새 작업은 이 표에 한 줄만 추가한다.
+    # 각 튜플: (작업명, module_path, func_name, description[, body_kwargs])
+    # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로 전달할 매핑이다.
+    # 예: {"caller_slack_user_id": "user_id"} → func(caller_slack_user_id=body.get("user_id"))
+    _JOBS = [
         (
-            "/validate-customer-reports",
+            "validate-customer-reports",
             "scripts.validate_customer_reports",
             "main",
             "고객 보고서 검증",
         ),
         (
-            "/manage-tasks-daily",
+            "manage-tasks-daily",
             "scripts.manage_tasks_daily",
             "main",
             "일일 작업 알림 처리",
         ),
         (
-            "/notify-upcoming-workevent",
+            "notify-upcoming-workevent",
             "scripts.notify_upcoming_workevent",
             "main",
             "근태 예정 알림 생성",
         ),
         (
-            "/notify-worktime-left",
+            "notify-worktime-left",
             "scripts.notify_worktime_left",
             "main",
             "잔여 근무시간 계산",
         ),
         (
-            "/collect-review-stats",
+            "collect-review-stats",
             "scripts.collect_review_stats",
             "main",
             "리뷰 통계 수집",
         ),
         (
-            "/collect-coding-rule-feedbacks",
+            "collect-coding-rule-feedbacks",
             "scripts.collect_coding_rule_feedbacks",
             "main",
             "코딩 규칙 피드백 수집",
         ),
         (
-            "/post-scrum-message",
+            "post-scrum-message",
             "scripts.post_scrum_message",
             "main",
             "스크럼 메시지 발송",
         ),
         (
-            "/schedule-scrum-mention",
+            "schedule-scrum-mention",
             "scripts.schedule_scrum_mention",
             "main",
             "스크럼 멘션 발송",
         ),
         (
-            "/summarize-deployment",
+            "summarize-deployment",
             "app.summarize_deployment",
             "summarize_deployment",
             "배포 요약을 작성",
             {"caller_slack_user_id": "user_id"},
         ),
         (
-            "/announce-deployment-rotation",
+            "announce-deployment-rotation",
             "scripts.announce_deployment_rotation",
             "main",
             "배포 담당자 공지",
         ),
         (
-            "/crawl-education-bids",
+            "crawl-education-bids",
             "scripts.crawl_education_bids",
             "main",
             "교육 외주 입찰공고 수집·평가",
         ),
     ]
 
-    def _register_cron_command(
-        command_name, module_path, func_name, description, body_kwargs=None
-    ):
-        @app.command(command_name)
-        async def handler(ack, body):
-            await ack(text=f"⏳ {description} 중입니다…")
-            module = importlib.import_module(module_path)
-            func = getattr(module, func_name)
-            kwargs = {
-                kwarg: body.get(body_key)
-                for kwarg, body_key in (body_kwargs or {}).items()
-            }
-            await asyncio.to_thread(func, **kwargs)
+    _JOB_BY_SUB = {
+        sub: (mod, fn, desc, rest[0] if rest else None)
+        for sub, mod, fn, desc, *rest in _JOBS
+    }
 
-    for cmd, mod, fn, desc, *rest in _CRON_COMMANDS:
-        _register_cron_command(cmd, mod, fn, desc, rest[0] if rest else None)
+    def _wa_usage():
+        lines = ["사용법: `/wa <작업>`", "", "작업 목록:"]
+        lines += [f"• `{sub}` — {meta[2]}" for sub, meta in _JOB_BY_SUB.items()]
+        return "\n".join(lines)
+
+    @app.command("/wa")
+    async def handle_wa(ack, body):
+        text = (body.get("text") or "").strip()
+        sub = text.split()[0] if text else ""
+        if sub in ("", "help", "list"):
+            await ack(text=_wa_usage())
+            return
+        meta = _JOB_BY_SUB.get(sub)
+        if not meta:
+            await ack(text=f"알 수 없는 작업: `{sub}`\n\n{_wa_usage()}")
+            return
+        module_path, func_name, description, body_kwargs = meta
+        await ack(text=f"⏳ {description} 중입니다…")
+        module = importlib.import_module(module_path)
+        func = getattr(module, func_name)
+        kwargs = {kw: body.get(bk) for kw, bk in (body_kwargs or {}).items()}
+        await asyncio.to_thread(func, **kwargs)
