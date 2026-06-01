@@ -323,6 +323,12 @@ def register_general_handlers(app, assistant):
             "main",
             "배포 담당자 공지",
         ),
+        (
+            "/crawl-education-bids",
+            "scripts.crawl_education_bids",
+            "main",
+            "교육 외주 입찰공고 수집·평가",
+        ),
     ]
 
     def _register_cron_command(
