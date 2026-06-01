@@ -7,7 +7,16 @@ S1 정규화/dedupe, S2 게이트, S3 트리아지, S6 결정, S7 보고.
 
 from datetime import date, datetime, time, timedelta
 
-from .schemas import Announcement, GateResult, Decision
+from .schemas import (
+    Announcement,
+    GateResult,
+    Decision,
+    LABEL_RECOMMEND,
+    LABEL_REVIEW,
+    LABEL_FUTURE,
+    LABEL_EXCLUDE,
+    REPORTABLE_LABELS,
+)
 
 # --- 공통 ---
 
@@ -43,9 +52,7 @@ def build_incremental_window(now: datetime) -> tuple[str, str]:
 # --- S1 정규화 ---
 
 
-def to_announcement(
-    item: dict, source: str, kind: str, kind_label: str
-) -> Announcement:
+def to_announcement(item: dict, kind_label: str) -> Announcement:
     """G2B raw item → Announcement (필드 누락에 견고하게 폴백)."""
     spec_docs = [
         {"name": item.get(f"ntceSpecFileNm{i}", ""), "url": item[f"ntceSpecDocUrl{i}"]}
@@ -53,22 +60,16 @@ def to_announcement(
         if item.get(f"ntceSpecDocUrl{i}")
     ]
     return Announcement(
-        source=source,
-        kind=kind,
         kind_label=kind_label,
         bid_no=_first(item, "bidNtceNo", "bidno"),
         bid_ord=_first(item, "bidNtceOrd"),
         title=_first(item, "bidNtceNm"),
         notice_inst=_first(item, "ntceInsttNm"),
         demand_inst=_first(item, "dminsttNm"),
-        notice_dt=_first(item, "bidNtceDt", "bidNtceDate"),
         close_dt=_first(item, "bidClseDt", "bidClseDate"),
-        opening_dt=_first(item, "opengDt", "opengDate"),
         estimated_price=_first(item, "presmptPrce"),
-        budget_amt=_first(item, "asignBdgtAmt"),
         url=_first(item, "bidNtceDtlUrl", "bidNtceUrl"),
         award_method=_first(item, "sucsfbidMthdNm"),
-        contract_method=_first(item, "cntrctCnclsMthdNm"),
         re_notice=_first(item, "reNtceYn"),
         result_competition=_first(item, "arsltCmptYn"),
         industry_limit=_first(item, "indstrytyLmtYn"),
@@ -81,13 +82,10 @@ def to_announcement(
         proc_mid=_first(item, "pubPrcrmntMidClsfcNm"),
         proc_large=_first(item, "pubPrcrmntLrgClsfcNm"),
         spec_docs=spec_docs,
-        raw=item,
     )
 
 
-def to_announcement_prespec(
-    item: dict, source: str, kind: str, kind_label: str
-) -> Announcement:
+def to_announcement_prespec(item: dict, kind_label: str) -> Announcement:
     """사전규격 raw item → Announcement (본공고와 필드가 달라 별도 매핑).
 
     사전규격은 공고 전 단계라 낙찰방식·실적경쟁 등은 없다. 대신 의견등록 마감(영업 윈도우)과
@@ -107,22 +105,16 @@ def to_announcement_prespec(
             proc_class = parts[2]
     opinion_close = _first(item, "opninRgstClseDt")
     return Announcement(
-        source=source,
-        kind=kind,
         kind_label=kind_label,
         bid_no=_first(item, "bfSpecRgstNo"),
         bid_ord="0",
         title=_first(item, "prdctClsfcNoNm"),
         notice_inst=_first(item, "orderInsttNm"),
         demand_inst=_first(item, "rlDminsttNm"),
-        notice_dt=_first(item, "rcptDt"),
         close_dt=opinion_close,
-        opening_dt="",
         estimated_price=_first(item, "asignBdgtAmt"),
-        budget_amt=_first(item, "asignBdgtAmt"),
         url=spec_docs[0]["url"] if spec_docs else "",
         award_method="",
-        contract_method="",
         re_notice="",
         result_competition="",
         industry_limit="",
@@ -134,9 +126,7 @@ def to_announcement_prespec(
         proc_class=proc_class,
         stage="presearch",
         opinion_close_dt=opinion_close,
-        pre_spec_no=_first(item, "bfSpecRgstNo"),
         spec_docs=spec_docs,
-        raw=item,
     )
 
 
@@ -258,15 +248,15 @@ def decide(
 
     th = knowledge.thresholds
     if gate_result.status == "fail":
-        label = "제외"
+        label = LABEL_EXCLUDE
     elif gate_result.status == "near_miss":
-        label = "미래타깃"
+        label = LABEL_FUTURE
     elif score >= th.get("recommend", 70):
-        label = "입찰추천"
+        label = LABEL_RECOMMEND
     elif score >= th.get("review", 50):
-        label = "검토"
+        label = LABEL_REVIEW
     else:
-        label = "제외"
+        label = LABEL_EXCLUDE
 
     return Decision(
         announcement=ann,
@@ -283,8 +273,6 @@ def decide(
 
 # --- S7 보고 ---
 
-_REPORT_LABELS = ["입찰추천", "검토", "미래타깃"]
-
 
 def format_won(value: str) -> str:
     """추정가격/예산 문자열 → '1,234,000원' 또는 원문(미상)."""
@@ -295,8 +283,8 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
     """보고 대상(추천/검토/미래타깃)을 라벨·점수 순으로 Slack 텍스트화."""
     bgn = window[0]
     bgn_disp = f"{bgn[:4]}-{bgn[4:6]}-{bgn[6:8]}"
-    shown = [d for d in decisions if d.label in _REPORT_LABELS]
-    shown.sort(key=lambda d: (_REPORT_LABELS.index(d.label), -d.score))
+    shown = [d for d in decisions if d.label in REPORTABLE_LABELS]
+    shown.sort(key=lambda d: (REPORTABLE_LABELS.index(d.label), -d.score))
 
     lines = [f":mega: 교육 외주 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)", ""]
     for d in shown:

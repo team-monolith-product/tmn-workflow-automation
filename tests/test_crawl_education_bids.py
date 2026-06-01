@@ -13,22 +13,16 @@ from service.edu_bid.schemas import Announcement, GateResult, Axes, EvalOut, Bat
 
 def _ann(**over) -> Announcement:
     base = dict(
-        source="g2b_servc",
-        kind="servc",
         kind_label="용역",
         bid_no="R1",
         bid_ord="000",
         title="t",
         notice_inst="",
         demand_inst="",
-        notice_dt="",
         close_dt="",
-        opening_dt="",
         estimated_price="",
-        budget_amt="",
         url="",
         award_method="",
-        contract_method="",
         re_notice="N",
         result_competition="N",
         industry_limit="N",
@@ -70,7 +64,7 @@ def test_to_announcement_maps_signal_fields():
         "ntceSpecDocUrl1": "http://spec/1",
         "ntceSpecDocUrl2": "http://spec/2",
     }
-    a = stages.to_announcement(item, "g2b_servc", "servc", "용역")
+    a = stages.to_announcement(item, "용역")
     assert a.title == "디지털교과서 플랫폼 고도화"
     assert a.award_method == "협상에 의한 계약"
     assert a.result_competition == "N"
@@ -80,7 +74,7 @@ def test_to_announcement_maps_signal_fields():
         {"name": "제안요청서.hwp", "url": "http://spec/1"},
         {"name": "", "url": "http://spec/2"},
     ]
-    assert a.key == "R26BK01550144-000"
+    assert a.bid_no == "R26BK01550144"
 
 
 # --- to_announcement_prespec (사전규격) ---
@@ -100,15 +94,13 @@ def test_to_announcement_prespec_maps_fields():
         "prdctDtlList": "[1^8111159901^정보시스템개발서비스]",
         "specDocFileUrl1": "http://spec/1",
     }
-    a = stages.to_announcement_prespec(
-        item, "g2b_presearch_servc", "servc", "용역(사전규격)"
-    )
+    a = stages.to_announcement_prespec(item, "용역(사전규격)")
     assert a.stage == "presearch"
     assert a.title == "AI 코딩교육 플랫폼 구축"
     assert a.demand_inst == "○○대학교"
     assert a.estimated_price == "161526000"
     assert a.opinion_close_dt == "2026-05-31 23:59:00"
-    assert a.pre_spec_no == "R26BD00232047"
+    assert a.bid_no == "R26BD00232047"
     assert a.proc_class == "정보시스템개발서비스"  # prdctDtlList 세부품명
     assert a.spec_docs == [{"name": "규격서1", "url": "http://spec/1"}]
     # 사전규격엔 낙찰방식 없음 → 게이트 수의시담/실적 룰 비적용

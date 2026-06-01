@@ -9,9 +9,7 @@ from datetime import date
 
 from .knowledge import load_knowledge
 from . import sources, stages, evaluate, enrich
-from .schemas import Decision
-
-_SHORTLIST_LABELS = ("입찰추천", "검토", "미래타깃")
+from .schemas import Decision, LABEL_EXCLUDE, REPORTABLE_LABELS
 
 
 def run(
@@ -78,7 +76,7 @@ def run(
                     quant_barrier="n/a",
                     matched_assets=matched,
                     score=0.0,
-                    label="제외",
+                    label=LABEL_EXCLUDE,
                     rationale=g.reasons[0] if g.reasons else "게이트 탈락",
                 )
             )
@@ -121,7 +119,7 @@ def run(
     # S4 보강 + 심층 재평가 — 숏리스트(추천/검토/미래타깃)만 규격서 정독
     if do_enrich:
         shortlist_idx = [
-            i for i, d in enumerate(decisions) if d.label in _SHORTLIST_LABELS
+            i for i, d in enumerate(decisions) if d.label in REPORTABLE_LABELS
         ]
         print(f"[edu-bid] S4 정독 대상: {len(shortlist_idx)}건")
         for i in shortlist_idx:

@@ -25,6 +25,7 @@ from slack_sdk import WebClient
 from service.config import load_config
 from service.edu_bid import pipeline, stages
 from service.edu_bid.knowledge import load_knowledge
+from service.edu_bid.schemas import REPORTABLE_LABELS
 
 load_dotenv()
 
@@ -71,7 +72,7 @@ def main():
     )
 
     text = stages.format_report(decisions, window)
-    reportable = [d for d in decisions if d.label in ("입찰추천", "검토", "미래타깃")]
+    reportable = [d for d in decisions if d.label in REPORTABLE_LABELS]
     if not reportable:
         print("[edu-bid] 보고 대상 없음. Slack 전송 생략.")
         return

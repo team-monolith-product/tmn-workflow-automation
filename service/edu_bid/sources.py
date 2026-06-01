@@ -116,7 +116,7 @@ def _collect_adapter(
             print(f"[edu-bid] 캐시 저장 {source_id} {bgn}~{end}: {len(raw_items)}건")
 
     label = KIND_LABELS[kind] + label_suffix
-    return [normalize(it, source_id, kind, label) for it in raw_items]
+    return [normalize(it, label) for it in raw_items]
 
 
 def collect(

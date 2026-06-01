@@ -24,11 +24,11 @@ from service.config import load_config
 from service.edu_bid import pipeline
 from service.edu_bid.knowledge import load_knowledge
 from service.edu_bid.stages import format_won as _won
+from service.edu_bid.schemas import REPORTABLE_LABELS as _REPORT_LABELS
 
 load_dotenv()
 
 _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
-_REPORT_LABELS = ["입찰추천", "검토", "미래타깃"]
 
 
 def business_days(n: int) -> list[date]:

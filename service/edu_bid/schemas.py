@@ -8,28 +8,29 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
+# 결정 라벨 (S6). 보고·S4 정독 대상은 REPORTABLE_LABELS (우선순위 순서이기도 함).
+LABEL_RECOMMEND = "입찰추천"
+LABEL_REVIEW = "검토"
+LABEL_FUTURE = "미래타깃"
+LABEL_EXCLUDE = "제외"
+REPORTABLE_LABELS = (LABEL_RECOMMEND, LABEL_REVIEW, LABEL_FUTURE)
+
 
 @dataclass
 class Announcement:
     """정규화된 입찰공고 (S1 출력)."""
 
-    source: str  # 소스 id (예: g2b_servc)
-    kind: str  # 업무구분 (servc/thng/...)
     kind_label: str
     bid_no: str
     bid_ord: str
     title: str
     notice_inst: str  # 공고기관
     demand_inst: str  # 수요기관
-    notice_dt: str
     close_dt: str
-    opening_dt: str
     estimated_price: str  # 추정가격
-    budget_amt: str  # 배정예산
     url: str
     # 선별 신호 (목록 응답에 포함)
     award_method: str  # 낙찰자결정방법 (sucsfbidMthdNm)
-    contract_method: str  # 계약체결방법 (cntrctCnclsMthdNm)
     re_notice: str  # 재공고여부 (reNtceYn)
     result_competition: str  # 실적경쟁여부 (arsltCmptYn) — 실적제한 신호
     industry_limit: str  # 업종제한여부 (indstrytyLmtYn)
@@ -44,13 +45,7 @@ class Announcement:
     work_type: str = ""  # 사업유형 태그 (S3에서 분류, 개발/운영/교육운영/...)
     stage: str = "notice"  # notice=본공고 | presearch=사전규격
     opinion_close_dt: str = ""  # 사전규격 의견등록 마감일시 (영업·의견제출 윈도우)
-    pre_spec_no: str = ""  # 사전규격등록번호 (bfSpecRgstNo)
     spec_docs: list[dict] = field(default_factory=list)  # 규격서 첨부 [{name, url}]
-    raw: dict = field(default_factory=dict)
-
-    @property
-    def key(self) -> str:
-        return f"{self.bid_no}-{self.bid_ord}"
 
 
 @dataclass
