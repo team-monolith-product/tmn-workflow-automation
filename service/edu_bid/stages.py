@@ -242,10 +242,6 @@ def classify_work_type(ann: Announcement, work_types: dict) -> str:
 # --- S6 결정 ---
 
 
-def _price_won(value: str) -> int | None:
-    return int(value) if value.isdigit() else None
-
-
 def decide(
     ann: Announcement,
     gate_result: GateResult,
@@ -290,6 +286,11 @@ def decide(
 _REPORT_LABELS = ["입찰추천", "검토", "미래타깃"]
 
 
+def format_won(value: str) -> str:
+    """추정가격/예산 문자열 → '1,234,000원' 또는 원문(미상)."""
+    return f"{int(value):,}원" if value.isdigit() else (value or "미상")
+
+
 def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
     """보고 대상(추천/검토/미래타깃)을 라벨·점수 순으로 Slack 텍스트화."""
     bgn = window[0]
@@ -300,10 +301,7 @@ def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
     lines = [f":mega: 교육 외주 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)", ""]
     for d in shown:
         a = d.announcement
-        price = _price_won(a.estimated_price)
-        price_disp = (
-            f"{price:,}원" if price is not None else (a.estimated_price or "미상")
-        )
+        price_disp = format_won(a.estimated_price)
         assets = ", ".join(d.matched_assets) if d.matched_assets else "-"
         tag = " :page_facing_up:정독" if d.enriched else ""
         stage_tag = " :hourglass:사전규격" if a.stage == "presearch" else ""

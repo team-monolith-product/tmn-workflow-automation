@@ -366,11 +366,11 @@ def test_collect_caches_raw_per_window(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "_CACHE_DIR", tmp_path)
     calls = {"n": 0}
 
-    def fake_fetch(kind, bgn, end, session):
+    def fake_paginate(fetch_fn, kind, bgn, end, session):
         calls["n"] += 1
         return [{"bidNtceNo": "R1", "bidNtceNm": "코딩교육 플랫폼"}]
 
-    monkeypatch.setattr(sources, "_fetch_g2b_raw", fake_fetch)
+    monkeypatch.setattr(sources, "_paginate", fake_paginate)
 
     class _KnSrc:
         enabled_sources = [{"adapter": "g2b", "kind": "servc", "id": "g2b_servc"}]

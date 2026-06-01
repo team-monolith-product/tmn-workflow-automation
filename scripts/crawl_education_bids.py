@@ -64,7 +64,6 @@ def main():
         batch_size=cfg.batch_size,
         today=now.date(),
         window=window,
-        dry_run=args.dry_run,
         limit=args.limit,
         do_enrich=not args.no_enrich,
         use_cache=not args.no_cache,

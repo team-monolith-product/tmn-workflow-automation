@@ -19,7 +19,6 @@ def run(
     model: str,
     batch_size: int,
     today: date,
-    dry_run: bool,
     lookback_days: int = 1,
     window: tuple[str, str] | None = None,
     limit: int | None = None,
@@ -121,9 +120,12 @@ def run(
 
     # S4 보강 + 심층 재평가 — 숏리스트(추천/검토/미래타깃)만 규격서 정독
     if do_enrich:
-        shortlist = [d for d in decisions if d.label in _SHORTLIST_LABELS]
-        print(f"[edu-bid] S4 정독 대상: {len(shortlist)}건")
-        for d in shortlist:
+        shortlist_idx = [
+            i for i, d in enumerate(decisions) if d.label in _SHORTLIST_LABELS
+        ]
+        print(f"[edu-bid] S4 정독 대상: {len(shortlist_idx)}건")
+        for i in shortlist_idx:
+            d = decisions[i]
             if not d.announcement.spec_docs:
                 continue
             spec_text = enrich.enrich(d.announcement, session=session)
@@ -132,10 +134,9 @@ def run(
             ev = evaluate.evaluate_deep(
                 d.announcement, d.matched_assets, spec_text, kn, model
             )
-            gate_result = stages.gate(d.announcement, eligibility)
             deep = stages.decide(
                 d.announcement,
-                gate_result,
+                d.gate,  # 게이트는 결정적 — 1차에서 계산한 결과 재사용
                 ev.axes.model_dump(),
                 ev.quant_barrier,
                 ev.wired_risk,
@@ -144,7 +145,7 @@ def run(
                 kn,
             )
             deep.enriched = True
-            decisions[decisions.index(d)] = deep
+            decisions[i] = deep
         print(f"[edu-bid] 최종 라벨 분포: {dict(Counter(d.label for d in decisions))}")
 
     return decisions

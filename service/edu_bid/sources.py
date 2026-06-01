@@ -1,8 +1,8 @@
 """
 S0 수집 — source_registry 의 활성 소스에서 공고를 모은다.
 
-현재 어댑터: g2b (나라장터). 새 소스는 어댑터 분기를 추가하고
-source_registry 에 enabled 로 등록하면 된다.
+현재 어댑터: g2b / g2b_presearch (나라장터). 새 소스는 _ADAPTERS 에 한 줄
+추가하고 source_registry 에 enabled 로 등록하면 된다.
 """
 
 import json
@@ -52,12 +52,19 @@ def _extract_items(payload: dict) -> tuple[list[dict], int]:
     return [], total
 
 
-def _fetch_page(kind: str, bgn: str, end: str, page: int, session) -> dict:
-    """게이트웨이 일시 오류(403/5xx)는 짧게 재시도."""
+# 어댑터 id → (목록 조회 함수, 정규화 함수, 업무구분 라벨 접미)
+_ADAPTERS = {
+    "g2b": (get_bid_pblanc_list, to_announcement, ""),
+    "g2b_presearch": (get_pre_spec_list, to_announcement_prespec, "(사전규격)"),
+}
+
+
+def _fetch_page(fetch_fn, kind: str, bgn: str, end: str, page: int, session) -> dict:
+    """한 페이지 조회. 게이트웨이 일시 오류(403/5xx)는 짧게 재시도."""
     last_exc = None
     for attempt in range(_FETCH_RETRIES):
         try:
-            return get_bid_pblanc_list(
+            return fetch_fn(
                 kind, bgn, end, page_no=page, num_of_rows=_PAGE_SIZE, session=session
             )
         except requests.HTTPError as exc:
@@ -73,56 +80,17 @@ def _fetch_page(kind: str, bgn: str, end: str, page: int, session) -> dict:
 
 
 def _paginate(fetch_fn, kind: str, bgn: str, end: str, session) -> list[dict]:
-    """fetch_fn(kind, bgn, end, page_no, num_of_rows, session=) 로 구간 전체 수집."""
+    """구간 전체를 페이지네이션으로 수집(페이지별 403/5xx 재시도 포함)."""
     out: list[dict] = []
     page = 1
     while page <= _MAX_PAGES:
-        payload = fetch_fn(
-            kind, bgn, end, page_no=page, num_of_rows=_PAGE_SIZE, session=session
-        )
+        payload = _fetch_page(fetch_fn, kind, bgn, end, page, session)
         items, total = _extract_items(payload)
         out.extend(items)
         if not items or len(out) >= total:
             break
         page += 1
     return out
-
-
-def _fetch_g2b_raw(kind: str, bgn: str, end: str, session) -> list[dict]:
-    """본공고 raw item 전체 (403/5xx 재시도는 _fetch_page 가 처리)."""
-    out: list[dict] = []
-    page = 1
-    while page <= _MAX_PAGES:
-        payload = _fetch_page(kind, bgn, end, page, session)
-        items, total = _extract_items(payload)
-        out.extend(items)
-        if not items or len(out) >= total:
-            break
-        page += 1
-    return out
-
-
-_ADAPTERS = ("g2b", "g2b_presearch")
-
-
-def _adapter_meta(adapter: str):
-    """어댑터별 (정규화 함수, 업무구분 라벨 접미)."""
-    if adapter == "g2b":
-        return to_announcement, ""
-    if adapter == "g2b_presearch":
-        return to_announcement_prespec, "(사전규격)"
-    raise ValueError(f"미지원 어댑터: {adapter}")
-
-
-def _fetch_adapter_raw(
-    adapter: str, kind: str, bgn: str, end: str, session
-) -> list[dict]:
-    """어댑터별 raw 수집. 이름으로 분기해 호출(테스트에서 패치 가능)."""
-    if adapter == "g2b":
-        return _fetch_g2b_raw(kind, bgn, end, session)
-    if adapter == "g2b_presearch":
-        return _paginate(get_pre_spec_list, kind, bgn, end, session)
-    raise ValueError(f"미지원 어댑터: {adapter}")
 
 
 def _collect_adapter(
@@ -130,8 +98,7 @@ def _collect_adapter(
 ) -> list[Announcement]:
     kind = source["kind"]
     source_id = source["id"]
-    adapter = source["adapter"]
-    normalize, label_suffix = _adapter_meta(adapter)
+    fetch_fn, normalize, label_suffix = _ADAPTERS[source["adapter"]]
     cache = _cache_path(source_id, bgn, end)
 
     if use_cache and cache.exists():
@@ -140,7 +107,7 @@ def _collect_adapter(
             f"[edu-bid] 캐시 사용 {source_id} {bgn}~{end}: {len(raw_items)}건 (API 미호출)"
         )
     else:
-        raw_items = _fetch_adapter_raw(adapter, kind, bgn, end, session)
+        raw_items = _paginate(fetch_fn, kind, bgn, end, session)
         if use_cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(

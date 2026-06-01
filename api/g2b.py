@@ -44,6 +44,44 @@ PRESPEC_LIST_OPERATIONS = {
 }
 
 
+def _get_list(
+    base_url: str,
+    operations: dict,
+    service_desc: str,
+    kind: str,
+    inqry_bgn: str,
+    inqry_end: str,
+    page_no: int,
+    num_of_rows: int,
+    inqry_div: str,
+    timeout: int,
+    session: requests.Session | None,
+) -> dict:
+    """목록 오퍼레이션 1페이지 조회 공통부 (본공고·사전규격 공유, raw JSON 반환)."""
+    if kind not in operations:
+        raise ValueError(f"알 수 없는 업무구분 '{kind}'. 가능: {sorted(operations)}")
+    service_key = os.environ.get("DATA_GO_KR_BID_KEY")
+    if not service_key:
+        raise RuntimeError(
+            "DATA_GO_KR_BID_KEY 환경변수가 없습니다. "
+            f"공공데이터포털 '{service_desc}' 활용신청 후 발급된 일반 인증키(Decoding)를 설정하세요."
+        )
+    http = session or requests
+    url = f"{base_url}/{operations[kind]}"
+    params = {
+        "serviceKey": service_key,
+        "inqryDiv": inqry_div,
+        "inqryBgnDt": inqry_bgn,
+        "inqryEndDt": inqry_end,
+        "pageNo": str(page_no),
+        "numOfRows": str(num_of_rows),
+        "type": "json",
+    }
+    resp = http.get(url, params=params, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def get_pre_spec_list(
     kind: str,
     inqry_bgn: str,
@@ -58,30 +96,19 @@ def get_pre_spec_list(
 
     본공고 전 단계. 인증키는 본공고와 동일 계정 키를 공유한다(서비스 15129437 활용신청 후).
     """
-    if kind not in PRESPEC_LIST_OPERATIONS:
-        raise ValueError(
-            f"알 수 없는 업무구분 '{kind}'. 가능: {sorted(PRESPEC_LIST_OPERATIONS)}"
-        )
-    service_key = os.environ.get("DATA_GO_KR_BID_KEY")
-    if not service_key:
-        raise RuntimeError(
-            "DATA_GO_KR_BID_KEY 환경변수가 없습니다. "
-            "공공데이터포털 '조달청_나라장터 사전규격정보서비스'(15129437) 활용신청 후 키를 설정하세요."
-        )
-    http = session or requests
-    url = f"{PRESPEC_BASE_URL}/{PRESPEC_LIST_OPERATIONS[kind]}"
-    params = {
-        "serviceKey": service_key,
-        "inqryDiv": inqry_div,
-        "inqryBgnDt": inqry_bgn,
-        "inqryEndDt": inqry_end,
-        "pageNo": str(page_no),
-        "numOfRows": str(num_of_rows),
-        "type": "json",
-    }
-    resp = http.get(url, params=params, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()
+    return _get_list(
+        PRESPEC_BASE_URL,
+        PRESPEC_LIST_OPERATIONS,
+        "조달청_나라장터 사전규격정보서비스(15129437)",
+        kind,
+        inqry_bgn,
+        inqry_end,
+        page_no,
+        num_of_rows,
+        inqry_div,
+        timeout,
+        session,
+    )
 
 
 def get_bid_pblanc_list(
@@ -109,30 +136,16 @@ def get_bid_pblanc_list(
     Returns:
         공공데이터포털 응답 JSON (response.body.items 구조)
     """
-    if kind not in BID_LIST_OPERATIONS:
-        raise ValueError(
-            f"알 수 없는 업무구분 '{kind}'. 가능: {sorted(BID_LIST_OPERATIONS)}"
-        )
-
-    service_key = os.environ.get("DATA_GO_KR_BID_KEY")
-    if not service_key:
-        raise RuntimeError(
-            "DATA_GO_KR_BID_KEY 환경변수가 없습니다. "
-            "공공데이터포털에서 '조달청_나라장터 입찰공고정보서비스'(데이터 15129394) "
-            "활용신청 후 발급된 일반 인증키(Decoding)를 설정하세요."
-        )
-
-    http = session or requests
-    url = f"{BASE_URL}/{BID_LIST_OPERATIONS[kind]}"
-    params = {
-        "serviceKey": service_key,
-        "inqryDiv": inqry_div,
-        "inqryBgnDt": inqry_bgn,
-        "inqryEndDt": inqry_end,
-        "pageNo": str(page_no),
-        "numOfRows": str(num_of_rows),
-        "type": "json",
-    }
-    resp = http.get(url, params=params, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()
+    return _get_list(
+        BASE_URL,
+        BID_LIST_OPERATIONS,
+        "조달청_나라장터 입찰공고정보서비스(데이터 15129394)",
+        kind,
+        inqry_bgn,
+        inqry_end,
+        page_no,
+        num_of_rows,
+        inqry_div,
+        timeout,
+        session,
+    )

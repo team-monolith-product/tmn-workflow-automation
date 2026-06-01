@@ -23,15 +23,12 @@ from dotenv import load_dotenv
 from service.config import load_config
 from service.edu_bid import pipeline
 from service.edu_bid.knowledge import load_knowledge
+from service.edu_bid.stages import format_won as _won
 
 load_dotenv()
 
 _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
 _REPORT_LABELS = ["입찰추천", "검토", "미래타깃"]
-
-
-def _won(v: str) -> str:
-    return f"{int(v):,}원" if v.isdigit() else (v or "미상")
 
 
 def business_days(n: int) -> list[date]:
@@ -63,7 +60,6 @@ def main():
                 lookback_days=1,
                 batch_size=cfg.batch_size,
                 today=d + timedelta(days=1),  # window=[d]
-                dry_run=True,
                 do_enrich=True,
                 use_cache=True,
                 knowledge=kn,
