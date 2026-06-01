@@ -141,13 +141,14 @@ def gate(ann: Announcement, eligibility: dict) -> GateResult:
     - 실적경쟁(arsltCmptYn=Y): 실적제한 존재 → 현 실적 약하면 near_miss.
     - 지역제한/업종제한: 존재 시 reason 으로 표시(상세 확인 필요), 하드 fail 보류.
     """
-    # 참가 불가(하드 제외): 수의시담/다자간수의시담은 계약대상자가 이미 정해진
-    # 정보공개용 공고라 외부 업체는 참가할 수 없다. (소액수의견적=견적경쟁은 참가 가능)
-    if "수의시담" in ann.award_method:
-        return GateResult(
-            status="fail",
-            reasons=["수의시담/다자간수의시담 — 계약대상자 외 참가 불가(정보공개용)"],
-        )
+    # 참가 불가(하드 제외): 계약대상자가 이미 정해진 정보공개용 공고는 외부 업체가
+    # 참가할 수 없다. 제외 대상 낙찰방식은 원장(excluded_award_methods)에서 관리한다.
+    for method in eligibility.get("excluded_award_methods", []):
+        if method in ann.award_method:
+            return GateResult(
+                status="fail",
+                reasons=[f"{method} — 계약대상자 외 참가 불가(정보공개용)"],
+            )
 
     reasons: list[str] = []
     status = "pass"

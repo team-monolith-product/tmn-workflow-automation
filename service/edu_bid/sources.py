@@ -38,18 +38,15 @@ def _extract_items(payload: dict) -> tuple[list[dict], int]:
     body = response.get("body", {})
     total = int(body.get("totalCount", 0) or 0)
     items = body.get("items", [])
-    if items in ("", None):
-        return [], total
     if isinstance(items, dict):
-        inner = items.get("item", items)
-        if isinstance(inner, dict):
-            return [inner], total
-        if isinstance(inner, list):
-            return inner, total
-        return [], total
+        items = items.get(
+            "item", items
+        )  # {"item": ...} 래퍼를 벗기거나, dict 자체가 단일 건
+    if isinstance(items, dict):
+        return [items], total
     if isinstance(items, list):
         return items, total
-    return [], total
+    return [], total  # "", None, 기타 → 빈 목록
 
 
 # 어댑터 id → (목록 조회 함수, 정규화 함수, 업무구분 라벨 접미)

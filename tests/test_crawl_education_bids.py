@@ -124,17 +124,20 @@ def test_gate_result_competition_near_miss_when_weak_performance():
 
 
 def test_gate_fail_on_sucsfbid_sidam():
-    """수의시담/다자간수의시담 = 정보공개용 → 참가 불가(fail)."""
-    g = stages.gate(_ann(award_method="수의시담-일반경쟁->수의"), {"performance": []})
+    """수의시담/다자간수의시담 = 정보공개용 → 참가 불가(fail). 원장의 제외 낙찰방식 룰 적용."""
+    g = stages.gate(
+        _ann(award_method="수의시담-일반경쟁->수의"),
+        {"performance": [], "excluded_award_methods": ["수의시담"]},
+    )
     assert g.status == "fail"
     assert any("참가 불가" in r for r in g.reasons)
 
 
 def test_gate_pass_on_small_sum_quote():
-    """소액수의견적(2인 이상 견적 제출)은 견적 경쟁 → 참가 가능(fail 아님)."""
+    """소액수의견적(2인 이상 견적 제출)은 견적 경쟁 → 제외 룰에 안 걸림(참가 가능)."""
     g = stages.gate(
         _ann(award_method="소액수의견적-소액수의견적(2인 이상 견적 제출)"),
-        {"performance": []},
+        {"performance": [], "excluded_award_methods": ["수의시담"]},
     )
     assert g.status == "pass"
 

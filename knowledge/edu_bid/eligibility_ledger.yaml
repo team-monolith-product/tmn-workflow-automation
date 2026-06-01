@@ -5,6 +5,12 @@
 version: 2
 updated: 2026-05-30
 
+# 참가 불가(하드 게이트 fail) 낙찰방식 — 계약대상자가 이미 정해진 정보공개용 공고.
+# award_method 에 아래 문자열이 포함되면 평가 전에 제외한다(substring 매칭).
+# "수의시담" 은 "다자간수의시담" 도 포함한다. 소액수의견적(견적경쟁)은 참가 가능하므로 제외 안 함.
+excluded_award_methods:
+  - 수의시담
+
 credentials:
   sw_business_report: true        # 소프트웨어사업자 신고 (보유)
   region: 서울특별시               # 본사 소재지 (지역제한 게이트용)
