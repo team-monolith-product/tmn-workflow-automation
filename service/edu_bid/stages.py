@@ -11,6 +11,7 @@ from .schemas import (
     Announcement,
     GateResult,
     Decision,
+    EvalOut,
     LABEL_RECOMMEND,
     LABEL_REVIEW,
     LABEL_FUTURE,
@@ -105,13 +106,6 @@ def to_announcement_prespec(item: dict, kind_label: str) -> Announcement:
         close_dt=opinion_close,
         estimated_price=_first(item, "asignBdgtAmt"),
         url=spec_docs[0]["url"] if spec_docs else "",
-        award_method="",
-        re_notice="",
-        result_competition="",
-        industry_limit="",
-        region_limit_basis="",
-        tech_eval_rate="",
-        price_eval_rate="",
         info_biz=_first(item, "swBizObjYn"),
         service_div=_first(item, "bsnsDivNm"),
         proc_class=proc_class,
@@ -226,14 +220,12 @@ def classify_work_type(ann: Announcement, work_types: dict) -> str:
 def decide(
     ann: Announcement,
     gate_result: GateResult,
-    axes: dict,
-    quant_barrier: str,
-    wired_risk: str,
-    matched_assets: list[str],
-    rationale: str,
+    ev: EvalOut,
+    fallback_assets: list[str],
     knowledge,
 ) -> Decision:
-    """4축 가중합으로 종합점수·라벨 산출."""
+    """LLM 평가(EvalOut)를 4축 가중합으로 종합점수·라벨화해 최종 결정으로 변환."""
+    axes = ev.axes.model_dump()
     weights = knowledge.weights
     score = sum(float(axes.get(k, 0)) * float(weights.get(k, 0)) for k in weights)
 
@@ -253,12 +245,12 @@ def decide(
         announcement=ann,
         gate=gate_result,
         axes=axes,
-        quant_barrier=quant_barrier,
-        matched_assets=matched_assets,
+        quant_barrier=ev.quant_barrier,
+        matched_assets=ev.matched_assets or fallback_assets,
         score=round(score, 1),
         label=label,
-        rationale=rationale,
-        wired_risk=wired_risk,
+        rationale=ev.rationale,
+        wired_risk=ev.wired_risk,
     )
 
 

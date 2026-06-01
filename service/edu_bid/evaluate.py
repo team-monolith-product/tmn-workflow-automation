@@ -77,11 +77,9 @@ def _announcement_line(i: int, ann: Announcement, matched: list[str]) -> str:
     )
 
 
-def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str:
-    lines = [
-        "당신은 팀모노리스(에듀테크)의 공공조달 사업개발 담당자다.",
-        "아래 회사 역량·자격·전략을 기준으로 각 입찰공고를 4축(0~100)으로 평가하라.",
-        "",
+def _knowledge_context(knowledge) -> list[str]:
+    """평가·심층평가 프롬프트가 공유하는 회사 역량·자격·전략·평가기준 블록."""
+    return [
         "# 우리 보유 자산(재사용 가능 역량)",
         _assets_block(knowledge),
         "",
@@ -92,6 +90,15 @@ def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str
         _strategy_block(knowledge),
         "",
         *_CRITERIA,
+    ]
+
+
+def _build_prompt(knowledge, batch: list[tuple[Announcement, list[str]]]) -> str:
+    lines = [
+        "당신은 팀모노리스(에듀테크)의 공공조달 사업개발 담당자다.",
+        "아래 회사 역량·자격·전략을 기준으로 각 입찰공고를 4축(0~100)으로 평가하라.",
+        "",
+        *_knowledge_context(knowledge),
         "",
         "# 평가 대상",
     ]
@@ -136,16 +143,7 @@ def _build_deep_prompt(
         "아래 회사 역량·자격·전략과 '규격서 본문'을 근거로 이 공고를 4축(0~100)으로 평가하라.",
         "규격서의 실제 과업범위·요구사항·평가배점·실적/지역요건을 우선 근거로 삼아라.",
         "",
-        "# 우리 보유 자산(재사용 가능 역량)",
-        _assets_block(knowledge),
-        "",
-        "# 자격·실적 상태",
-        _eligibility_block(knowledge),
-        "",
-        "# 전략",
-        _strategy_block(knowledge),
-        "",
-        *_CRITERIA,
+        *_knowledge_context(knowledge),
         "",
         "# 공고 메타",
         _announcement_line(0, ann, matched),

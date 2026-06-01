@@ -172,23 +172,46 @@ class _KN:
         "value": 0.2,
         "performance_building": 0.1,
     }
-    thresholds = {"recommend": 70, "review": 50, "future_target": 0}
+    thresholds = {"recommend": 70, "review": 50}
+
+
+def _eval(reuse, winnability, value, performance_building, **over) -> EvalOut:
+    base = dict(
+        index=0,
+        axes=Axes(
+            reuse=reuse,
+            winnability=winnability,
+            value=value,
+            performance_building=performance_building,
+        ),
+        quant_barrier="low",
+        wired_risk="low",
+        matched_assets=["codle"],
+        rationale="근거",
+    )
+    base.update(over)
+    return EvalOut(**base)
 
 
 def test_decide_recommend_label():
-    axes = {"reuse": 90, "winnability": 80, "value": 60, "performance_building": 40}
-    d = stages.decide(
-        _ann(), GateResult("pass"), axes, "low", "low", ["codle"], "근거", _KN()
-    )
+    ev = _eval(90, 80, 60, 40)
+    d = stages.decide(_ann(), GateResult("pass"), ev, [], _KN())
     # 0.4*90+0.3*80+0.2*60+0.1*40 = 36+24+12+4 = 76
     assert d.score == 76.0 and d.label == "입찰추천" and d.wired_risk == "low"
+    assert d.matched_assets == ["codle"]
+
+
+def test_decide_falls_back_to_triage_assets_when_eval_empty():
+    ev = _eval(90, 80, 60, 40, matched_assets=[])
+    d = stages.decide(_ann(), GateResult("pass"), ev, ["codle", "judge"], _KN())
+    assert d.matched_assets == ["codle", "judge"]
 
 
 def test_decide_near_miss_gate_overrides_to_future_target():
-    axes = {"reuse": 90, "winnability": 90, "value": 90, "performance_building": 90}
-    d = stages.decide(
-        _ann(), GateResult("near_miss", ["실적"]), axes, "high", "high", [], "r", _KN()
+    ev = _eval(
+        90, 90, 90, 90, quant_barrier="high", wired_risk="high", matched_assets=[]
     )
+    d = stages.decide(_ann(), GateResult("near_miss", ["실적"]), ev, [], _KN())
     assert d.label == "미래타깃"
 
 

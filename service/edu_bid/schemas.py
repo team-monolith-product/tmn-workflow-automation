@@ -29,17 +29,17 @@ class Announcement:
     close_dt: str
     estimated_price: str  # 추정가격
     url: str
-    # 선별 신호 (목록 응답에 포함)
-    award_method: str  # 낙찰자결정방법 (sucsfbidMthdNm)
-    re_notice: str  # 재공고여부 (reNtceYn)
-    result_competition: str  # 실적경쟁여부 (arsltCmptYn) — 실적제한 신호
-    industry_limit: str  # 업종제한여부 (indstrytyLmtYn)
-    region_limit_basis: str  # 지역제한 판단기준명 (rgnLmtBidLocplcJdgmBssNm)
-    tech_eval_rate: str  # 기술능력평가비율 (techAbltEvlRt)
-    price_eval_rate: str  # 입찰가격평가비율 (bidPrceEvlRt)
-    info_biz: str  # 정보화사업여부 (infoBizYn)
-    service_div: str  # 용역구분명 (srvceDivNm)
-    proc_class: str  # 조달 소분류 (pubPrcrmntClsfcNm)
+    # 선별 신호 (목록 응답에 포함) — 소스에 따라 없을 수 있어 기본값 "".
+    award_method: str = ""  # 낙찰자결정방법 (sucsfbidMthdNm)
+    re_notice: str = ""  # 재공고여부 (reNtceYn)
+    result_competition: str = ""  # 실적경쟁여부 (arsltCmptYn) — 실적제한 신호
+    industry_limit: str = ""  # 업종제한여부 (indstrytyLmtYn)
+    region_limit_basis: str = ""  # 지역제한 판단기준명 (rgnLmtBidLocplcJdgmBssNm)
+    tech_eval_rate: str = ""  # 기술능력평가비율 (techAbltEvlRt)
+    price_eval_rate: str = ""  # 입찰가격평가비율 (bidPrceEvlRt)
+    info_biz: str = ""  # 정보화사업여부 (infoBizYn)
+    service_div: str = ""  # 용역구분명 (srvceDivNm)
+    proc_class: str = ""  # 조달 소분류 (pubPrcrmntClsfcNm)
     proc_mid: str = ""  # 조달 중분류 (pubPrcrmntMidClsfcNm)
     proc_large: str = ""  # 조달 대분류 (pubPrcrmntLrgClsfcNm)
     work_type: str = ""  # 사업유형 태그 (S3에서 분류, 개발/운영/교육운영/...)
