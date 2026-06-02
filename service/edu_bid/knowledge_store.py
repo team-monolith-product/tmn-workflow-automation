@@ -14,10 +14,6 @@ from sqlalchemy import select
 from .db import EduBidKnowledgeDocument, session_scope
 
 
-def _norm_track(track: str | None) -> str:
-    return track or ""
-
-
 def _json_safe(obj: object) -> object:
     """JSON 컬럼 저장용 정규화 — YAML 이 date 로 파싱한 값(updated/expires 등)을 ISO 문자열로.
 
@@ -46,7 +42,7 @@ def get_active_document(
     section: str, track: str | None = None, *, session=None
 ) -> dict | None:
     """활성 버전의 payload 를 반환. 없으면 None (→ 호출측에서 YAML 폴백)."""
-    track = _norm_track(track)
+    track = track or ""  # 공유 문서는 track 빈 문자열
     if session is not None:
         row = _query_active(session, section, track)
         return row.payload if row else None
@@ -68,7 +64,7 @@ def save_document(
 
     직전 활성과 payload 가 동일하면 새 버전을 만들지 않는다(시드 멱등성).
     """
-    track = _norm_track(track)
+    track = track or ""  # 공유 문서는 track 빈 문자열
     payload = _json_safe(payload)
 
     def _save(s) -> int:
