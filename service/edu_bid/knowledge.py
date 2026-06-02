@@ -1,13 +1,15 @@
 """
 지식 레이어 로더
 
-knowledge/edu_bid/ 의 변동 자산(역량·자격·소스·사업유형)은 트랙이 공유하고,
-전략·점수정책은 tracks/<key>.yaml 로 트랙마다 따로 둔다. 파이프라인 단계는 이
-객체를 읽기만 하고, 회사·전략이 변하면 코드가 아니라 YAML 만 갱신한다.
+전략 지식(자산·정량규격·전략)의 원본은 DB(SoT)다 — 어드민에서 편집하면 새 버전이 쌓이고
+여기서 활성 버전을 읽는다. DB 에 문서가 없거나 DATABASE_URL 미설정이면 YAML 로 폴백한다
+(부트스트랩·로컬 개발). 사업유형·소스(work_types/source_registry)는 아직 YAML 만 쓴다.
+
+DB 우선 3문서: capability_profile(공유), eligibility_ledger(공유), scoring_policy(트랙별).
 """
 
+import os
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -59,23 +61,35 @@ def _load(name: str, base: Path) -> dict:
     return yaml.safe_load((base / name).read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=4)
-def _load_shared(base: Path) -> dict:
-    """트랙이 공유하는 지식 4종 (역량·자격·소스·사업유형). base 단위로 캐시."""
-    return {
-        "capability_profile": _load("capability_profile.yaml", base),
-        "eligibility_ledger": _load("eligibility_ledger.yaml", base),
-        "source_registry": _load("source_registry.yaml", base),
-        "work_types": _load("work_types.yaml", base),
-    }
+def _yaml_file(section: str, track: str) -> str:
+    """DB 우선 섹션의 YAML 폴백 경로."""
+    if section == "scoring_policy":
+        return f"tracks/{track}.yaml"
+    return f"{section}.yaml"
 
 
-@lru_cache(maxsize=8)
+def _document(section: str, track: str, base: Path) -> dict:
+    """DB(SoT) 활성 버전 → 없으면 YAML 폴백. DATABASE_URL 미설정이면 바로 YAML.
+
+    DB 가 원본이므로 캐시하지 않는다(어드민 편집이 다음 실행에 바로 반영되도록).
+    """
+    if os.environ.get("DATABASE_URL"):
+        from .knowledge_store import get_active_document
+
+        doc = get_active_document(section, track)
+        if doc is not None:
+            return doc
+    return _load(_yaml_file(section, track), base)
+
+
 def load_knowledge(track_key: str, knowledge_dir: str | None = None) -> Knowledge:
-    """트랙 지식 = 공유 4종 + tracks/<track_key>.yaml 의 전략·점수정책."""
+    """트랙 지식 조립. 자산·정량규격·전략은 DB(SoT, YAML 폴백), 사업유형·소스는 YAML."""
     base = Path(knowledge_dir) if knowledge_dir else _KNOWLEDGE_DIR
     return Knowledge(
         track_key=track_key,
-        scoring_policy=_load(f"tracks/{track_key}.yaml", base),
-        **_load_shared(base),
+        capability_profile=_document("capability_profile", "", base),
+        eligibility_ledger=_document("eligibility_ledger", "", base),
+        scoring_policy=_document("scoring_policy", track_key, base),
+        source_registry=_load("source_registry.yaml", base),
+        work_types=_load("work_types.yaml", base),
     )
