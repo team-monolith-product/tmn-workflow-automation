@@ -483,11 +483,20 @@ def _validate_notion_page_id(value: str) -> str:
     return value
 
 
+# description 은 bare 문자열이 아니라 Field 로 담는다.
+# bare 문자열은 함수형 @tool(Annotated 직접 파싱)에서는 설명으로 인식되지만
+# pydantic BaseModel args_schema 에서는 무시되어, 모델 기반 도구
+# (update_notion_task_status / create_notion_follow_up_task)의 LLM 설명이 사라진다.
+# Field 로 담으면 두 경로 모두에서 동일하게 노출된다.
 NotionPageId = Annotated[
     str,
     AfterValidator(_validate_notion_page_id),
-    "노션 페이지 ID. 32자리 hex 또는 UUID 형식 (ex: '12d1cc82...'). "
-    "Slack 유저 ID(U로 시작)가 아닌 노션 페이지 ID를 사용해야 합니다.",
+    Field(
+        description=(
+            "노션 페이지 ID. 32자리 hex 또는 UUID 형식 (ex: '12d1cc82...'). "
+            "Slack 유저 ID(U로 시작)가 아닌 노션 페이지 ID를 사용해야 합니다."
+        )
+    ),
 ]
 
 
