@@ -404,18 +404,40 @@ def test_load_knowledge_real_files():
     assert any(s["adapter"] == "g2b" for s in kn.enabled_sources)
 
 
-def test_each_track_loads_own_scoring_with_shared_assets():
+def test_each_track_loads_own_scoring_with_shared_source():
     dev = load_knowledge("dev")
     content = load_knowledge("content")
     edu = load_knowledge("edu")
-    # 역량·자격·소스는 공유(같은 객체로 캐시)
-    assert dev.assets is content.assets is edu.assets
+    # 원본 역량·자격·소스 dict 는 공유(같은 객체로 캐시)
+    assert dev.capability_profile is content.capability_profile
     assert dev.eligibility_ledger is edu.eligibility_ledger
     # 전략(점수정책)은 트랙마다 다른 파일
     descs = {
         k.scoring_policy["strategy"]["primary"]["desc"] for k in (dev, content, edu)
     }
     assert len(descs) == 3
+
+
+def test_assets_are_filtered_by_track_tag():
+    dev = load_knowledge("dev").assets
+    content = load_knowledge("content").assets
+    edu = load_knowledge("edu").assets
+    dev_ids = {a["id"] for a in dev}
+    content_ids = {a["id"] for a in content}
+    # 트랙뷰는 서로 다르고, 콘텐츠 트랙이 가장 좁다
+    assert dev_ids != content_ids
+    assert len(content) < len(dev)
+    # 태그대로 노출: 콘텐츠 저작은 콘텐츠에, 인프라는 콘텐츠에서 빠진다
+    assert "course_authoring" in content_ids
+    assert "gov_cloud_infra" in dev_ids and "gov_cloud_infra" not in content_ids
+    # 모든 트랙뷰 자산은 자기 트랙 태그를 가진다
+    assert all("edu" in a.get("tracks", []) for a in edu)
+
+
+def test_track_performance_is_per_track_and_empty():
+    # 구조만 있고 비어 있음 — 평가 프롬프트의 실적상태는 '약함'으로 나온다
+    for key in ("dev", "content", "edu"):
+        assert load_knowledge(key).track_performance == []
 
 
 # --- run_track (사업유형 분기, LLM 모킹) ---

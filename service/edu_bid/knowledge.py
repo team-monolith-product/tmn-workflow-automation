@@ -17,6 +17,7 @@ _KNOWLEDGE_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "edu_bid"
 
 @dataclass(frozen=True)
 class Knowledge:
+    track_key: str  # 이 지식이 어느 트랙용인지 (자산·정량실적 트랙뷰 기준)
     capability_profile: dict
     eligibility_ledger: dict
     scoring_policy: dict  # 트랙별 (tracks/<key>.yaml)
@@ -25,7 +26,21 @@ class Knowledge:
 
     @property
     def assets(self) -> list[dict]:
-        return self.capability_profile.get("assets", [])
+        """이 트랙에 태그된 내부 자산만. capability_profile 은 공유(SSOT)이고,
+        각 자산의 tracks: 태그로 트랙뷰를 만든다. 평가 프롬프트에 주입된다."""
+        return [
+            a
+            for a in self.capability_profile.get("assets", [])
+            if self.track_key in a.get("tracks", [])
+        ]
+
+    @property
+    def track_performance(self) -> list[dict]:
+        """이 트랙의 정량 실적(실적금액 증명 가능 계약). 평가 프롬프트의 실적상태 근거.
+        자격(업종·직생·인증)은 법인 단위라 공유하고, 정량 실적만 트랙별로 둔다."""
+        return self.eligibility_ledger.get("track_performance", {}).get(
+            self.track_key, []
+        )
 
     @property
     def weights(self) -> dict:
@@ -60,6 +75,7 @@ def load_knowledge(track_key: str, knowledge_dir: str | None = None) -> Knowledg
     """트랙 지식 = 공유 4종 + tracks/<track_key>.yaml 의 전략·점수정책."""
     base = Path(knowledge_dir) if knowledge_dir else _KNOWLEDGE_DIR
     return Knowledge(
+        track_key=track_key,
         scoring_policy=_load(f"tracks/{track_key}.yaml", base),
         **_load_shared(base),
     )
