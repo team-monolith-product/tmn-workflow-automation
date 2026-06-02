@@ -38,11 +38,11 @@ def _query_active(session, section: str, track: str):
     ).scalar_one_or_none()
 
 
-def get_active_document(
-    section: str, track: str | None = None, *, session=None
-) -> dict | None:
-    """활성 버전의 payload 를 반환. 없으면 None (→ 호출측에서 YAML 폴백)."""
-    track = track or ""  # 공유 문서는 track 빈 문자열
+def get_active_document(section: str, track: str = "", *, session=None) -> dict | None:
+    """활성 버전의 payload 를 반환. 없으면 None (→ 호출측에서 YAML 폴백).
+
+    공유 문서는 track="" (기본값), 트랙별(scoring_policy)은 트랙 key.
+    """
     if session is not None:
         row = _query_active(session, section, track)
         return row.payload if row else None
@@ -53,7 +53,7 @@ def get_active_document(
 
 def save_document(
     section: str,
-    track: str | None,
+    track: str,
     payload: dict,
     *,
     author: str,
@@ -62,9 +62,9 @@ def save_document(
 ) -> int:
     """새 버전을 활성으로 저장하고 직전 활성을 비활성화. 반환: 새 버전 번호.
 
+    공유 문서는 track="", 트랙별(scoring_policy)은 트랙 key.
     직전 활성과 payload 가 동일하면 새 버전을 만들지 않는다(시드 멱등성).
     """
-    track = track or ""  # 공유 문서는 track 빈 문자열
     payload = _json_safe(payload)
 
     def _save(s) -> int:
