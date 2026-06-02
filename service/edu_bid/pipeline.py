@@ -19,7 +19,7 @@ GatedCandidate = tuple[Announcement, list[str], GateResult]
 
 def prepare(
     window: tuple[str, str],
-    knowledge,
+    shared,
     *,
     limit: int | None = None,
     session=None,
@@ -27,31 +27,30 @@ def prepare(
 ) -> list[GatedCandidate]:
     """공유 상단부. 수집·트리아지·사업유형·게이트까지 트랙 무관하게 한 번 돈다.
 
-    knowledge 는 공유 지식(역량·자격·소스·사업유형)만 읽으므로 아무 트랙 것이나 무방하다.
+    shared 는 SharedKnowledge(역량·자격·소스·사업유형) — 트랙 전략·점수정책은 여기서 안 쓴다.
     반환: 게이트 통과(pass/near_miss) 후보 [(ann, matched_assets, gate)].
     ann.work_type 이 채워진 상태로 넘어가 run_track 에서 트랙으로 분기된다.
     """
-    kn = knowledge
     print(
-        f"[edu-bid] 구간 {window[0]}~{window[1]} / 소스 {[s['id'] for s in kn.enabled_sources]}"
+        f"[edu-bid] 구간 {window[0]}~{window[1]} / 소스 {[s['id'] for s in shared.enabled_sources]}"
     )
 
     # S0 수집 + S1 정규화/dedupe
-    anns = sources.collect(kn, window, session=session, use_cache=use_cache)
+    anns = sources.collect(shared, window, session=session, use_cache=use_cache)
     anns = stages.dedupe_by_notice(anns)
     print(f"[edu-bid] 수집·dedupe: {len(anns)}건")
 
     # S3 트리아지 (역량 키워드) — 비용 깔때기
-    kw_index = stages.build_keyword_index(kn.capability_profile)
+    kw_index = stages.build_keyword_index(shared.capability_profile)
     candidates = [(a, m) for a in anns if (m := stages.triage(a, kw_index))]
     print(f"[edu-bid] 트리아지 통과: {len(candidates)}건")
 
     # S3.5 사업유형 분류 + 무관 유형 사전 제외(비용 절감)
-    drop_types = set(kn.work_types.get("drop_for_eval", []))
+    drop_types = set(shared.work_types.get("drop_for_eval", []))
     kept: list[tuple] = []
     dropped_wt = 0
     for a, matched in candidates:
-        a.work_type = stages.classify_work_type(a, kn.work_types)
+        a.work_type = stages.classify_work_type(a, shared.work_types)
         if a.work_type in drop_types:
             dropped_wt += 1
         else:
@@ -63,7 +62,7 @@ def prepare(
     gated: list[GatedCandidate] = []
     dropped_gate = 0
     for ann, matched in kept:
-        g = stages.gate(ann, kn.eligibility_ledger)
+        g = stages.gate(ann, shared.eligibility_ledger)
         if g.status == "fail":
             dropped_gate += 1
         else:
@@ -82,7 +81,7 @@ def run_track(
     track_name: str,
     work_types: list[str],
     gated: list[GatedCandidate],
-    knowledge,
+    kn,
     model: str,
     batch_size: int,
     *,
@@ -90,7 +89,6 @@ def run_track(
     session=None,
 ) -> list[Decision]:
     """트랙 하단부. 사업유형이 이 트랙에 속한 후보만 트랙 지식으로 평가·결정·정독한다."""
-    kn = knowledge
     wt = set(work_types)
     subset = [(a, m, g) for a, m, g in gated if a.work_type in wt]
     print(f"[edu-bid][{track_name}] 사업유형 {work_types} 후보: {len(subset)}건")

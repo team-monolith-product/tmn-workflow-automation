@@ -225,15 +225,16 @@ def decide(
     fallback_assets: list[str],
     knowledge,
 ) -> Decision:
-    """LLM 평가(EvalOut)를 4축 가중합으로 종합점수·라벨화해 최종 결정으로 변환."""
+    """LLM 평가(EvalOut)를 4축 가중합으로 종합점수·라벨화해 최종 결정으로 변환.
+
+    게이트 통과분(pass/near_miss)만 들어온다 — fail 은 prepare 에서 이미 제외된다.
+    """
     axes = ev.axes.model_dump()
     weights = knowledge.weights
     score = sum(float(axes.get(k, 0)) * float(weights.get(k, 0)) for k in weights)
 
     th = knowledge.thresholds
-    if gate_result.status == "fail":
-        label = LABEL_EXCLUDE
-    elif gate_result.status == "near_miss":
+    if gate_result.status == "near_miss":
         label = LABEL_FUTURE
     elif score >= th.get("recommend", 70):
         label = LABEL_RECOMMEND
