@@ -108,14 +108,20 @@ def load_shared_knowledge(knowledge_dir: str | None = None) -> SharedKnowledge:
     )
 
 
-def load_knowledge(track_key: str, knowledge_dir: str | None = None) -> Knowledge:
+def load_knowledge(
+    track_key: str,
+    knowledge_dir: str | None = None,
+    *,
+    shared: SharedKnowledge | None = None,
+) -> Knowledge:
     """트랙 지식 = 공유 지식 + tracks/<track_key>.yaml 의 전략·점수정책.
 
-    전략·점수정책은 DB(SoT, YAML 폴백), 공유 지식은 load_shared_knowledge 참조.
+    전략·점수정책은 DB(SoT, YAML 폴백). 공유 지식은 호출측이 한 run 에 한 번 만들어
+    shared 로 넘긴다 — 트랙 루프마다 재조회하지 않기 위함. 생략하면 직접 로드한다.
     """
     base = Path(knowledge_dir) if knowledge_dir else _KNOWLEDGE_DIR
     return Knowledge(
         track_key=track_key,
-        shared=load_shared_knowledge(knowledge_dir),
+        shared=shared if shared is not None else load_shared_knowledge(knowledge_dir),
         scoring_policy=_document("scoring_policy", track_key, base),
     )

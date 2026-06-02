@@ -41,7 +41,7 @@ google-auth
 PyMuPDF
 gethwp
 
-# 교육 입찰 결과 적재 (enk Postgres) + 마이그레이션
-SQLAlchemy
+# edu_bid 전략 지식 DB(SoT) + 마이그레이션. SQLAlchemy 2.x API(DeclarativeBase/Mapped) 사용
+SQLAlchemy>=2.0
 alembic
 psycopg2-binary
