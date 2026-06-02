@@ -1,12 +1,11 @@
 """
 수업 종료 후 Discord 포럼 채널에 자동 공지 게시
 
-10분마다 실행되며:
-1. Google Sheets에서 학교별 수업 일정을 읽음
-2. 오늘 자정 ~ now 윈도우에 종료시각이 들어가는 학교를 감지
-   (outage 후 복귀 시 그날 안이면 자동 catch-up)
-3. "{학교이름}-공지" 포럼 채널에 템플릿 기반 게시물 3개 작성
-4. 멱등성: 같은 제목의 활성 스레드가 이미 있으면 그 템플릿만 스킵 (per-template)
+두 단계로 동작:
+1. schedule_today_notices(): 매일 아침 크론으로 실행.
+   Google Sheets에서 오늘 일정을 읽고, 각 종료시각에 맞춰 APScheduler 1회성 job 등록.
+2. post_notice(): 등록된 종료시각에 실행.
+   해당 학교의 "{학교이름}-공지" 포럼 채널에 템플릿 기반 게시물 3개 작성.
 """
 
 import sys
@@ -18,15 +17,13 @@ import argparse
 import os
 from datetime import datetime, timedelta, timezone
 
-import requests
+from apscheduler.triggers.date import DateTrigger
 from dotenv import load_dotenv
 
 from api.discord import (
     create_message,
     create_thread,
-    get_active_threads,
     get_channel,
-    get_channel_messages,
     get_guild_channels,
     get_message,
 )
@@ -35,6 +32,7 @@ from api.google_sheets import get_worksheet_values
 load_dotenv()
 
 KST = timezone(timedelta(hours=9))
+TIMEZONE = "Asia/Seoul"
 
 # Google Sheets 시리얼 날짜 기준일 (1899-12-30)
 SHEETS_EPOCH = datetime(1899, 12, 30, tzinfo=KST)
@@ -42,8 +40,7 @@ SHEETS_EPOCH = datetime(1899, 12, 30, tzinfo=KST)
 SPREADSHEET_ID = os.environ.get(
     "GOOGLE_SPREADSHEET_ID", "1ZP7wyxbwRO2AhyzForm7494C6bMbY_HAeNHV6-WbSnc"
 )
-# int 변환은 사용 시점으로 미뤄 모듈 import가 다른 잡까지 막지 않도록 함
-WORKSHEET_ID_RAW = os.environ.get("GOOGLE_WORKSHEET_ID", "451387449")
+WORKSHEET_ID = int(os.environ.get("GOOGLE_WORKSHEET_ID", "451387449"))
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1504338147155251220")
 TEMPLATE_THREAD_IDS = [
     tid.strip()
@@ -52,24 +49,24 @@ TEMPLATE_THREAD_IDS = [
 ]
 LOG_CHANNEL_ID = os.environ.get("DISCORD_LOG_CHANNEL_ID", "1505927819094397038")
 
-KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
+DATE_PLACEHOLDER = "yymmdd"
 FORUM_CHANNEL_TYPE = 15
 SCHOOL_NAME_COL = 0
-LOG_FETCH_LIMIT = 100
 
-NO_CHANNEL_PREFIX = "[채널 없음]"
+_scheduler = None
+
+
+def set_scheduler(scheduler):
+    """외부 스케줄러 인스턴스를 주입받는다."""
+    global _scheduler
+    _scheduler = scheduler
 
 
 def parse_school_schedules(rows: list[list]) -> list[dict]:
     """
-    학교별 일정 시트 데이터를 학교별 일정 dict 리스트로 변환한다.
+    UNFORMATTED_VALUE로 읽은 시트 데이터를 학교별 일정 dict 리스트로 변환한다.
 
     시트 스키마: 학교명 | 날짜1 | 시작1 | 종료1 | 날짜2 | 시작2 | 종료2 | ...
-
-    Args:
-        rows: gspread `get_all_values(value_render_option="UNFORMATTED_VALUE")`로 읽은
-              데이터. 날짜 셀은 시리얼 정수, 시간 셀은 하루의 비율(float, 0.0~1.0).
-              FORMATTED_VALUE로 읽은 데이터를 넘기면 int(date_val)에서 ValueError.
 
     Returns:
         [
@@ -84,7 +81,7 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
         ]
     """
     results = []
-    for row in rows[1:]:
+    for row in rows[1:]:  # 헤더 스킵
         school_name = str(row[SCHOOL_NAME_COL]).strip() if row else ""
         if not school_name:
             continue
@@ -96,8 +93,8 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
             start_val = row[col + 1]
             end_val = row[col + 2]
 
-            # 빈 슬롯 또는 부분 입력된 슬롯은 스킵
-            if date_val == "" or start_val == "" or end_val == "":
+            # 빈 슬롯 (학교당 최대 12슬롯 중 미사용)
+            if date_val == "":
                 col += 3
                 continue
 
@@ -124,14 +121,13 @@ def parse_school_schedules(rows: list[list]) -> list[dict]:
 
 def read_school_schedules() -> list[dict]:
     """시트에서 학교별 일정을 읽어온다."""
-    rows = get_worksheet_values(
-        SPREADSHEET_ID, int(WORKSHEET_ID_RAW), value_render_option="UNFORMATTED_VALUE"
-    )
+    rows = get_worksheet_values(SPREADSHEET_ID, WORKSHEET_ID)
     return parse_school_schedules(rows)
 
 
-def find_forum_channel(channels: list[dict], channel_name: str) -> dict | None:
-    """채널 목록에서 이름이 일치하는 포럼 채널을 찾는다."""
+def find_forum_channel(guild_id: str, channel_name: str) -> dict | None:
+    """서버에서 이름이 일치하는 포럼 채널을 찾는다."""
+    channels = get_guild_channels(guild_id)
     for ch in channels:
         if ch.get("type") == FORUM_CHANNEL_TYPE and ch.get("name") == channel_name:
             return ch
@@ -142,6 +138,9 @@ def fetch_thread_template(thread_id: str) -> dict:
     """
     포럼 스레드의 제목과 시작 메시지 본문을 가져온다.
     포럼 스레드의 시작 메시지는 id가 thread_id와 동일하다.
+
+    Returns:
+        {"title": "yymmdd_간식증빙사진", "content": "-"}
     """
     channel = get_channel(thread_id)
     starter = get_message(thread_id, thread_id)
@@ -153,46 +152,84 @@ def fetch_templates() -> list[dict]:
     return [fetch_thread_template(tid) for tid in TEMPLATE_THREAD_IDS]
 
 
-def fetch_already_notified_missing(today_str: str) -> set[str]:
+def post_notice(school_name: str, date_str: str):
     """
-    LOG 채널의 최근 메시지를 조회하여 오늘 이미 '채널 없음' 알림이 보내진 학교 집합 반환.
-    멱등성을 Discord state로 처리하므로 외부 저장소 불필요.
+    특정 학교의 포럼 채널에 공지 게시물 3개를 작성한다.
+    APScheduler에 의해 종료시각에 호출된다.
+
+    Args:
+        school_name: 학교명
+        date_str: 날짜 문자열 (예: "260531")
     """
-    if not LOG_CHANNEL_ID:
-        return set()
-    messages = get_channel_messages(LOG_CHANNEL_ID, limit=LOG_FETCH_LIMIT)
-    marker = f"{NO_CHANNEL_PREFIX} {today_str}"
-    notified = set()
-    for m in messages:
-        content = m.get("content", "")
-        if content.startswith(marker):
-            # "[채널 없음] yymmdd {학교명}-공지" → 학교명 추출
-            rest = content[len(marker) :].strip()
-            if rest.endswith("-공지"):
-                notified.add(rest[: -len("-공지")])
-    return notified
+    channel_name = f"{school_name}-공지"
+    print(f"[post_notice] {channel_name} 공지 시작")
+
+    channel = find_forum_channel(GUILD_ID, channel_name)
+    if not channel:
+        msg = f"[채널 없음] {channel_name}"
+        print(f"  {msg}")
+        if LOG_CHANNEL_ID:
+            create_message(LOG_CHANNEL_ID, msg)
+        return
+
+    templates = fetch_templates()
+
+    for tmpl in templates:
+        new_title = tmpl["title"].replace(DATE_PLACEHOLDER, date_str)
+        create_thread(channel["id"], name=new_title, content=tmpl["content"])
+        print(f"  게시물 생성: {new_title}")
+
+    print(f"[post_notice] {channel_name} 공지 완료")
 
 
-def format_marker(end_time: datetime) -> str:
-    """종료시각을 'M.d(E) HH:mm' 형식 문자열로 포맷."""
-    weekday = KOREAN_WEEKDAYS[end_time.weekday()]
-    return f"{end_time.month}.{end_time.day}({weekday}) {end_time:%H:%M}"
+def schedule_today_notices(scheduler=None):
+    """
+    오늘 수업이 있는 학교를 찾아 종료시각에 맞춰 1회성 job을 등록한다.
+    매일 아침 크론으로 호출된다.
+    """
+    sched = scheduler or _scheduler
+    if not sched:
+        print("[schedule_today_notices] 스케줄러가 없습니다.")
+        return
 
+    now = datetime.now(KST)
+    today = now.date()
+    today_str = now.strftime("%y%m%d")
 
-def make_title(template_title: str, end_time: datetime) -> str:
-    """템플릿 제목 앞에 종료시각 prefix를 붙인다."""
-    return f"{format_marker(end_time)} - {template_title}"
+    print(f"[schedule_today_notices] {today} 일정 등록 시작")
+
+    schools = read_school_schedules()
+    registered = 0
+
+    for school in schools:
+        for s in school["schedules"]:
+            if s["date"].date() != today:
+                continue
+
+            end_time = s["date"].replace(hour=s["end_hour"], minute=s["end_min"])
+
+            # 이미 지난 시각은 스킵
+            if end_time <= now:
+                continue
+
+            job_id = f"discord_notice_{school['school_name']}_{today_str}_{s['end_hour']:02d}{s['end_min']:02d}"
+
+            sched.add_job(
+                post_notice,
+                trigger=DateTrigger(run_date=end_time, timezone=TIMEZONE),
+                id=job_id,
+                name=job_id,
+                args=[school["school_name"], today_str],
+                replace_existing=True,
+            )
+            print(f"  등록: {school['school_name']} → {end_time.strftime('%H:%M')}")
+            registered += 1
+
+    print(f"[schedule_today_notices] {registered}개 job 등록 완료")
 
 
 def main(dry_run: bool = False, target_date: str | None = None):
-    """
-    10분마다 호출되어 오늘 이미 종료된 수업의 학교에 공지를 게시한다.
-    윈도우는 오늘 자정 ~ now. 멱등성으로 중복 방지하므로 outage 후 복귀 시 자동 catch-up.
-
-    Args:
-        dry_run: 실제 Discord 전송 없이 콘솔 출력만
-        target_date: 테스트용 날짜 지정 (YYYY-MM-DD or MM-DD). 지정 시 그 날 하루 전체를 윈도우로.
-    """
+    """CLI용 엔트리포인트. dry-run 및 날짜 지정 테스트 지원."""
     now = datetime.now(KST)
 
     if target_date:
@@ -205,108 +242,40 @@ def main(dry_run: bool = False, target_date: str | None = None):
         else:
             print(f"  잘못된 날짜 형식: {target_date} (YYYY-MM-DD 또는 MM-DD)")
             return
-        now = datetime(year, month, day, 23, 59, 59, tzinfo=KST)
+        target = datetime(year, month, day, tzinfo=KST).date()
+    else:
+        target = now.date()
 
-    window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_str = target.strftime("%y%m%d")
 
-    print(f"[discord_post_completion_notice] 실행: {now.isoformat()}")
-    print(
-        f"  윈도우: [{window_start.strftime('%Y-%m-%d %H:%M')}, {now.strftime('%H:%M')}]"
-    )
+    print(f"[discord_post_completion_notice] 실행: {target}")
 
     schools = read_school_schedules()
+    print(f"  학교 수: {len(schools)}")
 
-    # 윈도우 안에 종료시각이 들어가는 (학교, end_time) 추출
-    targets = []
+    notices = []
     for school in schools:
         for s in school["schedules"]:
+            if s["date"].date() != target:
+                continue
             end_time = s["date"].replace(hour=s["end_hour"], minute=s["end_min"])
-            if window_start < end_time <= now:
-                targets.append((school["school_name"], end_time))
+            notices.append((school["school_name"], end_time))
 
-    if not targets:
-        print("  공지 대상 없음")
+    if not notices:
+        print("  공지 대상 학교 없음")
         return
-
-    print(f"  대상 {len(targets)}건")
 
     if dry_run:
-        for school_name, end_time in targets:
+        for school_name, end_time in notices:
             channel_name = f"{school_name}-공지"
-            marker = format_marker(end_time)
-            print(f"  [DRY-RUN] {channel_name}")
-            print(f"    → {marker} - <템플릿 제목>")
+            print(f"  [DRY-RUN] {end_time.strftime('%H:%M')} → {channel_name}")
+            print(f"    → {today_str}_간식증빙사진")
+            print(f"    → {today_str}_출석부사진")
+            print(f"    → {today_str}_수업사진")
         return
 
-    # 템플릿/채널/활성 스레드/이미 알린 학교 한 번씩 조회
-    templates = fetch_templates()
-    channels = get_guild_channels(GUILD_ID)
-    active_threads = get_active_threads(GUILD_ID).get("threads", [])
-
-    today_str = now.strftime("%y%m%d")
-    notified_missing = fetch_already_notified_missing(today_str)
-
-    # 학교별 처리: Discord 호출의 일시적 실패가 나머지 학교 처리를 막지 않도록 격리.
-    # 다음 cron에서 멱등성으로 catch-up되지만, 실패 사실은 LOG 채널에 알려야 함.
-    # 코드 버그는 잡지 않고 그대로 raise되도록 한정된 예외만 처리.
-    for school_name, end_time in targets:
-        try:
-            process_school(
-                school_name,
-                end_time,
-                channels,
-                active_threads,
-                templates,
-                notified_missing,
-                today_str,
-            )
-        except requests.RequestException as e:
-            msg = f"[처리 실패] {school_name} {format_marker(end_time)}: {type(e).__name__}: {e}"
-            print(f"  {msg}")
-            if LOG_CHANNEL_ID:
-                try:
-                    create_message(LOG_CHANNEL_ID, msg)
-                except requests.RequestException:
-                    # LOG 채널 알림 실패는 콘솔에만 남기고 진행
-                    print(f"  [LOG 알림 실패] {msg}")
-
-
-def process_school(
-    school_name: str,
-    end_time: datetime,
-    channels: list[dict],
-    active_threads: list[dict],
-    templates: list[dict],
-    notified_missing: set[str],
-    today_str: str,
-):
-    """한 학교의 공지 게시를 처리한다."""
-    channel_name = f"{school_name}-공지"
-    channel = find_forum_channel(channels, channel_name)
-    if not channel:
-        print(f"  [채널 없음] {channel_name}")
-        # 멱등성: LOG 채널의 오늘 알림에 이 학교가 이미 있으면 스킵
-        if LOG_CHANNEL_ID and school_name not in notified_missing:
-            create_message(
-                LOG_CHANNEL_ID, f"{NO_CHANNEL_PREFIX} {today_str} {channel_name}"
-            )
-            notified_missing.add(school_name)
-        return
-
-    channel_id = channel["id"]
-    existing_titles = {
-        t.get("name", "") for t in active_threads if t.get("parent_id") == channel_id
-    }
-
-    # 멱등성: 동일 제목 스레드가 이미 있으면 그 템플릿만 스킵.
-    # 부분 실패 후 재시도 시 누락분만 생성하도록 per-template 검사.
-    for tmpl in templates:
-        new_title = make_title(tmpl["title"], end_time)
-        if new_title in existing_titles:
-            print(f"  스킵 (중복): {new_title}")
-            continue
-        create_thread(channel_id, name=new_title, content=tmpl["content"])
-        print(f"  생성: {new_title}")
+    for school_name, _ in notices:
+        post_notice(school_name, today_str)
 
 
 if __name__ == "__main__":
