@@ -31,7 +31,7 @@ def _assets_block(knowledge) -> str:
 
 
 def _eligibility_block(knowledge) -> str:
-    e = knowledge.eligibility_ledger
+    e = knowledge.shared.eligibility_ledger
     cred = e.get("credentials", {})
     perf = knowledge.track_performance  # 정량 실적은 트랙별
     dp = ", ".join(d["name"] for d in cred.get("direct_production", []))

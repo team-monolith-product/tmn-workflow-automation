@@ -3,10 +3,11 @@
 """
 
 import os
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
-from pydantic import BaseModel, Field, create_model
+from pydantic import AfterValidator, BaseModel, Field, create_model
 
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
@@ -461,14 +462,50 @@ def get_create_notion_task_tool(
     return create_notion_task
 
 
+# 노션 페이지 ID 입력 타입 (LLM 도구 인자 공용)
+# 32자리 hex 또는 대시 포함 UUID(8-4-4-4-12)만 허용한다.
+# LLM 에이전트가 Slack 유저 ID(U로 시작)를 page_id로 잘못 넘기면 노션 API 호출 전에
+# 명확한 ValueError 로 거부하여 자기수정을 유도한다. (Sentry WORKFLOW-AUTOMATION-5M/5N)
+_NOTION_PAGE_ID_RE = re.compile(
+    r"^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _validate_notion_page_id(value: str) -> str:
+    value = value.strip()
+    if not _NOTION_PAGE_ID_RE.match(value):
+        raise ValueError(
+            f"'{value}'은(는) 유효한 노션 페이지 ID가 아닙니다. "
+            "32자리 hex 또는 UUID 형식(예: '12d1cc820da680ba82d1e6d560aaf4c3')이어야 합니다. "
+            "Slack 유저 ID(U로 시작)나 다른 형식의 ID를 사용하지 마세요."
+        )
+    return value
+
+
+# description 은 bare 문자열이 아니라 Field 로 담는다.
+# bare 문자열은 함수형 @tool(Annotated 직접 파싱)에서는 설명으로 인식되지만
+# pydantic BaseModel args_schema 에서는 무시되어, 모델 기반 도구
+# (update_notion_task_status / create_notion_follow_up_task)의 LLM 설명이 사라진다.
+# Field 로 담으면 두 경로 모두에서 동일하게 노출된다.
+NotionPageId = Annotated[
+    str,
+    AfterValidator(_validate_notion_page_id),
+    Field(
+        description=(
+            "노션 페이지 ID. 32자리 hex 또는 UUID 형식 (ex: '12d1cc82...'). "
+            "Slack 유저 ID(U로 시작)가 아닌 노션 페이지 ID를 사용해야 합니다."
+        )
+    ),
+]
+
+
 def get_update_notion_task_deadline_tool():
     """노션 작업 마감일 업데이트 도구를 반환합니다."""
 
     @tool
     def update_notion_task_deadline(
-        page_id: Annotated[
-            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        ],
+        page_id: NotionPageId,
         new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"],
     ):
         """
@@ -514,9 +551,7 @@ def get_update_notion_task_status_tool(data_source_id: str):
     )
 
     class UpdateNotionTaskStatusInput(BaseModel):
-        page_id: str = Field(
-            description="노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        )
+        page_id: NotionPageId
         new_status: str = status_field
 
     @tool("update_notion_task_status", args_schema=UpdateNotionTaskStatusInput)
@@ -538,9 +573,7 @@ def get_notion_page_tool():
 
     @tool
     def get_notion_page(
-        page_id: Annotated[
-            str, "노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        ],
+        page_id: NotionPageId,
     ) -> str:
         """
         노션 페이지를 마크다운 형태로 조회합니다.
@@ -557,9 +590,7 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
     component_options = get_component_options(notion, data_source_id)
 
     class CreateNotionFollowUpTaskInput(BaseModel):
-        parent_page_id: str = Field(
-            description="선행 작업의 노션 페이지 ID. ^[a-f0-9]{32}$ 형식. (ex: '12d1cc82...')"
-        )
+        parent_page_id: NotionPageId
         component: str = Field(
             description=f"후속 작업의 구성요소. 가능한 값: {', '.join(component_options)}",
             json_schema_extra={"enum": component_options},

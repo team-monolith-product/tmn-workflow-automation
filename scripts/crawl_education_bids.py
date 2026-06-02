@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 import argparse
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
@@ -24,7 +25,7 @@ from slack_sdk import WebClient
 
 from service.config import load_config
 from service.edu_bid import pipeline, stages
-from service.edu_bid.knowledge import load_knowledge
+from service.edu_bid.knowledge import load_knowledge, load_shared_knowledge
 from service.edu_bid.schemas import REPORTABLE_LABELS
 
 load_dotenv()
@@ -59,14 +60,23 @@ def main():
     now = datetime.now(KST)
     window = stages.build_incremental_window(now)
 
-    # 공유 상단부는 트랙 무관 — 아무 트랙 지식으로 한 번만 수집·게이트한다.
-    shared_knowledge = load_knowledge(cfg.tracks[0].key)
+    # 공유 상단부는 트랙 무관 — 공유 지식으로 한 번만 수집·게이트한다.
     gated = pipeline.prepare(
         window,
-        shared_knowledge,
+        load_shared_knowledge(),
         limit=args.limit,
         use_cache=not args.no_cache,
     )
+
+    # 어느 트랙에도 매핑되지 않은 사업유형(연구·기타 등)은 평가 없이 누락된다 — 침묵 스킵 방지로 집계.
+    routed_types = {wt for t in cfg.tracks for wt in t.work_types}
+    unrouted = Counter(
+        a.work_type for a, _, _ in gated if a.work_type not in routed_types
+    )
+    if unrouted:
+        print(
+            f"[edu-bid] 트랙 미매핑 제외: {sum(unrouted.values())}건 {dict(unrouted)}"
+        )
 
     client = None if args.dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     for track in cfg.tracks:

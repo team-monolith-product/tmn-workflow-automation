@@ -5,7 +5,7 @@
 """
 
 from service.edu_bid import stages, evaluate
-from service.edu_bid.knowledge import load_knowledge
+from service.edu_bid.knowledge import load_knowledge, load_shared_knowledge
 from service.edu_bid.schemas import Announcement, GateResult, Axes, EvalOut, BatchEval
 
 
@@ -348,7 +348,7 @@ def test_enrich_skips_failed_download(monkeypatch):
 
 
 def test_classify_work_type():
-    wt = load_knowledge("dev").work_types
+    wt = load_shared_knowledge().work_types
     assert (
         stages.classify_work_type(
             _ann(title="LMS 고도화", proc_class="정보시스템개발서비스"), wt
@@ -401,16 +401,16 @@ def test_load_knowledge_real_files():
     kn = load_knowledge("dev")
     assert len(kn.assets) > 0
     assert "reuse" in kn.weights
-    assert any(s["adapter"] == "g2b" for s in kn.enabled_sources)
+    assert any(s["adapter"] == "g2b" for s in kn.shared.enabled_sources)
 
 
 def test_each_track_loads_own_scoring_with_shared_source():
     dev = load_knowledge("dev")
     content = load_knowledge("content")
     edu = load_knowledge("edu")
-    # 자산·자격은 트랙 공유(내용 동일), 소스도 동일
-    assert dev.capability_profile == content.capability_profile
-    assert dev.eligibility_ledger == edu.eligibility_ledger
+    # 공유 지식(역량·자격·소스·사업유형)은 트랙끼리 내용 동일
+    assert dev.shared == content.shared
+    assert dev.shared == edu.shared
     # 전략(점수정책)은 트랙마다 다른 문서
     descs = {
         k.scoring_policy["strategy"]["primary"]["desc"] for k in (dev, content, edu)

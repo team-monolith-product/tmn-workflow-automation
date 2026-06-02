@@ -109,4 +109,4 @@ def test_load_knowledge_prefers_db_over_yaml(monkeypatch, tmp_path):
     assert kn.thresholds["recommend"] == 99  # YAML(70) 아님 → DB 우선
     assert kn.scoring_policy["strategy"]["primary"]["desc"] == "DB 전략"
     # DB 에 없는 공유 문서는 YAML 폴백 — 자산이 그대로 로드됨
-    assert len(kn.capability_profile.get("assets", [])) > 0
+    assert len(kn.shared.capability_profile.get("assets", [])) > 0
