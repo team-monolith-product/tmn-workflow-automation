@@ -51,11 +51,11 @@ class EduBidKnowledgeDocument(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # capability_profile | eligibility_ledger | scoring_policy
-    section: Mapped[str] = mapped_column(String(32), index=True)
+    section: Mapped[str] = mapped_column(String(32))
     # 공유 문서는 "" , 트랙별(scoring_policy)은 트랙 key(dev/content/edu)
-    track: Mapped[str] = mapped_column(String(16), default="", index=True)
+    track: Mapped[str] = mapped_column(String(16), default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
-    active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
     payload: Mapped[dict] = mapped_column(JSON)  # YAML 과 동일 구조의 문서 본문
     author: Mapped[str] = mapped_column(
         String(64), default=""

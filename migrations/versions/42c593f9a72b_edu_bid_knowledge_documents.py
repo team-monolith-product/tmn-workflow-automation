@@ -44,38 +44,8 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("active"),
     )
-    op.create_index(
-        op.f("ix_edu_bid_knowledge_documents_active"),
-        "edu_bid_knowledge_documents",
-        ["active"],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_edu_bid_knowledge_documents_section"),
-        "edu_bid_knowledge_documents",
-        ["section"],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_edu_bid_knowledge_documents_track"),
-        "edu_bid_knowledge_documents",
-        ["track"],
-        unique=False,
-    )
 
 
 def downgrade() -> None:
     op.drop_index("uq_knowledge_doc_active", table_name="edu_bid_knowledge_documents")
-    op.drop_index(
-        op.f("ix_edu_bid_knowledge_documents_track"),
-        table_name="edu_bid_knowledge_documents",
-    )
-    op.drop_index(
-        op.f("ix_edu_bid_knowledge_documents_section"),
-        table_name="edu_bid_knowledge_documents",
-    )
-    op.drop_index(
-        op.f("ix_edu_bid_knowledge_documents_active"),
-        table_name="edu_bid_knowledge_documents",
-    )
     op.drop_table("edu_bid_knowledge_documents")
