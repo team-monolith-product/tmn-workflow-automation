@@ -228,7 +228,7 @@ scheduled_jobs:
     function: main
     cron:
       hour: 9
-      minute: 0
+      minute: 5
       day_of_week: mon-fri
     business_day_only: true
 
@@ -264,7 +264,7 @@ scheduled_jobs:
     function: main
     cron:
       hour: 9
-      minute: 0
+      minute: 8
       day_of_week: mon-fri
     business_day_only: true
 
@@ -273,7 +273,7 @@ scheduled_jobs:
     function: main
     cron:
       hour: 9
-      minute: 0
+      minute: 11
       day: 1
     business_day_only: false
 
@@ -289,7 +289,7 @@ scheduled_jobs:
     function: main
     cron:
       hour: 9
-      minute: 20            # 9시대 타 작업(00·15분)과 겹치지 않게
+      minute: 20            # 9시대 분산 배치된 타 작업과 겹치지 않게
     # 주말·공휴일 포함 매일 실행. 새 공고 없으면 Slack 전송은 자동 생략됨.
 
 # 나라장터(G2B) 교육 외주 입찰공고 수집·평가
