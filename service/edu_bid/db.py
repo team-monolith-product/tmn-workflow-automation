@@ -15,6 +15,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Index,
     Integer,
     JSON,
     String,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -31,11 +33,20 @@ class Base(DeclarativeBase):
 
 
 class EduBidKnowledgeDocument(Base):
-    """지식 문서 1버전. (section, track) 당 active=True 는 한 건만 유지(코드에서 보장)."""
+    """지식 문서 1버전. (section, track) 당 active=True 는 부분 유니크 인덱스로 한 건만 강제."""
 
     __tablename__ = "edu_bid_knowledge_documents"
     __table_args__ = (
         UniqueConstraint("section", "track", "version", name="uq_knowledge_doc_ver"),
+        # (section, track) 당 활성 단일성을 스키마로 강제 — 동시/중복 저장 시 두 번째 커밋이 깨진다.
+        Index(
+            "uq_knowledge_doc_active",
+            "section",
+            "track",
+            unique=True,
+            sqlite_where=text("active = 1"),
+            postgresql_where=text("active"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

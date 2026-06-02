@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -74,6 +75,23 @@ def test_new_version_supersedes_and_track_isolated(session):
         )
         is None
     )
+
+
+def test_db_rejects_two_active_per_section_track(session):
+    """활성 단일성은 부분 유니크 인덱스로 스키마가 강제한다 — 둘째 활성 행은 거부."""
+    session.add(
+        EduBidKnowledgeDocument(
+            section="capability_profile", track="", version=1, active=True, payload={}
+        )
+    )
+    session.flush()
+    session.add(
+        EduBidKnowledgeDocument(
+            section="capability_profile", track="", version=2, active=True, payload={}
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
 
 
 def test_idempotent_same_payload(session):

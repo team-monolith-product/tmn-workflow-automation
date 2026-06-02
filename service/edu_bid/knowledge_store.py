@@ -18,7 +18,7 @@ def _norm_track(track: str | None) -> str:
     return track or ""
 
 
-def _json_safe(obj):
+def _json_safe(obj: object) -> object:
     """JSON 컬럼 저장용 정규화 — YAML 이 date 로 파싱한 값(updated/expires 등)을 ISO 문자열로.
 
     파이프라인 로직은 이 날짜 값을 쓰지 않으므로 문자열화해도 무해하다(저장 일관성 확보).
@@ -78,6 +78,7 @@ def save_document(
         version = (current.version + 1) if current else 1
         if current is not None:
             current.active = False
+            s.flush()  # 직전 활성 해제를 먼저 반영 — active 부분 유니크 인덱스 충돌 방지
         s.add(
             EduBidKnowledgeDocument(
                 section=section,

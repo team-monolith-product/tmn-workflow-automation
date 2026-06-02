@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 from service.config import load_config
 from service.edu_bid import knowledge_store
-from service.edu_bid.knowledge import _KNOWLEDGE_DIR, _load
+from service.edu_bid.knowledge import _KNOWLEDGE_DIR, _load, _yaml_file
 
 load_dotenv()
 
@@ -34,15 +34,16 @@ def main():
     cfg = load_config().education_bid_crawler
     track_keys = [t.key for t in cfg.tracks] if cfg else []
 
-    # (section, track, yaml파일) — 공유 2종 + 트랙별 전략
-    targets: list[tuple[str, str, str]] = [
-        ("capability_profile", "", "capability_profile.yaml"),
-        ("eligibility_ledger", "", "eligibility_ledger.yaml"),
+    # (section, track) — 공유 2종 + 트랙별 전략. YAML 경로는 _yaml_file 로 도출(로더와 동일 규칙).
+    targets: list[tuple[str, str]] = [
+        ("capability_profile", ""),
+        ("eligibility_ledger", ""),
     ]
     for key in track_keys:
-        targets.append(("scoring_policy", key, f"tracks/{key}.yaml"))
+        targets.append(("scoring_policy", key))
 
-    for section, track, yaml_file in targets:
+    for section, track in targets:
+        yaml_file = _yaml_file(section, track)
         payload = _load(yaml_file, _KNOWLEDGE_DIR)
         label = f"{section}" + (f"[{track}]" if track else "")
         if args.dry_run:

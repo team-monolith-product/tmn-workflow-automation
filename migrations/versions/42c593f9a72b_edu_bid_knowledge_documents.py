@@ -31,11 +31,18 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            server_default=sa.func.now(),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("section", "track", "version", name="uq_knowledge_doc_ver"),
+    )
+    op.create_index(
+        "uq_knowledge_doc_active",
+        "edu_bid_knowledge_documents",
+        ["section", "track"],
+        unique=True,
+        postgresql_where=sa.text("active"),
     )
     op.create_index(
         op.f("ix_edu_bid_knowledge_documents_active"),
@@ -58,6 +65,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("uq_knowledge_doc_active", table_name="edu_bid_knowledge_documents")
     op.drop_index(
         op.f("ix_edu_bid_knowledge_documents_track"),
         table_name="edu_bid_knowledge_documents",
