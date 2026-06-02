@@ -53,8 +53,18 @@ credentials:
 #   perf_usable        : 그 금액을 실적요건에 쓸 수 있는지 (yes|uncertain|no)
 # TODO: 실제 계약 건만 기입(임의 생성 금지).
 #   contract_type: 구축개발 | 구축개발(RS) | 운영 | 유지관리 | SW공급이용
+# 회사 전체 실적 — S2 게이트의 near_miss 판정(실적제한경쟁 + 실적 약함)에 쓰인다(법인 단위).
 performance: []
-# 예시 형식:
+
+# 트랙별 정량 실적 — S5 평가 프롬프트의 '정량 실적 상태' 근거(팀별로 쌓이는 실적금액).
+# 구조만 두고 비워둔다. 실제 계약 건은 각 팀이 아래 예시 형식으로 채운다(임의 생성 금지).
+# 키는 config.yaml education_bid_crawler.tracks 의 key 와 일치(dev/content/edu).
+track_performance:
+  dev: []
+  content: []
+  edu: []
+
+# 예시 형식 (performance·track_performance 공통):
 # performance:
 #   - project: ○○ AI디지털교과서 통합플랫폼 연동 구축
 #     contract_type: 구축개발(RS)   # 구축했으나 대가는 매출배분

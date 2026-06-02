@@ -225,15 +225,16 @@ def decide(
     fallback_assets: list[str],
     knowledge,
 ) -> Decision:
-    """LLM 평가(EvalOut)를 4축 가중합으로 종합점수·라벨화해 최종 결정으로 변환."""
+    """LLM 평가(EvalOut)를 4축 가중합으로 종합점수·라벨화해 최종 결정으로 변환.
+
+    게이트 통과분(pass/near_miss)만 들어온다 — fail 은 prepare 에서 이미 제외된다.
+    """
     axes = ev.axes.model_dump()
     weights = knowledge.weights
     score = sum(float(axes.get(k, 0)) * float(weights.get(k, 0)) for k in weights)
 
     th = knowledge.thresholds
-    if gate_result.status == "fail":
-        label = LABEL_EXCLUDE
-    elif gate_result.status == "near_miss":
+    if gate_result.status == "near_miss":
         label = LABEL_FUTURE
     elif score >= th.get("recommend", 70):
         label = LABEL_RECOMMEND
@@ -263,14 +264,19 @@ def format_won(value: str) -> str:
     return f"{int(value):,}원" if value.isdigit() else (value or "미상")
 
 
-def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
+def format_report(
+    decisions: list[Decision], window: tuple[str, str], track_name: str
+) -> str:
     """보고 대상(추천/검토/미래타깃)을 라벨·점수 순으로 Slack 텍스트화."""
     bgn = window[0]
     bgn_disp = f"{bgn[:4]}-{bgn[4:6]}-{bgn[6:8]}"
     shown = [d for d in decisions if d.label in REPORTABLE_LABELS]
     shown.sort(key=lambda d: (REPORTABLE_LABELS.index(d.label), -d.score))
 
-    lines = [f":mega: 교육 외주 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)", ""]
+    lines = [
+        f":mega: [{track_name}] 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)",
+        "",
+    ]
     for d in shown:
         a = d.announcement
         price_disp = format_won(a.estimated_price)

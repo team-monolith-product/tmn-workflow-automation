@@ -3,12 +3,15 @@
 # 각 자산의 maturity/edu_bid_relevance/evidence 는 실제 소스·커밋·배포 구성 확인 결과.
 # - S3(트리아지) 키워드 매핑, S5(심층평가) 재사용률 판정의 기준선.
 # - 자산이 늘거나 성숙도가 바뀌면 갱신. maturity: production | beta | poc | research
-version: 2
-updated: 2026-05-30
+# - tracks: 이 자산이 어느 입찰 트랙의 재사용 근거가 되는지(dev=구축/개발, content=콘텐츠 제작,
+#   edu=교육/연수). S5 평가 프롬프트는 해당 트랙 태그가 붙은 자산만 본다(트리아지는 전체 사용).
+version: 3
+updated: 2026-06-02
 
 assets:
   # ───────── 공교육 플랫폼 연동 (입찰 최강 차별화) ─────────
   - id: aidt_keris_integration
+    tracks: [dev]
     name: AI디지털교과서(AIDT)·KERIS 통합플랫폼 연동 (SSO + 로스터 동기화)
     repos: [aidt-keris-sso, jce-user-rails, jce-class-rails, jce-service-helm]
     covers:
@@ -22,6 +25,7 @@ assets:
     evidence: aidt-keris-sso/agent sso.conf(sso.aidtbook.kr, GID teammonolith_01), jce-user-rails app/apis/keris_api.rb + keris sync jobs, jce-service-helm/keris-sso/ncloud-prd.yaml
 
   - id: public_ed_sso
+    tracks: [dev]
     name: 공교육 다중 IdP 연동 (웨일스페이스·시도교육청 SAML·티처빌·네이버웍스)
     repos: [jce-user-rails, omniauth-whalespace]
     covers:
@@ -34,6 +38,7 @@ assets:
     evidence: jce-user-rails app/services/aiep/{idp,sp}_metadata_service.rb, app/apis/{whalespace,teacherville,naverworks}_api, omniauth-whalespace/lib/omniauth/strategies/whalespace.rb
 
   - id: gov_cloud_infra
+    tracks: [dev, edu]
     name: 공교육 정부클라우드 멀티테넌트 인프라 (NCP gov, IaC/GitOps)
     repos: [ped-terraform, jce-service-helm]
     covers:
@@ -48,6 +53,7 @@ assets:
 
   # ───────── 코들 K12 교육 플랫폼(LMS) ─────────
   - id: course_authoring
+    tracks: [dev, content, edu]
     name: 교사 코스·콘텐츠 저작도구 (다형 활동 빌더)
     repos: [jce-class-rails, jce-codle-react, jce-admin-react, tmn-codle-cli]
     covers:
@@ -59,6 +65,7 @@ assets:
     evidence: jce-class-rails app/models/*_activity.rb(25종), codle src/routes/material, tmn-codle-cli
 
   - id: auto_grading_mastery
+    tracks: [dev, edu]
     name: 자동채점·성취도(마스터리) 평가 엔진
     repos: [jce-class-rails]
     covers:
@@ -70,6 +77,7 @@ assets:
     evidence: jce-class-rails app/services/{submission,test_case,mastery}_service, app/models/{knowledge_state,mastery}.rb
 
   - id: learning_dashboard
+    tracks: [dev, edu]
     name: 학습분석 대시보드·성적 리포트
     repos: [jce-class-rails, jce-codle-react]
     covers: [학급/활동/자료별 대시보드, 점수·진도·제출 요약, 패키지 성취 대시보드]
@@ -79,6 +87,7 @@ assets:
     evidence: jce-class-rails app/services/classroom_service/dashboard/*, app/models/*_dashboard*.rb
 
   - id: classroom_user_mgmt
+    tracks: [dev, edu]
     name: 학급·사용자·인증 관리 (다기관 멀티테넌트)
     repos: [jce-class-rails, jce-user-rails, jce-admin-react]
     covers:
@@ -90,6 +99,7 @@ assets:
     evidence: jce-class-rails app/models/{classroom,invitation,custom_audit}.rb, jce-user-rails app/apis/*_api
 
   - id: school_licensing
+    tracks: [dev]
     name: 학교/기관 단위 라이선스·구독 부여
     repos: [jce-class-rails]
     covers: [학기 단위 구독부여, 교사인증 일괄부여, 구독등급, Lite/Demo 체험]
@@ -100,6 +110,7 @@ assets:
 
   # ───────── 클라우드 코딩 실습환경 + 자동채점 ─────────
   - id: cloud_coding_env
+    tracks: [dev, edu]
     name: 클라우드 코딩 실습환경 (JupyterHub 멀티유저 스폰)
     repos: [jce-jupyter-hub-helm, tmn-stateless-hub, jce-configurable-http-proxy]
     covers:
@@ -111,6 +122,7 @@ assets:
     evidence: jce-jupyter-hub-helm(ArgoCD 4리전 value, kube_spawner/spec.py tier 쿼터), CHP ValkeyStore
 
   - id: jupyter_lab_extension
+    tracks: [dev, edu]
     name: 교육용 주피터랩 확장 (코딩수업 UX 통합)
     repos: [jce-codle-jlext, jce-theme-light-jlext]
     covers: [수업자료 보호(읽기전용 셀), 손들기 실시간 도움요청, 문제추천, 파일브라우저 샌드박싱, 한글화, 브랜딩 테마]
@@ -120,6 +132,7 @@ assets:
     evidence: jce-codle-jlext src/(judge,handraiser,markdownLocker 등 30+ 모듈, v1.86.3)
 
   - id: online_judge
+    tracks: [dev, content, edu]
     name: 온라인 저지 / 프로그래밍 자동채점
     repos: [jupyterlab-judge, jce-judge-jlext, jce-codle-jlext]
     covers:
@@ -131,6 +144,7 @@ assets:
     evidence: jupyterlab-judge/jupyterlab_judge/yjudge.py + src/problemProvider, jce-codle-jlext src/judge/JupyterServerProblemProvider.ts
 
   - id: error_helper
+    tracks: [dev, edu]
     name: AI 코딩 오류 도우미 (프로덕션, 템플릿 기반)
     repos: [jce-errorhelp-ipext, jce-codle-jlext]
     covers: [학생 코드 예외 후킹, 에러 타입별 한국어 친화 설명 주입, 프론트 오류도움 UI]
@@ -141,6 +155,7 @@ assets:
 
   # ───────── 블록/비주얼 코딩 · 피지컬컴퓨팅 ─────────
   - id: entry_block_coding
+    tracks: [content, edu]
     name: 엔트리(Entry) 블록코딩 — 자체 통합 + AIDT 테넌트 빌드
     repos: [jce-entry-ts, jce-entry-express]
     covers: [블록코딩, AI 학습하기(머신러닝/음성·번역), 블록 팔레트 동적제어, AIDT 발행사 테넌트 라우팅, Clova 음성 AI]
@@ -150,6 +165,7 @@ assets:
     evidence: jce-entry-ts src/config/{aidtConfigs,config}.ts(*.aidt.me 테넌트), src/entry/aiLearning, lib/entry-ml
 
   - id: scratch_block_coding
+    tracks: [content, edu]
     name: 스크래치 3.0 — 자체 GUI 포크 + 로보라이즌 피지컬컴퓨팅
     repos: [jce-scratch-react, scratch-gui, scratch-vm, scratch-blocks]
     covers: [블록코딩, 로보라이즌(G큐브/웜봇/크롤링봇) 피지컬컴퓨팅 확장, 마이크로비트, 호스트앱 연동·프로젝트 저장]
@@ -159,6 +175,7 @@ assets:
     evidence: scratch-vm:codle-main src/extensions/roborisen_*, jce-scratch-react(@team-monolith/scratch-gui 자체 패키지)
 
   - id: makecode_microbit
+    tracks: [content, edu]
     name: MakeCode/마이크로비트 — PXT 포크 + 자체 makecode 서버
     repos: [pxt, pxt-microbit]
     covers: [블록코딩, 마이크로비트 피지컬컴퓨팅, 사내 makecode 서버(github 오버라이드), 재검정·수정계 테넌트, CSAP 점검·소스 익명화]
@@ -168,6 +185,7 @@ assets:
     evidence: pxt(@team-monolith/pxt-core 자체배포), pxt-microbit(github proxy 오버라이드, nginx, CSAP 점검 커밋)
 
   - id: data_literacy
+    tracks: [content, edu]
     name: 데이터 리터러시/데이터과학 교육 도구 (CODAP·Orange3·ipydoodle)
     repos: [codap, cloud-file-manager, jce-orange3-wasm, ipydoodle]
     covers: [CODAP 데이터분석(프로젝트 저장·호스트연동), Orange3 노코드 데이터마이닝 브라우저(WASM) 포팅, 학생용 2D 시각화]
@@ -178,6 +196,7 @@ assets:
 
   # ───────── 교육용 AI · 교무행정 ─────────
   - id: ai_socratic_tutor
+    tracks: [dev, edu]
     name: 소크라테스식 AI 튜터 + 루브릭 자동채점 (Socroom)
     repos: [jce-ai-fastapi, socratic_demo]
     covers:
@@ -189,6 +208,7 @@ assets:
     evidence: jce-ai-fastapi app/services/chatkit/socroom/{agents,prompts,scorer}, app/client/class_rails/socroom_api.py
 
   - id: setuk_generation
+    tracks: [dev]
     name: 세특(세부능력·특기사항) 자동 초안 생성 파이프라인
     repos: [jce-setuk-python]
     covers:
@@ -200,6 +220,7 @@ assets:
     evidence: jce-setuk-python README + .claude/skills/write-setuk(scripts, rubrics 2022, policies 2026)
 
   - id: ai_coding_agent
+    tracks: [dev, edu]
     name: AI 코딩 에이전트 엔진 + 멀티유저 허브 (enk-opencode)
     repos: [enk-opencode, enk-opencode-hub-helm]
     covers: [opencode 커스텀 포크(터미널/데스크톱 AI 코딩 에이전트, 한국어 UI), 1인 1인스턴스 프로비저닝 허브(AWS dev/prd)]
@@ -209,6 +230,7 @@ assets:
     evidence: enk-opencode(anomalyco/opencode 포크 + 자체 fix), enk-opencode-hub-helm(dev/prd hackathon values)
 
   - id: knowledge_tracing
+    tracks: [dev]
     name: 지식추적(Knowledge Tracing)·LLM 평가 연구
     repos: [tmn-mlflow-kt, tmn-mlflow-llm, jce-synth-apr]
     covers: [DKT 지식추적 베이스라인, LLM 오류도우미 평가지표·프롬프트 실험(MLflow), CodeBERT 자동 프로그램 수정(APR)]
@@ -219,6 +241,7 @@ assets:
 
   # ───────── 지원 자산 ─────────
   - id: design_system
+    tracks: [dev]
     name: 코들 디자인시스템 (공통 UI 컴포넌트)
     repos: [jce-codle-cds]
     covers: [React 18 + MUI 공통 컴포넌트 npm 패키지(@team-monolith/cds), codle/admin/landing 재사용]
