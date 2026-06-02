@@ -40,3 +40,8 @@ google-auth
 # 교육 입찰 규격서 파싱 (S4 보강)
 PyMuPDF
 gethwp
+
+# 교육 입찰 결과 적재 (enk Postgres) + 마이그레이션
+SQLAlchemy
+alembic
+psycopg2-binary
