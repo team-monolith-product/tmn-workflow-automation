@@ -1,0 +1,12 @@
+.git
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.cache
+.venv
+# 프론트는 Dockerfile node 스테이지에서 새로 빌드 — 로컬 산출물·의존성 제외
+frontend/node_modules
+frontend/dist
+meeting_minutes
+pr_reports

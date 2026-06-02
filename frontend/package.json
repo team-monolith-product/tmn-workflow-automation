@@ -1,0 +1,28 @@
+{
+  "name": "wa-admin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WA 어드민 — 교육 입찰 전략 지식(자산·정량규격·전략) 관리",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@mui/icons-material": "^5.15.20",
+    "@mui/material": "^5.15.20",
+    "react": "^18.3.1",
+    "react-admin": "^4.16.20",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1"
+  }
+}

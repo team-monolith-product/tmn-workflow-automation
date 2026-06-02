@@ -65,6 +65,24 @@ from app.edu_bid_api import router as edu_bid_router  # noqa: E402
 
 app.include_router(edu_bid_router)
 
+# 어드민 SPA(frontend/dist) 정적 서빙 — 빌드 산출물이 있으면 /admin 으로 노출(SPA 폴백).
+# Dockerfile 의 node 빌드 스테이지가 dist 를 채운다. 없으면(로컬·미빌드) 라우트 미등록.
+from pathlib import Path as _Path  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+
+_FRONTEND_DIST = _Path(__file__).parent / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    _DIST_ROOT = _FRONTEND_DIST.resolve()
+
+    @app.get("/admin")
+    @app.get("/admin/{rest:path}")
+    async def serve_admin(rest: str = ""):
+        """정적 파일이면 그 파일을, 아니면 index.html(SPA 클라이언트 라우팅)."""
+        target = (_FRONTEND_DIST / rest).resolve()
+        if rest and target.is_file() and target.is_relative_to(_DIST_ROOT):
+            return FileResponse(target)
+        return FileResponse(_DIST_ROOT / "index.html")
+
 
 # ============================================================================
 # Request/Response 모델
