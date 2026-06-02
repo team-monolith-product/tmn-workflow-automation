@@ -60,6 +60,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# 교육 입찰 전략 지식 관리 API (WA 어드민 프론트용)
+from app.edu_bid_api import router as edu_bid_router  # noqa: E402
+
+app.include_router(edu_bid_router)
+
 
 # ============================================================================
 # Request/Response 모델

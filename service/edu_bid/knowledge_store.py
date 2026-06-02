@@ -95,3 +95,65 @@ def save_document(
         return _save(session)
     with session_scope() as s:
         return _save(s)
+
+
+def _doc_meta(row: EduBidKnowledgeDocument) -> dict:
+    return {
+        "section": row.section,
+        "track": row.track,
+        "version": row.version,
+        "active": row.active,
+        "author": row.author,
+        "note": row.note,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def list_active(*, session=None) -> list[dict]:
+    """활성 문서들의 메타(payload 제외)를 section/track 순으로 반환."""
+
+    def _list(s) -> list[dict]:
+        rows = (
+            s.execute(
+                select(EduBidKnowledgeDocument)
+                .where(EduBidKnowledgeDocument.active.is_(True))
+                .order_by(
+                    EduBidKnowledgeDocument.section, EduBidKnowledgeDocument.track
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [_doc_meta(r) for r in rows]
+
+    if session is not None:
+        return _list(session)
+    with session_scope() as s:
+        return _list(s)
+
+
+def list_versions(
+    section: str, track: str | None = None, *, session=None
+) -> list[dict]:
+    """한 문서의 전체 버전 메타를 최신순으로 반환(이력·롤백 UI 용)."""
+    track = _norm_track(track)
+
+    def _list(s) -> list[dict]:
+        rows = (
+            s.execute(
+                select(EduBidKnowledgeDocument)
+                .where(
+                    EduBidKnowledgeDocument.section == section,
+                    EduBidKnowledgeDocument.track == track,
+                )
+                .order_by(EduBidKnowledgeDocument.version.desc())
+            )
+            .scalars()
+            .all()
+        )
+        return [_doc_meta(r) for r in rows]
+
+    if session is not None:
+        return _list(session)
+    with session_scope() as s:
+        return _list(s)
