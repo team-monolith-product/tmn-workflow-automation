@@ -263,14 +263,19 @@ def format_won(value: str) -> str:
     return f"{int(value):,}원" if value.isdigit() else (value or "미상")
 
 
-def format_report(decisions: list[Decision], window: tuple[str, str]) -> str:
+def format_report(
+    decisions: list[Decision], window: tuple[str, str], track_name: str
+) -> str:
     """보고 대상(추천/검토/미래타깃)을 라벨·점수 순으로 Slack 텍스트화."""
     bgn = window[0]
     bgn_disp = f"{bgn[:4]}-{bgn[4:6]}-{bgn[6:8]}"
     shown = [d for d in decisions if d.label in REPORTABLE_LABELS]
     shown.sort(key=lambda d: (REPORTABLE_LABELS.index(d.label), -d.score))
 
-    lines = [f":mega: 교육 외주 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)", ""]
+    lines = [
+        f":mega: [{track_name}] 입찰 후보 {len(shown)}건 (게시일 {bgn_disp} 구간)",
+        "",
+    ]
     for d in shown:
         a = d.announcement
         price_disp = format_won(a.estimated_price)

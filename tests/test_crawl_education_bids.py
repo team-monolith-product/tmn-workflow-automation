@@ -259,8 +259,11 @@ def test_format_report_sorts_and_filters():
             "r3",
         ),
     ]
-    text = stages.format_report(decisions, ("202605290000", "202605292359"))
+    text = stages.format_report(
+        decisions, ("202605290000", "202605292359"), "구축/개발"
+    )
     assert "후보 2건" in text  # 제외 제외됨
+    assert "[구축/개발]" in text  # 트랙명 헤더
     assert text.index("추천건") < text.index("검토건")  # 추천이 먼저
     assert "300,000,000원" in text
     assert "제외건" not in text
@@ -290,7 +293,7 @@ class _FakeLLM:
 
 
 def test_evaluate_batches_and_global_index():
-    kn = load_knowledge()  # 프롬프트 조립에 실제 지식 사용(네트워크 없음)
+    kn = load_knowledge("dev")  # 프롬프트 조립에 실제 지식 사용(네트워크 없음)
     cands = [(_ann(title=f"코딩교육 {i}"), ["codle"]) for i in range(5)]
     out = evaluate.evaluate(cands, kn, "gpt-x", batch_size=2, llm=_FakeLLM())
     assert len(out) == 5
@@ -298,7 +301,7 @@ def test_evaluate_batches_and_global_index():
 
 
 def test_evaluate_empty():
-    assert evaluate.evaluate([], load_knowledge(), "m", 10, llm=_FakeLLM()) == {}
+    assert evaluate.evaluate([], load_knowledge("dev"), "m", 10, llm=_FakeLLM()) == {}
 
 
 # --- enrich (S4) ---
@@ -345,7 +348,7 @@ def test_enrich_skips_failed_download(monkeypatch):
 
 
 def test_classify_work_type():
-    wt = load_knowledge().work_types
+    wt = load_knowledge("dev").work_types
     assert (
         stages.classify_work_type(
             _ann(title="LMS 고도화", proc_class="정보시스템개발서비스"), wt
@@ -395,7 +398,65 @@ def test_collect_caches_raw_per_window(monkeypatch, tmp_path):
 
 
 def test_load_knowledge_real_files():
-    kn = load_knowledge()
+    kn = load_knowledge("dev")
     assert len(kn.assets) > 0
     assert "reuse" in kn.weights
     assert any(s["adapter"] == "g2b" for s in kn.enabled_sources)
+
+
+def test_each_track_loads_own_scoring_with_shared_assets():
+    dev = load_knowledge("dev")
+    content = load_knowledge("content")
+    edu = load_knowledge("edu")
+    # 역량·자격·소스는 공유(같은 객체로 캐시)
+    assert dev.assets is content.assets is edu.assets
+    assert dev.eligibility_ledger is edu.eligibility_ledger
+    # 전략(점수정책)은 트랙마다 다른 파일
+    descs = {
+        k.scoring_policy["strategy"]["primary"]["desc"] for k in (dev, content, edu)
+    }
+    assert len(descs) == 3
+
+
+# --- run_track (사업유형 분기, LLM 모킹) ---
+
+
+def test_run_track_filters_by_work_type(monkeypatch):
+    from service.edu_bid import pipeline, evaluate
+    from service.edu_bid.schemas import GateResult
+
+    # LLM 평가는 모킹 — run_track 의 사업유형 분기만 검증한다.
+    def fake_eval(cands, kn, model, batch_size, llm=None):
+        return {
+            i: EvalOut(
+                index=i,
+                axes=Axes(reuse=80, winnability=70, value=60, performance_building=50),
+                quant_barrier="low",
+                wired_risk="low",
+                matched_assets=["x"],
+                rationale="r",
+            )
+            for i in range(len(cands))
+        }
+
+    monkeypatch.setattr(evaluate, "evaluate", fake_eval)
+
+    kn = load_knowledge("content")
+    a_dev = _ann(title="LMS 고도화")
+    a_dev.work_type = "개발"
+    a_content = _ann(title="디지털 교재 제작")
+    a_content.work_type = "콘텐츠"
+    gated = [(a_dev, ["x"], GateResult("pass")), (a_content, ["x"], GateResult("pass"))]
+
+    decisions = pipeline.run_track(
+        "콘텐츠 제작",
+        ["콘텐츠"],
+        gated,
+        kn,
+        "gpt-x",
+        batch_size=10,
+        do_enrich=False,
+    )
+    # 콘텐츠 트랙은 사업유형 '콘텐츠' 1건만 평가 (개발 건은 제외)
+    assert len(decisions) == 1
+    assert decisions[0].announcement.title == "디지털 교재 제작"

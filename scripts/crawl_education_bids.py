@@ -55,36 +55,44 @@ def main():
         print("education_bid_crawler 설정이 config.yaml에 없습니다.")
         return
 
-    # 직전 영업일 같은 시각 ~ 현재. 월요일이면 전 영업일(금요일) 이후 = 주말 게시분 포함.
+    # 어제 같은 시각 ~ 현재(무상태). 매일 같은 시각 실행이라 구간이 빈틈·중복 없이 이어진다.
     now = datetime.now(KST)
     window = stages.build_incremental_window(now)
 
-    knowledge = load_knowledge()
-    decisions = pipeline.run(
-        model=cfg.model,
-        batch_size=cfg.batch_size,
-        window=window,
+    # 공유 상단부는 트랙 무관 — 아무 트랙 지식으로 한 번만 수집·게이트한다.
+    shared_knowledge = load_knowledge(cfg.tracks[0].key)
+    gated = pipeline.prepare(
+        window,
+        shared_knowledge,
         limit=args.limit,
-        do_enrich=not args.no_enrich,
         use_cache=not args.no_cache,
-        knowledge=knowledge,
     )
 
-    text = stages.format_report(decisions, window)
-    reportable = [d for d in decisions if d.label in REPORTABLE_LABELS]
-    if not reportable:
-        print("[edu-bid] 보고 대상 없음. Slack 전송 생략.")
-        return
+    client = None if args.dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    for track in cfg.tracks:
+        knowledge = load_knowledge(track.key)
+        decisions = pipeline.run_track(
+            track.name,
+            track.work_types,
+            gated,
+            knowledge,
+            cfg.model,
+            cfg.batch_size,
+            do_enrich=not args.no_enrich,
+        )
+        reportable = [d for d in decisions if d.label in REPORTABLE_LABELS]
+        if not reportable:
+            print(f"[edu-bid][{track.name}] 보고 대상 없음. Slack 전송 생략.")
+            continue
 
-    if args.dry_run:
-        print("----- DRY RUN: Slack 메시지 -----")
-        print(text)
-        return
+        text = stages.format_report(decisions, window, track.name)
+        if args.dry_run:
+            print(f"----- DRY RUN: [{track.name}] Slack 메시지 -----")
+            print(text)
+            continue
 
-    WebClient(token=os.environ["SLACK_BOT_TOKEN"]).chat_postMessage(
-        channel=cfg.channel_id, text=text
-    )
-    print(f"[edu-bid] Slack 전송 완료 → {cfg.channel_id}")
+        client.chat_postMessage(channel=track.channel_id, text=text)
+        print(f"[edu-bid][{track.name}] Slack 전송 완료 → {track.channel_id}")
 
 
 if __name__ == "__main__":

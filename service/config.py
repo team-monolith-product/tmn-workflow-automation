@@ -125,10 +125,25 @@ class DeploymentRotationConfig:
 
 
 @dataclass(frozen=True)
+class BidTrackConfig:
+    """입찰 트랙(팀별 파이프라인) 설정.
+
+    수집·게이트·트리아지는 트랙이 공유하고, 사업유형으로 분기해 트랙별 지식(전략·
+    점수정책)으로 평가한 뒤 트랙 채널로 보고한다. key 는 knowledge/edu_bid/tracks/<key>.yaml
+    의 점수정책 파일명과 일치해야 한다.
+    """
+
+    key: str  # 점수정책 파일·지식 식별자 (예: dev/content/edu)
+    name: str  # 보고 헤더에 쓰는 한글 트랙명
+    channel_id: str  # 보고 슬랙 채널
+    work_types: list[str]  # 이 트랙이 맡는 사업유형 (work_types.yaml 의 유형명)
+
+
+@dataclass(frozen=True)
 class EducationBidCrawlerConfig:
     """나라장터 교육 외주 입찰공고 수집·평가 설정"""
 
-    channel_id: str
+    tracks: list[BidTrackConfig]
     model: str = "gpt-5.5"
     batch_size: int = 20
 
@@ -286,7 +301,15 @@ def _parse_config(raw: dict) -> AppConfig:
     education_bid_crawler = None
     if ebc_raw:
         education_bid_crawler = EducationBidCrawlerConfig(
-            channel_id=ebc_raw["channel_id"],
+            tracks=[
+                BidTrackConfig(
+                    key=t["key"],
+                    name=t["name"],
+                    channel_id=t["channel_id"],
+                    work_types=t["work_types"],
+                )
+                for t in ebc_raw["tracks"]
+            ],
             model=ebc_raw.get("model", "gpt-5.5"),
             batch_size=ebc_raw.get("batch_size", 20),
         )

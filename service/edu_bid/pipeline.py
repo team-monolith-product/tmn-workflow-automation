@@ -1,29 +1,37 @@
 """
 오케스트레이터 — 단계를 순서대로 호출하는 얇은 조립부.
 
-S0 수집 → S1 정규화/dedupe → S2 게이트 → S3 트리아지 → S5 평가 → S6 결정 → S7 보고.
-S4 보강(규격서·실적/지역 상세)은 후속. 현재는 목록 단계 신호로 판정.
+공유 상단부(prepare): S0 수집 → S1 정규화/dedupe → S3 트리아지 → S3.5 사업유형 분류
+→ S2 게이트. 트랙 무관(공유 지식만 사용)으로 한 번만 돈다.
+트랙 하단부(run_track): 사업유형으로 후보를 갈라 트랙 지식으로 S5 평가 → S6 결정 →
+S4 정독 재평가. 트랙마다 다른 전략·점수정책·채널이 여기서 갈린다. 사업유형이 트랙을
+겹치지 않게 나누므로, 각 공고는 정확히 한 트랙에서 한 번만 평가된다(비용 1배).
 """
 
 from collections import Counter
 
-from .knowledge import load_knowledge
 from . import sources, stages, evaluate, enrich
-from .schemas import Decision, LABEL_EXCLUDE, REPORTABLE_LABELS
+from .schemas import Announcement, GateResult, Decision, REPORTABLE_LABELS
+
+# 게이트 통과(또는 near_miss) 후보 — 트랙으로 분기되기 전 공유 단위.
+GatedCandidate = tuple[Announcement, list[str], GateResult]
 
 
-def run(
-    *,
-    model: str,
-    batch_size: int,
+def prepare(
     window: tuple[str, str],
+    knowledge,
+    *,
     limit: int | None = None,
-    do_enrich: bool = True,
-    use_cache: bool = True,
     session=None,
-    knowledge=None,
-) -> list[Decision]:
-    kn = knowledge or load_knowledge()
+    use_cache: bool = True,
+) -> list[GatedCandidate]:
+    """공유 상단부. 수집·트리아지·사업유형·게이트까지 트랙 무관하게 한 번 돈다.
+
+    knowledge 는 공유 지식(역량·자격·소스·사업유형)만 읽으므로 아무 트랙 것이나 무방하다.
+    반환: 게이트 통과(pass/near_miss) 후보 [(ann, matched_assets, gate)].
+    ann.work_type 이 채워진 상태로 넘어가 run_track 에서 트랙으로 분기된다.
+    """
+    kn = knowledge
     print(
         f"[edu-bid] 구간 {window[0]}~{window[1]} / 소스 {[s['id'] for s in kn.enabled_sources]}"
     )
@@ -35,11 +43,7 @@ def run(
 
     # S3 트리아지 (역량 키워드) — 비용 깔때기
     kw_index = stages.build_keyword_index(kn.capability_profile)
-    candidates: list[tuple] = []
-    for a in anns:
-        matched = stages.triage(a, kw_index)
-        if matched:
-            candidates.append((a, matched))
+    candidates = [(a, m) for a in anns if (m := stages.triage(a, kw_index))]
     print(f"[edu-bid] 트리아지 통과: {len(candidates)}건")
 
     # S3.5 사업유형 분류 + 무관 유형 사전 제외(비용 절감)
@@ -52,60 +56,65 @@ def run(
             dropped_wt += 1
         else:
             kept.append((a, matched))
-    candidates = kept
-    print(
-        f"[edu-bid] 사업유형 무관 제외: {dropped_wt}건 / 남은 후보: {len(candidates)}건"
-    )
+    print(f"[edu-bid] 사업유형 무관 제외: {dropped_wt}건 / 남은 후보: {len(kept)}건")
 
     # S2 게이트 — 참가 불가(fail)는 평가 전에 제외해 LLM 비용 절감.
-    # near_miss/pass 만 평가 대상으로 넘긴다.
-    eligibility = kn.eligibility_ledger
-    decisions: list[Decision] = []  # 사전 제외분 포함
-    gated: list[tuple] = []  # (ann, matched, gate)
-    for ann, matched in candidates:
-        g = stages.gate(ann, eligibility)
+    # near_miss/pass 만 평가 대상으로 넘긴다(near_miss 는 결정 단계에서 미래타깃 처리).
+    gated: list[GatedCandidate] = []
+    dropped_gate = 0
+    for ann, matched in kept:
+        g = stages.gate(ann, kn.eligibility_ledger)
         if g.status == "fail":
-            decisions.append(
-                Decision(
-                    announcement=ann,
-                    gate=g,
-                    axes={},
-                    quant_barrier="n/a",
-                    matched_assets=matched,
-                    score=0.0,
-                    label=LABEL_EXCLUDE,
-                    rationale=g.reasons[0] if g.reasons else "게이트 탈락",
-                )
-            )
+            dropped_gate += 1
         else:
             gated.append((ann, matched, g))
     print(
-        f"[edu-bid] 게이트 제외(참가불가): {len(decisions)}건 / 평가대상: {len(gated)}건"
+        f"[edu-bid] 게이트 제외(참가불가): {dropped_gate}건 / 평가대상: {len(gated)}건"
     )
 
     if limit is not None:
         gated = gated[:limit]
         print(f"[edu-bid] --limit 적용: {len(gated)}건만 평가")
-    if not gated:
-        print("[edu-bid] 평가 대상 없음. 종료.")
-        return decisions
+    return gated
 
-    # S5 평가 + S6 결정 (게이트는 이미 계산됨)
-    evals = evaluate.evaluate([(a, m) for a, m, _ in gated], kn, model, batch_size)
-    for i, (ann, matched, g) in enumerate(gated):
+
+def run_track(
+    track_name: str,
+    work_types: list[str],
+    gated: list[GatedCandidate],
+    knowledge,
+    model: str,
+    batch_size: int,
+    *,
+    do_enrich: bool = True,
+    session=None,
+) -> list[Decision]:
+    """트랙 하단부. 사업유형이 이 트랙에 속한 후보만 트랙 지식으로 평가·결정·정독한다."""
+    kn = knowledge
+    wt = set(work_types)
+    subset = [(a, m, g) for a, m, g in gated if a.work_type in wt]
+    print(f"[edu-bid][{track_name}] 사업유형 {work_types} 후보: {len(subset)}건")
+    if not subset:
+        return []
+
+    # S5 평가 + S6 결정 (게이트는 prepare 에서 계산됨)
+    evals = evaluate.evaluate([(a, m) for a, m, _ in subset], kn, model, batch_size)
+    decisions: list[Decision] = []
+    for i, (ann, matched, g) in enumerate(subset):
         ev = evals.get(i)
         if ev is None:
             continue
         decisions.append(stages.decide(ann, g, ev, matched, kn))
-
-    print(f"[edu-bid] 1차 라벨 분포: {dict(Counter(d.label for d in decisions))}")
+    print(
+        f"[edu-bid][{track_name}] 1차 라벨 분포: {dict(Counter(d.label for d in decisions))}"
+    )
 
     # S4 보강 + 심층 재평가 — 숏리스트(추천/검토/미래타깃)만 규격서 정독
     if do_enrich:
         shortlist_idx = [
             i for i, d in enumerate(decisions) if d.label in REPORTABLE_LABELS
         ]
-        print(f"[edu-bid] S4 정독 대상: {len(shortlist_idx)}건")
+        print(f"[edu-bid][{track_name}] S4 정독 대상: {len(shortlist_idx)}건")
         for i in shortlist_idx:
             d = decisions[i]
             if not d.announcement.spec_docs:
@@ -116,10 +125,11 @@ def run(
             ev = evaluate.evaluate_deep(
                 d.announcement, d.matched_assets, spec_text, kn, model
             )
-            # 게이트는 결정적 — 1차에서 계산한 결과 재사용
             deep = stages.decide(d.announcement, d.gate, ev, d.matched_assets, kn)
             deep.enriched = True
             decisions[i] = deep
-        print(f"[edu-bid] 최종 라벨 분포: {dict(Counter(d.label for d in decisions))}")
+        print(
+            f"[edu-bid][{track_name}] 최종 라벨 분포: {dict(Counter(d.label for d in decisions))}"
+        )
 
     return decisions

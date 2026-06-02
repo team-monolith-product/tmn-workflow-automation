@@ -294,10 +294,25 @@ scheduled_jobs:
 
 # 나라장터(G2B) 교육 외주 입찰공고 수집·평가
 # - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급, 클러스터 시크릿)
-# - 역량·자격·전략·점수정책 등 변동 지식은 knowledge/edu_bid/*.yaml 에서 관리
+# - 역량·자격·소스는 knowledge/edu_bid/*.yaml, 트랙별 전략·점수정책은 tracks/<key>.yaml 에서 관리
 # - 조회 구간은 '어제 같은 시각 ~ 현재'를 무상태로 계산(stages.build_incremental_window)
 # - 조회할 업무구분·소스는 knowledge/edu_bid/source_registry.yaml 의 enabled 로 관리
+# - 수집·게이트·트리아지는 공유하고, 사업유형(work_type)으로 분기해 트랙별로 평가·보고한다.
+#   work_types 의 유형명은 knowledge/edu_bid/work_types.yaml 의 order 와 일치해야 한다.
+#   (연구·기타·무관은 어느 트랙에도 없으면 평가 없이 자동 제외)
 education_bid_crawler:
-  channel_id: "C0B7CQ19DS6"    # 슬랙 t_제품_공공입찰
   model: "gpt-5.5"
   batch_size: 20               # LLM 1회 호출당 평가 공고 수
+  tracks:
+    - key: dev                 # 구축/개발 (제품 본부)
+      name: "구축/개발"
+      channel_id: "C0B7CQ19DS6"  # 슬랙 t_제품_공공입찰
+      work_types: [개발, 유지관리]
+    - key: content             # 콘텐츠 제작
+      name: "콘텐츠 제작"
+      channel_id: "C0B7Q27E2PN"  # 슬랙 콘텐츠 공공입찰
+      work_types: [콘텐츠]
+    - key: edu                 # 교육/연수
+      name: "교육/연수"
+      channel_id: "C0B7H27DFT7"  # 슬랙 교육/운영 공공입찰
+      work_types: [교육운영, 행사]
