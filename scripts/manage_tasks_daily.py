@@ -83,6 +83,15 @@ def main(dry_run: bool = False):
                 if result:
                     items.extend(result)
 
+            # squad_overrides: 다른 스쿼드로 오버라이드된 사용자 제외
+            items = [
+                (uid, text)
+                for uid, text in items
+                if uid is None
+                or uid not in config.squad_overrides
+                or config.squad_overrides[uid].handle == squad.handle
+            ]
+
             # 담당자별 그룹핑 후 메시지 전송
             if items:
                 _send_squad_summary(
