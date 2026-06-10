@@ -1,0 +1,44 @@
+{
+  "enk-hackathon-rails": {
+    "required_checks": ["test", "runner / rubocop", "n_plus_one_detection / detect"]
+  },
+  "enk-user-rails": {
+    "required_checks": ["test", "runner / rubocop"]
+  },
+  "jce-ai-fastapi": {
+    "required_checks": ["lint", "test"]
+  },
+  "jce-class-rails": {
+    "required_checks": ["test", "runner / rubocop", "n_plus_one_detection / detect"]
+  },
+  "jce-codle-jlext": {
+    "required_checks": ["transpile"]
+  },
+  "jce-entry-ts": {
+    "required_checks": ["transpile"]
+  },
+  "jce-scratch-react": {
+    "required_checks": ["transpile"]
+  },
+  "jce-user-rails": {
+    "required_checks": ["test", "runner / rubocop"]
+  },
+  "jupyterlab-google-analytics": {
+    "required_checks": ["build", "check_release"]
+  },
+  "jupyterlab-reset-fixer": {
+    "required_checks": ["build", "check_release"]
+  },
+  "jupyterlab-sentry": {
+    "required_checks": ["check_release"]
+  },
+  "tflint-ruleset-tmn": {
+    "required_checks": ["ubuntu-latest"]
+  },
+  "tmn-admin-rails": {
+    "required_checks": ["runner / rubocop"]
+  },
+  "tmn-codle-cli": {
+    "required_checks": ["build", "test", "validate"]
+  }
+}
