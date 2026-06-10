@@ -1,6 +1,6 @@
 """merge_dependabot_prs 스크립트의 커밋 메타데이터 파싱 및 병합 정책 테스트"""
 
-from scripts.github_admin.merge_dependabot_prs import (
+from scripts.merge_dependabot_prs import (
     evaluate_ci,
     evaluate_updates,
     is_minor_or_lower_update,

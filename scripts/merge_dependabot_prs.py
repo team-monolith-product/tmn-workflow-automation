@@ -19,7 +19,7 @@ GitHub Search API로 org 전체의 열린 Dependabot PR을 조회한 뒤 (레포
 충족되므로 bypass에 의존하지 않습니다.
 
 사용법:
-    python scripts/github_admin/merge_dependabot_prs.py [--dry-run]
+    python scripts/merge_dependabot_prs.py [--dry-run]
 
 옵션:
     --dry-run: 실제 approve/병합 없이 어떤 PR이 병합될지 확인
@@ -28,17 +28,17 @@ GitHub Search API로 org 전체의 열린 Dependabot PR을 조회한 뒤 (레포
 import argparse
 import os
 import re
-import sys
 from typing import Literal
 
 import yaml
-from github import GithubException
+from dotenv import load_dotenv
+from github import Github, GithubException
 from github.PullRequest import PullRequest
 
-# 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+load_dotenv()
 
-from scripts.github_admin.common import get_github_client, get_org_name
+# GitHub 조직 이름 (다른 스케줄 잡과 동일하게 상수로 둠)
+ORG_NAME = "team-monolith-product"
 
 # check run conclusion 중 실패로 간주하는 값
 FAILURE_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "stale"}
@@ -243,12 +243,11 @@ def main(dry_run: bool = False):
     Args:
         dry_run: True면 실제 approve/병합 없이 대상 PR만 출력
     """
-    g = get_github_client()
-    org_name = get_org_name()
+    g = Github(os.environ["GITHUB_TOKEN"])
     reviewer_login = g.get_user().login
 
     issues = g.search_issues(
-        f"org:{org_name} is:pr is:open author:app/dependabot archived:false"
+        f"org:{ORG_NAME} is:pr is:open author:app/dependabot archived:false"
     )
 
     merged_count = 0

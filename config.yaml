@@ -285,7 +285,7 @@ scheduled_jobs:
     business_day_only: false
 
   - name: merge_dependabot_prs
-    module: scripts.github_admin.merge_dependabot_prs
+    module: scripts.merge_dependabot_prs
     function: main
     cron:
       minute: 40            # 매시 40분, Dependabot PR의 CI 완료를 기다렸다가 병합
