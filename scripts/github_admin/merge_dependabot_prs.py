@@ -7,12 +7,13 @@ GitHub Search API로 org 전체의 열린 Dependabot PR을 조회한 뒤 (레포
 모든 체크가 통과했는지 확인하여 approve + 병합합니다.
 
 병합 조건 (PR에 포함된 모든 의존성이 만족해야 함):
+- fork가 아닌 레포여야 함 (fork는 테스트 셋업을 우리가 소유하지 않음)
 - 커밋 메타데이터에서 변경 전/후 버전을 파싱할 수 있어야 함 (제거된 의존성,
   requirement 범위 변경 등 버전 쌍이 없는 항목은 보수적으로 차단)
 - major 버전이 동일해야 함 (단, 0.x 버전은 semver 관례상 minor 변경도
   breaking으로 간주하여 minor까지 동일해야 함)
-- head 커밋의 모든 체크(보조 봇 체크 제외)가 완료 + 통과 상태이고,
-  성공으로 끝난 실제 CI 체크가 1개 이상 존재해야 함 (CI 없는 레포는 차단)
+- head 커밋의 모든 체크가 완료 + 통과 상태이고, 성공으로 끝난 체크가
+  1개 이상 존재해야 함 (체크가 없거나 전부 skipped인 레포는 차단)
 
 리뷰 요건(ruleset의 required approving review)은 이 스크립트의 정식 approve로
 충족되므로 bypass에 의존하지 않습니다.
@@ -38,9 +39,6 @@ from github.PullRequest import PullRequest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from scripts.github_admin.common import get_github_client, get_org_name
-
-# CI 존재·통과 판정에서 제외하는 보조 봇 체크 이름 (CI가 아닌 advisory 체크)
-EXCLUDED_CHECKS = {"ai-code-reviewer", "d-day-labeler", "restyled"}
 
 # check run conclusion 중 실패로 간주하는 값
 FAILURE_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "stale"}
@@ -171,8 +169,8 @@ def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     """
     체크 결과 목록에서 CI 상태를 종합하는 순수 함수
 
-    보조 봇 체크(EXCLUDED_CHECKS)는 제외하며, "성공으로 끝난 체크 1개 이상"을
-    실제 CI 존재의 증거로 요구합니다 (전부 skipped인 경우는 CI 없음으로 간주).
+    "성공으로 끝난 체크 1개 이상"을 실제 CI 존재의 증거로 요구합니다
+    (체크가 없거나 전부 skipped인 경우는 CI 없음으로 간주).
 
     Args:
         check_runs: (이름, status, conclusion) 목록 (GitHub Actions 등 check run)
@@ -184,8 +182,6 @@ def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     has_pending = False
 
     for name, status, conclusion in check_runs:
-        if name in EXCLUDED_CHECKS:
-            continue
         if status != "completed":
             has_pending = True
         elif conclusion in FAILURE_CONCLUSIONS:
@@ -272,6 +268,12 @@ def main(dry_run: bool = False):
         try:
             if pr.draft:
                 print(f"[SKIP] {label}: draft PR - {pr.title}")
+                skip_count += 1
+                continue
+
+            # fork는 테스트 셋업을 우리가 소유하지 않고 upstream에서 동기화되므로 제외
+            if pr.base.repo.fork:
+                print(f"[SKIP] {label}: fork 레포 - {pr.title}")
                 skip_count += 1
                 continue
 

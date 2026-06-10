@@ -209,18 +209,5 @@ class TestEvaluateCi:
     def test_no_checks_at_all(self):
         assert evaluate_ci([]) == "none"
 
-    def test_excluded_bot_check_is_not_ci_evidence(self):
-        state = evaluate_ci([("ai-code-reviewer", "completed", "success")])
-        assert state == "none"
-
-    def test_excluded_bot_failure_ignored(self):
-        state = evaluate_ci(
-            [
-                ("test", "completed", "success"),
-                ("d-day-labeler", "completed", "failure"),
-            ]
-        )
-        assert state == "success"
-
     def test_only_skipped_is_not_ci_evidence(self):
         assert evaluate_ci([("test", "completed", "skipped")]) == "none"
