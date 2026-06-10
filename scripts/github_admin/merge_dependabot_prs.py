@@ -165,7 +165,7 @@ def evaluate_updates(updates: list[dict] | None) -> tuple[bool, str]:
     return True, f"minor 이하 ({summary})"
 
 
-def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
+def evaluate_ci(check_runs: list[tuple[str, str | None]]) -> CiState:
     """
     체크 결과 목록에서 CI 상태를 종합하는 순수 함수
 
@@ -173,7 +173,7 @@ def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     (체크가 없거나 전부 skipped인 경우는 CI 없음으로 간주).
 
     Args:
-        check_runs: (이름, status, conclusion) 목록 (GitHub Actions 등 check run)
+        check_runs: (status, conclusion) 목록 (GitHub Actions 등 check run)
 
     Returns:
         CiState: "success" | "pending" | "failure" | "none" (CI 없음)
@@ -181,7 +181,7 @@ def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     has_success = False
     has_pending = False
 
-    for name, status, conclusion in check_runs:
+    for status, conclusion in check_runs:
         if status != "completed":
             has_pending = True
         elif conclusion in FAILURE_CONCLUSIONS:
@@ -194,23 +194,6 @@ def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     if has_success:
         return "success"
     return "none"
-
-
-def get_ci_state(pr: PullRequest) -> CiState:
-    """
-    PR head 커밋의 체크 결과를 조회하여 CI 상태를 반환하는 함수
-
-    Args:
-        pr: 대상 PR
-
-    Returns:
-        CiState: evaluate_ci()의 결과
-    """
-    commit = pr.base.repo.get_commit(pr.head.sha)
-    check_runs = [
-        (run.name, run.status, run.conclusion) for run in commit.get_check_runs()
-    ]
-    return evaluate_ci(check_runs)
 
 
 def ensure_approved(pr: PullRequest, reviewer_login: str) -> None:
@@ -234,12 +217,13 @@ def merge_pr(pr: PullRequest) -> None:
     PR을 병합하는 함수
 
     리포지토리가 squash 병합을 허용하면 squash, 아니면 merge 방식을 사용합니다.
+    head sha를 핀하여 평가 이후 rebase 등으로 head가 바뀐 경우 병합이 거부됩니다.
 
     Args:
         pr: 병합할 PR
     """
     merge_method = "squash" if pr.base.repo.allow_squash_merge else "merge"
-    pr.merge(merge_method=merge_method)
+    pr.merge(merge_method=merge_method, sha=pr.head.sha)
 
 
 def main(dry_run: bool = False):
@@ -277,14 +261,18 @@ def main(dry_run: bool = False):
                 skip_count += 1
                 continue
 
-            commit_message = pr.base.repo.get_commit(pr.head.sha).commit.message
-            eligible, reason = evaluate_updates(parse_dependabot_commit(commit_message))
+            commit = pr.base.repo.get_commit(pr.head.sha)
+            eligible, reason = evaluate_updates(
+                parse_dependabot_commit(commit.commit.message)
+            )
             if not eligible:
                 print(f"[SKIP] {label}: {reason} - {pr.title}")
                 skip_count += 1
                 continue
 
-            ci_state = get_ci_state(pr)
+            ci_state = evaluate_ci(
+                [(run.status, run.conclusion) for run in commit.get_check_runs()]
+            )
             if ci_state != "success":
                 ci_reason = "CI 없음" if ci_state == "none" else f"CI {ci_state}"
                 print(f"[SKIP] {label}: {ci_reason} - {pr.title}")

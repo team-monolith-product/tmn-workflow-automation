@@ -192,22 +192,18 @@ class TestEvaluateUpdates:
 
 class TestEvaluateCi:
     def test_all_success(self):
-        state = evaluate_ci(
-            [("test", "completed", "success"), ("lint", "completed", "skipped")]
-        )
+        state = evaluate_ci([("completed", "success"), ("completed", "skipped")])
         assert state == "success"
 
     def test_failure(self):
-        state = evaluate_ci(
-            [("test", "completed", "success"), ("lint", "completed", "failure")]
-        )
+        state = evaluate_ci([("completed", "success"), ("completed", "failure")])
         assert state == "failure"
 
     def test_pending(self):
-        assert evaluate_ci([("test", "in_progress", None)]) == "pending"
+        assert evaluate_ci([("in_progress", None)]) == "pending"
 
     def test_no_checks_at_all(self):
         assert evaluate_ci([]) == "none"
 
     def test_only_skipped_is_not_ci_evidence(self):
-        assert evaluate_ci([("test", "completed", "skipped")]) == "none"
+        assert evaluate_ci([("completed", "skipped")]) == "none"
