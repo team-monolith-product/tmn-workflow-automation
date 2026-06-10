@@ -19,7 +19,7 @@ GitHub Search API로 org 전체의 열린 Dependabot PR을 조회한 뒤 (레포
 충족되므로 bypass에 의존하지 않습니다.
 
 사용법:
-    python scripts/github_admin/merge_dependabot_prs.py [--dry-run]
+    python scripts/merge_dependabot_prs.py [--dry-run]
 
 옵션:
     --dry-run: 실제 approve/병합 없이 어떤 PR이 병합될지 확인
