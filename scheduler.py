@@ -10,12 +10,17 @@ from datetime import datetime, timezone, timedelta
 import sentry_sdk
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sentry_sdk.integrations.logging import ignore_logger
 
 from service.business_days import is_business_day
 from service.config import load_config
 
 TIMEZONE = "Asia/Seoul"
 KST = timezone(timedelta(hours=9))
+
+# 잡 예외는 _make_job_callable의 wrapper가 scheduled_job 태그와 함께 직접 보고한다.
+# executor의 ERROR 로그가 LoggingIntegration을 거쳐 만드는 무태그 중복 이벤트는 막는다.
+ignore_logger("apscheduler.executors.default")
 
 
 def _make_job_callable(func, job_name: str, business_day_only: bool):
@@ -35,8 +40,8 @@ def _make_job_callable(func, job_name: str, business_day_only: bool):
         try:
             func()
         except Exception:
-            # APScheduler는 잡 예외를 stdout 로그로만 남기고 Sentry로 전달하지
-            # 않으므로, 어떤 잡이 실패했는지 태그와 함께 직접 보고한 뒤 다시 올린다.
+            # 어떤 잡이 실패했는지 식별할 수 있도록 태그를 붙여 보고한 뒤 다시 올린다.
+            # executor 로그 경유 이벤트는 위 ignore_logger로 차단되어 이 경로가 유일하다.
             with sentry_sdk.new_scope() as scope:
                 scope.set_tag("scheduled_job", job_name)
                 sentry_sdk.capture_exception()

@@ -39,14 +39,19 @@ class TestMakeJobCallable:
         func.assert_called_once()
 
     def test_job_exception_reported_to_sentry_and_reraised(self):
-        """잡 예외는 Sentry로 보고된 뒤 다시 올라간다"""
+        """잡 예외는 scheduled_job 태그와 함께 Sentry로 보고된 뒤 다시 올라간다"""
         func = MagicMock(side_effect=ValueError("boom"))
         wrapper = _make_job_callable(func, "test_job", business_day_only=False)
 
-        with patch.object(scheduler_module.sentry_sdk, "capture_exception") as capture:
+        with (
+            patch.object(scheduler_module.sentry_sdk, "new_scope") as new_scope,
+            patch.object(scheduler_module.sentry_sdk, "capture_exception") as capture,
+        ):
             with pytest.raises(ValueError, match="boom"):
                 wrapper()
 
+        scope = new_scope.return_value.__enter__.return_value
+        scope.set_tag.assert_called_once_with("scheduled_job", "test_job")
         capture.assert_called_once()
 
 
