@@ -110,9 +110,9 @@ class TestParseDependabotCommit:
             {"name": "jupyterlab", "before": "4.1.8", "after": "4.5.7"}
         ]
 
-    def test_requirement_range_update_has_no_version_pair(self):
-        # "Update rails requirement from ~> 7.0 to ~> 7.1" 형태는 의존성명과 from
-        # 사이에 단어가 끼어 매칭되지 않음 → 버전 쌍 없음으로 보수적 차단됨
+    def test_requirement_range_update_has_no_previous_version(self):
+        # requirement 범위 변경은 본문이 "to ~> 7.1"이라 YAML의 새 버전(7.1.0)을
+        # 앵커로 한 이전 버전 탐색이 실패 → before=None으로 보수적 차단됨
         message = (
             "chore(deps): update rails requirement from ~> 7.0 to ~> 7.1\n"
             "\n"
@@ -124,7 +124,7 @@ class TestParseDependabotCommit:
             "...\n"
         )
         assert parse_dependabot_commit(message) == [
-            {"name": "rails", "before": None, "after": None}
+            {"name": "rails", "before": None, "after": "7.1.0"}
         ]
 
     def test_no_metadata_block(self):
