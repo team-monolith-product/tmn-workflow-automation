@@ -193,24 +193,24 @@ class TestEvaluateUpdates:
 class TestEvaluateCi:
     def test_all_success(self):
         state = evaluate_ci(
-            [("test", "completed", "success"), ("lint", "completed", "skipped")], []
+            [("test", "completed", "success"), ("lint", "completed", "skipped")]
         )
         assert state == "success"
 
     def test_failure(self):
         state = evaluate_ci(
-            [("test", "completed", "success"), ("lint", "completed", "failure")], []
+            [("test", "completed", "success"), ("lint", "completed", "failure")]
         )
         assert state == "failure"
 
     def test_pending(self):
-        assert evaluate_ci([("test", "in_progress", None)], []) == "pending"
+        assert evaluate_ci([("test", "in_progress", None)]) == "pending"
 
     def test_no_checks_at_all(self):
-        assert evaluate_ci([], []) == "none"
+        assert evaluate_ci([]) == "none"
 
     def test_excluded_bot_check_is_not_ci_evidence(self):
-        state = evaluate_ci([("ai-code-reviewer", "completed", "success")], [])
+        state = evaluate_ci([("ai-code-reviewer", "completed", "success")])
         assert state == "none"
 
     def test_excluded_bot_failure_ignored(self):
@@ -218,19 +218,9 @@ class TestEvaluateCi:
             [
                 ("test", "completed", "success"),
                 ("d-day-labeler", "completed", "failure"),
-            ],
-            [],
+            ]
         )
         assert state == "success"
 
     def test_only_skipped_is_not_ci_evidence(self):
-        assert evaluate_ci([("test", "completed", "skipped")], []) == "none"
-
-    def test_external_status_failure(self):
-        state = evaluate_ci(
-            [("test", "completed", "success")], [("ci/external", "failure")]
-        )
-        assert state == "failure"
-
-    def test_external_status_only_success(self):
-        assert evaluate_ci([], [("ci/external", "success")]) == "success"
+        assert evaluate_ci([("test", "completed", "skipped")]) == "none"

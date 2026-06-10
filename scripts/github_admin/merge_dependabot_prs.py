@@ -167,10 +167,7 @@ def evaluate_updates(updates: list[dict] | None) -> tuple[bool, str]:
     return True, f"minor 이하 ({summary})"
 
 
-def evaluate_ci(
-    check_runs: list[tuple[str, str, str | None]],
-    statuses: list[tuple[str, str]],
-) -> CiState:
+def evaluate_ci(check_runs: list[tuple[str, str, str | None]]) -> CiState:
     """
     체크 결과 목록에서 CI 상태를 종합하는 순수 함수
 
@@ -179,7 +176,6 @@ def evaluate_ci(
 
     Args:
         check_runs: (이름, status, conclusion) 목록 (GitHub Actions 등 check run)
-        statuses: (context, state) 목록 (외부 CI의 commit status)
 
     Returns:
         CiState: "success" | "pending" | "failure" | "none" (CI 없음)
@@ -195,16 +191,6 @@ def evaluate_ci(
         elif conclusion in FAILURE_CONCLUSIONS:
             return "failure"
         elif conclusion == "success":
-            has_success = True
-
-    for context, state in statuses:
-        if context in EXCLUDED_CHECKS:
-            continue
-        if state in ("failure", "error"):
-            return "failure"
-        elif state == "pending":
-            has_pending = True
-        elif state == "success":
             has_success = True
 
     if has_pending:
@@ -228,11 +214,7 @@ def get_ci_state(pr: PullRequest) -> CiState:
     check_runs = [
         (run.name, run.status, run.conclusion) for run in commit.get_check_runs()
     ]
-    statuses = [
-        (status.context, status.state)
-        for status in commit.get_combined_status().statuses
-    ]
-    return evaluate_ci(check_runs, statuses)
+    return evaluate_ci(check_runs)
 
 
 def ensure_approved(pr: PullRequest, reviewer_login: str) -> None:
