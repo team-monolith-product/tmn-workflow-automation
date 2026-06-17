@@ -38,6 +38,11 @@
       "actor_id": 1,
       "actor_type": "OrganizationAdmin",
       "bypass_mode": "always"
+    },
+    {
+      "actor_id": 4068636,
+      "actor_type": "Integration",
+      "bypass_mode": "pull_request"
     }
   ]
 }
