@@ -1,13 +1,15 @@
 """
 지식 레이어 로더
 
-knowledge/edu_bid/ 의 변동 자산(역량·자격·소스·사업유형)은 트랙이 공유하고,
-전략·점수정책은 tracks/<key>.yaml 로 트랙마다 따로 둔다. 파이프라인 단계는 이
-객체를 읽기만 하고, 회사·전략이 변하면 코드가 아니라 YAML 만 갱신한다.
+전략 지식(자산·정량규격·전략)의 원본은 DB(SoT)다 — 어드민에서 편집하면 새 버전이 쌓이고
+여기서 활성 버전을 읽는다. DB 에 문서가 없거나 DATABASE_URL 미설정이면 YAML 로 폴백한다
+(부트스트랩·로컬 개발). 사업유형·소스(work_types/source_registry)는 아직 YAML 만 쓴다.
+
+DB 우선 3문서: capability_profile(공유), eligibility_ledger(공유), scoring_policy(트랙별).
 """
 
+import os
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -71,24 +73,55 @@ def _load(name: str, base: Path) -> dict:
     return yaml.safe_load((base / name).read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=4)
+def _yaml_file(section: str, track: str) -> str:
+    """DB 우선 섹션의 YAML 폴백 경로."""
+    if section == "scoring_policy":
+        return f"tracks/{track}.yaml"
+    return f"{section}.yaml"
+
+
+def _document(section: str, track: str, base: Path) -> dict:
+    """DB(SoT) 활성 버전 → 없으면 YAML 폴백. DATABASE_URL 미설정이면 바로 YAML.
+
+    DB 가 원본이므로 캐시하지 않는다(어드민 편집이 다음 실행에 바로 반영되도록).
+    """
+    if os.environ.get("DATABASE_URL"):
+        from .knowledge_store import get_active_document
+
+        doc = get_active_document(section, track)
+        if doc is not None:
+            return doc
+    return _load(_yaml_file(section, track), base)
+
+
 def load_shared_knowledge(knowledge_dir: str | None = None) -> SharedKnowledge:
-    """트랙이 공유하는 지식 4종 (역량·자격·소스·사업유형). 공유 상단부(prepare)용."""
+    """트랙이 공유하는 지식 4종 (역량·자격·소스·사업유형). 공유 상단부(prepare)용.
+
+    역량·자격은 DB(SoT, YAML 폴백), 소스·사업유형은 아직 YAML 만 쓴다.
+    """
     base = Path(knowledge_dir) if knowledge_dir else _KNOWLEDGE_DIR
     return SharedKnowledge(
-        capability_profile=_load("capability_profile.yaml", base),
-        eligibility_ledger=_load("eligibility_ledger.yaml", base),
+        capability_profile=_document("capability_profile", "", base),
+        eligibility_ledger=_document("eligibility_ledger", "", base),
         source_registry=_load("source_registry.yaml", base),
         work_types=_load("work_types.yaml", base),
     )
 
 
-@lru_cache(maxsize=8)
-def load_knowledge(track_key: str, knowledge_dir: str | None = None) -> Knowledge:
-    """트랙 지식 = 공유 지식 + tracks/<track_key>.yaml 의 전략·점수정책."""
+def load_knowledge(
+    track_key: str,
+    knowledge_dir: str | None = None,
+    *,
+    shared: SharedKnowledge | None = None,
+) -> Knowledge:
+    """트랙 지식 = 공유 지식 + tracks/<track_key>.yaml 의 전략·점수정책.
+
+    전략·점수정책은 DB(SoT, YAML 폴백). 공유 지식은 호출측이 한 run 에 한 번 만들어
+    shared 로 넘긴다 — 트랙 루프마다 재조회하지 않기 위함. 생략하면 직접 로드한다.
+    """
     base = Path(knowledge_dir) if knowledge_dir else _KNOWLEDGE_DIR
     return Knowledge(
         track_key=track_key,
-        shared=load_shared_knowledge(knowledge_dir),
-        scoring_policy=_load(f"tracks/{track_key}.yaml", base),
+        shared=shared if shared is not None else load_shared_knowledge(knowledge_dir),
+        scoring_policy=_document("scoring_policy", track_key, base),
     )

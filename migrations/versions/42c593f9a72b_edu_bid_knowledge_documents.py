@@ -1,0 +1,51 @@
+"""edu_bid knowledge documents
+
+Revision ID: 42c593f9a72b
+Revises:
+Create Date: 2026-06-02 16:22:43.944964
+"""
+
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers, used by Alembic.
+revision: str = "42c593f9a72b"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "edu_bid_knowledge_documents",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("section", sa.String(length=32), nullable=False),
+        sa.Column("track", sa.String(length=16), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column("active", sa.Boolean(), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column("author", sa.String(length=64), nullable=False),
+        sa.Column("note", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("section", "track", "version", name="uq_knowledge_doc_ver"),
+    )
+    op.create_index(
+        "uq_knowledge_doc_active",
+        "edu_bid_knowledge_documents",
+        ["section", "track"],
+        unique=True,
+        postgresql_where=sa.text("active"),
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("uq_knowledge_doc_active", table_name="edu_bid_knowledge_documents")
+    op.drop_table("edu_bid_knowledge_documents")

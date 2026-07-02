@@ -60,10 +60,11 @@ def main():
     now = datetime.now(KST)
     window = stages.build_incremental_window(now)
 
-    # 공유 상단부는 트랙 무관 — 공유 지식으로 한 번만 수집·게이트한다.
+    # 공유 상단부는 트랙 무관 — 공유 지식을 run 당 한 번만 만들어 게이트·트랙 루프가 함께 쓴다.
+    shared = load_shared_knowledge()
     gated = pipeline.prepare(
         window,
-        load_shared_knowledge(),
+        shared,
         limit=args.limit,
         use_cache=not args.no_cache,
     )
@@ -80,7 +81,7 @@ def main():
 
     client = None if args.dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     for track in cfg.tracks:
-        knowledge = load_knowledge(track.key)
+        knowledge = load_knowledge(track.key, shared=shared)
         decisions = pipeline.run_track(
             track.name,
             track.work_types,

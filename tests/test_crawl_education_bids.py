@@ -408,10 +408,10 @@ def test_each_track_loads_own_scoring_with_shared_source():
     dev = load_knowledge("dev")
     content = load_knowledge("content")
     edu = load_knowledge("edu")
-    # 공유 지식(역량·자격·소스·사업유형)은 트랙끼리 같은 객체로 캐시
-    assert dev.shared is content.shared
-    assert dev.shared is edu.shared
-    # 전략(점수정책)은 트랙마다 다른 파일
+    # 공유 지식(역량·자격·소스·사업유형)은 트랙끼리 내용 동일
+    assert dev.shared == content.shared
+    assert dev.shared == edu.shared
+    # 전략(점수정책)은 트랙마다 다른 문서
     descs = {
         k.scoring_policy["strategy"]["primary"]["desc"] for k in (dev, content, edu)
     }
