@@ -109,18 +109,6 @@ class TaskAlertsConfig:
     pipelines: list[TaskAlertPipeline]
 
 
-# --- 배포 담당자 로테이션 ---
-
-
-@dataclass(frozen=True)
-class DeploymentRotationConfig:
-    """배포 담당자 로테이션 설정"""
-
-    channel_id: str
-    members: list[str]
-    fixed_days: int = 0
-
-
 # --- 교육 외주 입찰공고 크롤러 ---
 
 
@@ -174,7 +162,6 @@ class AppConfig:
     squad_overrides: dict[str, Squad]
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
-    deployment_rotation: DeploymentRotationConfig | None = None
     education_bid_crawler: EducationBidCrawlerConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
 
@@ -286,16 +273,6 @@ def _parse_config(raw: dict) -> AppConfig:
         )
     task_alerts = TaskAlertsConfig(pipelines=pipelines)
 
-    # Deployment rotation
-    dr_raw = raw.get("deployment_rotation")
-    deployment_rotation = None
-    if dr_raw:
-        deployment_rotation = DeploymentRotationConfig(
-            channel_id=dr_raw["channel_id"],
-            members=dr_raw["members"],
-            fixed_days=dr_raw.get("fixed_days", 0),
-        )
-
     # Education bid crawler
     ebc_raw = raw.get("education_bid_crawler")
     education_bid_crawler = None
@@ -332,7 +309,6 @@ def _parse_config(raw: dict) -> AppConfig:
         squad_overrides=squad_overrides,
         scrum=scrum,
         task_alerts=task_alerts,
-        deployment_rotation=deployment_rotation,
         education_bid_crawler=education_bid_crawler,
         scheduled_jobs=scheduled_jobs,
     )
