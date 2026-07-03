@@ -323,12 +323,6 @@ def register_general_handlers(app, assistant):
             {"caller_slack_user_id": "user_id"},
         ),
         (
-            "announce-deployment-rotation",
-            "scripts.announce_deployment_rotation",
-            "main",
-            "배포 담당자 공지",
-        ),
-        (
             "crawl-education-bids",
             "scripts.crawl_education_bids",
             "main",
