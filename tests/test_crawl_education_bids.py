@@ -210,12 +210,24 @@ def test_decide_falls_back_to_triage_assets_when_eval_empty():
     assert d.matched_assets == ["codle", "judge"]
 
 
-def test_decide_near_miss_gate_overrides_to_future_target():
+def test_decide_near_miss_demotes_reportable_to_future_target():
+    """실적제한경쟁 + 적합도 높음 → 미래타깃(지금은 실적장벽, 좋은 건이라 추적)."""
     ev = _eval(
         90, 90, 90, 90, quant_barrier="high", wired_risk="high", matched_assets=[]
     )
     d = stages.decide(_ann(), GateResult("near_miss", ["실적"]), ev, [], _KN())
     assert d.label == "미래타깃"
+
+
+def test_decide_near_miss_low_fit_stays_excluded():
+    """실적제한경쟁이어도 적합도가 문턱 미만(무관 건)이면 제외 — 잡음 차단.
+
+    예: 재사용 0인 축제 식당 운영 공고가 실적경쟁이라는 이유만으로 미래타깃으로
+    보고되던 문제(탈춤식당 사례) 재현·수정.
+    """
+    ev = _eval(0, 20, 20, 20, matched_assets=[])  # 0.4*0+0.3*20+0.2*20+0.1*20 = 12점
+    d = stages.decide(_ann(), GateResult("near_miss", ["실적제한경쟁"]), ev, [], _KN())
+    assert d.score == 12.0 and d.label == "제외"
 
 
 # --- format_report ---
