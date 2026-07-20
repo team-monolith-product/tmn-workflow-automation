@@ -440,6 +440,68 @@ def test_track_performance_is_per_track_and_empty():
         assert load_knowledge(key).track_performance == []
 
 
+# --- prepare (후보 채택: 키워드 ∪ 담당 사업유형) ---
+
+
+def test_prepare_admits_work_type_without_keyword(monkeypatch):
+    """우리 기술을 호명하지 않는 연수 공고는 트리아지 단독으론 탈락하지만,
+    교육운영으로 분류되면 담당 사업유형 합집합으로 채택된다(실제 누락 재현·수정)."""
+    from service.edu_bid import pipeline, sources
+
+    shared = load_shared_knowledge()
+    # 실제 슬랙에서 누락 제보된 제목 — 자산 키워드 미매칭, 제목 '연수' → 교육운영
+    yeonsu = _ann(
+        bid_no="R1",
+        title="2026년 AI·디지털 활용 수업혁신 역량강화(실습형) 연수 운영 위탁 용역",
+        demand_inst="○○교육청교육연수원",
+    )
+    # 무관 공고 — 트리아지도 분류도 탈락 → 제외
+    junk = _ann(
+        bid_no="R2",
+        title="가로수 전지 용역",
+        proc_large="폐기물 처리 및 재활용서비스",
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect",
+        lambda kn, win, session=None, use_cache=True: [yeonsu, junk],
+    )
+
+    routed = {"개발", "유지관리", "콘텐츠", "교육운영", "행사"}
+    gated = pipeline.prepare(
+        ("202607190000", "202607200000"), shared, routed, use_cache=False
+    )
+
+    by_title = {a.title: (a, m, g) for a, m, g in gated}
+    assert yeonsu.title in by_title  # 담당 사업유형으로 채택
+    assert junk.title not in by_title  # 무관은 제외
+    a, matched, _ = by_title[yeonsu.title]
+    assert matched == []  # 자산 키워드는 안 걸렸어도 후보로 남는다
+    assert a.work_type == "교육운영"
+
+
+def test_prepare_excludes_off_scope_work_type_without_keyword(monkeypatch):
+    """담당 밖 사업유형(연구)은 키워드도 안 걸리면 채택하지 않는다(스코프 과확대 방지)."""
+    from service.edu_bid import pipeline, sources
+
+    shared = load_shared_knowledge()
+    research = _ann(
+        bid_no="R3",
+        title="청소년 진로 실태조사 연구용역",
+        proc_class="학술연구서비스",
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect",
+        lambda kn, win, session=None, use_cache=True: [research],
+    )
+    routed = {"개발", "유지관리", "콘텐츠", "교육운영", "행사"}
+    gated = pipeline.prepare(
+        ("202607190000", "202607200000"), shared, routed, use_cache=False
+    )
+    assert gated == []  # 연구 = 담당 밖 + 키워드 미매칭 → 제외
+
+
 # --- run_track (사업유형 분기, LLM 모킹) ---
 
 
