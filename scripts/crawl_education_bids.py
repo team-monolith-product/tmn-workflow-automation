@@ -60,16 +60,19 @@ def main():
     now = datetime.now(KST)
     window = stages.build_incremental_window(now)
 
+    # 어느 트랙이든 담당하는 사업유형 — 후보 채택(키워드∪담당유형)과 미매핑 집계에 함께 쓴다.
+    routed_types = {wt for t in cfg.tracks for wt in t.work_types}
+
     # 공유 상단부는 트랙 무관 — 공유 지식으로 한 번만 수집·게이트한다.
     gated = pipeline.prepare(
         window,
         load_shared_knowledge(),
+        routed_types,
         limit=args.limit,
         use_cache=not args.no_cache,
     )
 
     # 어느 트랙에도 매핑되지 않은 사업유형(연구·기타 등)은 평가 없이 누락된다 — 침묵 스킵 방지로 집계.
-    routed_types = {wt for t in cfg.tracks for wt in t.work_types}
     unrouted = Counter(
         a.work_type for a, _, _ in gated if a.work_type not in routed_types
     )
