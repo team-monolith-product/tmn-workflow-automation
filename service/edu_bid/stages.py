@@ -234,14 +234,18 @@ def decide(
     score = sum(float(axes.get(k, 0)) * float(weights.get(k, 0)) for k in weights)
 
     th = knowledge.thresholds
-    if gate_result.status == "near_miss":
-        label = LABEL_FUTURE
-    elif score >= th.get("recommend", 70):
+    if score >= th.get("recommend", 70):
         label = LABEL_RECOMMEND
     elif score >= th.get("review", 50):
         label = LABEL_REVIEW
     else:
         label = LABEL_EXCLUDE
+
+    # 실적제한경쟁(near_miss)은 실적장벽으로 지금은 못 잡는 건 — 적합도가 보고 문턱(추천/검토)
+    # 을 넘는 건만 '미래타깃'으로 낮춰 추적한다. 문턱 미만(무관·저적합)은 실적경쟁이어도 제외해,
+    # 재사용 0짜리 공고가 near_miss 라는 이유만으로 보고되지 않게 한다.
+    if gate_result.status == "near_miss" and label in (LABEL_RECOMMEND, LABEL_REVIEW):
+        label = LABEL_FUTURE
 
     return Decision(
         announcement=ann,
