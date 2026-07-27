@@ -15,14 +15,14 @@ assets:
     name: AI디지털교과서(AIDT)·KERIS 통합플랫폼 연동 (SSO + 로스터 동기화)
     repos: [aidt-keris-sso, jce-user-rails, jce-class-rails, jce-service-helm]
     covers:
-      - KERIS 통합플랫폼(aidtbook.kr) SSO 게이트웨이 — KSignAccess 에이전트, GID teammonolith_01 운영
+      - KERIS 통합플랫폼(edupath.kr, 구 aidtbook.kr) SSO 게이트웨이 — KSignAccess 에이전트, GID teammonolith_01 운영
       - KERIS API 2.4 교사/학생 인증 콜백 + 학급/학생/강의/교재 로스터 자동 동기화
       - 학습이력(시작/종료) 전송, 교육과정 성취기준 기준 진도 송신
       - 발행사별 멀티테넌트(YBM·금성·잇플 등 *.aidt.me 운영)
     keywords: [AI디지털교과서, AIDT, 디지털교과서, KERIS, 한국교육학술정보원, 통합플랫폼, 학습이력, 성취기준, 통합인증, SSO]
     maturity: production
     edu_bid_relevance: high
-    evidence: aidt-keris-sso/agent sso.conf(sso.aidtbook.kr, GID teammonolith_01), jce-user-rails app/apis/keris_api.rb + keris sync jobs, jce-service-helm/keris-sso/ncloud-prd.yaml
+    evidence: aidt-keris-sso/agent sso.conf(sso.edupath.kr, GID teammonolith_01), jce-user-rails app/apis/keris_api.rb + keris sync jobs, jce-service-helm/keris-sso/aws-apne2-prd-service.yaml
 
   - id: public_ed_sso
     tracks: [dev]
