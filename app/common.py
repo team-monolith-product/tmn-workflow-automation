@@ -686,6 +686,30 @@ def extract_matching_lines(
     return matched
 
 
+# 봇 기준을 담는 캔버스 이름. 채널에 캔버스가 여럿이면 이 이름을 우선한다.
+BOT_CANVAS_NAME = "CLAUDE.md"
+
+
+def _pick_bot_canvas(files: list[dict]) -> dict | None:
+    """
+    채널의 캔버스 중 봇 기준 캔버스를 고른다.
+
+    채널에는 회의록 등 다른 캔버스가 함께 있을 수 있다. 이름이 맞는 것만 골라야
+    엉뚱한 캔버스를 채널 기준으로 삼는 일이 없다. 이름이 맞는 것이 없으면
+    캔버스가 하나뿐일 때만 그것을 쓰고, 여럿이면 고르지 않는다.
+    """
+    if not files:
+        return None
+
+    target = BOT_CANVAS_NAME.casefold()
+    for f in files:
+        name = (f.get("title") or f.get("name") or "").strip().casefold()
+        if name == target:
+            return f
+
+    return files[0] if len(files) == 1 else None
+
+
 async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | None:
     """
     채널에 붙은 캔버스 본문을 가져온다. 없거나 읽을 수 없으면 None.
@@ -699,16 +723,16 @@ async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | No
     동작해야 한다. 스코프 누락·캔버스 부재·다운로드 실패를 모두 None으로 흡수한다.
     """
     try:
-        response = await client.files_list(channel=channel, types="canvas", count=1)
+        response = await client.files_list(channel=channel, types="canvas", count=100)
     except SlackApiError as e:
         print(f"채널 캔버스 조회 실패 (channel={channel}): {e}")
         return None
 
-    files = response.get("files", [])
-    if not files:
+    canvas = _pick_bot_canvas(response.get("files", []))
+    if canvas is None:
         return None
 
-    url = files[0].get("url_private_download") or files[0].get("url_private")
+    url = canvas.get("url_private_download") or canvas.get("url_private")
     if not url:
         return None
 

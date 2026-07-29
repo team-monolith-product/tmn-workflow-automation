@@ -10,6 +10,7 @@ from app import common, drive_bot
 
 CANVAS_FILE = {
     "id": "F123",
+    "title": "CLAUDE.md",
     "filetype": "canvas",
     "url_private_download": "https://files.slack.com/canvas-1",
 }
@@ -46,7 +47,9 @@ class TestFetchChannelCanvas:
             headers={"Authorization": "Bearer xoxb-token"},
         )
 
-        client.files_list.assert_called_once_with(channel="C1", types="canvas", count=1)
+        client.files_list.assert_called_once_with(
+            channel="C1", types="canvas", count=100
+        )
         assert "채널 규칙" in result
 
     @pytest.mark.asyncio
@@ -89,3 +92,38 @@ class TestSystemPromptInjection:
 
         assert "search_drive_files" in prompt
         assert "create_ops_task" in prompt
+
+
+class TestPickBotCanvas:
+    """채널에 캔버스가 여럿일 때 봇 기준 캔버스를 고른다"""
+
+    def test_picks_canvas_named_claude_md(self):
+        """이름이 CLAUDE.md인 캔버스를 고른다"""
+        files = [
+            {"id": "F1", "title": "7월 회의록"},
+            {"id": "F2", "title": "CLAUDE.md"},
+        ]
+        assert common._pick_bot_canvas(files)["id"] == "F2"
+
+    def test_name_match_is_case_insensitive(self):
+        """대소문자가 달라도 인식한다"""
+        files = [{"id": "F1", "title": "claude.md"}]
+        assert common._pick_bot_canvas(files)["id"] == "F1"
+
+    def test_falls_back_to_name_field(self):
+        """title이 없으면 name을 본다"""
+        files = [{"id": "F1", "name": "CLAUDE.md"}]
+        assert common._pick_bot_canvas(files)["id"] == "F1"
+
+    def test_single_canvas_is_used_even_without_matching_name(self):
+        """캔버스가 하나뿐이면 이름이 달라도 쓴다"""
+        files = [{"id": "F1", "title": "채널 안내"}]
+        assert common._pick_bot_canvas(files)["id"] == "F1"
+
+    def test_multiple_canvases_without_match_picks_none(self):
+        """여럿인데 이름이 맞는 게 없으면 고르지 않는다 (엉뚱한 것 방지)"""
+        files = [{"id": "F1", "title": "회의록"}, {"id": "F2", "title": "온보딩"}]
+        assert common._pick_bot_canvas(files) is None
+
+    def test_empty_list_returns_none(self):
+        assert common._pick_bot_canvas([]) is None
