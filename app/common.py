@@ -690,9 +690,10 @@ async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | No
     """
     채널에 붙은 캔버스 본문을 가져온다. 없거나 읽을 수 없으면 None.
 
-    캔버스 본문을 돌려주는 전용 API가 없다. canvases.sections.lookup은 섹션 ID만
-    주므로, files.list가 함께 돌려주는 url_private_download를 봇 토큰으로
-    내려받는 경로를 쓴다.
+    캔버스 본문만 돌려주는 전용 메서드는 없다. canvases:read로 쓸 수 있는
+    canvases.sections.lookup은 섹션 ID만 준다. 대신 files.list?types=canvas로
+    캔버스를 찾고, 파일 내용 조회의 표준 경로인 url_private_download를
+    files:read 권한으로 내려받는다. 두 단계 모두 공식 문서에 있는 방법이다.
 
     캔버스는 있으면 좋은 맥락이지 필수가 아니므로, 조회에 실패해도 봇은 계속
     동작해야 한다. 스코프 누락·캔버스 부재·다운로드 실패를 모두 None으로 흡수한다.
