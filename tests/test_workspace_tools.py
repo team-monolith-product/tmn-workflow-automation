@@ -1,5 +1,5 @@
 """
-Google Sheets / Docs 네이티브 조작 도구 테스트
+Google Sheets 네이티브 조작 도구 테스트
 """
 
 import pytest
@@ -97,36 +97,3 @@ class TestUpdateSheetRange:
         mock_update.assert_called_once_with("sheet-1", "집계!A1:B2", values)
         assert "집계!A1:B2" in result
         assert "4개 셀" in result
-
-
-class TestReplaceTextInDoc:
-    """문서 문구 치환"""
-
-    @pytest.mark.asyncio
-    async def test_reports_number_of_replacements(self):
-        """치환 횟수를 알린다"""
-        with patch.object(workspace_tools.google_docs, "replace_all_text") as mock_rep:
-            mock_rep.return_value = {
-                "replies": [{"replaceAllText": {"occurrencesChanged": 3}}]
-            }
-
-            result = await workspace_tools.replace_text_in_doc.ainvoke(
-                {"document_id": "doc-1", "find": "2025년", "replace": "2026년"}
-            )
-
-        mock_rep.assert_called_once_with("doc-1", "2025년", "2026년")
-        assert "3곳" in result
-
-    @pytest.mark.asyncio
-    async def test_zero_match_is_stated_explicitly(self):
-        """일치가 없으면 아무것도 바꾸지 않았음을 분명히 알린다"""
-        with patch.object(workspace_tools.google_docs, "replace_all_text") as mock_rep:
-            mock_rep.return_value = {
-                "replies": [{"replaceAllText": {"occurrencesChanged": 0}}]
-            }
-
-            result = await workspace_tools.replace_text_in_doc.ainvoke(
-                {"document_id": "doc-1", "find": "없는문구", "replace": "x"}
-            )
-
-        assert "찾지 못해" in result

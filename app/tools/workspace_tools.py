@@ -1,18 +1,17 @@
 """
-Google Sheets / Docs 네이티브 조작 LangChain Tools
+Google Sheets 네이티브 조작 LangChain Tools
 
 drive_tools는 파일을 통째로 읽고 쓰는 도구다.
-여기 있는 도구들은 셀 범위나 특정 문구처럼 문서 내부를 직접 다룬다.
+여기 있는 도구들은 셀 범위처럼 시트 내부를 직접 다룬다.
 """
 
 import asyncio
 from typing import Annotated
 
-from googleapiclient.errors import HttpError
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 from langchain_core.tools import tool
 
-from api import google_docs, google_sheets
+from api import google_sheets
 
 # 한 번에 돌려줄 최대 행 수 (에이전트 컨텍스트 보호)
 MAX_ROWS = 200
@@ -110,36 +109,3 @@ async def update_sheet_range(
     updated_range = response.get("updatedRange", range_a1)
     updated_cells = response.get("updatedCells", 0)
     return f"{updated_range}에 {updated_cells}개 셀을 썼습니다."
-
-
-@tool
-async def replace_text_in_doc(
-    document_id: Annotated[str, "Google 문서 파일 ID"],
-    find: Annotated[str, "찾을 문자열"],
-    replace: Annotated[str, "바꿀 문자열"],
-) -> str:
-    """
-    Google 문서에서 일치하는 모든 문구를 치환합니다.
-
-    문서 일부만 고칠 때 write_drive_file로 전체를 덮어쓰면 서식이 사라지므로,
-    문구 단위 수정에는 이 도구를 쓰세요.
-
-    치환은 되돌릴 수 없습니다. 무엇을 무엇으로 바꿀지 사용자에게 알리고
-    확인을 받은 뒤에 호출하세요.
-
-    Returns:
-        str: 치환된 횟수
-    """
-    try:
-        response = await asyncio.to_thread(
-            google_docs.replace_all_text, document_id, find, replace
-        )
-    except HttpError as e:
-        return f"문서 치환 실패: {e}. 파일 ID와 편집 권한을 확인하세요."
-
-    replies = response.get("replies", [])
-    occurrences = replies[0].get("replaceAllText", {}).get("occurrencesChanged", 0)
-
-    if occurrences == 0:
-        return f"'{find}'을(를) 찾지 못해 아무것도 바꾸지 않았습니다."
-    return f"'{find}' → '{replace}' {occurrences}곳을 바꿨습니다."
