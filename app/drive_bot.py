@@ -22,7 +22,8 @@ from .common import (
 )
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
-from .tools.drive_tools import read_drive_file, search_drive_files, write_drive_file
+from .tools import drive_scope
+from .tools.drive_tools import get_drive_tools
 from .tools.notion_tools import get_create_ops_task_tool, get_search_ops_tasks_tool
 from .tools.slack_tools import get_search_channel_messages_tool
 from .tools.workspace_tools import read_sheet_range
@@ -38,7 +39,9 @@ SLACK_WORKSPACE = "monolith-keb2010"
 RECURSION_LIMIT = 100
 
 
-def _build_system_prompt(channel_canvas: str | None = None) -> str:
+def _build_system_prompt(
+    channel_canvas: str | None = None, workspace_scoped: bool = False
+) -> str:
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
     prompt = (
@@ -96,6 +99,17 @@ def _build_system_prompt(channel_canvas: str | None = None) -> str:
         "- Code block: ``` ```코드 블록``` ``` (백틱 3개)\n"
         "- 파일과 노션 페이지 링크는 <URL|이름> 형식으로 답변에 포함하세요.\n"
     )
+
+    if workspace_scoped:
+        prompt += (
+            "\n"
+            "## Drive 작업 공간\n"
+            "- 이 채널의 Drive 작업 공간은 캔버스에 적힌 폴더와 그 하위입니다. "
+            "검색·읽기·쓰기가 모두 그 범위로 제한되어 있습니다.\n"
+            "- 검색할 때 폴더 조건을 따로 넣지 않아도 범위가 알아서 걸립니다.\n"
+            "- 범위 밖 파일을 요청받으면 접근할 수 없다고 알리고, "
+            "필요하면 캔버스에 그 폴더를 추가해 달라고 안내하세요.\n"
+        )
 
     # 채널 캔버스는 그 채널의 공통 맥락이다. 도구로 읽게 하면 LLM 턴이 하나 늘고
     # 모델이 건너뛸 수도 있으므로, 핸들러가 미리 읽어 여기에 넣는다.
@@ -209,8 +223,18 @@ async def answer_drive(
         say: 메시지 전송 함수
         slack_client: Slack 클라이언트
     """
+    # 캔버스에 적힌 폴더를 이 채널의 Drive 작업 공간으로 삼는다.
+    # 캔버스에 없으면 전역 기본 폴더로 떨어지고, 그것도 없으면 제한 없이 동작한다.
+    root_folder_id = drive_scope.extract_folder_id(channel_canvas) or os.environ.get(
+        "GOOGLE_DRIVE_FOLDER_ID"
+    )
+
     messages: list[BaseMessage] = [
-        SystemMessage(content=_build_system_prompt(channel_canvas))
+        SystemMessage(
+            content=_build_system_prompt(
+                channel_canvas, workspace_scoped=bool(root_folder_id)
+            )
+        )
     ]
 
     if threads_joined:
@@ -249,9 +273,7 @@ async def answer_drive(
     )
 
     tools = [
-        search_drive_files,
-        read_drive_file,
-        write_drive_file,
+        *get_drive_tools(root_folder_id),
         read_sheet_range,
         search_ops_tasks,
         create_ops_task,

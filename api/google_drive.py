@@ -16,7 +16,7 @@ from googleapiclient.http import MediaIoBaseUpload
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-FILE_FIELDS = "id, name, mimeType, modifiedTime, size, webViewLink"
+FILE_FIELDS = "id, name, mimeType, modifiedTime, size, webViewLink, parents"
 
 
 def get_drive_service():
