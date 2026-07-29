@@ -1,24 +1,17 @@
 """
 Drive 접근 범위를 폴더 하위 트리로 제한하는 유틸리티
 
-채널 캔버스에 적힌 Drive 폴더를 그 채널의 작업 공간으로 삼는다.
-프롬프트로 "이 폴더만 봐라"라고 지시하는 것과 달리, 여기서는 검색 쿼리와
-파일 접근을 코드에서 막으므로 모델이 어긋날 수 없다.
+GOOGLE_DRIVE_FOLDER_ID가 봇의 작업 공간이다. 검색·읽기·쓰기가 그 폴더와 하위로
+제한된다. 프롬프트로 "이 폴더만 봐라"라고 지시하는 것과 달리, 검색 쿼리와 파일
+접근을 코드에서 막으므로 모델이 어긋날 수 없다.
 
 Drive 검색의 `'X' in parents`는 직계 자식만 매칭한다. 재귀 검색이 없어서
 하위 폴더 ID를 직접 모아야 한다.
 """
 
-import re
-
 from cachetools import TTLCache
 
 from api import google_drive
-
-# 폴더 URL. 마크다운 링크 안에 있어도 잡힌다.
-_FOLDER_URL_RE = re.compile(
-    r"drive\.google\.com/drive/(?:u/\d+/)?folders/([A-Za-z0-9_-]+)"
-)
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
@@ -28,15 +21,6 @@ MAX_SCOPE_DEPTH = 5
 
 # 하위 트리는 자주 바뀌지 않는다. 대화 한 세션 동안은 한 번만 훑으면 된다.
 _scope_cache = TTLCache(maxsize=32, ttl=600)
-
-
-def extract_folder_id(text: str | None) -> str | None:
-    """텍스트에서 첫 번째 Drive 폴더 ID를 뽑는다."""
-    if not text:
-        return None
-
-    match = _FOLDER_URL_RE.search(text)
-    return match.group(1) if match else None
 
 
 def folder_scope(root_id: str) -> list[str]:

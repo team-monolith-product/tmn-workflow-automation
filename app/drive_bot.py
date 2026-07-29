@@ -14,15 +14,9 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from .common import (
-    KST,
-    collect_thread_context,
-    fetch_channel_canvas,
-    say_in_chunks,
-)
+from .common import KST, collect_thread_context, say_in_chunks
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
-from .tools import drive_scope
 from .tools.drive_tools import get_drive_tools
 from .tools.notion_tools import get_create_ops_task_tool, get_search_ops_tasks_tool
 from .tools.slack_tools import get_search_channel_messages_tool
@@ -39,9 +33,7 @@ SLACK_WORKSPACE = "monolith-keb2010"
 RECURSION_LIMIT = 100
 
 
-def _build_system_prompt(
-    channel_canvas: str | None = None, workspace_scoped: bool = False
-) -> str:
+def _build_system_prompt(workspace_scoped: bool = False) -> str:
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
     prompt = (
@@ -53,7 +45,6 @@ def _build_system_prompt(
         "- 예전에 처리한 일과 관련된 질문이면 search_ops_tasks(노션 운영 DB)를 먼저 봅니다.\n"
         "- 그 외에는 슬랙 대화(search_channel_messages)를 먼저 보고, "
         "거기서 답이 안 나오면 Drive 문서(search_drive_files)를 봅니다.\n"
-        "- 채널 캔버스에 쓰는 자료나 채널이 적혀 있으면 그 안내를 우선합니다.\n"
         "- 노션과 슬랙은 검색 범위가 좁습니다. 노션은 유형·상태·기간으로, "
         "슬랙은 채널과 기간으로 좁힐수록 정확합니다. 무엇으로 좁힐지 모르겠으면 "
         "넓게 여러 번 뒤지지 말고 사용자에게 물어보세요.\n"
@@ -104,24 +95,10 @@ def _build_system_prompt(
         prompt += (
             "\n"
             "## Drive 작업 공간\n"
-            "- 이 채널의 Drive 작업 공간은 캔버스에 적힌 폴더와 그 하위입니다. "
-            "검색·읽기·쓰기가 모두 그 범위로 제한되어 있습니다.\n"
+            "- Drive 작업 공간이 정해져 있습니다. 검색·읽기·쓰기가 모두 그 폴더와 "
+            "하위로 제한되어 있습니다.\n"
             "- 검색할 때 폴더 조건을 따로 넣지 않아도 범위가 알아서 걸립니다.\n"
-            "- 범위 밖 파일을 요청받으면 접근할 수 없다고 알리고, "
-            "필요하면 캔버스에 그 폴더를 추가해 달라고 안내하세요.\n"
-        )
-
-    # 채널 캔버스는 그 채널의 공통 맥락이다. 도구로 읽게 하면 LLM 턴이 하나 늘고
-    # 모델이 건너뛸 수도 있으므로, 핸들러가 미리 읽어 여기에 넣는다.
-    if channel_canvas:
-        prompt += (
-            "\n"
-            "## 이 채널의 공통 맥락\n"
-            "아래는 이 채널 캔버스의 내용입니다. 이 채널에서 일할 때의 기준으로 삼으세요.\n"
-            "여기 목록으로 적힌 자료는 본문이 아니라 안내입니다. "
-            "필요해지면 해당 자료를 직접 찾아 읽으세요.\n"
-            "\n"
-            f"{channel_canvas}\n"
+            "- 범위 밖 파일을 요청받으면 접근할 수 없다고 알리세요.\n"
         )
 
     return prompt
@@ -175,15 +152,9 @@ def register_drive_handlers(app_drive):
             f"/archives/{channel}/p{thread_ts.replace('.', '')}"
         )
 
-        # 스레드 이력과 채널 캔버스를 함께 조회한다. 캔버스 왕복이 지연에
-        # 얹히지 않도록 병렬로 던진다.
-        thread_context, channel_canvas = await asyncio.gather(
-            collect_thread_context(app_drive.client, channel, thread_ts, user),
-            fetch_channel_canvas(
-                app_drive.client, channel, os.environ["SLACK_BOT_TOKEN_DRIVE"]
-            ),
+        threads_joined, user_real_name = await collect_thread_context(
+            app_drive.client, channel, thread_ts, user
         )
-        threads_joined, user_real_name = thread_context
 
         await answer_drive(
             thread_ts,
@@ -192,7 +163,6 @@ def register_drive_handlers(app_drive):
             threads_joined,
             text,
             slack_thread_url,
-            channel_canvas,
             say,
             app_drive.client,
         )
@@ -205,7 +175,6 @@ async def answer_drive(
     threads_joined: str,
     text: str,
     slack_thread_url: str,
-    channel_canvas: str | None,
     say,
     slack_client,
 ):
@@ -219,21 +188,15 @@ async def answer_drive(
         threads_joined: 스레드 이전 대화 내용
         text: 이번 질문 내용
         slack_thread_url: 노션 페이지에 첨부할 슬랙 스레드 URL
-        channel_canvas: 채널 캔버스 본문. 없으면 None.
         say: 메시지 전송 함수
         slack_client: Slack 클라이언트
     """
-    # 캔버스에 적힌 폴더를 이 채널의 Drive 작업 공간으로 삼는다.
-    # 캔버스에 없으면 전역 기본 폴더로 떨어지고, 그것도 없으면 제한 없이 동작한다.
-    root_folder_id = drive_scope.extract_folder_id(channel_canvas) or os.environ.get(
-        "GOOGLE_DRIVE_FOLDER_ID"
-    )
+    # 작업 공간. 지정되면 검색·읽기·쓰기가 이 폴더 하위로 제한된다.
+    root_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
     messages: list[BaseMessage] = [
         SystemMessage(
-            content=_build_system_prompt(
-                channel_canvas, workspace_scoped=bool(root_folder_id)
-            )
+            content=_build_system_prompt(workspace_scoped=bool(root_folder_id))
         )
     ]
 

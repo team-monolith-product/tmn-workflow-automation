@@ -120,22 +120,7 @@ class TestReadDriveFile:
 
 
 class TestFolderScope:
-    """캔버스에서 뽑은 폴더로 접근 범위를 묶는다"""
-
-    def test_extracts_folder_id_from_markdown_link(self):
-        """캔버스의 마크다운 링크에서도 폴더 ID를 뽑는다"""
-        canvas = "# 채널 규칙\n자료는 [작업 폴더](https://drive.google.com/drive/folders/ABC_123-x)에"
-        assert drive_scope.extract_folder_id(canvas) == "ABC_123-x"
-
-    def test_extracts_folder_id_from_user_scoped_url(self):
-        """/u/0/ 가 낀 URL도 인식한다"""
-        canvas = "https://drive.google.com/drive/u/0/folders/XYZ789"
-        assert drive_scope.extract_folder_id(canvas) == "XYZ789"
-
-    def test_returns_none_without_folder_link(self):
-        """폴더 링크가 없으면 None"""
-        assert drive_scope.extract_folder_id("폴더 없음") is None
-        assert drive_scope.extract_folder_id(None) is None
+    """작업 공간 하위 트리 수집"""
 
     def test_scope_collects_subfolders_and_caches(self):
         """하위 폴더를 모으고, 두 번째 호출은 캐시를 쓴다"""

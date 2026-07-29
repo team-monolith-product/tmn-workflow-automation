@@ -36,8 +36,8 @@ MAX_CONTENT_CHARS = 40000
 GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 
 OUT_OF_SCOPE = (
-    "이 파일은 지금 채널의 작업 공간 밖에 있어 접근할 수 없습니다. "
-    "채널 캔버스에 적힌 폴더 하위만 다룰 수 있습니다."
+    "이 파일은 작업 공간 밖에 있어 접근할 수 없습니다. "
+    "지정된 폴더와 그 하위만 다룰 수 있습니다."
 )
 
 
@@ -162,7 +162,7 @@ def get_drive_tools(root_folder_id: str | None) -> list:
         Google Drive에서 파일과 폴더를 검색합니다.
 
         파일을 읽거나 수정하기 전에 이 도구로 먼저 file_id를 찾아야 합니다.
-        검색 범위는 이 채널의 작업 공간 하위로 자동 제한되므로,
+        검색 범위는 작업 공간 하위로 자동 제한되므로,
         폴더 조건을 직접 넣을 필요가 없습니다.
 
         자주 쓰는 쿼리 패턴:
@@ -224,7 +224,7 @@ def get_drive_tools(root_folder_id: str | None) -> list:
         ] = None,
         folder_id: Annotated[
             str | None,
-            "새 파일을 만들 상위 폴더 ID. 생략하면 이 채널 작업 공간의 루트에 만듭니다.",
+            "새 파일을 만들 상위 폴더 ID. 생략하면 작업 공간 루트에 만듭니다.",
         ] = None,
         as_google_doc: Annotated[
             bool, "True면 Google 문서로, False면 마크다운 텍스트 파일로 저장합니다."
@@ -237,7 +237,7 @@ def get_drive_tools(root_folder_id: str | None) -> list:
         덮어쓰기는 기존 내용을 완전히 대체하므로, 일부만 고칠 때는 먼저 read_drive_file로
         전체를 읽어 수정된 전체 본문을 전달하세요.
 
-        이 채널 작업 공간 하위에만 쓸 수 있습니다.
+        작업 공간 하위에만 쓸 수 있습니다.
 
         Returns:
             str: 저장된 파일의 이름과 링크

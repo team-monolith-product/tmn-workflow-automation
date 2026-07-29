@@ -9,10 +9,8 @@ from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field, create_model
 
-import aiohttp
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
-from slack_sdk.errors import SlackApiError
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from dotenv import load_dotenv
@@ -684,70 +682,6 @@ def extract_matching_lines(
     if len(matched) > max_lines:
         return matched[:max_lines] + [f"...외 {len(matched) - max_lines}줄 더 일치"]
     return matched
-
-
-# 봇 기준을 담는 캔버스 이름. 채널에 캔버스가 여럿이면 이 이름을 우선한다.
-BOT_CANVAS_NAME = "CLAUDE.md"
-
-
-def _pick_bot_canvas(files: list[dict]) -> dict | None:
-    """
-    채널의 캔버스 중 봇 기준 캔버스를 고른다.
-
-    채널에는 회의록 등 다른 캔버스가 함께 있을 수 있다. 이름이 맞는 것만 골라야
-    엉뚱한 캔버스를 채널 기준으로 삼는 일이 없다. 이름이 맞는 것이 없으면
-    캔버스가 하나뿐일 때만 그것을 쓰고, 여럿이면 고르지 않는다.
-    """
-    if not files:
-        return None
-
-    target = BOT_CANVAS_NAME.casefold()
-    for f in files:
-        name = (f.get("title") or f.get("name") or "").strip().casefold()
-        if name == target:
-            return f
-
-    return files[0] if len(files) == 1 else None
-
-
-async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | None:
-    """
-    채널에 붙은 캔버스 본문을 가져온다. 없거나 읽을 수 없으면 None.
-
-    캔버스 본문만 돌려주는 전용 메서드는 없다. canvases:read로 쓸 수 있는
-    canvases.sections.lookup은 섹션 ID만 준다. 대신 files.list?types=canvas로
-    캔버스를 찾고, 파일 내용 조회의 표준 경로인 url_private_download를
-    files:read 권한으로 내려받는다. 두 단계 모두 공식 문서에 있는 방법이다.
-
-    캔버스는 있으면 좋은 맥락이지 필수가 아니므로, 조회에 실패해도 봇은 계속
-    동작해야 한다. 스코프 누락·캔버스 부재·다운로드 실패를 모두 None으로 흡수한다.
-    """
-    try:
-        response = await client.files_list(channel=channel, types="canvas", count=100)
-    except SlackApiError as e:
-        print(f"채널 캔버스 조회 실패 (channel={channel}): {e}")
-        return None
-
-    canvas = _pick_bot_canvas(response.get("files", []))
-    if canvas is None:
-        return None
-
-    url = canvas.get("url_private_download") or canvas.get("url_private")
-    if not url:
-        return None
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, headers={"Authorization": f"Bearer {bot_token}"}
-            ) as resp:
-                resp.raise_for_status()
-                body = await resp.read()
-    except aiohttp.ClientError as e:
-        print(f"채널 캔버스 다운로드 실패 (channel={channel}): {e}")
-        return None
-
-    return body.decode("utf-8", errors="replace")
 
 
 async def collect_thread_context(
