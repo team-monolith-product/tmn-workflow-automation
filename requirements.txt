@@ -36,6 +36,7 @@ PyYAML
 apscheduler
 gspread
 google-auth
+google-api-python-client
 
 # 교육 입찰 규격서 파싱 (S4 보강)
 PyMuPDF

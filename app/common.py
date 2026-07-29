@@ -649,6 +649,81 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
     return create_notion_follow_up_task
 
 
+async def collect_thread_context(
+    client, channel: str, thread_ts: str, user: str | None
+) -> tuple[str, str]:
+    """
+    슬랙 스레드의 이전 대화와 질문자 이름을 조회한다.
+    마지막 메시지(=이번 멘션)는 제외한다.
+
+    Returns:
+        (이전 대화 내용, 질문자 실명)
+    """
+    result = await client.conversations_replies(channel=channel, ts=thread_ts)
+
+    user_ids = set(
+        message["user"] for message in result["messages"] if "user" in message
+    )
+    if user:
+        user_ids.add(user)
+
+    user_info_list = await slack_users_list(client)
+    user_dict = {
+        member["id"]: member
+        for member in user_info_list["members"]
+        if member["id"] in user_ids
+    }
+
+    threads = []
+    for message in result["messages"][:-1]:
+        slack_user_id = message.get("user")
+        if slack_user_id:
+            real_name = user_dict.get(slack_user_id, {}).get("real_name", "Unknown")
+        else:
+            real_name = "Bot"
+        threads.append(f"{real_name}:\n{message['text']}")
+
+    user_real_name = user_dict.get(user, {}).get("real_name", "Unknown")
+    return "\n\n".join(threads), user_real_name
+
+
+# Slack section 블록의 텍스트 길이 제한
+MAX_SLACK_TEXT_CHARS = 3000
+
+
+async def say_in_chunks(say, text: str, thread_ts: str) -> None:
+    """
+    긴 텍스트를 슬랙 블록 길이 제한에 맞춰 줄 단위로 나누어 전송한다.
+    """
+    chunks: list[str] = []
+    current = ""
+
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > MAX_SLACK_TEXT_CHARS:
+            if current:
+                chunks.append(current)
+            # 한 줄이 제한을 넘으면 문자 단위로 자른다
+            while len(line) > MAX_SLACK_TEXT_CHARS:
+                chunks.append(line[:MAX_SLACK_TEXT_CHARS])
+                line = line[MAX_SLACK_TEXT_CHARS:]
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        await say(
+            {
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
+                ]
+            },
+            thread_ts=thread_ts,
+        )
+
+
 async def answer(
     thread_ts: str,
     channel: str,
