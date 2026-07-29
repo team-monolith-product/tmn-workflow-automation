@@ -12,10 +12,17 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 ### 3. Drive Bot (`app/drive_bot.py`)
 Google Drive 자료를 직접 탐색하며 답하는 에이전트 봇. 슬랙에서 멘션하면 필요한 만큼 파일을 검색·열람하고, 정보가 부족하면 되묻고, 요청에 따라 문서를 생성하거나 수정한다.
 
-- 모델: Claude Opus 5 (`claude-opus-5`)
-- 도구: `search_drive_files`, `read_drive_file`, `write_drive_file`
+- 모델: `gpt-5.4` (reasoning effort high)
+- 파일 단위 도구: `search_drive_files`, `read_drive_file`, `write_drive_file`
+- 문서 내부 조작 도구: `read_sheet_range`, `update_sheet_range`, `replace_text_in_doc`
+- 노션 연동: `create_ops_task` (운영 DB에 업무 등록, 슬랙 스레드 자동 첨부)
 - 읽기 지원 형식: Google 문서/스프레드시트/프레젠테이션, PDF, 텍스트 계열
 - 대화 맥락은 슬랙 스레드를 그대로 사용한다 (별도 세션 저장소 없음)
+
+시트를 통째로 읽으면 큰 파일에서 컨텍스트가 터지므로, 범위 단위 도구를 함께 둔다.
+Google 문서의 일부만 고칠 때 전체 덮어쓰기는 서식을 지우므로 문구 치환 도구를 쓴다.
+Docs API의 다른 편집 요청은 문자 인덱스 기반이라 LLM이 위치를 잘못 계산해도 오류 없이
+엉뚱한 곳을 고칠 수 있어 채택하지 않았다.
 
 **공유 드라이브 필수**: 서비스 계정은 스토리지 할당량이 없어 개인 My Drive에 파일을 만들 수 없다(`403 storageQuotaExceeded`). `GOOGLE_DRIVE_FOLDER_ID`는 반드시 공유 드라이브 하위 폴더여야 하며, 해당 공유 드라이브에 서비스 계정을 **콘텐츠 관리자** 이상으로 추가해야 한다. 읽기 전용으로 쓸 폴더는 서비스 계정 이메일에 공유하면 검색·열람이 가능하다.
 
@@ -30,9 +37,12 @@ Google Drive 자료를 직접 탐색하며 답하는 에이전트 봇. 슬랙에
 
 ### Drive Bot 전용
 - `SLACK_BOT_TOKEN_DRIVE` / `SLACK_APP_TOKEN_DRIVE`: Drive 봇 Slack 토큰
-- `ANTHROPIC_API_KEY`: Claude API 키
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: 서비스 계정 JSON (Drive 스코프 필요)
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: 서비스 계정 JSON
 - `GOOGLE_DRIVE_FOLDER_ID`: 새 파일을 만들 기본 폴더 ID (공유 드라이브 하위)
+
+서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기), `spreadsheets`(셀 범위 쓰기),
+`documents`(문서 문구 치환). 시트 읽기는 `spreadsheets.readonly`로 분리되어 있어,
+봇이 쓰기 기능을 갖는다고 해서 기존 읽기 전용 스크립트의 권한이 넓어지지 않는다.
 
 ### FastAPI 전용
 - `WORKFLOW_AUTOMATION_API_KEY`: 웹훅 API 인증을 위한 API 키 (필수)
