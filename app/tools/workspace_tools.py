@@ -1,8 +1,11 @@
 """
-Google Sheets 네이티브 조작 LangChain Tools
+Google Sheets 조회 LangChain Tools
 
-drive_tools는 파일을 통째로 읽고 쓰는 도구다.
-여기 있는 도구들은 셀 범위처럼 시트 내부를 직접 다룬다.
+drive_tools는 파일을 통째로 읽는다.
+여기 있는 도구는 셀 범위 단위로 시트 내부를 읽는다.
+
+시트 쓰기는 아직 두지 않았다. 되돌리기가 어렵고, 서식·정렬·필터까지 다루려면
+batchUpdate 요청을 그대로 노출해야 하는데 그 파괴 범위를 먼저 합의해야 한다.
 """
 
 import asyncio
@@ -74,38 +77,3 @@ async def read_sheet_range(
         return f"시트 읽기 실패: {e}. 파일 ID와 탭 이름, 범위 표기를 확인하세요."
 
     return _format_rows(response.get("values", []))
-
-
-@tool
-async def update_sheet_range(
-    spreadsheet_id: Annotated[str, "스프레드시트 파일 ID"],
-    range_a1: Annotated[str, "'시트1!A1:D20' 형태의 범위"],
-    values: Annotated[
-        list[list[str]],
-        "행 단위 2차원 배열. 예: [['이름', '수량'], ['연필', '3']]",
-    ],
-) -> str:
-    """
-    Google 스프레드시트의 특정 범위에 값을 씁니다.
-
-    지정한 범위의 기존 값은 대체됩니다. 어떤 셀이 바뀌는지 사용자에게 알리고
-    확인을 받은 뒤에 호출하세요.
-
-    맨 아래에 행을 덧붙이려면 read_sheet_range로 마지막 행을 확인한 뒤
-    그 다음 행부터 범위를 지정하세요.
-
-    Returns:
-        str: 갱신된 셀 범위와 개수
-    """
-    try:
-        response = await asyncio.to_thread(
-            google_sheets.update_range, spreadsheet_id, range_a1, values
-        )
-    except SHEET_ERRORS as e:
-        return (
-            f"시트 쓰기 실패: {e}. 서비스 계정에 편집 권한이 있는지 확인이 필요합니다."
-        )
-
-    updated_range = response.get("updatedRange", range_a1)
-    updated_cells = response.get("updatedCells", 0)
-    return f"{updated_range}에 {updated_cells}개 셀을 썼습니다."

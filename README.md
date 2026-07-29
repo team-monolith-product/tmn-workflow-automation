@@ -14,7 +14,7 @@ Google Drive 자료를 직접 탐색하며 답하는 에이전트 봇. 슬랙에
 
 - 모델: `gpt-5.4` (reasoning effort high)
 - 파일 단위 도구: `search_drive_files`, `read_drive_file`, `write_drive_file`
-- 시트 내부 조작 도구: `read_sheet_range`, `update_sheet_range`
+- 시트 조회 도구: `read_sheet_range` (범위 생략 시 탭 목록)
 - 노션 연동: `create_ops_task` (운영 DB에 업무 등록, 슬랙 스레드 자동 첨부)
 - 읽기 지원 형식: Google 문서/스프레드시트/프레젠테이션, PDF, 텍스트 계열
 - 대화 맥락은 슬랙 스레드를 그대로 사용한다 (별도 세션 저장소 없음)
@@ -40,9 +40,7 @@ LLM이 위치를 잘못 계산해도 오류 없이 엉뚱한 곳을 고칠 수 �
 - `GOOGLE_SERVICE_ACCOUNT_JSON`: 서비스 계정 JSON
 - `GOOGLE_DRIVE_FOLDER_ID`: 새 파일을 만들 기본 폴더 ID (공유 드라이브 하위)
 
-서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기), `spreadsheets`(셀 범위 쓰기).
-시트 읽기는 `spreadsheets.readonly`로 분리되어 있어, 봇이 쓰기 기능을 갖는다고 해서
-기존 읽기 전용 스크립트의 권한이 넓어지지 않는다.
+서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기), `spreadsheets.readonly`(셀 범위 조회).
 
 ### FastAPI 전용
 - `WORKFLOW_AUTOMATION_API_KEY`: 웹훅 API 인증을 위한 API 키 (필수)

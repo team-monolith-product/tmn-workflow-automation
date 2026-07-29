@@ -1,5 +1,5 @@
 """
-Google Sheets 네이티브 조작 도구 테스트
+Google Sheets 조회 도구 테스트
 """
 
 import pytest
@@ -70,30 +70,3 @@ class TestReadSheetRange:
             )
 
         assert "값이 없습니다" in result
-
-
-class TestUpdateSheetRange:
-    """범위 쓰기"""
-
-    @pytest.mark.asyncio
-    async def test_passes_values_through_and_reports_count(self):
-        """값을 그대로 넘기고 갱신 결과를 알린다"""
-        values = [["이름", "수량"], ["연필", "3"]]
-
-        with patch.object(workspace_tools.google_sheets, "update_range") as mock_update:
-            mock_update.return_value = {
-                "updatedRange": "집계!A1:B2",
-                "updatedCells": 4,
-            }
-
-            result = await workspace_tools.update_sheet_range.ainvoke(
-                {
-                    "spreadsheet_id": "sheet-1",
-                    "range_a1": "집계!A1:B2",
-                    "values": values,
-                }
-            )
-
-        mock_update.assert_called_once_with("sheet-1", "집계!A1:B2", values)
-        assert "집계!A1:B2" in result
-        assert "4개 셀" in result

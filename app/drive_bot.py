@@ -18,7 +18,7 @@ from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.drive_tools import read_drive_file, search_drive_files, write_drive_file
 from .tools.notion_tools import get_create_ops_task_tool
-from .tools.workspace_tools import read_sheet_range, update_sheet_range
+from .tools.workspace_tools import read_sheet_range
 
 MODEL = "gpt-5.4"
 
@@ -56,12 +56,12 @@ def _build_system_prompt() -> str:
         "- 기존 파일을 덮어쓰기 전에는 어떤 파일을 어떻게 바꿀지 알리고 사용자 확인을 받으세요. "
         "새 파일 생성은 확인 없이 진행해도 됩니다.\n"
         "\n"
-        "## 스프레드시트 부분 수정\n"
-        "- 스프레드시트는 read_sheet_range로 필요한 범위만 읽고 update_sheet_range로 씁니다. "
+        "## 스프레드시트 읽기\n"
+        "- 스프레드시트는 read_sheet_range로 필요한 범위만 읽습니다. "
         "read_drive_file로 통째로 읽는 것은 작은 시트에만 쓰세요.\n"
         "- 어떤 탭이 있는지 모르면 read_sheet_range를 범위 없이 먼저 호출해 구조를 파악하세요.\n"
-        "- 시트 쓰기는 되돌릴 수 없습니다. 어떤 범위가 어떻게 바뀌는지 먼저 알리고 "
-        "확인을 받은 뒤에 실행하세요.\n"
+        "- 시트 셀을 고치는 기능은 없습니다. 수정 요청을 받으면 할 수 없다고 알리세요. "
+        "write_drive_file로 스프레드시트를 덮어쓰면 시트 전체가 망가지므로 절대 시도하지 마세요.\n"
         "\n"
         "## 노션 운영 업무 등록\n"
         "- 발송, 시스템, 문서, 보고, 예약·구매, 섭외, 모집, CS 같은 운영 업무를 "
@@ -207,7 +207,6 @@ async def answer_drive(
         read_drive_file,
         write_drive_file,
         read_sheet_range,
-        update_sheet_range,
         create_ops_task,
     ]
 
