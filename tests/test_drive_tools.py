@@ -310,3 +310,27 @@ class TestSearchResults:
 
         assert "id=abc123" in result
         assert "2026 연수 계획" in result
+
+
+class TestNormalizeFolderId:
+    """환경 변수에 링크를 그대로 넣어도 되게 한다"""
+
+    def test_accepts_browser_copied_link(self):
+        """브라우저에서 복사한 ?usp= 꼬리표가 붙은 링크"""
+        url = "https://drive.google.com/drive/folders/1Ca4MSIv8IimJ2wg?usp=drive_link"
+        assert drive_scope.normalize_folder_id(url) == "1Ca4MSIv8IimJ2wg"
+
+    def test_accepts_user_scoped_link(self):
+        url = "https://drive.google.com/drive/u/0/folders/XYZ789"
+        assert drive_scope.normalize_folder_id(url) == "XYZ789"
+
+    def test_accepts_bare_id(self):
+        assert drive_scope.normalize_folder_id("1Ca4MSIv8IimJ2wg") == "1Ca4MSIv8IimJ2wg"
+
+    def test_strips_whitespace(self):
+        assert drive_scope.normalize_folder_id("  ABC123  ") == "ABC123"
+
+    def test_empty_is_none(self):
+        assert drive_scope.normalize_folder_id("") is None
+        assert drive_scope.normalize_folder_id("   ") is None
+        assert drive_scope.normalize_folder_id(None) is None

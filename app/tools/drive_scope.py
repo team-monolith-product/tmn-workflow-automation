@@ -9,11 +9,18 @@ Drive 검색의 `'X' in parents`는 직계 자식만 매칭한다. 재귀 검색
 하위 폴더 ID를 직접 모아야 한다.
 """
 
+import re
+
 from cachetools import TTLCache
 
 from api import google_drive
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+# 폴더 URL에서 ID를 뽑는다. 환경 변수에 Drive 링크를 그대로 붙여넣을 수 있게 한다.
+_FOLDER_URL_RE = re.compile(
+    r"drive\.google\.com/drive/(?:u/\d+/)?folders/([A-Za-z0-9_-]+)"
+)
 
 # 트리를 훑는 범위. 상한이 없으면 큰 드라이브에서 요청이 폭주한다.
 MAX_SCOPE_FOLDERS = 200
@@ -21,6 +28,21 @@ MAX_SCOPE_DEPTH = 5
 
 # 하위 트리는 자주 바뀌지 않는다. 대화 한 세션 동안은 한 번만 훑으면 된다.
 _scope_cache = TTLCache(maxsize=32, ttl=600)
+
+
+def normalize_folder_id(value: str | None) -> str | None:
+    """
+    설정값에서 폴더 ID를 뽑는다.
+
+    Drive 링크를 그대로 붙여넣어도 되고(브라우저에서 복사한 ?usp=... 꼬리표 포함),
+    ID만 적어도 된다. 빈 값이면 None.
+    """
+    if not value or not value.strip():
+        return None
+
+    value = value.strip()
+    match = _FOLDER_URL_RE.search(value)
+    return match.group(1) if match else value
 
 
 def folder_scope(root_id: str) -> list[str]:

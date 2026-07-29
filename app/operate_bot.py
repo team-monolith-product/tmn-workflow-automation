@@ -1,8 +1,8 @@
 """
-Drive Bot — Google Drive 자료를 읽고 쓰며 노션 운영 업무를 만드는 에이전트 봇
+Operate Bot — 운영 업무를 돕는 에이전트 봇
 
-슬랙에서 멘션하면 Google Drive를 직접 탐색하여 답한다.
-필요한 만큼 파일을 찾아 읽고, 정보가 부족하면 되묻고, 요청에 따라 문서를 만들거나 고치고,
+슬랙에서 멘션하면 Drive 자료, 노션 운영 DB, 슬랙 과거 대화를 직접 뒤져 답한다.
+필요한 만큼 자료를 찾아 읽고, 정보가 부족하면 되묻고, 요청에 따라 문서를 만들거나 고치고,
 후속 업무를 노션 운영 DB에 등록한다.
 """
 
@@ -17,6 +17,7 @@ from langgraph.prebuilt import create_react_agent
 from .common import KST, collect_thread_context, say_in_chunks
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
+from .tools import drive_scope
 from .tools.drive_tools import get_drive_tools
 from .tools.notion_tools import get_create_ops_task_tool, get_search_ops_tasks_tool
 from .tools.slack_tools import get_search_channel_messages_tool
@@ -37,7 +38,7 @@ def _build_system_prompt(workspace_scoped: bool = False) -> str:
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
     prompt = (
-        "당신은 슬랙에 연결된 Google Drive 어시스턴트입니다.\n"
+        "당신은 슬랙에 연결된 운영 업무 어시스턴트입니다.\n"
         "한국의 에듀테크 스타트업에서 일하며, 항상 한국어로 답합니다.\n"
         f"오늘 날짜는 {today_str}입니다.\n"
         "\n"
@@ -120,15 +121,15 @@ def _extract_text(content) -> str:
     return "\n".join(texts)
 
 
-def register_drive_handlers(app_drive):
+def register_operate_handlers(app_operate):
     """
-    Drive 봇의 이벤트 핸들러를 등록합니다.
+    Operate 봇의 이벤트 핸들러를 등록합니다.
     """
 
-    @app_drive.event("app_mention")
-    async def app_mention_drive(body, say):
+    @app_operate.event("app_mention")
+    async def app_mention_operate(body, say):
         """
-        슬랙에서 Drive 봇을 멘션하면 호출되는 이벤트
+        슬랙에서 Operate 봇을 멘션하면 호출되는 이벤트
         """
         if is_duplicate_event(body):
             return
@@ -153,10 +154,10 @@ def register_drive_handlers(app_drive):
         )
 
         threads_joined, user_real_name = await collect_thread_context(
-            app_drive.client, channel, thread_ts, user
+            app_operate.client, channel, thread_ts, user
         )
 
-        await answer_drive(
+        await answer_operate(
             thread_ts,
             channel,
             user_real_name,
@@ -164,11 +165,11 @@ def register_drive_handlers(app_drive):
             text,
             slack_thread_url,
             say,
-            app_drive.client,
+            app_operate.client,
         )
 
 
-async def answer_drive(
+async def answer_operate(
     thread_ts: str,
     channel: str,
     user_real_name: str,
@@ -179,7 +180,7 @@ async def answer_drive(
     slack_client,
 ):
     """
-    Google Drive 관련 요청에 답변합니다.
+    운영 업무 요청에 답변합니다.
 
     Args:
         thread_ts: 스레드 타임스탬프
@@ -192,7 +193,10 @@ async def answer_drive(
         slack_client: Slack 클라이언트
     """
     # 작업 공간. 지정되면 검색·읽기·쓰기가 이 폴더 하위로 제한된다.
-    root_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    # 환경 변수에는 Drive 링크를 그대로 넣어도 되고 폴더 ID만 넣어도 된다.
+    root_folder_id = drive_scope.normalize_folder_id(
+        os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    )
 
     messages: list[BaseMessage] = [
         SystemMessage(
