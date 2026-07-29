@@ -7,13 +7,19 @@ Drive Bot — Google Drive 자료를 읽고 쓰며 노션 운영 업무를 만�
 """
 
 import asyncio
+import os
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from .common import KST, collect_thread_context, say_in_chunks
+from .common import (
+    KST,
+    collect_thread_context,
+    fetch_channel_canvas,
+    say_in_chunks,
+)
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.drive_tools import read_drive_file, search_drive_files, write_drive_file
@@ -31,10 +37,10 @@ SLACK_WORKSPACE = "monolith-keb2010"
 RECURSION_LIMIT = 100
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(channel_canvas: str | None = None) -> str:
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
-    return (
+    prompt = (
         "당신은 슬랙에 연결된 Google Drive 어시스턴트입니다.\n"
         "한국의 에듀테크 스타트업에서 일하며, 항상 한국어로 답합니다.\n"
         f"오늘 날짜는 {today_str}입니다.\n"
@@ -80,6 +86,21 @@ def _build_system_prompt() -> str:
         "- Code block: ``` ```코드 블록``` ``` (백틱 3개)\n"
         "- 파일과 노션 페이지 링크는 <URL|이름> 형식으로 답변에 포함하세요.\n"
     )
+
+    # 채널 캔버스는 그 채널의 공통 맥락이다. 도구로 읽게 하면 LLM 턴이 하나 늘고
+    # 모델이 건너뛸 수도 있으므로, 핸들러가 미리 읽어 여기에 넣는다.
+    if channel_canvas:
+        prompt += (
+            "\n"
+            "## 이 채널의 공통 맥락\n"
+            "아래는 이 채널 캔버스의 내용입니다. 이 채널에서 일할 때의 기준으로 삼으세요.\n"
+            "여기 목록으로 적힌 자료는 본문이 아니라 안내입니다. "
+            "필요해지면 해당 자료를 직접 찾아 읽으세요.\n"
+            "\n"
+            f"{channel_canvas}\n"
+        )
+
+    return prompt
 
 
 def _extract_text(content) -> str:
@@ -130,9 +151,15 @@ def register_drive_handlers(app_drive):
             f"/archives/{channel}/p{thread_ts.replace('.', '')}"
         )
 
-        threads_joined, user_real_name = await collect_thread_context(
-            app_drive.client, channel, thread_ts, user
+        # 스레드 이력과 채널 캔버스를 함께 조회한다. 캔버스 왕복이 지연에
+        # 얹히지 않도록 병렬로 던진다.
+        thread_context, channel_canvas = await asyncio.gather(
+            collect_thread_context(app_drive.client, channel, thread_ts, user),
+            fetch_channel_canvas(
+                app_drive.client, channel, os.environ["SLACK_BOT_TOKEN_DRIVE"]
+            ),
         )
+        threads_joined, user_real_name = thread_context
 
         await answer_drive(
             thread_ts,
@@ -141,6 +168,7 @@ def register_drive_handlers(app_drive):
             threads_joined,
             text,
             slack_thread_url,
+            channel_canvas,
             say,
             app_drive.client,
         )
@@ -153,6 +181,7 @@ async def answer_drive(
     threads_joined: str,
     text: str,
     slack_thread_url: str,
+    channel_canvas: str | None,
     say,
     slack_client,
 ):
@@ -166,10 +195,13 @@ async def answer_drive(
         threads_joined: 스레드 이전 대화 내용
         text: 이번 질문 내용
         slack_thread_url: 노션 페이지에 첨부할 슬랙 스레드 URL
+        channel_canvas: 채널 캔버스 본문. 없으면 None.
         say: 메시지 전송 함수
         slack_client: Slack 클라이언트
     """
-    messages: list[BaseMessage] = [SystemMessage(content=_build_system_prompt())]
+    messages: list[BaseMessage] = [
+        SystemMessage(content=_build_system_prompt(channel_canvas))
+    ]
 
     if threads_joined:
         messages.append(

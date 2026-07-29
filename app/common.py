@@ -9,8 +9,10 @@ from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field, create_model
 
+import aiohttp
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from slack_sdk.errors import SlackApiError
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from dotenv import load_dotenv
@@ -666,6 +668,45 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
         return response["url"]
 
     return create_notion_follow_up_task
+
+
+async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | None:
+    """
+    채널에 붙은 캔버스 본문을 가져온다. 없거나 읽을 수 없으면 None.
+
+    캔버스 본문을 돌려주는 전용 API가 없다. canvases.sections.lookup은 섹션 ID만
+    주므로, files.list가 함께 돌려주는 url_private_download를 봇 토큰으로
+    내려받는 경로를 쓴다.
+
+    캔버스는 있으면 좋은 맥락이지 필수가 아니므로, 조회에 실패해도 봇은 계속
+    동작해야 한다. 스코프 누락·캔버스 부재·다운로드 실패를 모두 None으로 흡수한다.
+    """
+    try:
+        response = await client.files_list(channel=channel, types="canvas", count=1)
+    except SlackApiError as e:
+        print(f"채널 캔버스 조회 실패 (channel={channel}): {e}")
+        return None
+
+    files = response.get("files", [])
+    if not files:
+        return None
+
+    url = files[0].get("url_private_download") or files[0].get("url_private")
+    if not url:
+        return None
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers={"Authorization": f"Bearer {bot_token}"}
+            ) as resp:
+                resp.raise_for_status()
+                body = await resp.read()
+    except aiohttp.ClientError as e:
+        print(f"채널 캔버스 다운로드 실패 (channel={channel}): {e}")
+        return None
+
+    return body.decode("utf-8", errors="replace")
 
 
 async def collect_thread_context(
