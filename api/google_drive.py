@@ -7,12 +7,11 @@ Google Drive API 래퍼 함수
 """
 
 import io
-import json
-import os
 
-from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+
+from . import google_auth
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -20,9 +19,8 @@ FILE_FIELDS = "id, name, mimeType, modifiedTime, size, webViewLink, parents"
 
 
 def get_drive_service():
-    """환경 변수의 서비스 계정 JSON으로 Drive v3 서비스를 생성한다."""
-    info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    """운영봇 서비스 계정으로 Drive v3 서비스를 생성한다."""
+    creds = google_auth.operate_credentials(SCOPES)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 

@@ -2,21 +2,21 @@
 Google Sheets API 래퍼 함수
 """
 
-import json
-import os
-
 import gspread
-from google.oauth2.service_account import Credentials
+
+from . import google_auth
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
 def _get_client() -> gspread.Client:
-    """환경 변수에서 서비스 계정 JSON을 읽어 gspread 클라이언트 생성"""
-    sa_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
-    info = json.loads(sa_json)
-    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    return gspread.authorize(creds)
+    """공용 서비스 계정으로 gspread 클라이언트 생성 (기존 스크립트용)"""
+    return gspread.authorize(google_auth.shared_credentials(SCOPES))
+
+
+def _get_operate_client() -> gspread.Client:
+    """운영봇 서비스 계정으로 gspread 클라이언트 생성"""
+    return gspread.authorize(google_auth.operate_credentials(SCOPES))
 
 
 def get_worksheet_values(
@@ -46,7 +46,7 @@ def list_worksheets(spreadsheet_id: str) -> list[dict]:
     Returns:
         [{"title": str, "id": int, "row_count": int, "col_count": int}, ...]
     """
-    gc = _get_client()
+    gc = _get_operate_client()
     sh = gc.open_by_key(spreadsheet_id)
     return [
         {
@@ -75,6 +75,6 @@ def get_range(
     Returns:
         Sheets API values.get 원본 응답
     """
-    gc = _get_client()
+    gc = _get_operate_client()
     sh = gc.open_by_key(spreadsheet_id)
     return sh.values_get(range_a1, params={"valueRenderOption": value_render_option})

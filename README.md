@@ -55,10 +55,17 @@ LLM이 위치를 잘못 계산해도 오류 없이 엉뚱한 곳을 고칠 수 �
 
 ### Operate Bot 전용
 - `SLACK_BOT_TOKEN_OPERATE` / `SLACK_APP_TOKEN_OPERATE`: Operate 봇 Slack 토큰
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: 서비스 계정 JSON
+- `GOOGLE_SERVICE_ACCOUNT_JSON_OPERATE`: 운영봇 전용 서비스 계정 JSON.
+  없으면 공용 `GOOGLE_SERVICE_ACCOUNT_JSON`으로 떨어진다
 - `GOOGLE_DRIVE_FOLDER_ID`: 작업 공간 폴더. Drive 링크를 그대로 넣어도 되고 ID만 넣어도 된다 (공유 드라이브 하위)
 
-서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기), `spreadsheets.readonly`(셀 범위 조회).
+운영봇 서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기),
+`spreadsheets.readonly`(셀 범위 조회).
+
+계정을 분리한 이유: 봇은 Drive 쓰기와 공유 드라이브 접근이 필요해 기존 스크립트가 쓰는
+공용 계정(`spreadsheets.readonly`)보다 권한이 넓다. 나눠 두면 봇에 준 권한이 다른 곳으로
+번지지 않고, 문제가 생겼을 때 봇 계정만 회수할 수 있다. 기존 `get_worksheet_values`는
+공용 계정을 그대로 쓰므로 `scripts/discord_post_completion_notice.py`는 영향을 받지 않는다.
 
 Slack 봇 스코프: `app_mentions:read`, `chat:write`, `users:read`, `users:read.email`,
 `channels:history`(스레드·채널 조회).
