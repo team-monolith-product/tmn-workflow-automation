@@ -203,3 +203,123 @@ class TestGetDataSourceId:
         assert first == "ds-abc"
         assert second == "ds-abc"
         mock_notion.databases.retrieve.assert_called_once_with("db-1")
+
+
+def _page(page_id: str, title: str, task_type: str = "발송", status: str = "완료"):
+    return {
+        "id": page_id,
+        "url": f"https://notion.so/{page_id}",
+        "properties": {
+            "이름": {"type": "title", "title": [{"plain_text": title}]},
+            "유형": {"type": "select", "select": {"name": task_type}},
+            "상태": {"type": "status", "status": {"name": status}},
+            "날짜": {"type": "date", "date": {"start": "2026-07-01"}},
+        },
+    }
+
+
+class TestSearchOpsTasks:
+    """속성으로 좁힌 뒤 소수의 본문만 읽는 2단계 조회"""
+
+    def _tool(self):
+        with (
+            patch.object(notion_tools, "get_data_source_id", return_value="ds-1"),
+            patch.object(
+                notion_tools,
+                "get_data_source_schema",
+                return_value={"properties": OPS_PROPERTIES},
+            ),
+        ):
+            return notion_tools.get_search_ops_tasks_tool("db-1")
+
+    @pytest.mark.asyncio
+    async def test_property_filters_are_combined_with_and(self):
+        """유형·상태·기간을 함께 주면 and 조건으로 묶인다"""
+        tool = self._tool()
+        mock_notion = MagicMock()
+        mock_notion.data_sources.query.return_value = {"results": []}
+
+        with patch.object(notion_tools, "notion", mock_notion):
+            await tool.ainvoke(
+                {"task_type": "발송", "status": "완료", "since_days": 30}
+            )
+
+        query = mock_notion.data_sources.query.call_args.kwargs
+        assert len(query["filter"]["and"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_without_keyword_no_body_is_read(self):
+        """검색어가 없으면 본문을 읽지 않고 목록만 돌려준다"""
+        tool = self._tool()
+        mock_notion = MagicMock()
+        mock_notion.data_sources.query.return_value = {
+            "results": [_page("p1", "7월 안내문 발송")]
+        }
+
+        with (
+            patch.object(notion_tools, "notion", mock_notion),
+            patch.object(notion_tools, "notion_page_to_markdown") as mock_md,
+        ):
+            result = await tool.ainvoke({"task_type": "발송"})
+
+        mock_md.assert_not_called()
+        assert "7월 안내문 발송" in result
+
+    @pytest.mark.asyncio
+    async def test_title_hit_skips_body_read(self):
+        """제목에서 걸리면 그 페이지의 본문은 읽지 않는다"""
+        tool = self._tool()
+        mock_notion = MagicMock()
+        mock_notion.data_sources.query.return_value = {
+            "results": [_page("p1", "연수 안내문 발송")]
+        }
+
+        with (
+            patch.object(notion_tools, "notion", mock_notion),
+            patch.object(notion_tools, "notion_page_to_markdown") as mock_md,
+        ):
+            result = await tool.ainvoke({"keyword": "연수"})
+
+        mock_md.assert_not_called()
+        assert "연수 안내문 발송" in result
+
+    @pytest.mark.asyncio
+    async def test_body_is_read_when_title_misses(self):
+        """제목에 없으면 본문을 읽어 일치한 줄만 뽑는다"""
+        tool = self._tool()
+        mock_notion = MagicMock()
+        mock_notion.data_sources.query.return_value = {
+            "results": [_page("p1", "7월 업무")]
+        }
+
+        with (
+            patch.object(notion_tools, "notion", mock_notion),
+            patch.object(
+                notion_tools,
+                "notion_page_to_markdown",
+                return_value="첫 줄\n연수 간식 영수증 정리\n마지막 줄",
+            ),
+        ):
+            result = await tool.ainvoke({"keyword": "연수"})
+
+        assert "연수 간식 영수증 정리" in result
+        assert "마지막 줄" not in result
+
+    @pytest.mark.asyncio
+    async def test_body_reads_are_capped(self):
+        """본문 조회는 상한까지만 하고 남은 건수를 알린다"""
+        tool = self._tool()
+        pages = [_page(f"p{i}", f"업무 {i}") for i in range(20)]
+        mock_notion = MagicMock()
+        mock_notion.data_sources.query.return_value = {"results": pages}
+
+        with (
+            patch.object(notion_tools, "notion", mock_notion),
+            patch.object(
+                notion_tools, "notion_page_to_markdown", return_value="관계없는 본문"
+            ) as mock_md,
+        ):
+            result = await tool.ainvoke({"keyword": "연수"})
+
+        assert mock_md.call_count == notion_tools.MAX_BODY_READS
+        assert "찾지 못했습니다" in result

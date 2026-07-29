@@ -15,7 +15,17 @@ Google Drive 자료를 직접 탐색하며 답하는 에이전트 봇. 슬랙에
 - 모델: `gpt-5.4` (reasoning effort high)
 - 파일 단위 도구: `search_drive_files`, `read_drive_file`, `write_drive_file`
 - 시트 조회 도구: `read_sheet_range` (범위 생략 시 탭 목록)
-- 노션 연동: `create_ops_task` (운영 DB에 업무 등록, 슬랙 스레드 자동 첨부)
+- 과거 조회 도구: `search_ops_tasks` (노션 운영 DB), `search_channel_messages` (슬랙 채널)
+- 노션 등록: `create_ops_task` (운영 DB에 업무 등록, 슬랙 스레드 자동 첨부)
+
+과거를 찾을 때는 예전에 처리한 일이면 노션 운영 DB를, 그 외에는 슬랙 대화를 먼저 보고
+안 나오면 Drive 문서를 본다.
+
+**두 조회 도구는 모두 2단계로 동작한다.** 노션은 본문 검색 API가 없고 평균 초당 3요청
+제한이 있으며, 슬랙은 봇 토큰에 검색 API가 열려 있지 않고 `conversations.history`가
+최상위 메시지만 돌려준다. 그래서 양쪽 다 값싼 수단으로 후보를 좁힌 뒤(노션은 속성 필터,
+슬랙은 채널·기간) 소수만 깊이 읽고(노션은 페이지 본문, 슬랙은 스레드 답글),
+일치한 부분만 돌려준다. 결과 크기를 입력 크기와 분리해 컨텍스트가 터지지 않게 한다.
 - 읽기 지원 형식: Google 문서/스프레드시트/프레젠테이션, PDF, 텍스트 계열
 - 대화 맥락은 슬랙 스레드를 그대로 사용한다 (별도 세션 저장소 없음)
 - 채널 캔버스가 있으면 매 요청마다 읽어 시스템 프롬프트에 넣는다
@@ -51,7 +61,11 @@ LLM이 위치를 잘못 계산해도 오류 없이 엉뚱한 곳을 고칠 수 �
 서비스 계정에 필요한 스코프: `drive`(파일 검색·읽기·쓰기), `spreadsheets.readonly`(셀 범위 조회).
 
 Slack 봇 스코프: `app_mentions:read`, `chat:write`, `users:read`, `users:read.email`,
-`channels:history`(스레드 조회), `files:read`(채널 캔버스 조회).
+`channels:history`(스레드·채널 조회), `files:read`(채널 캔버스 조회).
+비공개 채널까지 보려면 `groups:history`가 추가로 필요하다.
+
+`conversations.history`의 요청당 999개 한도는 내부용 앱 기준이다. 마켓플레이스 밖으로
+배포되는 앱은 2025년 5월부터 분당 1요청·15개로 제한되지만 사내 앱은 해당하지 않는다.
 
 ### FastAPI 전용
 - `WORKFLOW_AUTOMATION_API_KEY`: 웹훅 API 인증을 위한 API 키 (필수)

@@ -670,6 +670,22 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
     return create_notion_follow_up_task
 
 
+def extract_matching_lines(
+    text: str, regex: re.Pattern, max_lines: int = 10
+) -> list[str]:
+    """
+    본문에서 패턴과 일치하는 줄만 추려낸다.
+
+    전문을 그대로 컨텍스트에 넣으면 몇 건만 훑어도 한도를 넘긴다.
+    일치하는 줄만 돌려주어 결과 크기를 입력 크기와 분리한다.
+    """
+    matched = [line.strip() for line in text.split("\n") if regex.search(line)]
+
+    if len(matched) > max_lines:
+        return matched[:max_lines] + [f"...외 {len(matched) - max_lines}줄 더 일치"]
+    return matched
+
+
 async def fetch_channel_canvas(client, channel: str, bot_token: str) -> str | None:
     """
     채널에 붙은 캔버스 본문을 가져온다. 없거나 읽을 수 없으면 None.

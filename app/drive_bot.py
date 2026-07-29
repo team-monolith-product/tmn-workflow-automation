@@ -23,7 +23,8 @@ from .common import (
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.drive_tools import read_drive_file, search_drive_files, write_drive_file
-from .tools.notion_tools import get_create_ops_task_tool
+from .tools.notion_tools import get_create_ops_task_tool, get_search_ops_tasks_tool
+from .tools.slack_tools import get_search_channel_messages_tool
 from .tools.workspace_tools import read_sheet_range
 
 MODEL = "gpt-5.4"
@@ -44,6 +45,15 @@ def _build_system_prompt(channel_canvas: str | None = None) -> str:
         "당신은 슬랙에 연결된 Google Drive 어시스턴트입니다.\n"
         "한국의 에듀테크 스타트업에서 일하며, 항상 한국어로 답합니다.\n"
         f"오늘 날짜는 {today_str}입니다.\n"
+        "\n"
+        "## 어디서 찾을지 먼저 정하기\n"
+        "- 예전에 처리한 일과 관련된 질문이면 search_ops_tasks(노션 운영 DB)를 먼저 봅니다.\n"
+        "- 그 외에는 슬랙 대화(search_channel_messages)를 먼저 보고, "
+        "거기서 답이 안 나오면 Drive 문서(search_drive_files)를 봅니다.\n"
+        "- 채널 캔버스에 쓰는 자료나 채널이 적혀 있으면 그 안내를 우선합니다.\n"
+        "- 노션과 슬랙은 검색 범위가 좁습니다. 노션은 유형·상태·기간으로, "
+        "슬랙은 채널과 기간으로 좁힐수록 정확합니다. 무엇으로 좁힐지 모르겠으면 "
+        "넓게 여러 번 뒤지지 말고 사용자에게 물어보세요.\n"
         "\n"
         "## 일하는 방식\n"
         "- 추측해서 답하지 마세요. 답에 필요한 자료는 search_drive_files로 찾고 "
@@ -230,8 +240,12 @@ async def answer_drive(
 
     # 도구 생성 시 노션 스키마를 동기 조회하므로 이벤트 루프를 막지 않도록 분리한다
     # (캐시 미스일 때만 실제 호출이 나간다)
-    create_ops_task = await asyncio.to_thread(
-        get_create_ops_task_tool, OPS_DATABASE_ID, slack_thread_url
+    create_ops_task, search_ops_tasks = await asyncio.gather(
+        asyncio.to_thread(get_create_ops_task_tool, OPS_DATABASE_ID, slack_thread_url),
+        asyncio.to_thread(get_search_ops_tasks_tool, OPS_DATABASE_ID),
+    )
+    search_channel_messages = get_search_channel_messages_tool(
+        slack_client, SLACK_WORKSPACE, channel
     )
 
     tools = [
@@ -239,7 +253,9 @@ async def answer_drive(
         read_drive_file,
         write_drive_file,
         read_sheet_range,
+        search_ops_tasks,
         create_ops_task,
+        search_channel_messages,
     ]
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
