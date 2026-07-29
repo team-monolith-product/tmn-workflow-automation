@@ -12,8 +12,8 @@ SUB = "sub-folder"
 
 
 def _tools(root_folder_id=None):
-    search, read, write = drive_tools.get_drive_tools(root_folder_id)
-    return {"search": search, "read": read, "write": write}
+    search, read = drive_tools.get_drive_tools(root_folder_id)
+    return {"search": search, "read": read}
 
 
 @pytest.fixture(autouse=True)
@@ -211,73 +211,6 @@ class TestScopedAccess:
             result = await _tools(ROOT)["read"].ainvoke({"file_id": "x"})
 
         assert "우리 문서" in result
-
-    @pytest.mark.asyncio
-    async def test_writing_outside_workspace_is_refused(self):
-        """범위 밖 폴더에는 만들지 않는다"""
-        with (
-            self._patch_scope(),
-            patch.object(drive_tools.google_drive, "create_file") as mock_create,
-        ):
-            result = await _tools(ROOT)["write"].ainvoke(
-                {"name": "새 문서", "content": "본문", "folder_id": "남의-폴더"}
-            )
-
-        mock_create.assert_not_called()
-        assert "작업 공간 밖" in result
-
-    @pytest.mark.asyncio
-    async def test_overwriting_outside_workspace_is_refused(self):
-        """범위 밖 파일은 덮어쓰지 않는다"""
-        with (
-            self._patch_scope(),
-            patch.object(drive_tools.google_drive, "get_file_metadata") as mock_meta,
-            patch.object(drive_tools.google_drive, "update_file") as mock_update,
-        ):
-            mock_meta.return_value = {"name": "남의 문서", "parents": ["다른-폴더"]}
-            result = await _tools(ROOT)["write"].ainvoke(
-                {"name": "x", "content": "본문", "file_id": "f1"}
-            )
-
-        mock_update.assert_not_called()
-        assert "작업 공간 밖" in result
-
-    @pytest.mark.asyncio
-    async def test_new_file_defaults_to_workspace_root(self):
-        """폴더를 안 주면 작업 공간 루트에 만든다"""
-        with (
-            self._patch_scope(),
-            patch.object(drive_tools.google_drive, "create_file") as mock_create,
-        ):
-            mock_create.return_value = {"name": "새 문서", "webViewLink": ""}
-            await _tools(ROOT)["write"].ainvoke({"name": "새 문서", "content": "본문"})
-
-        assert mock_create.call_args.args[1] == ROOT
-
-    @pytest.mark.asyncio
-    async def test_missing_workspace_and_folder_returns_guidance(self):
-        """작업 공간도 폴더도 없으면 API를 부르지 않고 안내한다"""
-        with patch.object(drive_tools.google_drive, "create_file") as mock_create:
-            result = await _tools()["write"].ainvoke(
-                {"name": "무소속", "content": "본문"}
-            )
-
-        mock_create.assert_not_called()
-        assert "폴더" in result
-
-    @pytest.mark.asyncio
-    async def test_as_google_doc_false_skips_conversion(self):
-        """as_google_doc=False면 변환 타입을 넘기지 않는다"""
-        with (
-            self._patch_scope(),
-            patch.object(drive_tools.google_drive, "create_file") as mock_create,
-        ):
-            mock_create.return_value = {"name": "raw.md", "webViewLink": ""}
-            await _tools(ROOT)["write"].ainvoke(
-                {"name": "raw.md", "content": "본문", "as_google_doc": False}
-            )
-
-        assert mock_create.call_args.args[4] is None
 
 
 class TestSearchResults:

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from api import google_auth
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 OPERATE_JSON = json.dumps({"type": "service_account", "project_id": "operate"})
 SHARED_JSON = json.dumps({"type": "service_account", "project_id": "shared"})
 
@@ -53,14 +53,3 @@ class TestOperateCredentials:
         google_auth.operate_credentials(SCOPES)
 
         assert from_info.call_args.kwargs["scopes"] == SCOPES
-
-
-class TestSharedCredentials:
-    def test_ignores_operate_account(self, monkeypatch, from_info):
-        """공용 경로는 전용 계정이 있어도 공용 계정을 쓴다 (기존 스크립트 보호)"""
-        monkeypatch.setenv(google_auth.OPERATE_ENV, OPERATE_JSON)
-        monkeypatch.setenv(google_auth.SHARED_ENV, SHARED_JSON)
-
-        google_auth.shared_credentials(SCOPES)
-
-        assert from_info.call_args.args[0]["project_id"] == "shared"

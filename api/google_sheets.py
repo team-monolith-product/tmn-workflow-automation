@@ -2,7 +2,11 @@
 Google Sheets API 래퍼 함수
 """
 
+import json
+import os
+
 import gspread
+from google.oauth2.service_account import Credentials
 
 from . import google_auth
 
@@ -10,8 +14,11 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
 def _get_client() -> gspread.Client:
-    """공용 서비스 계정으로 gspread 클라이언트 생성 (기존 스크립트용)"""
-    return gspread.authorize(google_auth.shared_credentials(SCOPES))
+    """환경 변수에서 서비스 계정 JSON을 읽어 gspread 클라이언트 생성"""
+    sa_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+    info = json.loads(sa_json)
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return gspread.authorize(creds)
 
 
 def _get_operate_client() -> gspread.Client:
