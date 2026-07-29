@@ -1,28 +1,33 @@
 """
-Drive Bot — Google Drive 자료를 읽고 쓰는 에이전트 봇
+Drive Bot — Google Drive 자료를 읽고 쓰며 노션 운영 업무를 만드는 에이전트 봇
 
 슬랙에서 멘션하면 Google Drive를 직접 탐색하여 답한다.
-필요한 만큼 파일을 찾아 읽고, 정보가 부족하면 되묻고, 요청에 따라 문서를 만들거나 고친다.
+필요한 만큼 파일을 찾아 읽고, 정보가 부족하면 되묻고, 요청에 따라 문서를 만들거나 고치고,
+후속 업무를 노션 운영 DB에 등록한다.
 """
 
+import asyncio
 from datetime import datetime
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from .common import KST, collect_thread_context, say_in_chunks
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.drive_tools import read_drive_file, search_drive_files, write_drive_file
+from .tools.notion_tools import get_create_ops_task_tool
 
-MODEL = "claude-opus-5"
+MODEL = "gpt-5.4"
+
+# 노션 운영 DB
+OPS_DATABASE_ID = "3ab1cc82-0da6-8001-bf7f-c21c17e01dc2"
+
+SLACK_WORKSPACE = "monolith-keb2010"
 
 # 다단계 탐색에 여유를 두되 폭주는 막는다
 RECURSION_LIMIT = 100
-
-# thinking 이 켜져 있으므로 응답 본문과 합쳐 넉넉히 잡는다
-MAX_TOKENS = 16000
 
 
 def _build_system_prompt() -> str:
@@ -50,6 +55,14 @@ def _build_system_prompt() -> str:
         "- 기존 파일을 덮어쓰기 전에는 어떤 파일을 어떻게 바꿀지 알리고 사용자 확인을 받으세요. "
         "새 파일 생성은 확인 없이 진행해도 됩니다.\n"
         "\n"
+        "## 노션 운영 업무 등록\n"
+        "- 발송, 시스템, 문서, 보고, 예약·구매, 섭외, 모집, CS 같은 운영 업무를 "
+        "등록해 달라고 하면 create_ops_task를 씁니다.\n"
+        "- 담당자는 사람이 아니라 조직 단위입니다. 대화에서 어느 조직이 맡을지 "
+        "분명하지 않으면 도구를 호출하지 말고 먼저 물어보세요.\n"
+        "- 자료를 읽고 할 일을 도출하는 요청이라면, 먼저 Drive에서 근거를 확인한 뒤 "
+        "무엇을 등록할지 정리해 보여주고 등록합니다.\n"
+        "\n"
         "## 슬랙 텍스트 포맷팅\n"
         "- 슬랙은 마크다운이 아닌 자체 mrkdwn 포맷을 사용합니다.\n"
         "- Bold: `*텍스트*` (별표 1개, **텍스트** 형식은 작동하지 않음)\n"
@@ -57,14 +70,14 @@ def _build_system_prompt() -> str:
         "- Strikethrough: `~텍스트~` (물결표)\n"
         "- Code: `` `코드` `` (백틱)\n"
         "- Code block: ``` ```코드 블록``` ``` (백틱 3개)\n"
-        "- 파일 링크는 <URL|파일명> 형식으로 답변에 포함하세요.\n"
+        "- 파일과 노션 페이지 링크는 <URL|이름> 형식으로 답변에 포함하세요.\n"
     )
 
 
 def _extract_text(content) -> str:
     """
-    Anthropic 응답 본문에서 텍스트를 추출한다.
-    thinking이 켜져 있으면 content가 블록 리스트로 반환된다.
+    응답 본문에서 텍스트를 추출한다.
+    reasoning 모드에서는 content가 블록 리스트로 반환된다.
     """
     if isinstance(content, str):
         return content
@@ -103,6 +116,12 @@ def register_drive_handlers(app_drive):
         user = event.get("user")
         text = event["text"]
 
+        # Slack 스레드 링크 만들기 (노션 페이지에 북마크로 첨부된다)
+        slack_thread_url = (
+            f"https://{SLACK_WORKSPACE}.slack.com"
+            f"/archives/{channel}/p{thread_ts.replace('.', '')}"
+        )
+
         threads_joined, user_real_name = await collect_thread_context(
             app_drive.client, channel, thread_ts, user
         )
@@ -113,6 +132,7 @@ def register_drive_handlers(app_drive):
             user_real_name,
             threads_joined,
             text,
+            slack_thread_url,
             say,
             app_drive.client,
         )
@@ -124,6 +144,7 @@ async def answer_drive(
     user_real_name: str,
     threads_joined: str,
     text: str,
+    slack_thread_url: str,
     say,
     slack_client,
 ):
@@ -136,6 +157,7 @@ async def answer_drive(
         user_real_name: 질문자 이름
         threads_joined: 스레드 이전 대화 내용
         text: 이번 질문 내용
+        slack_thread_url: 노션 페이지에 첨부할 슬랙 스레드 URL
         say: 메시지 전송 함수
         slack_client: Slack 클라이언트
     """
@@ -155,10 +177,30 @@ async def answer_drive(
     else:
         messages.append(HumanMessage(content=f"{user_real_name}: {text}"))
 
-    # Claude Opus 5는 temperature 를 받지 않으며 thinking 이 기본 활성화된다
-    chat_model = ChatAnthropic(model=MODEL, max_tokens=MAX_TOKENS)
+    reasoning = {
+        "effort": "high",
+        "summary": "auto",
+    }
+    chat_model = ChatOpenAI(
+        model=MODEL,
+        temperature=0,
+        reasoning=reasoning,
+        output_version="responses/v1",
+    )
 
-    tools = [search_drive_files, read_drive_file, write_drive_file]
+    # 도구 생성 시 노션 스키마를 동기 조회하므로 이벤트 루프를 막지 않도록 분리한다
+    # (캐시 미스일 때만 실제 호출이 나간다)
+    create_ops_task = await asyncio.to_thread(
+        get_create_ops_task_tool, OPS_DATABASE_ID, slack_thread_url
+    )
+
+    tools = [
+        search_drive_files,
+        read_drive_file,
+        write_drive_file,
+        create_ops_task,
+    ]
+
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
     tool_status_handler = ToolStatusHandler(

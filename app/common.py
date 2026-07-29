@@ -131,6 +131,25 @@ def notion_page_to_markdown(page_id: str) -> str:
 _cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
 _cache_database_schema = TTLCache(maxsize=10, ttl=3600)
+_cache_data_source_id = TTLCache(maxsize=10, ttl=3600)
+
+
+def get_data_source_id(database_id: str) -> str:
+    """
+    데이터베이스 ID로 첫 번째 data source ID를 조회한다.
+
+    Notion API 2025-09-03 버전부터 database와 data source가 분리되어
+    페이지 생성/스키마 조회에는 data_source_id가 필요하다.
+    노션 URL에서 얻을 수 있는 것은 database_id뿐이므로 런타임에 변환한다.
+    """
+    if database_id in _cache_data_source_id:
+        return _cache_data_source_id[database_id]
+
+    database = notion.databases.retrieve(database_id)
+    data_source_id = database["data_sources"][0]["id"]
+
+    _cache_data_source_id[database_id] = data_source_id
+    return data_source_id
 
 
 async def slack_users_list(client: AsyncWebClient):
