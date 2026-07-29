@@ -11,7 +11,7 @@ from . import google_auth
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-FILE_FIELDS = "id, name, mimeType, modifiedTime, size, webViewLink, parents"
+FILE_FIELDS = "id, name, mimeType, modifiedTime, parents"
 
 
 def get_drive_service():

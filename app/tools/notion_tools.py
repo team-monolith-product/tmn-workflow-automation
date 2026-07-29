@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from ..common import (
     KST,
-    extract_matching_lines,
     flatten_deep_children,
     get_data_source_id,
     get_data_source_schema,
@@ -179,6 +178,22 @@ MAX_CANDIDATES = 30
 # 본문까지 읽을 페이지 수. 노션은 평균 초당 3요청이고 페이지 하나를 마크다운으로
 # 바꾸는 데도 여러 요청이 나가므로, 이 값을 올리면 체감 지연이 바로 늘어난다.
 MAX_BODY_READS = 5
+
+
+def extract_matching_lines(
+    text: str, regex: re.Pattern, max_lines: int = 10
+) -> list[str]:
+    """
+    본문에서 패턴과 일치하는 줄만 추려낸다.
+
+    전문을 그대로 컨텍스트에 넣으면 몇 건만 훑어도 한도를 넘긴다.
+    일치하는 줄만 돌려주어 결과 크기를 입력 크기와 분리한다.
+    """
+    matched = [line.strip() for line in text.split("\n") if regex.search(line)]
+
+    if len(matched) > max_lines:
+        return matched[:max_lines] + [f"...외 {len(matched) - max_lines}줄 더 일치"]
+    return matched
 
 
 def _page_title(page: dict) -> str:
