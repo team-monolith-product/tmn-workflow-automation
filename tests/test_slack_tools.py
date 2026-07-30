@@ -26,7 +26,13 @@ def _msg(ts: str, user: str, text: str, reply_count: int = 0) -> dict:
 
 
 def _tool(client):
+    slack_tools._channels_cache.clear()
     return slack_tools.get_search_channel_messages_tool(client, "monolith", "C_CUR")
+
+
+BOT_CHANNELS = {
+    "channels": [{"id": "C_OPS", "name": "운영"}, {"id": "C_CUR", "name": "현재"}]
+}
 
 
 class TestSearchChannelMessages:
@@ -137,3 +143,60 @@ class TestSearchChannelMessages:
             result = await _tool(client).ainvoke({"query": "연수"})
 
         assert "찾지 못했습니다" in result
+
+
+class TestChannelRestriction:
+    """봇이 초대된 채널만 볼 수 있다"""
+
+    @pytest.mark.asyncio
+    async def test_channel_not_joined_is_refused_with_allowed_list(self):
+        """미참여 채널은 조회하지 않고 볼 수 있는 채널을 알려준다"""
+        client = AsyncMock()
+        client.users_conversations.return_value = BOT_CHANNELS
+
+        result = await _tool(client).ainvoke({"query": "연수", "channel": "C_SECRET"})
+
+        client.conversations_history.assert_not_called()
+        assert "들어가 있지 않은 채널" in result
+        assert "#운영" in result
+
+    @pytest.mark.asyncio
+    async def test_joined_channel_id_is_allowed(self):
+        client = AsyncMock()
+        client.users_conversations.return_value = BOT_CHANNELS
+        client.conversations_history.return_value = {"messages": []}
+
+        with patch.object(
+            slack_tools, "slack_users_list", AsyncMock(return_value=USERS)
+        ):
+            await _tool(client).ainvoke({"query": "연수", "channel": "C_OPS"})
+
+        assert client.conversations_history.call_args.kwargs["channel"] == "C_OPS"
+
+    @pytest.mark.asyncio
+    async def test_channel_name_is_resolved_to_id(self):
+        """채널명으로 줘도 ID로 바꿔 조회한다 (#접두사 허용)"""
+        client = AsyncMock()
+        client.users_conversations.return_value = BOT_CHANNELS
+        client.conversations_history.return_value = {"messages": []}
+
+        with patch.object(
+            slack_tools, "slack_users_list", AsyncMock(return_value=USERS)
+        ):
+            await _tool(client).ainvoke({"query": "연수", "channel": "#운영"})
+
+        assert client.conversations_history.call_args.kwargs["channel"] == "C_OPS"
+
+    @pytest.mark.asyncio
+    async def test_omitted_channel_skips_membership_lookup(self):
+        """현재 채널을 쓸 때는 목록 조회를 하지 않는다"""
+        client = AsyncMock()
+        client.conversations_history.return_value = {"messages": []}
+
+        with patch.object(
+            slack_tools, "slack_users_list", AsyncMock(return_value=USERS)
+        ):
+            await _tool(client).ainvoke({"query": "연수"})
+
+        client.users_conversations.assert_not_called()
+        assert client.conversations_history.call_args.kwargs["channel"] == "C_CUR"

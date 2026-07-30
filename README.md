@@ -70,8 +70,11 @@ BFS로 훑어 ID 집합을 만든 뒤 캐시한다(10분). 폴더 200개·깊이
 `scripts/discord_post_completion_notice.py`는 영향을 받지 않는다.
 
 Slack 봇 스코프: `app_mentions:read`, `chat:write`, `users:read`, `users:read.email`,
-`channels:history`(스레드·채널 조회).
-비공개 채널까지 보려면 `groups:history`가 추가로 필요하다.
+`channels:history`(스레드·채널 조회), `channels:read`(봇 참여 채널 목록).
+비공개 채널까지 보려면 `groups:history`·`groups:read`가 추가로 필요하다.
+
+슬랙 조회 대상은 **봇이 초대된 채널로 제한된다.** 다른 채널을 지정하면 조회하지 않고 볼 수 있는
+채널 목록을 돌려준다. 채널명으로 지정해도 ID로 해석한다.
 
 `conversations.history`의 요청당 999개 한도는 내부용 앱 기준이다. 마켓플레이스 밖으로
 배포되는 앱은 2025년 5월부터 분당 1요청·15개로 제한되지만 사내 앱은 해당하지 않는다.
