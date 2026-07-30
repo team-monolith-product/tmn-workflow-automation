@@ -1,0 +1,8 @@
+slack-bolt
+aiohttp
+google-auth
+google-api-python-client
+gspread
+notion-client
+requests
+PyMuPDF
