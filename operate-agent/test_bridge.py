@@ -24,7 +24,9 @@ def test_resume_switches_the_session_flag():
 
 def test_prompt_carries_slack_location_without_mention():
     """멘션은 지우고 채널·스레드·요청자는 남긴다"""
-    prompt = bridge.build_prompt("<@U0BOT> 연수 일정 알려줘", "C1", "1700000001.0", "U1")
+    prompt = bridge.build_prompt(
+        "<@U0BOT> 연수 일정 알려줘", "C1", "1700000001.0", "U1"
+    )
     assert "<@U0BOT>" not in prompt
     assert "연수 일정 알려줘" in prompt
     assert "C1" in prompt and "1700000001.0" in prompt and "<@U1>" in prompt

@@ -63,9 +63,7 @@ def claude_args(prompt: str, session_id: str, resume: bool) -> list[str]:
 def build_prompt(text: str, channel: str, thread_ts: str, user: str) -> str:
     """멘션 텍스트에 슬랙 위치 정보를 붙인다. 에이전트가 이 채널을 직접 조회할 수 있어야 한다."""
     request = _MENTION_RE.sub("", text).strip()
-    return (
-        f"[슬랙] 채널 {channel} · 스레드 {thread_ts} · 요청자 <@{user}>\n\n{request}"
-    )
+    return f"[슬랙] 채널 {channel} · 스레드 {thread_ts} · 요청자 <@{user}>\n\n{request}"
 
 
 def chunks(text: str) -> list[str]:
