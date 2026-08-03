@@ -19,7 +19,6 @@ from .tools.redash_tools import (
     read_redash_query,
 )
 
-
 # 에이전트 뷰에서 새 대화를 시작했을 때 슬랙이 보여주는 예시 질문
 SUGGESTED_PROMPTS = [
     {
