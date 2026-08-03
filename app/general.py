@@ -160,16 +160,6 @@ def register_general_handlers(app, assistant):
 
         event = body.get("event", {})
         channel = event.get("channel")
-
-        # 지식베이스 수집을 위해 봇이 전 공개 채널에 들어가 있다. 관심 채널이
-        # 아니면 본문을 남기지 않는다. 전사 메시지가 로그로 흘러가지 않도록.
-        if channel not in (
-            SLACK_BUG_REPORT_CHANNEL_ID,
-            SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID,
-        ):
-            return
-
-        print("Received message event:", body)
         print(f"Channel: {channel}")
 
         if channel == SLACK_BUG_REPORT_CHANNEL_ID:

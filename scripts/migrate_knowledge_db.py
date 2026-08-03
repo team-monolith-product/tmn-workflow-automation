@@ -13,6 +13,11 @@ CREATE EXTENSION 은 rds_superuser 권한이 필요하므로 마스터 계정 DS
     python scripts/migrate_knowledge_db.py --dsn "postgresql://..."
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import pathlib
 
