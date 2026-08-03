@@ -2,8 +2,13 @@
 데이터 분석 Bot 관련 모듈들의 단위 테스트
 """
 
+import asyncio
+import json
+
 import pytest
-from types import SimpleNamespace
+from slack_bolt.async_app import AsyncApp
+from slack_bolt.authorization import AuthorizeResult
+from slack_bolt.request.async_request import AsyncBoltRequest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from api import athena, redash
 from app import data_bot
@@ -253,36 +258,6 @@ class TestRedashTools:
         assert "analytics.users" in result
 
 
-class FakeApp:
-    """이벤트 핸들러 등록만 흉내내는 Slack 앱 테스트 더블"""
-
-    def __init__(self, client):
-        self.client = client
-        self.handlers = {}
-
-    def event(self, event_type):
-        def decorator(func):
-            self.handlers[event_type] = func
-            return func
-
-        return decorator
-
-
-class FakeAssistant:
-    """등록된 Assistant 핸들러를 붙잡아 두는 테스트 더블"""
-
-    def __init__(self):
-        self.handlers = {}
-
-    def thread_started(self, func):
-        self.handlers["thread_started"] = func
-        return func
-
-    def user_message(self, func):
-        self.handlers["user_message"] = func
-        return func
-
-
 USERS_LIST_RESPONSE = {
     "members": [
         {"id": "U1", "real_name": "김분석"},
@@ -335,63 +310,120 @@ class TestCollectThreadContext:
         assert threads_joined == ""
 
 
+async def authorize_stub(**kwargs):
+    """토큰 검증 없이 인가된 것으로 처리한다"""
+    return AuthorizeResult(
+        enterprise_id=None,
+        team_id="T1",
+        bot_token="xoxb-test",
+        bot_id="B1",
+        bot_user_id="U0BOT",
+    )
+
+
+def build_data_app():
+    """실제 Bolt 미들웨어를 태운 데이터 봇 앱을 만든다"""
+    app = AsyncApp(
+        signing_secret="dummy",
+        authorize=authorize_stub,
+        request_verification_enabled=False,
+    )
+    data_bot.register_data_handlers(app)
+    app.client.conversations_replies = AsyncMock(
+        return_value={"messages": [{"user": "U1", "text": "어제 DAU 알려줘"}]}
+    )
+    return app
+
+
+async def dispatch(app, event):
+    """이벤트를 앱에 흘려보내고 리스너가 끝날 때까지 기다린다"""
+    # 중복 이벤트 필터에 걸리지 않도록 이벤트마다 다른 event_id를 만든다
+    body = {
+        "token": "x",
+        "team_id": "T1",
+        "api_app_id": "A1",
+        "type": "event_callback",
+        "event_time": 1,
+        "event_id": "Ev" + "".join(f"{k}{v}" for k, v in sorted(event.items())),
+        "event": event,
+    }
+    before = set(asyncio.all_tasks())
+    await app.async_dispatch(
+        AsyncBoltRequest(body=json.dumps(body), mode="socket_mode")
+    )
+    # Bolt는 리스너를 태스크로 띄우고 즉시 응답하므로 새로 생긴 태스크를 기다린다
+    spawned = [
+        t for t in asyncio.all_tasks() - before if t is not asyncio.current_task()
+    ]
+    if spawned:
+        await asyncio.gather(*spawned)
+
+
+def dm_event(**overrides):
+    """DM 메시지 이벤트를 만든다"""
+    event = {
+        "type": "message",
+        "channel_type": "im",
+        "channel": "D123",
+        "user": "U1",
+        "ts": "1234567890.123456",
+        "text": "어제 DAU 알려줘",
+    }
+    event.update(overrides)
+    return event
+
+
 class TestDataBotDirectMessage:
-    """DM(Assistant 스레드) 질문 처리 테스트"""
-
-    def _register(self):
-        client = MagicMock()
-        client.conversations_replies = AsyncMock(
-            return_value={"messages": [{"user": "U1", "text": "어제 DAU 알려줘"}]}
-        )
-        app = FakeApp(client)
-        assistant = FakeAssistant()
-        data_bot.register_data_handlers(app, assistant)
-        return app, assistant
-
-    async def test_thread_started_sets_suggested_prompts(self):
-        """DM 대화를 시작하면 인사와 예시 질문을 보낸다"""
-        _, assistant = self._register()
-        say = AsyncMock()
-        set_suggested_prompts = AsyncMock()
-
-        await assistant.handlers["thread_started"](
-            say=say, set_suggested_prompts=set_suggested_prompts
-        )
-
-        assert say.called
-        set_suggested_prompts.assert_called_once_with(
-            prompts=data_bot.SUGGESTED_PROMPTS
-        )
+    """DM 질문 처리 테스트 (실제 Bolt 미들웨어 경유)"""
 
     @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
     @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
-    async def test_user_message_runs_data_analysis(self, mock_users_list, mock_answer):
-        """DM으로 받은 질문을 데이터 분석 Agent로 넘긴다"""
+    async def test_classic_dm(self, mock_users_list, mock_answer):
+        """스레드 없는 DM은 질문 메시지의 스레드에서 처리한다"""
         mock_users_list.return_value = USERS_LIST_RESPONSE
-        app, assistant = self._register()
-        say = AsyncMock()
-        set_status = AsyncMock()
-        context = SimpleNamespace(
-            channel_id="D123", thread_ts="1234567890.123456", user_id="U1"
-        )
+        app = build_data_app()
 
-        await assistant.handlers["user_message"](
-            payload={"text": "어제 DAU 알려줘"},
-            context=context,
-            set_status=set_status,
-            say=say,
-        )
+        await dispatch(app, dm_event())
 
-        assert set_status.called
-        mock_answer.assert_called_once_with(
+        assert mock_answer.call_args.args[:5] == (
             "1234567890.123456",
             "D123",
             "김분석",
             "",
             "어제 DAU 알려줘",
-            say,
-            app.client,
         )
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
+    async def test_thread_reply(self, mock_users_list, mock_answer):
+        """스레드에서 이어진 질문은 그 스레드에서 처리한다"""
+        mock_users_list.return_value = USERS_LIST_RESPONSE
+        app = build_data_app()
+
+        await dispatch(
+            app, dm_event(ts="1234567899.000000", thread_ts="1234567890.123456")
+        )
+
+        assert mock_answer.call_args.args[0] == "1234567890.123456"
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    async def test_ignores_channel_message(self, mock_answer):
+        """채널 메시지는 멘션 핸들러가 담당하므로 무시한다"""
+        app = build_data_app()
+
+        await dispatch(app, dm_event(channel_type="channel", channel="C123"))
+
+        assert not mock_answer.called
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    async def test_ignores_bot_and_edited_messages(self, mock_answer):
+        """봇 메시지와 편집 이벤트는 무시한다 (무한 루프 방지)"""
+        app = build_data_app()
+
+        await dispatch(app, dm_event(bot_id="B9"))
+        await dispatch(app, dm_event(subtype="message_changed"))
+
+        assert not mock_answer.called
 
 
 if __name__ == "__main__":

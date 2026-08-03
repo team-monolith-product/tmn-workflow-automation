@@ -5,10 +5,8 @@
 import asyncio
 from datetime import datetime, timedelta
 import importlib
-import logging
 
 from cachetools import TTLCache
-from slack_bolt.async_app import AsyncBoltContext, AsyncSetStatus
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
@@ -66,6 +64,58 @@ async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad 
     return None
 
 
+async def _build_tools(
+    client: AsyncWebClient, user_id: str | None, channel: str, thread_ts: str
+) -> list:
+    """질문자의 스쿼드에 맞춘 도구 목록을 만듭니다.
+
+    작업 생성 도구는 스쿼드별 Notion DB를 대상으로 하며,
+    후속 작업 도구는 프로젝트/구성요소 속성이 있는 메인 DB에서만 사용합니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        user_id: 질문자의 Slack 사용자 ID
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+
+    Returns:
+        list: 에이전트에 주입할 도구 목록
+    """
+    slack_workspace = "monolith-keb2010"
+    slack_thread_url = (
+        f"https://{slack_workspace}.slack.com"
+        f"/archives/{channel}/p{thread_ts.replace('.', '')}"
+    )
+
+    squad = await _get_user_squad(client, user_id)
+    if squad and squad.notion_db.name != "main":
+        task_ds_id = squad.notion_db.data_source_id
+        title_prop = squad.notion_db.properties.title
+        project_ds_id = None
+    else:
+        task_ds_id = DATA_SOURCE_ID
+        title_prop = "제목"
+        project_ds_id = PROJECT_DATA_SOURCE_ID
+
+    notion_tools = [
+        get_create_notion_task_tool(
+            user_id,
+            slack_thread_url,
+            task_ds_id,
+            client,
+            project_ds_id,
+            title_prop,
+        ),
+        get_update_notion_task_deadline_tool(),
+        get_update_notion_task_status_tool(task_ds_id),
+        get_notion_page_tool(),
+    ]
+    if project_ds_id:
+        notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+
+    return [search_tool, get_web_page_from_url] + notion_tools
+
+
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
 SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
@@ -74,7 +124,7 @@ SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
 
-def register_general_handlers(app, assistant):
+def register_general_handlers(app):
     """
     범용 봇의 이벤트 핸들러를 등록합니다.
     """
@@ -107,51 +157,13 @@ def register_general_handlers(app, assistant):
             await analyze_oom.analyze_oom_alert(app.client, body, say)
             return
 
-        # Slack 스레드 링크 만들기
-        slack_workspace = "monolith-keb2010"
-        thread_ts_for_link = (event.get("thread_ts") or body["event"]["ts"]).replace(
-            ".", ""
-        )
-        slack_thread_url = (
-            f"https://{slack_workspace}.slack.com"
-            f"/archives/{channel}/p{thread_ts_for_link}"
-        )
-
-        # 사용자의 스쿼드에 따라 대상 Notion DB 결정
-        squad = await _get_user_squad(app.client, user)
-        if squad and squad.notion_db.name != "main":
-            task_ds_id = squad.notion_db.data_source_id
-            title_prop = squad.notion_db.properties.title
-            project_ds_id = None
-        else:
-            task_ds_id = DATA_SOURCE_ID
-            title_prop = "제목"
-            project_ds_id = PROJECT_DATA_SOURCE_ID
-
-        # General Agent 사용
-        notion_tools = [
-            get_create_notion_task_tool(
-                user,
-                slack_thread_url,
-                task_ds_id,
-                app.client,
-                project_ds_id,
-                title_prop,
-            ),
-            get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(task_ds_id),
-            get_notion_page_tool(),
-        ]
-        # 후속 작업 도구는 메인 DB에서만 사용 (프로젝트/구성요소 속성 필요)
-        if project_ds_id:
-            notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
-
-        tools = [search_tool, get_web_page_from_url] + notion_tools
+        tools = await _build_tools(app.client, user, channel, thread_ts)
         await answer(thread_ts, channel, user, text, say, app.client, tools)
 
     @app.event("message")
     async def message(body, say):
         """
+        DM으로 받은 질문에 답하고,
         버그 신고 채널에 올라오는 메시지를 LLM으로 분석하여
         Notion에 버그 작업을 생성하고, 시급한 경우 담당 그룹을 태그합니다.
         """
@@ -164,7 +176,18 @@ def register_general_handlers(app, assistant):
         channel = event.get("channel")
         print(f"Channel: {channel}")
 
-        if channel == SLACK_BUG_REPORT_CHANNEL_ID:
+        if event.get("channel_type") == "im":
+            # 봇 메시지와 편집·삭제 등 서브타입 이벤트는 무시
+            if event.get("bot_id") or event.get("subtype"):
+                return
+
+            thread_ts = event.get("thread_ts") or event["ts"]
+            user = event.get("user")
+            tools = await _build_tools(app.client, user, channel, thread_ts)
+            await answer(
+                thread_ts, channel, user, event["text"], say, app.client, tools
+            )
+        elif channel == SLACK_BUG_REPORT_CHANNEL_ID:
             # 메시지 편집 이벤트 필터링
             subtype = event.get("subtype")
             print(f"Subtype: {subtype}")
@@ -194,72 +217,6 @@ def register_general_handlers(app, assistant):
             if thread_ts is None or thread_ts == message_ts:
                 print("Routing dev env infra bug report")
                 await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
-
-    @assistant.thread_started
-    async def start_assistant_thread(say, _set_suggested_prompts):
-        """
-        Assistant thread started
-        """
-        await say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
-
-    @assistant.user_message
-    async def respond_in_assistant_thread(
-        payload: dict,
-        logger: logging.Logger,
-        context: AsyncBoltContext,
-        set_status: AsyncSetStatus,
-        client: AsyncWebClient,
-        say,
-    ):
-        """
-        Respond to a user message in the assistant thread.
-        """
-        # Slack 스레드 링크 만들기
-        slack_workspace = "monolith-keb2010"
-        thread_ts_for_link = context.thread_ts.replace(".", "")
-        slack_thread_url = (
-            f"https://{slack_workspace}.slack.com"
-            f"/archives/{context.channel_id}/p{thread_ts_for_link}"
-        )
-
-        # 사용자의 스쿼드에 따라 대상 Notion DB 결정
-        squad = await _get_user_squad(app.client, context.user_id)
-        if squad and squad.notion_db.name != "main":
-            task_ds_id = squad.notion_db.data_source_id
-            title_prop = squad.notion_db.properties.title
-            project_ds_id = None
-        else:
-            task_ds_id = DATA_SOURCE_ID
-            title_prop = "제목"
-            project_ds_id = PROJECT_DATA_SOURCE_ID
-
-        notion_tools = [
-            get_create_notion_task_tool(
-                context.user_id,
-                slack_thread_url,
-                task_ds_id,
-                app.client,
-                project_ds_id,
-                title_prop,
-            ),
-            get_update_notion_task_deadline_tool(),
-            get_update_notion_task_status_tool(task_ds_id),
-            get_notion_page_tool(),
-        ]
-        if project_ds_id:
-            notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
-
-        tools = [search_tool, get_web_page_from_url] + notion_tools
-
-        await answer(
-            context.thread_ts,
-            context.channel_id,
-            context.user_id,
-            payload["text"],
-            say,
-            app.client,
-            tools,
-        )
 
     # 자동화 작업 표 — 단일 진입 커맨드 `/wa <작업>` 로 라우팅한다.
     # 슬랙 앱 UI 에는 `/wa` 하나만 등록하면 되고, 새 작업은 이 표에 한 줄만 추가한다.
