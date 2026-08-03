@@ -37,6 +37,11 @@ def _row(messages=None, delay=900):
     )
 
 
+def _meta(messages=None):
+    """metadata jsonb를 파싱해 돌려줍니다."""
+    return json.loads(_row(messages)["metadata"])
+
+
 def test_external_id_는_채널과_부모_ts로_만들어진다():
     assert _row()["external_id"] == f"{CHANNEL_ID}:1785338608.347569"
 
@@ -51,19 +56,32 @@ def test_title은_부모_메시지_첫_줄만_쓴다():
     assert _row()["title"] == "세레브라스 놀리지 관리"
 
 
+def test_소스별_필드는_컬럼이_아니라_metadata에_있다():
+    row = _row()
+    assert "reply_count" not in row
+    assert "reaction_count" not in row
+    assert "participants" not in row
+    assert set(json.loads(row["metadata"])) == {
+        "channel_id",
+        "participants",
+        "reply_count",
+        "reaction_count",
+    }
+
+
 def test_reply_count는_부모를_제외한다():
-    assert _row()["reply_count"] == 1
+    assert _meta()["reply_count"] == 1
 
 
 def test_reaction_count는_스레드_전체를_합산한다():
-    assert _row()["reaction_count"] == 2
+    assert _meta()["reaction_count"] == 2
 
 
 def test_participants는_중복없이_정렬된다():
     messages = THREAD + [
         {"ts": "1785338620.000000", "user": "U02HT4EU4VD", "text": "네"}
     ]
-    assert _row(messages)["participants"] == ["U02HT4EU4VD", "U02JLCWGETT"]
+    assert _meta(messages)["participants"] == ["U02HT4EU4VD", "U02JLCWGETT"]
 
 
 def test_distill_after는_마지막_활동_기준으로_미뤄진다():

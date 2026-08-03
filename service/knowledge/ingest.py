@@ -18,27 +18,22 @@ import psycopg
 
 UPSERT_ITEM = """
 INSERT INTO item (
-    data_source_id, source, external_id, kind,
-    url, title, author, participants,
-    reply_count, reaction_count,
+    data_source_id, external_id,
+    url, title, author,
     source_created_at, source_updated_at,
     raw, raw_text, metadata, content_hash,
     distill_state, distill_after
 )
 VALUES (
-    %(data_source_id)s, 'slack', %(external_id)s, 'thread',
-    %(url)s, %(title)s, %(author)s, %(participants)s,
-    %(reply_count)s, %(reaction_count)s,
+    %(data_source_id)s, %(external_id)s,
+    %(url)s, %(title)s, %(author)s,
     %(source_created_at)s, %(source_updated_at)s,
     %(raw)s, %(raw_text)s, %(metadata)s, %(content_hash)s,
     'pending', %(distill_after)s
 )
-ON CONFLICT (source, external_id) DO UPDATE SET
+ON CONFLICT (data_source_id, external_id) DO UPDATE SET
     url               = EXCLUDED.url,
     title             = EXCLUDED.title,
-    participants      = EXCLUDED.participants,
-    reply_count       = EXCLUDED.reply_count,
-    reaction_count    = EXCLUDED.reaction_count,
     source_updated_at = EXCLUDED.source_updated_at,
     raw               = EXCLUDED.raw,
     raw_text          = EXCLUDED.raw_text,
@@ -160,14 +155,20 @@ def build_thread_row(
         # 스레드에 제목이 없으므로 부모 메시지 첫 줄을 쓴다.
         "title": parent.get("text", "").split("\n")[0][:200],
         "author": parent.get("user") or parent.get("bot_id"),
-        "participants": participants,
-        "reply_count": len(messages) - 1,
-        "reaction_count": _count_reactions(messages),
         "source_created_at": _ts_to_datetime(thread_ts),
         "source_updated_at": last_activity,
         "raw": json.dumps(messages, ensure_ascii=False),
         "raw_text": raw_text,
-        "metadata": json.dumps({"channel_id": channel_id}, ensure_ascii=False),
+        # 소스별 필드. index_score의 입력이고 검색 경로는 산출된 점수만 본다.
+        "metadata": json.dumps(
+            {
+                "channel_id": channel_id,
+                "participants": participants,
+                "reply_count": len(messages) - 1,
+                "reaction_count": _count_reactions(messages),
+            },
+            ensure_ascii=False,
+        ),
         "content_hash": compute_content_hash(raw_text),
         "distill_after": last_activity + timedelta(seconds=distill_delay_seconds),
     }
