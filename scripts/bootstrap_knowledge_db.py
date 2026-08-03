@@ -173,9 +173,10 @@ def register_password(password: str, dry_run: bool) -> None:
     if len(updated) != len(current) + (0 if already else 1):
         raise RuntimeError("키 개수가 예상과 다릅니다. 중단합니다.")
 
+    # 원격 시크릿 이름과 키 이름은 파일 상단 상수로 보인다. 로그에 남길 이유가
+    # 없고, 남기면 CodeQL이 민감 데이터 로깅으로 잡는다.
     print(
-        f"{REMOTE_SECRET}: 키 {len(current)}개 → {len(updated)}개, "
-        f"{SECRET_PROPERTY} {'갱신' if already else '추가'}"
+        f"원격 시크릿: 키 {len(current)}개 → {len(updated)}개, {'갱신' if already else '추가'}"
     )
     if dry_run:
         print("[dry-run] put-secret-value 생략")
@@ -184,7 +185,7 @@ def register_password(password: str, dry_run: bool) -> None:
     client.put_secret_value(
         SecretId=REMOTE_SECRET, SecretString=json.dumps(updated, ensure_ascii=False)
     )
-    print(f"{REMOTE_SECRET}: 반영함")
+    print("원격 시크릿: 반영함")
 
 
 def main() -> None:
