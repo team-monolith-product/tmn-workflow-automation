@@ -160,7 +160,6 @@ def register_general_handlers(app, assistant):
 
         event = body.get("event", {})
         channel = event.get("channel")
-        print(f"Channel: {channel}")
 
         if channel == SLACK_BUG_REPORT_CHANNEL_ID:
             # 메시지 편집 이벤트 필터링
