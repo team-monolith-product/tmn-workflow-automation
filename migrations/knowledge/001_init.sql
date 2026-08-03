@@ -57,10 +57,15 @@ CREATE TABLE item (
     max_idf           real,
     index_score       real,
 
-    -- question, summary, resolution, systems_and_refs
+    -- LLM이 스레드 하나를 재작성한 결과. 스레드당 하나다.
+    -- question, summary, resolution, systems, code_refs
     distilled         jsonb,
-    -- 002에서 임베딩 입력이 된다. 1차에도 bigram으로 검색한다. 질의문 형태로
-    -- 정규화된 짧은 텍스트라 사용자 표현과 어휘가 겹칠 확률이 원문보다 높다.
+    -- 위 다섯 항목을 이어붙인 정규화 문서. 002에서 임베딩 입력이 되고 1차에도
+    -- bigram으로 검색한다. question은 "엔지니어가 실제로 검색할 법한 한 줄"로
+    -- 뽑으므로 사용자 질의와 같은 어휘 공간에 놓인다.
+    --
+    -- 구조를 distilled에 따로 보존하는 이유는 조합을 바꿀 때 LLM을 다시 돌리지
+    -- 않고 다시 렌더하기만 하면 되기 때문이다. 정제가 파이프라인에서 제일 비싸다.
     distilled_text    text,
 
     metadata          jsonb NOT NULL DEFAULT '{}',
