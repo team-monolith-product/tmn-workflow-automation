@@ -3,8 +3,10 @@
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from api import athena, redash
+from app import data_bot
 from app.tools import athena_tools, redash_tools
 
 
@@ -249,6 +251,147 @@ class TestRedashTools:
 
         assert "Test Query" in result
         assert "analytics.users" in result
+
+
+class FakeApp:
+    """이벤트 핸들러 등록만 흉내내는 Slack 앱 테스트 더블"""
+
+    def __init__(self, client):
+        self.client = client
+        self.handlers = {}
+
+    def event(self, event_type):
+        def decorator(func):
+            self.handlers[event_type] = func
+            return func
+
+        return decorator
+
+
+class FakeAssistant:
+    """등록된 Assistant 핸들러를 붙잡아 두는 테스트 더블"""
+
+    def __init__(self):
+        self.handlers = {}
+
+    def thread_started(self, func):
+        self.handlers["thread_started"] = func
+        return func
+
+    def user_message(self, func):
+        self.handlers["user_message"] = func
+        return func
+
+
+USERS_LIST_RESPONSE = {
+    "members": [
+        {"id": "U1", "real_name": "김분석"},
+        {"id": "U2", "real_name": "이데이터"},
+    ]
+}
+
+
+class TestCollectThreadContext:
+    """스레드 대화 수집 테스트"""
+
+    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
+    async def test_excludes_last_message(self, mock_users_list):
+        """마지막 메시지(방금 도착한 질문)는 이전 대화에서 제외한다"""
+        mock_users_list.return_value = USERS_LIST_RESPONSE
+        client = MagicMock()
+        client.conversations_replies = AsyncMock(
+            return_value={
+                "messages": [
+                    {"user": "U1", "text": "지난주 DAU 알려줘"},
+                    {"bot_id": "B1", "text": "1,000명입니다"},
+                    {"user": "U1", "text": "이번주는?"},
+                ]
+            }
+        )
+
+        user_real_name, threads_joined = await data_bot.collect_thread_context(
+            client, "D123", "1234567890.123456", "U1"
+        )
+
+        assert user_real_name == "김분석"
+        assert "지난주 DAU 알려줘" in threads_joined
+        assert "Bot:\n1,000명입니다" in threads_joined
+        assert "이번주는?" not in threads_joined
+
+    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
+    async def test_first_message_has_no_context(self, mock_users_list):
+        """첫 질문이면 이전 대화가 비어 있다"""
+        mock_users_list.return_value = USERS_LIST_RESPONSE
+        client = MagicMock()
+        client.conversations_replies = AsyncMock(
+            return_value={"messages": [{"user": "U2", "text": "안녕"}]}
+        )
+
+        user_real_name, threads_joined = await data_bot.collect_thread_context(
+            client, "D123", "1234567890.123456", "U2"
+        )
+
+        assert user_real_name == "이데이터"
+        assert threads_joined == ""
+
+
+class TestDataBotDirectMessage:
+    """DM(Assistant 스레드) 질문 처리 테스트"""
+
+    def _register(self):
+        client = MagicMock()
+        client.conversations_replies = AsyncMock(
+            return_value={"messages": [{"user": "U1", "text": "어제 DAU 알려줘"}]}
+        )
+        app = FakeApp(client)
+        assistant = FakeAssistant()
+        data_bot.register_data_handlers(app, assistant)
+        return app, assistant
+
+    async def test_thread_started_sets_suggested_prompts(self):
+        """DM 대화를 시작하면 인사와 예시 질문을 보낸다"""
+        _, assistant = self._register()
+        say = AsyncMock()
+        set_suggested_prompts = AsyncMock()
+
+        await assistant.handlers["thread_started"](
+            say=say, set_suggested_prompts=set_suggested_prompts
+        )
+
+        assert say.called
+        set_suggested_prompts.assert_called_once_with(
+            prompts=data_bot.SUGGESTED_PROMPTS
+        )
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
+    async def test_user_message_runs_data_analysis(self, mock_users_list, mock_answer):
+        """DM으로 받은 질문을 데이터 분석 Agent로 넘긴다"""
+        mock_users_list.return_value = USERS_LIST_RESPONSE
+        app, assistant = self._register()
+        say = AsyncMock()
+        set_status = AsyncMock()
+        context = SimpleNamespace(
+            channel_id="D123", thread_ts="1234567890.123456", user_id="U1"
+        )
+
+        await assistant.handlers["user_message"](
+            payload={"text": "어제 DAU 알려줘"},
+            context=context,
+            set_status=set_status,
+            say=say,
+        )
+
+        assert set_status.called
+        mock_answer.assert_called_once_with(
+            "1234567890.123456",
+            "D123",
+            "김분석",
+            "",
+            "어제 DAU 알려줘",
+            say,
+            app.client,
+        )
 
 
 if __name__ == "__main__":
