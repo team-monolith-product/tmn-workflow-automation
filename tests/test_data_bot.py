@@ -3,7 +3,6 @@
 """
 
 import pytest
-from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from api import athena, redash
 from app import data_bot
@@ -268,21 +267,6 @@ class FakeApp:
         return decorator
 
 
-class FakeAssistant:
-    """등록된 Assistant 핸들러를 붙잡아 두는 테스트 더블"""
-
-    def __init__(self):
-        self.handlers = {}
-
-    def thread_started(self, func):
-        self.handlers["thread_started"] = func
-        return func
-
-    def user_message(self, func):
-        self.handlers["user_message"] = func
-        return func
-
-
 USERS_LIST_RESPONSE = {
     "members": [
         {"id": "U1", "real_name": "김분석"},
@@ -335,8 +319,24 @@ class TestCollectThreadContext:
         assert threads_joined == ""
 
 
+def dm_event(**overrides):
+    """DM 메시지 이벤트 body를 만든다"""
+    event = {
+        "type": "message",
+        "channel_type": "im",
+        "channel": "D123",
+        "user": "U1",
+        "ts": "1234567890.123456",
+        "text": "어제 DAU 알려줘",
+    }
+    event.update(overrides)
+    # 중복 이벤트 필터에 걸리지 않도록 이벤트마다 다른 event_id를 만든다
+    event_id = "Ev" + "".join(f"{k}{v}" for k, v in sorted(event.items()))
+    return {"event_id": event_id, "event": event}
+
+
 class TestDataBotDirectMessage:
-    """DM(Assistant 스레드) 질문 처리 테스트"""
+    """DM 질문 처리 테스트"""
 
     def _register(self):
         client = MagicMock()
@@ -344,45 +344,19 @@ class TestDataBotDirectMessage:
             return_value={"messages": [{"user": "U1", "text": "어제 DAU 알려줘"}]}
         )
         app = FakeApp(client)
-        assistant = FakeAssistant()
-        data_bot.register_data_handlers(app, assistant)
-        return app, assistant
-
-    async def test_thread_started_sets_suggested_prompts(self):
-        """DM 대화를 시작하면 인사와 예시 질문을 보낸다"""
-        _, assistant = self._register()
-        say = AsyncMock()
-        set_suggested_prompts = AsyncMock()
-
-        await assistant.handlers["thread_started"](
-            say=say, set_suggested_prompts=set_suggested_prompts
-        )
-
-        assert say.called
-        set_suggested_prompts.assert_called_once_with(
-            prompts=data_bot.SUGGESTED_PROMPTS
-        )
+        data_bot.register_data_handlers(app)
+        return app
 
     @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
     @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
-    async def test_user_message_runs_data_analysis(self, mock_users_list, mock_answer):
-        """DM으로 받은 질문을 데이터 분석 Agent로 넘긴다"""
+    async def test_dm_runs_data_analysis(self, mock_users_list, mock_answer):
+        """DM으로 받은 질문을 질문 메시지의 스레드에서 처리한다"""
         mock_users_list.return_value = USERS_LIST_RESPONSE
-        app, assistant = self._register()
+        app = self._register()
         say = AsyncMock()
-        set_status = AsyncMock()
-        context = SimpleNamespace(
-            channel_id="D123", thread_ts="1234567890.123456", user_id="U1"
-        )
 
-        await assistant.handlers["user_message"](
-            payload={"text": "어제 DAU 알려줘"},
-            context=context,
-            set_status=set_status,
-            say=say,
-        )
+        await app.handlers["message"](dm_event(), say)
 
-        assert set_status.called
         mock_answer.assert_called_once_with(
             "1234567890.123456",
             "D123",
@@ -392,6 +366,42 @@ class TestDataBotDirectMessage:
             say,
             app.client,
         )
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
+    async def test_dm_in_thread_keeps_thread(self, mock_users_list, mock_answer):
+        """스레드에서 이어진 질문은 그 스레드에서 처리한다"""
+        mock_users_list.return_value = USERS_LIST_RESPONSE
+        app = self._register()
+
+        await app.handlers["message"](
+            dm_event(ts="1234567899.000000", thread_ts="1234567890.123456"), AsyncMock()
+        )
+
+        assert mock_answer.call_args.args[0] == "1234567890.123456"
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    async def test_ignores_channel_message(self, mock_answer):
+        """채널 메시지는 멘션 핸들러가 담당하므로 무시한다"""
+        app = self._register()
+
+        await app.handlers["message"](
+            dm_event(channel_type="channel", channel="C123"), AsyncMock()
+        )
+
+        assert not mock_answer.called
+
+    @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
+    async def test_ignores_bot_and_edited_messages(self, mock_answer):
+        """봇 메시지와 편집 이벤트는 무시한다 (무한 루프 방지)"""
+        app = self._register()
+
+        await app.handlers["message"](dm_event(bot_id="B1"), AsyncMock())
+        await app.handlers["message"](
+            dm_event(ts="1234567891.000000", subtype="message_changed"), AsyncMock()
+        )
+
+        assert not mock_answer.called
 
 
 if __name__ == "__main__":

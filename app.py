@@ -50,12 +50,11 @@ app_contents = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_CONTENTS"))
 app_data = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_DATA"))
 app_justin = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_JUSTIN"))
 assistant = AsyncAssistant()
-assistant_data = AsyncAssistant()
 
 # 이벤트 핸들러 등록
 register_general_handlers(app, assistant)
 register_contents_handlers(app_contents)
-register_data_handlers(app_data, assistant_data)
+register_data_handlers(app_data)
 register_justin_handlers(app_justin)
 
 
@@ -63,9 +62,8 @@ async def main():
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
     start_scheduler()
 
-    # Assistant 등록 (DM 대화 처리)
+    # Assistant 등록
     app.use(assistant)
-    app_data.use(assistant_data)
 
     # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
     handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])

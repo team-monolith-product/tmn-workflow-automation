@@ -19,22 +19,6 @@ from .tools.redash_tools import (
     read_redash_query,
 )
 
-# DM으로 대화를 시작했을 때 슬랙이 보여주는 예시 질문
-SUGGESTED_PROMPTS = [
-    {
-        "title": "어제 DAU",
-        "message": "어제 코들 DAU가 얼마인지 알려줘.",
-    },
-    {
-        "title": "최근 7일 활성 교실 추이",
-        "message": "최근 7일간 활성 교실 수 추이를 차트로 보여줘.",
-    },
-    {
-        "title": "관련 대시보드 찾기",
-        "message": "회원 가입 지표를 볼 수 있는 Redash 대시보드를 찾아줘.",
-    },
-]
-
 
 async def collect_thread_context(
     slack_client,
@@ -88,13 +72,9 @@ async def collect_thread_context(
     return user_real_name, "\n\n".join(threads)
 
 
-def register_data_handlers(app_data, assistant_data):
+def register_data_handlers(app_data):
     """
     데이터 봇의 이벤트 핸들러를 등록합니다.
-
-    Args:
-        app_data: 데이터 봇 Slack 앱
-        assistant_data: DM 대화를 처리하는 Assistant 미들웨어
     """
 
     @app_data.event("app_mention")
@@ -133,31 +113,42 @@ def register_data_handlers(app_data, assistant_data):
             app_data.client,
         )
 
-    @assistant_data.thread_started
-    async def start_data_assistant_thread(say, set_suggested_prompts):
+    @app_data.event("message")
+    async def message_data(body, say):
         """
-        데이터 봇과의 DM 대화가 시작되면 호출되는 이벤트
-        """
-        await say(":bar_chart: 데이터에 대해 무엇이든 물어보세요.")
-        await set_suggested_prompts(prompts=SUGGESTED_PROMPTS)
+        데이터 봇에게 DM으로 질문하면 호출되는 이벤트
 
-    @assistant_data.user_message
-    async def respond_in_data_assistant_thread(payload, context, set_status, say):
+        답변은 질문 메시지의 스레드에 답니다.
+        이어지는 질문은 같은 스레드에서 해야 앞선 대화를 문맥으로 사용합니다.
         """
-        데이터 봇과의 DM 대화에서 질문을 받으면 호출되는 이벤트
-        """
-        await set_status("데이터를 살펴보는 중입니다...")
+        if is_duplicate_event(body):
+            return
+
+        event = body["event"]
+
+        # DM만 처리 (채널 메시지는 멘션 핸들러가 담당)
+        if event.get("channel_type") != "im":
+            return
+
+        # 봇 메시지와 편집·삭제 등 서브타입 이벤트는 무시
+        if event.get("bot_id") or event.get("subtype"):
+            return
+
+        thread_ts = event.get("thread_ts") or event["ts"]
+        channel = event["channel"]
+        user = event.get("user")
+        text = event["text"]
 
         user_real_name, threads_joined = await collect_thread_context(
-            app_data.client, context.channel_id, context.thread_ts, context.user_id
+            app_data.client, channel, thread_ts, user
         )
 
         await answer_data_analysis(
-            context.thread_ts,
-            context.channel_id,
+            thread_ts,
+            channel,
             user_real_name,
             threads_joined,
-            payload["text"],
+            text,
             say,
             app_data.client,
         )
