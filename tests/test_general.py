@@ -6,7 +6,7 @@ import asyncio
 import json
 
 import pytest
-from slack_bolt.async_app import AsyncApp, AsyncAssistant
+from slack_bolt.async_app import AsyncApp
 from slack_bolt.authorization import AuthorizeResult
 from slack_bolt.request.async_request import AsyncBoltRequest
 from unittest.mock import AsyncMock, patch
@@ -32,9 +32,7 @@ def build_general_app():
         authorize=authorize_stub,
         request_verification_enabled=False,
     )
-    assistant = AsyncAssistant()
-    general.register_general_handlers(app, assistant)
-    app.use(assistant)
+    general.register_general_handlers(app)
     return app
 
 

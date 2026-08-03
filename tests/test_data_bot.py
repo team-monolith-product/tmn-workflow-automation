@@ -6,10 +6,9 @@ import asyncio
 import json
 
 import pytest
-from slack_bolt.async_app import AsyncApp, AsyncAssistant
+from slack_bolt.async_app import AsyncApp
 from slack_bolt.authorization import AuthorizeResult
 from slack_bolt.request.async_request import AsyncBoltRequest
-from slack_sdk.web.async_client import AsyncWebClient
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from api import athena, redash
 from app import data_bot
@@ -329,9 +328,7 @@ def build_data_app():
         authorize=authorize_stub,
         request_verification_enabled=False,
     )
-    assistant = AsyncAssistant()
-    data_bot.register_data_handlers(app, assistant)
-    app.use(assistant)
+    data_bot.register_data_handlers(app)
     app.client.conversations_replies = AsyncMock(
         return_value={"messages": [{"user": "U1", "text": "어제 DAU 알려줘"}]}
     )
@@ -398,8 +395,8 @@ class TestDataBotDirectMessage:
 
     @patch("app.data_bot.answer_data_analysis", new_callable=AsyncMock)
     @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
-    async def test_agent_view_message(self, mock_users_list, mock_answer):
-        """에이전트 뷰 질문은 Assistant 미들웨어를 통과해 같은 핸들러로 온다"""
+    async def test_thread_reply(self, mock_users_list, mock_answer):
+        """스레드에서 이어진 질문은 그 스레드에서 처리한다"""
         mock_users_list.return_value = USERS_LIST_RESPONSE
         app = build_data_app()
 
@@ -427,29 +424,6 @@ class TestDataBotDirectMessage:
         await dispatch(app, dm_event(subtype="message_changed"))
 
         assert not mock_answer.called
-
-    @patch.object(
-        AsyncWebClient, "assistant_threads_setSuggestedPrompts", new_callable=AsyncMock
-    )
-    @patch.object(AsyncWebClient, "chat_postMessage", new_callable=AsyncMock)
-    async def test_agent_view_thread_started(self, mock_post, mock_prompts):
-        """에이전트 뷰에서 새 대화를 열면 인사와 예시 질문을 보낸다"""
-        app = build_data_app()
-
-        await dispatch(
-            app,
-            {
-                "type": "assistant_thread_started",
-                "assistant_thread": {
-                    "channel_id": "D123",
-                    "thread_ts": "1234567890.123456",
-                    "context": {},
-                },
-            },
-        )
-
-        assert mock_post.called
-        assert mock_prompts.call_args.kwargs["prompts"] == data_bot.SUGGESTED_PROMPTS
 
 
 if __name__ == "__main__":

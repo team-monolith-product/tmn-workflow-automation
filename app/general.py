@@ -124,7 +124,7 @@ SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
 
-def register_general_handlers(app, assistant):
+def register_general_handlers(app):
     """
     범용 봇의 이벤트 핸들러를 등록합니다.
     """
@@ -217,13 +217,6 @@ def register_general_handlers(app, assistant):
             if thread_ts is None or thread_ts == message_ts:
                 print("Routing dev env infra bug report")
                 await route_dev_env_infra_bug.route_dev_env_infra_bug(app.client, body)
-
-    @assistant.thread_started
-    async def start_assistant_thread(say, _set_suggested_prompts):
-        """
-        Assistant thread started
-        """
-        await say(":wave: 안녕하세요. 무엇을 도와드릴까요?")
 
     # 자동화 작업 표 — 단일 진입 커맨드 `/wa <작업>` 로 라우팅한다.
     # 슬랙 앱 UI 에는 `/wa` 하나만 등록하면 되고, 새 작업은 이 표에 한 줄만 추가한다.
