@@ -20,6 +20,23 @@ from .tools.redash_tools import (
 )
 
 
+# 에이전트 뷰에서 새 대화를 시작했을 때 슬랙이 보여주는 예시 질문
+SUGGESTED_PROMPTS = [
+    {
+        "title": "어제 DAU",
+        "message": "어제 코들 DAU가 얼마인지 알려줘.",
+    },
+    {
+        "title": "최근 7일 활성 교실 추이",
+        "message": "최근 7일간 활성 교실 수 추이를 차트로 보여줘.",
+    },
+    {
+        "title": "관련 대시보드 찾기",
+        "message": "회원 가입 지표를 볼 수 있는 Redash 대시보드를 찾아줘.",
+    },
+]
+
+
 async def collect_thread_context(
     slack_client,
     channel: str,
@@ -72,9 +89,13 @@ async def collect_thread_context(
     return user_real_name, "\n\n".join(threads)
 
 
-def register_data_handlers(app_data):
+def register_data_handlers(app_data, assistant_data):
     """
     데이터 봇의 이벤트 핸들러를 등록합니다.
+
+    Args:
+        app_data: 데이터 봇 Slack 앱
+        assistant_data: 에이전트 뷰의 대화 시작을 처리하는 Assistant 미들웨어
     """
 
     @app_data.event("app_mention")
@@ -113,10 +134,21 @@ def register_data_handlers(app_data):
             app_data.client,
         )
 
+    @assistant_data.thread_started
+    async def start_data_assistant_thread(say, set_suggested_prompts):
+        """
+        에이전트 뷰에서 새 대화를 시작하면 호출되는 이벤트
+        """
+        await say(":bar_chart: 데이터에 대해 무엇이든 물어보세요.")
+        await set_suggested_prompts(prompts=SUGGESTED_PROMPTS)
+
     @app_data.event("message")
     async def message_data(body, say):
         """
         데이터 봇에게 DM으로 질문하면 호출되는 이벤트
+
+        에이전트 뷰의 질문도 같은 message.im 이벤트로 도착한다.
+        Assistant 미들웨어에 user_message 리스너를 두지 않아 여기까지 내려온다.
 
         답변은 질문 메시지의 스레드에 답니다.
         이어지는 질문은 같은 스레드에서 해야 앞선 대화를 문맥으로 사용합니다.
