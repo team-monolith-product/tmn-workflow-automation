@@ -10,12 +10,11 @@ from typing import Any
 import psycopg
 
 UPSERT_CHANNEL = """
-INSERT INTO data_source (source, external_id, name, enabled, joined_at)
-VALUES ('slack', %(channel_id)s, %(name)s, true, now())
+INSERT INTO data_source (source, external_id, name, enabled)
+VALUES ('slack', %(channel_id)s, %(name)s, true)
 ON CONFLICT (source, external_id) DO UPDATE SET
-    name      = EXCLUDED.name,
-    enabled   = true,
-    joined_at = coalesce(data_source.joined_at, EXCLUDED.joined_at)
+    name    = EXCLUDED.name,
+    enabled = true
 RETURNING id
 """
 
@@ -46,7 +45,9 @@ def validate_public_channel(info: dict[str, Any]) -> str | None:
 def upsert_channel(conn: psycopg.Connection, channel_id: str, name: str) -> int:
     """채널을 등록하거나 재활성화합니다.
 
-    joined_at은 최초 등록 시각을 보존합니다.
+    joined_at은 쓰지 않습니다. 멘션 인터페이스에서 멤버십은 등록의
+    전제조건이라 따로 기록할 사건이 아니고, 등록 시각은 created_at이
+    이미 기록합니다.
 
     Args:
         conn: 커넥션
