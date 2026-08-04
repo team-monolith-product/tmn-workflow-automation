@@ -16,10 +16,16 @@ content_hash 비교로 재전송이 무해하기 때문이고, app.event_dedup�
 
 from typing import Any, Awaitable, Callable
 
+from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.knowledge.db import connect
 from service.knowledge.ingest import build_thread_row, upsert_thread
+from service.knowledge.register import (
+    disable_channel,
+    upsert_channel,
+    validate_public_channel,
+)
 from service.knowledge.users import fetch_user_emails
 
 SLACK_WORKSPACE_DOMAIN = "monolith-keb2010.slack.com"
@@ -94,6 +100,52 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
             user_emails=await fetch_user_emails(client),
         )
         upsert_thread(conn, row)
+
+
+def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list:
+    """멘션이 온 채널의 수집을 켜고 끄는 도구를 반환합니다.
+
+    채널 ID를 도구 인자가 아니라 클로저로 받습니다. 멘션이 온 그 채널이
+    대상이라는 걸 강제해서, 에이전트가 다른 채널 ID를 지어내 등록하는
+    경로를 없앱니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel_id: 멘션이 온 채널 ID
+
+    Returns:
+        list: [수집 시작, 수집 중지] 도구
+    """
+
+    @tool
+    async def enable_knowledge_collection() -> str:
+        """
+        이 채널을 지식베이스 수집 대상으로 등록합니다.
+        "이 채널 지식 수집 시작해줘" 같은 요청에 사용합니다.
+        """
+        info = (await client.conversations_info(channel=channel_id))["channel"]
+        rejection = validate_public_channel(info)
+        if rejection:
+            return rejection
+        with connect() as conn:
+            upsert_channel(conn, channel_id, info["name"])
+        return (
+            f"#{info['name']} 수집을 시작했습니다. 지금부터 오는 스레드가 적재됩니다."
+        )
+
+    @tool
+    async def disable_knowledge_collection() -> str:
+        """
+        이 채널의 지식베이스 수집을 중지합니다.
+        "이 채널 지식 수집 그만해줘" 같은 요청에 사용합니다.
+        """
+        with connect() as conn:
+            data_source_id = disable_channel(conn, channel_id)
+        if data_source_id is None:
+            return "이 채널은 수집 대상이 아니었습니다."
+        return "수집을 중지했습니다. 이미 적재된 스레드는 남아 있습니다."
+
+    return [enable_knowledge_collection, disable_knowledge_collection]
 
 
 def register_knowledge_middleware(app) -> None:
