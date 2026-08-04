@@ -8,7 +8,7 @@ import os
 import sentry_sdk
 from aiohttp import ClientConnectionResetError
 from dotenv import load_dotenv
-from slack_bolt.async_app import AsyncApp, AsyncAssistant
+from slack_bolt.async_app import AsyncApp
 from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
 from app.general import register_general_handlers
@@ -50,10 +50,9 @@ app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
 app_contents = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_CONTENTS"))
 app_data = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_DATA"))
 app_justin = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_JUSTIN"))
-assistant = AsyncAssistant()
 
 # 이벤트 핸들러 등록
-register_general_handlers(app, assistant)
+register_general_handlers(app)
 # 리스너가 아니라 미들웨어다. 대표 봇에 이미 message 리스너가 있어서
 # 리스너를 추가하면 Bolt 디스패치가 둘 중 하나에서 멈춘다.
 register_knowledge_middleware(app)
@@ -65,9 +64,6 @@ register_justin_handlers(app_justin)
 async def main():
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
     start_scheduler()
-
-    # Assistant 등록
-    app.use(assistant)
 
     # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
     handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])

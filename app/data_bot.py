@@ -20,6 +20,58 @@ from .tools.redash_tools import (
 )
 
 
+async def collect_thread_context(
+    slack_client,
+    channel: str,
+    thread_ts: str,
+    user: str | None,
+) -> tuple[str, str]:
+    """
+    스레드의 이전 대화 내용과 질문자 이름을 수집합니다.
+
+    스레드의 마지막 메시지는 방금 도착한 질문이므로 대화 내용에서 제외합니다.
+
+    Args:
+        slack_client: Slack 클라이언트
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+        user: 질문자의 Slack 사용자 ID
+
+    Returns:
+        tuple[str, str]: (질문자 이름, 이전 대화 내용)
+    """
+    result = await slack_client.conversations_replies(channel=channel, ts=thread_ts)
+
+    # 메시지에서 사용자 ID를 수집
+    user_ids = set(
+        message["user"] for message in result["messages"] if "user" in message
+    )
+    if user:
+        user_ids.add(user)
+
+    # 사용자 정보 일괄 조회
+    user_info_list = await slack_users_list(slack_client)
+    user_dict = {
+        member["id"]: member
+        for member in user_info_list["members"]
+        if member["id"] in user_ids
+    }
+
+    threads = []
+    for message in result["messages"][:-1]:
+        slack_user_id = message.get("user", None)
+        if slack_user_id:
+            user_profile = user_dict.get(slack_user_id, {})
+            speaker_name = user_profile.get("real_name", "Unknown")
+        else:
+            speaker_name = "Bot"
+        threads.append(f"{speaker_name}:\n{message['text']}")
+
+    user_real_name = user_dict.get(user, {}).get("real_name", "Unknown")
+
+    return user_real_name, "\n\n".join(threads)
+
+
 def register_data_handlers(app_data):
     """
     데이터 봇의 이벤트 핸들러를 등록합니다.
@@ -47,42 +99,49 @@ def register_data_handlers(app_data):
         user = event.get("user")
         text = event["text"]
 
-        # 스레드의 모든 메시지를 가져옴
-        result = await app_data.client.conversations_replies(
-            channel=channel, ts=thread_ts
+        user_real_name, threads_joined = await collect_thread_context(
+            app_data.client, channel, thread_ts, user
         )
 
-        # 메시지에서 사용자 ID를 수집
-        user_ids = set(
-            message["user"] for message in result["messages"] if "user" in message
+        await answer_data_analysis(
+            thread_ts,
+            channel,
+            user_real_name,
+            threads_joined,
+            text,
+            say,
+            app_data.client,
         )
-        if user:
-            user_ids.add(user)
 
-        # 사용자 정보 일괄 조회
-        user_info_list = await slack_users_list(app_data.client)
-        user_dict = {
-            user["id"]: user
-            for user in user_info_list["members"]
-            if user["id"] in user_ids
-        }
+    @app_data.event("message")
+    async def message_data(body, say):
+        """
+        데이터 봇에게 DM으로 질문하면 호출되는 이벤트
 
-        threads = []
-        for message in result["messages"][:-1]:
-            slack_user_id = message.get("user", None)
-            if slack_user_id:
-                user_profile = user_dict.get(slack_user_id, {})
-                user_real_name = user_profile.get("real_name", "Unknown")
-            else:
-                user_real_name = "Bot"
-            threads.append(f"{user_real_name}:\n{message['text']}")
+        답변은 질문 메시지의 스레드에 답니다.
+        이어지는 질문은 같은 스레드에서 해야 앞선 대화를 문맥으로 사용합니다.
+        """
+        if is_duplicate_event(body):
+            return
 
-        # 최종 질의한 사용자 정보
-        slack_user_id = user
-        user_profile = user_dict.get(slack_user_id, {})
-        user_real_name = user_profile.get("real_name", "Unknown")
+        event = body["event"]
 
-        threads_joined = "\n\n".join(threads)
+        # DM만 처리 (채널 메시지는 멘션 핸들러가 담당)
+        if event.get("channel_type") != "im":
+            return
+
+        # 봇 메시지와 편집·삭제 등 서브타입 이벤트는 무시
+        if event.get("bot_id") or event.get("subtype"):
+            return
+
+        thread_ts = event.get("thread_ts") or event["ts"]
+        channel = event["channel"]
+        user = event.get("user")
+        text = event["text"]
+
+        user_real_name, threads_joined = await collect_thread_context(
+            app_data.client, channel, thread_ts, user
+        )
 
         await answer_data_analysis(
             thread_ts,
