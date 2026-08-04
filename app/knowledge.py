@@ -26,7 +26,7 @@ from service.knowledge.register import (
     upsert_channel,
     validate_public_channel,
 )
-from service.knowledge.search import search_items
+from service.knowledge.search import render_results, search_items
 from service.knowledge.users import fetch_user_emails
 
 SLACK_WORKSPACE_DOMAIN = "monolith-keb2010.slack.com"
@@ -101,26 +101,6 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
             user_emails=await fetch_user_emails(client),
         )
         upsert_thread(conn, row)
-
-
-def render_results(results: list[dict[str, Any]]) -> str:
-    """검색 결과를 에이전트가 읽을 형태로 만듭니다.
-
-    Args:
-        results: search_items 결과
-
-    Returns:
-        str: 건별 한 문단. 결과가 없으면 그 사실을 말한다
-    """
-    if not results:
-        return "검색 결과가 없습니다."
-
-    return "\n\n".join(
-        f"[{result['channel']}] {result['title']}\n"
-        f"{result['author']} · {result['created_at']} · {result['url']}\n"
-        f"{result['snippet']}"
-        for result in results
-    )
 
 
 def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> list:

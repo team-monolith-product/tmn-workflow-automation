@@ -1,7 +1,6 @@
 """지식베이스 어휘 검색 테스트"""
 
-from app.knowledge import render_results
-from service.knowledge.search import build_snippet, to_like_pattern
+from service.knowledge.search import build_snippet, render_results, to_like_pattern
 
 
 def test_질의는_소문자로_접힌다():

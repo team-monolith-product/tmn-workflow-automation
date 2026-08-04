@@ -90,6 +90,29 @@ def build_snippet(raw_text: str, query: str) -> str:
     return ("…" if start > 0 else "") + snippet + ("…" if end < len(raw_text) else "")
 
 
+def render_results(results: list[dict[str, Any]]) -> str:
+    """검색 결과를 에이전트가 읽을 형태로 만듭니다.
+
+    봇과 MCP가 같은 형태를 씁니다. 소비자가 둘 다 에이전트라 다르게 그릴
+    이유가 없습니다.
+
+    Args:
+        results: search_items 결과
+
+    Returns:
+        str: 건별 한 문단. 결과가 없으면 그 사실을 말한다
+    """
+    if not results:
+        return "검색 결과가 없습니다."
+
+    return "\n\n".join(
+        f"[{result['channel']}] {result['title']}\n"
+        f"{result['author']} · {result['created_at']} · {result['url']}\n"
+        f"{result['snippet']}"
+        for result in results
+    )
+
+
 def search_items(
     conn: psycopg.Connection,
     query: str,

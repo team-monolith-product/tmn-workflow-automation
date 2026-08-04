@@ -26,6 +26,7 @@ PyGithub
 pytest
 pytest-asyncio
 fastapi
+mcp
 uvicorn[standard]
 pydantic
 boto3
