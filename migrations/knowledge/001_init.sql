@@ -14,7 +14,8 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_bigm;
 
--- Slack 채널 하나가 데이터소스 하나다. 수집 주기와 제외 규칙을 채널별로 준다.
+-- Slack 채널 하나가 데이터소스 하나다. 수집 범위는 enabled로만 정한다.
+-- 채널 안에서 메시지를 골라내지 않는다.
 CREATE TABLE data_source (
     id             bigserial PRIMARY KEY,
     source         text NOT NULL,

@@ -20,6 +20,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.knowledge.db import connect
 from service.knowledge.ingest import build_thread_row, upsert_thread
+from service.knowledge.users import fetch_user_emails
 
 SLACK_WORKSPACE_DOMAIN = "monolith-keb2010.slack.com"
 
@@ -90,6 +91,7 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
             messages=replies["messages"],
             workspace_domain=SLACK_WORKSPACE_DOMAIN,
             distill_delay_seconds=DISTILL_DELAY_SECONDS,
+            user_emails=await fetch_user_emails(client),
         )
         upsert_thread(conn, row)
 
