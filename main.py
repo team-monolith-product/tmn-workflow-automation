@@ -8,6 +8,7 @@ import os
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, Any, Tuple
 
@@ -16,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 from app.common import notion_page_to_markdown
+from app.knowledge_mcp import build_mcp
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -54,10 +56,26 @@ if not GITHUB_TOKEN:
 # FastAPI 앱 초기화
 # ============================================================================
 
+knowledge_mcp = build_mcp()
+# 세션 매니저가 여기서 만들어지므로 lifespan보다 먼저 불러야 한다.
+knowledge_mcp_app = knowledge_mcp.streamable_http_app(stateless_http=True)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """MCP 세션 매니저를 앱 수명에 맞춰 띄웁니다.
+
+    mount만 하고 이걸 빠뜨리면 /mcp 요청이 전부 실패합니다.
+    """
+    async with knowledge_mcp.session_manager.run():
+        yield
+
+
 app = FastAPI(
     title="Workflow Automation API",
     description="노션 Webhook 및 자동화 작업을 처리하는 API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -471,6 +489,17 @@ async def general_exception_handler(request: Request, exc: Exception):
             "message": "Internal server error",
         },
     )
+
+
+# ============================================================================
+# MCP 서버 마운트
+# ============================================================================
+
+# "/"에 붙이는 이유는 MCP 클라이언트가 찾는 경로가 정해져 있기 때문입니다.
+# 리소스는 https://wfa.codle.io/mcp 이고 메타데이터는 그 호스트의
+# /.well-known/oauth-protected-resource 입니다. 하위 경로에 붙이면 둘 다
+# 어긋납니다. 위에 선언된 라우트가 먼저 잡히고 나머지가 MCP로 갑니다.
+app.mount("/", knowledge_mcp_app)
 
 
 # ============================================================================
