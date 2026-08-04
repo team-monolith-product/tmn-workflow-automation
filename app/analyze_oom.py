@@ -9,8 +9,8 @@ OOM 원인에 대한 가설을 제시합니다.
 from datetime import datetime
 from pathlib import Path
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from app.common import KST
@@ -20,6 +20,7 @@ from app.tools.oom_tools import (
     list_log_streams,
     query_alb_access_logs,
 )
+from service.llm import DEFAULT_MODEL
 
 SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
 
@@ -102,8 +103,8 @@ async def analyze_oom_alert(slack_client, body, say):
         ),
     ]
 
-    chat_model = ChatAnthropic(
-        model="claude-opus-4-5",
+    chat_model = ChatOpenAI(
+        model=DEFAULT_MODEL,
         temperature=0,
     )
 

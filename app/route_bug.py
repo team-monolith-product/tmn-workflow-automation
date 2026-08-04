@@ -19,6 +19,7 @@ import redis
 from openai import OpenAI
 from slack_sdk.web.async_client import AsyncWebClient
 
+from service.llm import DEFAULT_MODEL
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 from service.teams import TEAM_USERGROUP_IDS
 from service.worktime import get_working_emails
@@ -88,7 +89,7 @@ def extract_team_and_priority_from_report_text(
     """버그 신고 메시지 내용을 분석하여 관련 팀/구성 요소 반환"""
     client = OpenAI()
     response = client.responses.create(
-        model="gpt-4o",
+        model=DEFAULT_MODEL,
         input=[
             {
                 "role": "system",

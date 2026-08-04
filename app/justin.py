@@ -5,7 +5,7 @@ Slack에서 @Justin을 멘션하면서 Notion 페이지 링크 또는 PDF 첨부
 Justin 프롬프트 MD 파일을 기반으로 피드백을 자동 생성합니다.
 
 - 미팅 보고서: Notion 링크 → 마크다운 변환 → 피드백
-- 제안서: PDF 첨부파일 → Claude 네이티브 PDF 분석 → 피드백
+- 제안서: PDF 첨부파일 → Responses API에 PDF를 그대로 올려 분석 → 피드백
 """
 
 import base64
@@ -17,16 +17,16 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 import aiohttp
-import anthropic
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
+
+from service.llm import DEFAULT_MODEL
 from .common import slack_users_list, notion_page_to_markdown
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 
 KST = ZoneInfo("Asia/Seoul")
-
-MODEL = "claude-opus-4-6"
 
 # Justin 프롬프트 MD 파일 캐시
 _prompts_cache: dict[str, str] = {}
@@ -270,7 +270,7 @@ async def _handle_notion_feedback(
         HumanMessage(content=human_message),
     ]
 
-    chat_model = ChatAnthropic(model=MODEL)
+    chat_model = ChatOpenAI(model=DEFAULT_MODEL)
     response = await chat_model.ainvoke(messages)
     feedback = response.content
 
@@ -292,7 +292,7 @@ async def _handle_notion_feedback(
 async def _handle_pdf_feedback(
     app, say, pdf_files, user_real_name, text, thread_ts, channel
 ):
-    """PDF 첨부파일 기반 제안서 피드백을 처리합니다. (Claude 네이티브 PDF 지원)"""
+    """PDF 첨부파일 기반 제안서 피드백을 처리합니다."""
     pdf_file = pdf_files[0]  # 첫 번째 PDF만 처리
     file_name = pdf_file.get("name", "제안서.pdf")
 
@@ -322,28 +322,26 @@ async def _handle_pdf_feedback(
         text=f":hourglass_flowing_sand: `{file_name}` 제안서 피드백을 작성 중입니다...",
     )
 
-    # Claude 네이티브 PDF API로 직접 호출
+    # PDF를 파일로 올리지 않고 요청 본문에 실어 보낸다. 한 번 보고 버리는 문서라
+    # Files API에 남기면 지우는 일이 따라붙는다.
     system_prompt = _build_system_prompt("proposal")
 
-    client = anthropic.AsyncAnthropic()
-    response = await client.messages.create(
-        model=MODEL,
-        max_tokens=16384,
-        system=system_prompt,
-        messages=[
+    client = AsyncOpenAI()
+    response = await client.responses.create(
+        model=DEFAULT_MODEL,
+        max_output_tokens=16384,
+        instructions=system_prompt,
+        input=[
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_base64,
-                        },
+                        "type": "input_file",
+                        "filename": file_name,
+                        "file_data": f"data:application/pdf;base64,{pdf_base64}",
                     },
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": (
                             f"{user_real_name}님이 제출한 제안서 `{file_name}`입니다.\n"
                             f"피드백 가이드에 따라 피드백을 작성해주세요.\n"
@@ -356,7 +354,7 @@ async def _handle_pdf_feedback(
         ],
     )
 
-    feedback = response.content[0].text
+    feedback = response.output_text
 
     await app.client.chat_delete(channel=channel, ts=status_msg["ts"])
 
