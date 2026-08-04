@@ -8,6 +8,7 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+from service.llm import DEFAULT_MODEL
 from .common import KST, slack_users_list
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
@@ -253,15 +254,12 @@ async def answer_data_analysis(
     else:
         messages.append(HumanMessage(content=f"{user_real_name}: {text}"))
 
-    # GPT-5.2 모델 사용 - OpenAI의 최신 플래그십 모델 (2025년 12월 출시)
-    # 데이터 분석, 긴 컨텍스트 이해, 도구 호출에 최적화됨
-    # reasoning 파라미터로 확장된 추론 능력 활성화
     reasoning = {
         "effort": "high",  # 데이터 분석을 위한 깊이 있는 추론
         "summary": "auto",  # 자동으로 추론 요약 생성
     }
     chat_model = ChatOpenAI(
-        model="gpt-5.4",
+        model=DEFAULT_MODEL,
         temperature=0,
         reasoning=reasoning,
         output_version="responses/v1",

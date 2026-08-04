@@ -18,6 +18,7 @@ from api.wantedspace import get_workevent
 from service.business_days import get_nth_business_day_from
 from service.config import NotionDBConfig, load_config
 from service.holidays import get_public_holidays
+from service.llm import DEFAULT_MODEL
 from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
@@ -861,8 +862,8 @@ def _evaluate_schedule_with_llm(assignee_name: str, tasks_text: str) -> dict:
 위 담당자의 일정 실현 가능성을 평가해주세요."""
 
     response = client.chat.completions.create(
-        model="gpt-5.2",
-        reasoning_effort="medium",  # 일정 분석을 위한 추론 강화
+        model=DEFAULT_MODEL,
+        reasoning_effort="medium",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

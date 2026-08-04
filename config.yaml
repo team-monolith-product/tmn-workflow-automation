@@ -275,7 +275,6 @@ scheduled_jobs:
 #   work_types 의 유형명은 knowledge/edu_bid/work_types.yaml 의 order 와 일치해야 한다.
 #   (연구·기타·무관은 어느 트랙에도 없으면 평가 없이 자동 제외)
 education_bid_crawler:
-  model: "gpt-5.5"
   batch_size: 20               # LLM 1회 호출당 평가 공고 수
   tracks:
     - key: dev                 # 구축/개발 (제품 본부)

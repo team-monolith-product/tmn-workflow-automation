@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from service.llm import DEFAULT_MODEL
+
 # --- Notion DB ---
 
 
@@ -132,7 +134,7 @@ class EducationBidCrawlerConfig:
     """나라장터 교육 외주 입찰공고 수집·평가 설정"""
 
     tracks: list[BidTrackConfig]
-    model: str = "gpt-5.5"
+    model: str = DEFAULT_MODEL
     batch_size: int = 20
 
 
@@ -287,7 +289,7 @@ def _parse_config(raw: dict) -> AppConfig:
                 )
                 for t in ebc_raw["tracks"]
             ],
-            model=ebc_raw.get("model", "gpt-5.5"),
+            model=ebc_raw.get("model", DEFAULT_MODEL),
             batch_size=ebc_raw.get("batch_size", 20),
         )
 
