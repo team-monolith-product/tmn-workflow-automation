@@ -57,6 +57,8 @@ if not GITHUB_TOKEN:
 # ============================================================================
 
 knowledge_mcp = build_mcp()
+# 세션 매니저가 여기서 만들어지므로 lifespan보다 먼저 불러야 한다.
+knowledge_mcp_app = knowledge_mcp.streamable_http_app(stateless_http=True)
 
 
 @asynccontextmanager
@@ -497,7 +499,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 # 리소스는 https://wfa.codle.io/mcp 이고 메타데이터는 그 호스트의
 # /.well-known/oauth-protected-resource 입니다. 하위 경로에 붙이면 둘 다
 # 어긋납니다. 위에 선언된 라우트가 먼저 잡히고 나머지가 MCP로 갑니다.
-app.mount("/", knowledge_mcp.streamable_http_app())
+app.mount("/", knowledge_mcp_app)
 
 
 # ============================================================================

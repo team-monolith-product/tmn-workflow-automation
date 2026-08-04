@@ -1,8 +1,10 @@
 """지식베이스 MCP 서버 테스트"""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.knowledge_mcp import AdminRailsTokenVerifier, AdminToken, build_mcp
@@ -62,6 +64,40 @@ def test_401이_가리키는_메타데이터_주소가_실제로_열려_있다(m
     advertised = response.headers["www-authenticate"].split('resource_metadata="')[1]
     advertised = advertised.rstrip('"')
     assert advertised == "https://wfa.codle.io/.well-known/oauth-protected-resource"
+
+
+def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(monkeypatch):
+    # main.py 의 배선을 그대로 재현한다. "/"에 mount 하므로 기존 라우트를
+    # 가리지 않는지, lifespan 이 세션 매니저를 띄우는지가 여기서 갈린다.
+    monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
+    monkeypatch.setenv("KNOWLEDGE_MCP_RESOURCE_URL", "https://wfa.codle.io")
+
+    mcp = build_mcp()
+    mcp_app = mcp.streamable_http_app(stateless_http=True)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async with mcp.session_manager.run():
+            yield
+
+    api = FastAPI(lifespan=lifespan)
+
+    @api.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    api.mount("/", mcp_app)
+
+    with TestClient(api) as client:
+        assert client.get("/health").json() == {"status": "ok"}
+        assert client.get("/.well-known/oauth-protected-resource").status_code == 200
+
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        assert response.status_code == 401
 
 
 @pytest.mark.asyncio

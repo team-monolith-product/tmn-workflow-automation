@@ -12,6 +12,9 @@
 
 FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저가 뜨지 않으면
 /mcp 요청이 전부 실패합니다.
+
+세션은 들고 있지 않습니다(stateless_http). 세션이 있으면 파드가 늘어날 때
+sticky routing이 필요해지는데, 검색은 요청 하나로 끝나 이어갈 상태가 없습니다.
 """
 
 import os
@@ -20,7 +23,7 @@ from typing import Any, cast
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from api.admin_rails import get_me
 from service.knowledge.db import connect
@@ -65,11 +68,8 @@ class AdminRailsTokenVerifier(TokenVerifier):
         )
 
 
-def build_mcp() -> FastMCP:
+def build_mcp() -> MCPServer:
     """지식베이스 MCP 서버를 만듭니다.
-
-    stateless로 둡니다. 세션을 들고 있으면 파드가 늘어날 때 sticky routing이
-    필요해지는데, 검색은 요청 하나로 끝나 이어갈 상태가 없습니다.
 
     KNOWLEDGE_MCP_RESOURCE_URL에는 /mcp를 붙이지 않습니다. SDK가 401의
     resource_metadata 주소를 "이 값 + /.well-known/oauth-protected-resource"로
@@ -77,9 +77,9 @@ def build_mcp() -> FastMCP:
     인가 서버를 찾지 못합니다.
 
     Returns:
-        FastMCP: 도구가 등록된 서버
+        MCPServer: 도구가 등록된 서버
     """
-    mcp: FastMCP = FastMCP(
+    mcp: MCPServer = MCPServer(
         "team-monolith-knowledge",
         instructions=INSTRUCTIONS,
         token_verifier=AdminRailsTokenVerifier(),
@@ -87,7 +87,6 @@ def build_mcp() -> FastMCP:
             issuer_url=cast(Any, os.environ["ADMIN_RAILS_BASE_URL"]),
             resource_server_url=cast(Any, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
         ),
-        stateless_http=True,
     )
 
     @mcp.tool()
