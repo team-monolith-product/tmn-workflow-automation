@@ -12,18 +12,18 @@
 
 FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저가 뜨지 않으면
 /mcp 요청이 전부 실패합니다.
-
-세션은 들고 있지 않습니다(stateless_http). 세션이 있으면 파드가 늘어날 때
-sticky routing이 필요해지는데, 검색은 요청 하나로 끝나 이어갈 상태가 없습니다.
 """
 
 import os
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
 
 from api.admin_rails import get_me
 from service.knowledge.db import connect
@@ -118,3 +118,31 @@ def build_mcp() -> MCPServer:
         return render_results(results)
 
     return mcp
+
+
+def build_mcp_app(mcp: MCPServer) -> Starlette:
+    """MCP를 FastAPI에 mount할 ASGI 앱으로 만듭니다.
+
+    transport_security를 넘기지 않으면 SDK가 host 인자 기본값 "127.0.0.1"을 보고
+    로컬 서버로 판단해 DNS rebinding 보호를 켭니다. 그러면 허용 목록이
+    루프백 주소뿐이라 운영 도메인으로 온 요청이 421 Invalid Host header로
+    막힙니다. 인증을 통과한 요청만 여기까지 오므로 401 뒤에 가려집니다.
+
+    세션은 들고 있지 않습니다(stateless_http). 세션이 있으면 파드가 늘어날 때
+    sticky routing이 필요해지는데, 검색은 요청 하나로 끝나 이어갈 상태가 없습니다.
+
+    Args:
+        mcp: build_mcp가 만든 서버
+
+    Returns:
+        Starlette: /mcp와 리소스 메타데이터 경로를 여는 앱
+    """
+    host = urlparse(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]).netloc
+
+    return mcp.streamable_http_app(
+        stateless_http=True,
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[host],
+            allowed_origins=[f"https://{host}"],
+        ),
+    )

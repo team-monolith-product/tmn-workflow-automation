@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 from app.common import notion_page_to_markdown
-from app.knowledge_mcp import build_mcp
+from app.knowledge_mcp import build_mcp, build_mcp_app
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -58,7 +58,7 @@ if not GITHUB_TOKEN:
 
 knowledge_mcp = build_mcp()
 # 세션 매니저가 여기서 만들어지므로 lifespan보다 먼저 불러야 한다.
-knowledge_mcp_app = knowledge_mcp.streamable_http_app(stateless_http=True)
+knowledge_mcp_app = build_mcp_app(knowledge_mcp)
 
 
 @asynccontextmanager
