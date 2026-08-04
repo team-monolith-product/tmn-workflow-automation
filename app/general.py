@@ -170,11 +170,8 @@ def register_general_handlers(app):
         if is_duplicate_event(body):
             return
 
-        print("Received message event:", body)
-
         event = body.get("event", {})
         channel = event.get("channel")
-        print(f"Channel: {channel}")
 
         if event.get("channel_type") == "im":
             # 봇 메시지와 편집·삭제 등 서브타입 이벤트는 무시

@@ -21,6 +21,7 @@ markdown
 pypandoc_binary
 tabulate[widechars]
 redis
+psycopg[binary]
 PyGithub
 pytest
 pytest-asyncio
