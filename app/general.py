@@ -10,6 +10,7 @@ from cachetools import TTLCache
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
+from .knowledge import get_knowledge_channel_tools
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -113,7 +114,11 @@ async def _build_tools(
     if project_ds_id:
         notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
 
-    return [search_tool, get_web_page_from_url] + notion_tools
+    return (
+        [search_tool, get_web_page_from_url]
+        + notion_tools
+        + get_knowledge_channel_tools(client, channel)
+    )
 
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
