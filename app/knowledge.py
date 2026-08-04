@@ -20,10 +20,10 @@ from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.knowledge.db import connect
-from service.knowledge.ingest import build_thread_row, upsert_thread
+from service.knowledge.ingest import build_thread_row, upsert_item
 from service.knowledge.register import (
-    disable_channel,
-    upsert_channel,
+    disable_source,
+    upsert_source,
     validate_public_channel,
 )
 from service.knowledge.search import render_results, search_items
@@ -100,7 +100,7 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
             distill_delay_seconds=DISTILL_DELAY_SECONDS,
             user_emails=await fetch_user_emails(client),
         )
-        upsert_thread(conn, row)
+        upsert_item(conn, row)
 
 
 def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> list:
@@ -166,7 +166,7 @@ def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list
         if rejection:
             return rejection
         with connect() as conn:
-            upsert_channel(conn, channel_id, info["name"])
+            upsert_source(conn, "slack", channel_id, info["name"])
         return (
             f"#{info['name']} 수집을 시작했습니다. 지금부터 오는 스레드가 적재됩니다."
         )
@@ -178,7 +178,7 @@ def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list
         "이 채널 지식 수집 그만해줘" 같은 요청에 사용합니다.
         """
         with connect() as conn:
-            data_source_id = disable_channel(conn, channel_id)
+            data_source_id = disable_source(conn, "slack", channel_id)
         if data_source_id is None:
             return "이 채널은 수집 대상이 아니었습니다."
         return "수집을 중지했습니다. 이미 적재된 스레드는 남아 있습니다."
