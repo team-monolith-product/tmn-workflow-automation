@@ -6,7 +6,7 @@ Export로 채웁니다. 비마켓플레이스 앱은 conversations.history의 ra
 분당 1회라 API로는 과거를 훑을 수 없습니다.
 
 Export의 일별 파일을 채널 단위로 모아 thread_ts로 묶고, Socket Mode와 같은
-build_thread_row·upsert_thread를 거칩니다. 이메일 정규화도, 봇 단독 스레드를
+build_thread_row·upsert_item를 거칩니다. 이메일 정규화도, 봇 단독 스레드를
 skipped로 두는 판정도 같은 함수가 합니다.
 
 content_hash가 같으면 정제 상태를 건드리지 않으므로 여러 번 돌려도, 실시간
@@ -37,7 +37,7 @@ from app.knowledge import (
     SLACK_WORKSPACE_DOMAIN,
 )
 from service.knowledge.db import connect, fetch_all
-from service.knowledge.ingest import build_thread_row, upsert_thread
+from service.knowledge.ingest import build_thread_row, upsert_item
 from service.knowledge.users import load_from_export
 
 ENABLED_SOURCES = """
@@ -145,7 +145,7 @@ def backfill_channel(
             distill_delay_seconds=DISTILL_DELAY_SECONDS,
             user_emails=user_emails,
         )
-        inserted += upsert_thread(conn, row)["inserted"]
+        inserted += upsert_item(conn, row)["inserted"]
     return inserted
 
 

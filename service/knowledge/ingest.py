@@ -237,12 +237,14 @@ def build_thread_row(
     }
 
 
-def upsert_thread(conn: psycopg.Connection, row: dict[str, Any]) -> dict[str, Any]:
-    """스레드 행을 적재하거나 갱신합니다.
+def upsert_item(conn: psycopg.Connection, row: dict[str, Any]) -> dict[str, Any]:
+    """item 행을 적재하거나 갱신합니다.
+
+    SQL이 소스를 가리지 않으므로 Slack 스레드와 노션 페이지가 같이 씁니다.
 
     Args:
         conn: 커넥션
-        row: build_thread_row 결과
+        row: 소스별 정규화 함수가 만든 행
 
     Returns:
         dict[str, Any]: id와 inserted 여부
