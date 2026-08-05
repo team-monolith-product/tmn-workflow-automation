@@ -10,6 +10,7 @@
 슬랙 봇(app.py)이 이 파일을 import 하여 사용하길 기대합니다.
 """
 
+import asyncio
 import json
 import random
 from typing import Literal
@@ -141,12 +142,17 @@ t_개발_인프라는 ie 입니다.
 
 
 @tool
-def search_knowledge(query: str, channel: str | None = None) -> str:
+async def search_knowledge(query: str, channel: str | None = None) -> str:
     """
     사내 슬랙 공개 채널의 과거 대화를 검색합니다.
     검색어는 어휘가 그대로 맞아야 하므로 문장이 아니라 핵심 단어를 넣습니다.
     channel에 "t_개발_백" 같은 채널 이름을 주면 그 채널로 좁힙니다.
     """
+    return await asyncio.to_thread(_search_knowledge, query, channel)
+
+
+def _search_knowledge(query: str, channel: str | None) -> str:
+    """지식베이스를 검색합니다. psycopg는 동기라 스레드에서 실행합니다."""
     with connect() as conn:
         results = search_items(
             conn,
