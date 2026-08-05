@@ -12,6 +12,8 @@ from slack_sdk.web.async_client import AsyncWebClient
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_search_tools
 from .event_dedup import is_duplicate_event
+from .sms_approval import register_sms_handlers
+from .tools.sms_tools import get_sms_tools
 from .common import (
     KST,
     answer,
@@ -119,6 +121,7 @@ async def _build_tools(
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_search_tools(client, user_id)
+        + get_sms_tools(channel, thread_ts, user_id, client)
     )
 
 
@@ -140,6 +143,9 @@ def register_general_handlers(app):
     """
     범용 봇의 이벤트 핸들러를 등록합니다.
     """
+
+    # 문자 발송 승인(버튼·✅ 이모지) 핸들러
+    register_sms_handlers(app)
 
     @app.event("app_mention")
     async def app_mention(body, say):

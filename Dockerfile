@@ -40,6 +40,10 @@ RUN rm -rf /root/.cache/matplotlib
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder /opt/venv /opt/venv
 
+# 뿌리오 발송결과 확인용 Chromium. 브라우저 바이너리는 pip 패키지에 없어 따로 받아야 한다.
+# (이미지가 ~400MB 커진다 — 문자 발송 결과 추적을 안 쓰게 되면 이 줄부터 지울 것)
+RUN playwright install --with-deps chromium
+
 # 애플리케이션 코드 복사
 COPY . .
 
