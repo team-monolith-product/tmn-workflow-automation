@@ -25,7 +25,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.knowledge.db import connect
 from service.knowledge.search import render_results, search_items
-from service.llm import DEFAULT_MODEL
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 from service.teams import PRODUCT_USERGROUP_IDS, TEAM_USERGROUP_IDS
 from service.worktime import get_working_emails
@@ -162,10 +162,8 @@ async def extract_team_and_priority_from_report_text(
     text: str,
 ) -> tuple[Literal["ie", "fe", "be"], Literal["보통", "높음", "긴급"]]:
     """버그 신고 메시지 내용을 분석하여 관련 직군/우선순위 반환"""
-    # output_version 없이는 chat/completions로 나가는데, 그 경로는 추론 모델에
-    # 함수 도구를 붙이는 것을 400으로 막는다.
     agent = create_react_agent(
-        ChatOpenAI(model=DEFAULT_MODEL, output_version="responses/v1"),
+        ChatOpenAI(model=DEFAULT_MODEL, output_version=RESPONSES_OUTPUT_VERSION),
         [search_knowledge],
         prompt=EXTRACT_SYSTEM_PROMPT,
         response_format=TeamAndPriority,
