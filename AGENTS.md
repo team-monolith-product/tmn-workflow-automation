@@ -2,21 +2,10 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
-## 철칙: 이벤트 루프를 막지 않는다
+## 철칙
 
-슬랙 봇 4개와 APScheduler가 이벤트 루프 하나를 공유한다. 한 곳이 막으면 전부 멈춘다.
-
-- 코루틴 안에서 동기 I/O 금지. `requests`, `boto3`, `psycopg`, `notion-client`, `time.sleep`, `exec`
-- 비동기 클라이언트가 있으면 그것을 쓰고, 없으면 `asyncio.to_thread`로 넘긴다
-- 대기는 `await asyncio.sleep`. 폴링 루프를 통째로 스레드에 넘기지 않는다
-- DB 커넥션을 `await` 구간에 걸쳐 들고 있지 않는다
-- 경계는 정해진 통로로만 넘는다. 루프 → 스레드는 `asyncio.to_thread`, 스레드 → 루프는 `asyncio.run_coroutine_threadsafe`
-
-## 철칙: 도구는 전부 `async def`
-
-동기 `@tool def` 하나면 langchain이 콜백까지 별도 이벤트 루프로 끌고 간다. 콜백 핸들러의 `asyncio.Lock` 같은 루프 종속 객체가 그 순간 깨진다.
-
-`tests/test_tools_are_async.py`가 강제한다.
+- 이벤트 루프를 막지 않는다. 봇 4개와 스케줄러가 루프 하나를 공유한다. 블로킹은 `asyncio.to_thread`로.
+- 도구는 전부 `async def`. 동기 `@tool`은 콜백까지 별도 루프로 끌고 간다. `tests/test_tools_are_async.py`가 강제한다.
 
 ## Build/Lint/Test Commands
 - Run application: `python app.py`
