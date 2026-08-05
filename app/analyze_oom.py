@@ -20,7 +20,7 @@ from app.tools.oom_tools import (
     list_log_streams,
     query_alb_access_logs,
 )
-from service.llm import DEFAULT_MODEL
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
 
 SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
 
@@ -106,6 +106,7 @@ async def analyze_oom_alert(slack_client, body, say):
     chat_model = ChatOpenAI(
         model=DEFAULT_MODEL,
         temperature=0,
+        output_version=RESPONSES_OUTPUT_VERSION,
     )
 
     # OOM 분석 전용 도구들
