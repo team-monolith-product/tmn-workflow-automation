@@ -30,6 +30,11 @@ PW_SELECTOR = os.environ.get("PPURIO_WEB_PW_SELECTOR", "input[type='password']")
 
 PAGE_TIMEOUT_MS = 30000
 
+# 컨테이너 구동 조건. 둘 다 없으면 로컬에서는 되고 서버에서만 죽는다.
+# --no-sandbox: 이미지가 root 로 돌아 Chromium 샌드박스를 못 쓴다(securityContext 비어 있음)
+# --disable-dev-shm-usage: 쿠버네티스 기본 /dev/shm 이 64MB 라 탭이 공유메모리 부족으로 죽는다
+LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
+
 _PHONE_PATTERN = re.compile(r"01[016789][-\s]?\d{3,4}[-\s]?\d{4}")
 # 뿌리오 발송결과 표기: 성공/실패/대기 계열. 표기가 조금씩 달라 계열 단위로 잡는다.
 _STATUS_PATTERN = re.compile(
@@ -113,7 +118,7 @@ async def fetch_results(phones: list[str]) -> dict[str, str]:
     from playwright.async_api import async_playwright
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch()
+        browser = await playwright.chromium.launch(headless=True, args=LAUNCH_ARGS)
         page = await browser.new_page()
         html = await _login_and_get_result_html(page)
         await browser.close()
@@ -129,7 +134,7 @@ async def _dump() -> None:
 
     os.makedirs("tmp", exist_ok=True)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch()
+        browser = await playwright.chromium.launch(headless=True, args=LAUNCH_ARGS)
         page = await browser.new_page()
 
         await page.goto(LOGIN_URL, timeout=PAGE_TIMEOUT_MS)

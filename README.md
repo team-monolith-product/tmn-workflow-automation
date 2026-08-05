@@ -44,6 +44,14 @@ python -m service.ppurio_result --dump   # tmp/ppurio_*.html, *.png 확인 후 �
 
 Slack 앱 설정에 `reactions:read` 스코프와 `reaction_added` 이벤트 구독, Interactivity 활성화가 필요하다.
 
+#### 서버(쿠버네티스) 구동 조건
+헤드리스로 돈다(화면·X서버 불필요). 다만 컨테이너에서는 아래가 갖춰져야 한다.
+
+- `--no-sandbox`: 이미지가 root 로 실행돼 Chromium 샌드박스를 못 쓴다 (코드에 반영됨)
+- `--disable-dev-shm-usage`: 기본 `/dev/shm` 이 64MB 라 탭이 죽는다 (코드에 반영됨)
+- **메모리 limit 최소 1Gi** — 현재 slackbot 파드는 400Mi 라 Chromium 을 띄우면 OOMKill 된다.
+  `jce-service-helm/workflow-automation-slack` 의 `slackbot.resources` 를 올려야 한다.
+
 ## 로컬 실행
 
 ### Slack Bot
