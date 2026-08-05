@@ -2,6 +2,7 @@
 AWS Athena 관련 LangChain Tools
 """
 
+import asyncio
 from typing import Annotated, Callable, Any
 from langchain_core.tools import tool
 from api import athena
@@ -161,7 +162,11 @@ def get_execute_athena_query_tool(
         )
 
         try:
-            results = athena.execute_and_wait(query, database=database)
+            # execute_and_wait는 완료까지 time.sleep으로 폴링하는 동기 함수다.
+            # 이벤트 루프에서 직접 호출하면 슬랙 봇 4개와 스케줄러가 함께 멈춘다.
+            results = await asyncio.to_thread(
+                athena.execute_and_wait, query, database=database
+            )
 
             if show_result_to_user and say and thread_ts:
                 # 1. 먼저 사용된 SQL 쿼리를 전송

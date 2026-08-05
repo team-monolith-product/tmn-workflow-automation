@@ -5,6 +5,8 @@ Redash API 래퍼 함수들
 import os
 import requests
 
+REQUEST_TIMEOUT = 10
+
 
 def get_base_url() -> str:
     """
@@ -51,7 +53,9 @@ def list_dashboards(query: str | None = None) -> dict:
     if query:
         params["q"] = query
 
-    response = requests.get(url, headers=get_headers(), params=params)
+    response = requests.get(
+        url, headers=get_headers(), params=params, timeout=REQUEST_TIMEOUT
+    )
     response.raise_for_status()
     return response.json()
 
@@ -67,7 +71,7 @@ def get_dashboard(dashboard_slug: str) -> dict:
         dict: 대시보드 상세 정보 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/dashboards/{dashboard_slug}"
-    response = requests.get(url, headers=get_headers())
+    response = requests.get(url, headers=get_headers(), timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
@@ -83,7 +87,7 @@ def get_query(query_id: int) -> dict:
         dict: 쿼리 상세 정보 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/queries/{query_id}"
-    response = requests.get(url, headers=get_headers())
+    response = requests.get(url, headers=get_headers(), timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
@@ -102,6 +106,8 @@ def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
     """
     url = f"{get_base_url()}/api/queries"
     params = {"q": query, "page": page, "page_size": page_size}
-    response = requests.get(url, headers=get_headers(), params=params)
+    response = requests.get(
+        url, headers=get_headers(), params=params, timeout=REQUEST_TIMEOUT
+    )
     response.raise_for_status()
     return response.json()

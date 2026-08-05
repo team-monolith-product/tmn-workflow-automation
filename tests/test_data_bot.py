@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import threading
 
 import pytest
 from slack_bolt.async_app import AsyncApp
@@ -162,6 +163,39 @@ class TestAthenaTools:
         assert "count" in result
         assert "42" in result
         mock_execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("api.athena.execute_and_wait")
+    async def test_execute_athena_query_tool_keeps_event_loop_free(self, mock_execute):
+        """쿼리 대기 동안 이벤트 루프가 다른 코루틴을 실행할 수 있어야 한다"""
+        heartbeat_ran = threading.Event()
+
+        def blocking_execute(*_args, **_kwargs):
+            # 이벤트 루프가 막히면 heartbeat가 영영 실행되지 않아 여기서 걸린다
+            assert heartbeat_ran.wait(timeout=5), "이벤트 루프가 쿼리 대기에 막혔다"
+            return {
+                "ResultSet": {
+                    "Rows": [
+                        {"Data": [{"VarCharValue": "count"}]},
+                        {"Data": [{"VarCharValue": "42"}]},
+                    ]
+                }
+            }
+
+        mock_execute.side_effect = blocking_execute
+
+        async def heartbeat():
+            await asyncio.sleep(0.05)
+            heartbeat_ran.set()
+
+        result, _ = await asyncio.gather(
+            athena_tools.execute_athena_query.ainvoke(
+                {"query": "SELECT COUNT(*) as count FROM test", "database": "test_db"}
+            ),
+            heartbeat(),
+        )
+
+        assert "42" in result
 
 
 class TestRedashTools:
