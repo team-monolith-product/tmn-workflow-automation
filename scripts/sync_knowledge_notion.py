@@ -5,17 +5,28 @@
 따로 두지 않습니다. 두 곳을 맞춰야 하는 상태를 만들면 언젠가 어긋나고, 어느
 쪽이 맞는지 알 수 없게 됩니다.
 
-권한에서 빠진 것은 지웁니다. 권한을 내렸는데 검색에는 계속 나오면 내린 것이
-아닙니다. 최상위 항목이 빠지면 data_source를 지우고 딸린 item이 함께 사라지며,
-페이지 하나만 빠지면 그 item만 지웁니다.
+권한에서 빠진 것은 지웁니다. 권한을 내렸는데 검색에 계속 나오면 내린 것이
+아닙니다.
 
-data_source는 최상위 항목마다 하나입니다. 부모를 따라 올라가다 권한 밖으로
-나가는 자리가 최상위이고, 그게 연결 설정 화면에 보이는 목록입니다. 검색 결과에
-"Product HQ" 같은 출처가 찍히는 것도 이 단위입니다.
+## 데이터베이스 행
 
-두 번째 실행부터는 마지막 동기화 이후 편집된 페이지만 본문을 받습니다. 목록을
-훑는 search는 매번 하지만, 블록을 전부 읽어 마크다운으로 바꾸는 비싼 일은
-건너뜁니다.
+권한 안 페이지 8.5만 개 중 8.3만 개가 데이터베이스 행이고, 대부분은 문서가
+아니라 표입니다. 구매 내역, 결산 자료, 학교 목록 같은 것들입니다. 반대로 행
+자체가 문서인 데이터베이스도 있습니다. 회의록, 일반 문서, 출장보고서입니다.
+
+본문 길이로 가릅니다(MIN_BODY_CHARS). 이름을 코드에 적어두면 데이터베이스가
+늘 때마다 코드를 고쳐야 합니다.
+
+길이를 알려면 페이지마다 블록을 받아야 하는데 8.3만 번은 13시간입니다. 그래서
+같은 기준을 두 단계로 겁니다. 데이터베이스마다 표본 몇 행을 재서 본문이 없는
+표를 통째로 걸러내고, 남은 것에만 행별로 겁니다. 표본은 데이터베이스 수에만
+비례하므로 수백 배 싸고, 판정 기준은 같습니다.
+
+## data_source 단위
+
+데이터베이스 행은 자기 데이터소스가, 문서 페이지는 워크스페이스 직속
+팀스페이스가 data_source 하나입니다. 검색 결과에 "Product HQ"나 "회의록"이
+출처로 찍히는 단위입니다.
 
 사용법:
     python scripts/sync_knowledge_notion.py --dry-run
@@ -30,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import psycopg
@@ -41,13 +53,24 @@ from app.knowledge import DISTILL_DELAY_SECONDS
 from service.knowledge.db import connect, fetch_all
 from service.knowledge.ingest import upsert_item
 from service.knowledge.notion import (
+    MIN_BODY_CHARS,
     build_page_row,
     derive_roots,
     fetch_accessible,
     fetch_user_emails,
+    has_document_body,
+    is_database_row,
     node_title,
+    sample_evenly,
 )
 from service.knowledge.register import upsert_source
+
+# 데이터베이스 하나를 판정할 표본 행 수.
+SAMPLE_SIZE = 8
+
+# 본문 받기는 네트워크 대기가 대부분이라 동시에 돌린다. 노션 rate limit이
+# 평균 초당 3회라 그 위로는 올려도 429만 더 받는다.
+CONCURRENCY = 3
 
 NOTION_SOURCES = """
 SELECT id, external_id, name, last_synced_at
@@ -61,7 +84,9 @@ DELETE FROM data_source
 WHERE source = 'notion' AND NOT (external_id = ANY(%(root_ids)s))
 """
 
-# 최상위는 남았는데 페이지만 빠진 경우.
+# 최상위는 남았는데 페이지만 빠진 경우. 본문이 짧아져 기준에서 밀려난 행도
+# 여기로 온다. 인자는 "색인에 남아 있어야 할 페이지" 전체이지 이번 회차에
+# 적재한 것이 아니다. 후자를 넘기면 안 바뀐 페이지가 매번 지워진다.
 DELETE_GONE_ITEMS = """
 DELETE FROM item
 USING data_source
@@ -73,6 +98,63 @@ WHERE item.data_source_id = data_source.id
 MARK_SYNCED = "UPDATE data_source SET last_synced_at = now() WHERE id = %s"
 
 
+def body_of(page_id: str) -> str:
+    """페이지 본문을 마크다운으로 받아옵니다. 실패하면 빈 문자열입니다.
+
+    한 페이지가 실패해도 8만 건짜리 훑기를 처음부터 다시 하지 않기 위해서만
+    삼킵니다. 실패한 행은 본문이 없는 것으로 판정되어 이번 회차에 빠지고,
+    다음 회차에 다시 시도합니다.
+
+    Args:
+        page_id: 노션 페이지 ID
+
+    Returns:
+        str: 마크다운 본문
+    """
+    try:
+        return notion_page_to_markdown(page_id) or ""
+    except Exception as exc:
+        print(f"  본문 실패 {page_id}: {type(exc).__name__}")
+        return ""
+
+
+def classify_databases(
+    rows_by_database: dict[str, list[dict]], titles: dict[str, str]
+) -> set[str]:
+    """표본으로 문서형 데이터베이스를 가려냅니다.
+
+    Args:
+        rows_by_database: 데이터소스 ID → 그 안의 행
+        titles: 데이터소스 ID → 이름
+
+    Returns:
+        set[str]: 문서형으로 판정된 데이터소스 ID
+    """
+    samples = {
+        database_id: sample_evenly(rows, SAMPLE_SIZE)
+        for database_id, rows in rows_by_database.items()
+    }
+    flat = [(d, row) for d, rows in samples.items() for row in rows]
+    print(f"데이터베이스 {len(samples)}개를 표본 {len(flat)}행으로 판정하는 중")
+
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
+        lengths = list(executor.map(lambda item: len(body_of(item[1]["id"])), flat))
+
+    measured: dict[str, list[int]] = {d: [] for d in samples}
+    for (database_id, _), length in zip(flat, lengths):
+        measured[database_id].append(length)
+
+    documental = {d for d, lens in measured.items() if has_document_body(lens)}
+    print(
+        f"문서형 {len(documental)}개, 표로 판정해 제외 {len(samples) - len(documental)}개"
+    )
+    for database_id in sorted(documental, key=lambda d: -len(rows_by_database[d])):
+        print(
+            f"  {titles.get(database_id, '?')[:38]:<40} {len(rows_by_database[database_id]):>6}행"
+        )
+    return documental
+
+
 def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     """통합 권한 전체를 동기화합니다.
 
@@ -81,88 +163,126 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
         full: True면 last_synced_at을 무시하고 전부 다시 받습니다
         dry_run: True면 아무것도 쓰지 않고 대상만 셉니다
     """
-    client = Client(auth=os.environ["NOTION_TOKEN"])
+    client = Client(auth=os.environ["NOTION_TOKEN"].strip())
     user_emails = fetch_user_emails(client)
 
     nodes = fetch_accessible(client)
-    roots = derive_roots(nodes)
-    by_id = {node["id"]: node for node in nodes}
-    pages = [node for node in nodes if node["object"] == "page"]
+    block_parents: dict[str, str | None] = {}
 
-    root_ids = sorted(set(roots.values()))
+    def resolve_block(block_id: str) -> str | None:
+        if block_id not in block_parents:
+            try:
+                block = client.blocks.retrieve(block_id)
+                parent = block.get("parent", {})
+                block_parents[block_id] = parent.get(parent.get("type", ""))
+            except Exception:
+                block_parents[block_id] = None
+        return block_parents[block_id]
+
+    roots = derive_roots(nodes, resolve_block=resolve_block)
+    pages = [node for node in nodes if node["object"] == "page"]
+    documents = [page for page in pages if not is_database_row(page)]
+
+    rows_by_database: dict[str, list[dict]] = {}
+    for page in pages:
+        if is_database_row(page):
+            rows_by_database.setdefault(roots[page["id"]], []).append(page)
+
     print(f"노션 사용자 {len(user_emails)}명")
-    print(f"권한 안에 페이지 {len(pages)}개, 최상위 항목 {len(root_ids)}개\n")
+    print(
+        f"문서 페이지 {len(documents)}개, 데이터베이스 행 {len(pages) - len(documents)}개\n"
+    )
+
+    titles = {node["id"]: node_title(node) for node in nodes}
+    documental = classify_databases(rows_by_database, titles)
+
+    targets = list(documents)
+    for database_id in documental:
+        targets.extend(rows_by_database[database_id])
+
+    root_ids = sorted({roots[page["id"]] for page in targets})
+    print(f"\n적재 후보 {len(targets)}개, 최상위 {len(root_ids)}개\n")
 
     with connect(dsn) as conn:
         known = {row["external_id"]: row for row in fetch_all(conn, NOTION_SOURCES)}
-        source_ids = _sync_sources(conn, by_id, root_ids, known, dry_run)
-        _prune(conn, root_ids, [page["id"] for page in pages], known, dry_run)
+        source_ids = _sync_sources(conn, titles, root_ids, dry_run)
 
-        counts: dict[str, list[int]] = {root_id: [0, 0] for root_id in root_ids}
-        for page in pages:
+        # 색인에 남아 있어야 할 페이지. 이번 회차에 건드리지 않은 것도 포함한다.
+        # 여기 없는 노션 item은 뒤에서 지운다.
+        retained = {page["id"] for page in targets}
+
+        stored = 0
+        for page in targets:
             root_id = roots[page["id"]]
-            counts[root_id][0] += 1
-
             synced_at = (
                 None if full else (known.get(root_id) or {}).get("last_synced_at")
             )
             if synced_at is not None:
                 if datetime.fromisoformat(page["last_edited_time"]) <= synced_at:
                     continue
-            counts[root_id][1] += 1
 
             if dry_run:
+                stored += 1
                 continue
 
-            row = build_page_row(
-                data_source_id=source_ids[root_id],
-                page=page,
-                markdown=notion_page_to_markdown(page["id"]),
-                distill_delay_seconds=DISTILL_DELAY_SECONDS,
-                user_emails=user_emails,
-            )
-            upsert_item(conn, row)
-            conn.commit()
+            markdown = body_of(page["id"])
+            # 데이터베이스 행은 여기서 한 번 더 거른다. 표본 판정이 느슨해
+            # 문서형으로 들어온 데이터베이스에도 빈 행이 섞여 있다.
+            if is_database_row(page) and len(markdown) < MIN_BODY_CHARS:
+                retained.discard(page["id"])
+                continue
 
+            upsert_item(
+                conn,
+                build_page_row(
+                    data_source_id=source_ids[root_id],
+                    page=page,
+                    markdown=markdown,
+                    distill_delay_seconds=DISTILL_DELAY_SECONDS,
+                    user_emails=user_emails,
+                ),
+            )
+            conn.commit()
+            stored += 1
+            if stored % 100 == 0:
+                print(f"  적재 {stored}")
+
+        print(f"\n적재 {stored}건")
+        if dry_run:
+            return
+
+        _prune(conn, root_ids, sorted(retained), known)
         for root_id in root_ids:
-            walked, changed = counts[root_id]
-            name = node_title(by_id[root_id])
-            print(f"{name:<30} 페이지 {walked:>5} 적재 {changed:>5}")
-            if not dry_run:
-                with conn.cursor() as cur:
-                    cur.execute(MARK_SYNCED, (source_ids[root_id],))
-                conn.commit()
+            with conn.cursor() as cur:
+                cur.execute(MARK_SYNCED, (source_ids[root_id],))
+        conn.commit()
 
 
 def _sync_sources(
     conn: psycopg.Connection,
-    by_id: dict[str, dict],
+    titles: dict[str, str],
     root_ids: list[str],
-    known: dict[str, dict],
     dry_run: bool,
 ) -> dict[str, int]:
     """최상위 항목을 data_source로 맞춥니다.
 
     Args:
         conn: 커넥션
-        by_id: 노드 ID → 노드
+        titles: 노드 ID → 이름
         root_ids: 최상위 항목 ID
-        known: 이미 등록된 노션 data_source
         dry_run: True면 쓰지 않습니다
 
     Returns:
         dict[str, int]: 최상위 항목 ID → data_source.id. dry_run이면 빈 값
     """
-    added = [root_id for root_id in root_ids if root_id not in known]
-    if added:
-        print(f"권한에 새로 들어옴: {', '.join(node_title(by_id[i]) for i in added)}")
-
     if dry_run:
+        for root_id in root_ids:
+            print(f"  {titles.get(root_id, root_id)[:38]}")
         return {}
 
     source_ids = {
         root_id: upsert_source(
-            conn, "notion", root_id, node_title(by_id[root_id]), {"kind": "root"}
+            conn, "notion", root_id, titles.get(root_id, root_id), {"kind": "root"}
         )
         for root_id in root_ids
     }
@@ -175,28 +295,18 @@ def _prune(
     root_ids: list[str],
     page_ids: list[str],
     known: dict[str, dict],
-    dry_run: bool,
 ) -> None:
-    """권한에서 빠진 것을 지웁니다.
+    """권한에서 빠졌거나 기준에서 밀려난 것을 지웁니다.
 
     Args:
         conn: 커넥션
-        root_ids: 지금 권한 안에 있는 최상위 항목 ID
-        page_ids: 지금 권한 안에 있는 페이지 ID
+        root_ids: 지금 적재 대상인 최상위 항목 ID
+        page_ids: 지금 적재 대상인 페이지 ID
         known: 이미 등록된 노션 data_source
-        dry_run: True면 지우지 않고 알리기만 합니다
     """
-    gone = [
-        name
-        for ext, row in known.items()
-        if ext not in root_ids
-        for name in [row["name"]]
-    ]
+    gone = [row["name"] for ext, row in known.items() if ext not in root_ids]
     if gone:
-        print(f"권한에서 빠져 지움: {', '.join(gone)}")
-
-    if dry_run:
-        return
+        print(f"대상에서 빠져 지움: {', '.join(gone)}")
 
     with conn.cursor() as cur:
         cur.execute(DELETE_GONE_SOURCES, {"root_ids": root_ids})
@@ -206,7 +316,7 @@ def _prune(
     conn.commit()
 
     if dropped_sources or dropped_items:
-        print(f"삭제: 최상위 {dropped_sources}, 페이지 {dropped_items}\n")
+        print(f"삭제: 최상위 {dropped_sources}, 페이지 {dropped_items}")
 
 
 def main() -> None:

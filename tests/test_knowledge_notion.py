@@ -7,8 +7,11 @@ from service.knowledge.notion import (
     author_of,
     build_page_row,
     derive_roots,
+    has_document_body,
+    is_database_row,
     node_title,
     parent_id,
+    sample_evenly,
 )
 
 EMAILS = {
@@ -79,20 +82,66 @@ def test_권한_밖으로_나가는_자리가_최상위다():
     assert derive_roots(nodes) == {"hq": "hq", "a": "hq", "b": "hq"}
 
 
-def test_데이터베이스_행은_데이터소스를_거쳐_최상위에_붙는다():
-    # 데이터소스를 같이 받지 않으면 사슬이 끊겨 행마다 자기가 최상위가 된다.
+def test_데이터베이스_행의_최상위는_자기_데이터소스다():
+    # 켜고 끄는 단위도 검색 결과에 찍히는 출처도 데이터베이스다.
     nodes = [
         _page("hq", {"type": "page_id", "page_id": "팀스페이스"}),
         {
             "object": "data_source",
             "id": "d1",
             "title": [{"plain_text": "회의록"}],
-            "parent": {"type": "page_id", "page_id": "hq"},
+            "parent": {"type": "database_id", "database_id": "db1"},
         },
         _page("row", {"type": "data_source_id", "data_source_id": "d1"}),
     ]
 
-    assert derive_roots(nodes)["row"] == "hq"
+    assert derive_roots(nodes)["row"] == "d1"
+
+
+def test_블록_안에_있는_페이지는_블록을_풀어_올라간다():
+    # search가 블록을 돌려주지 않아 사슬이 거기서 끊긴다. 실측에서 문서
+    # 페이지 1,769개 중 545개가 이 경우였다.
+    nodes = [
+        _page("hq", {"type": "workspace", "workspace": True}),
+        _page("a", {"type": "block_id", "block_id": "토글"}),
+    ]
+
+    roots = derive_roots(nodes, resolve_block=lambda block_id: "hq")
+    assert roots["a"] == "hq"
+
+
+def test_블록을_못_풀면_거기서_멈춘다():
+    nodes = [_page("a", {"type": "block_id", "block_id": "토글"})]
+
+    assert derive_roots(nodes)["a"] == "a"
+
+
+def test_데이터베이스_행_여부():
+    assert is_database_row(
+        _page("r", {"type": "data_source_id", "data_source_id": "d"})
+    )
+    assert not is_database_row(_page("p", {"type": "page_id", "page_id": "hq"}))
+
+
+def test_표본은_난수_없이_고르게_뽑는다():
+    # 실행마다 판정이 뒤집히면 안 된다.
+    rows = [{"id": str(i)} for i in range(100)]
+    picked = sample_evenly(rows, 4)
+
+    assert [r["id"] for r in picked] == ["0", "25", "50", "75"]
+    assert sample_evenly(rows, 4) == picked
+
+
+def test_행이_표본보다_적으면_전부_쓴다():
+    rows = [{"id": "1"}, {"id": "2"}]
+    assert sample_evenly(rows, 8) == rows
+
+
+def test_한_건이라도_기준을_넘으면_문서형이다():
+    # 잘못 넣으면 행별 판정이 한 번 더 거르지만, 잘못 빼면 영영 안 들어온다.
+    assert has_document_body([0, 0, 0, 4684])
+    assert not has_document_body([0, 0, 0, 0])
+    assert not has_document_body([99, 12, 0])
 
 
 def test_최상위가_여럿이면_각자에_붙는다():

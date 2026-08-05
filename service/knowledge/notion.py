@@ -16,7 +16,7 @@ search는 질의 없이 부르면 통합에 공유된 페이지와 데이터소�
 
 import json
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from notion_client import Client
 
@@ -27,6 +27,14 @@ from service.knowledge.ingest import compute_content_hash
 TITLE_TYPE = "title"
 
 PAGE_SIZE = 100
+
+# 본문이 이보다 짧은 데이터베이스 행은 문서가 아니라 데이터로 본다.
+#
+# 실측(2026-08-05, 표본 125건)에서 두 부류가 깨끗하게 갈렸다. 구매 내역·결산
+# 자료·학교 목록 같은 표는 본문 중앙값이 0자이고 표본 전부가 이 값에 못 미쳤다.
+# 회의록·일반 문서·출장보고서는 중앙값이 4,600~13,200자였다. 이름을 코드에
+# 적어두지 않아도 길이만으로 갈린다.
+MIN_BODY_CHARS = 100
 
 
 def fetch_user_emails(client: Client) -> dict[str, str]:
@@ -92,39 +100,109 @@ def parent_id(node: dict[str, Any]) -> str | None:
     return parent.get(parent.get("type", ""))
 
 
-def derive_roots(nodes: list[dict[str, Any]]) -> dict[str, str]:
+def is_database_row(node: dict[str, Any]) -> bool:
+    """데이터베이스 안의 행인지 봅니다.
+
+    Args:
+        node: 노션 page 객체
+
+    Returns:
+        bool: 부모가 데이터소스면 True
+    """
+    return (node.get("parent") or {}).get("type") == "data_source_id"
+
+
+def derive_roots(
+    nodes: list[dict[str, Any]],
+    resolve_block: Callable[[str], str | None] | None = None,
+) -> dict[str, str]:
     """각 노드가 어느 최상위 항목에 속하는지 정합니다.
 
-    부모를 따라 올라가다가 접근 권한 밖으로 나가면 거기서 멈춥니다. 멈춘
-    자리가 곧 연결 설정에서 권한을 준 항목입니다. 그 위는 통합이 볼 수 없어
-    search에 나오지 않습니다.
+    데이터베이스 행은 자기가 속한 데이터소스가 최상위입니다. 켜고 끄는 단위도,
+    검색 결과에 찍히는 출처도 데이터베이스이기 때문입니다.
 
-    사슬이 도는 경우는 없지만, 노션이 예상 못 한 부모를 주더라도 무한히 돌지
-    않도록 지나온 자리를 기억합니다.
+    문서 페이지는 부모를 따라 올라가 워크스페이스 직속 페이지에 닿습니다. 그게
+    연결 설정 화면에 보이는 팀스페이스입니다.
+
+    토글이나 컬럼 안에 있는 페이지는 부모가 블록인데, search가 블록을 돌려주지
+    않아 사슬이 거기서 끊깁니다. resolve_block으로 이어 붙입니다. 실측에서
+    문서 페이지 1,769개 중 545개가 이 경우였습니다.
 
     Args:
         nodes: fetch_accessible 결과
+        resolve_block: 블록 ID를 받아 그 블록이 놓인 부모 ID를 돌려주는 함수.
+            생략하면 블록에서 사슬이 끊긴 자리를 최상위로 둡니다
 
     Returns:
         dict[str, str]: 노드 ID → 최상위 항목 ID
     """
     by_id = {node["id"]: node for node in nodes}
+    memo: dict[str, str] = {}
 
-    roots: dict[str, str] = {}
-    for node in nodes:
-        path = []
-        current = node["id"]
-        while current not in roots and current not in path:
-            path.append(current)
-            parent = parent_id(by_id[current])
-            if parent not in by_id:
-                break
-            current = parent
+    def root_of(node_id: str, seen: set[str]) -> str:
+        if node_id in memo:
+            return memo[node_id]
+        if node_id in seen:
+            # 부모가 서로를 가리킨다. 노션이 이런 응답을 줄 일은 없지만
+            # 무한히 돌 이유도 없다.
+            return node_id
+        seen.add(node_id)
 
-        root = roots.get(current, current)
-        for node_id in path:
-            roots[node_id] = root
-    return roots
+        node = by_id.get(node_id)
+        if node is None:
+            # 권한 밖이거나 블록이다. 블록이면 한 단계 더 올라간다.
+            above = resolve_block(node_id) if resolve_block else None
+            result = root_of(above, seen) if above else node_id
+        elif is_database_row(node):
+            result = parent_id(node)
+        else:
+            above = parent_id(node)
+            resolvable = isinstance(above, str) and (
+                above in by_id or resolve_block is not None
+            )
+            result = root_of(above, seen) if resolvable else node_id
+
+        memo[node_id] = result
+        return result
+
+    return {node["id"]: root_of(node["id"], set()) for node in nodes}
+
+
+def sample_evenly(rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
+    """표본을 고르게 뽑습니다.
+
+    난수를 쓰지 않습니다. 같은 입력에 같은 표본이 나와야 실행마다 판정이
+    뒤집히지 않습니다.
+
+    Args:
+        rows: 데이터베이스 하나의 행 목록
+        size: 뽑을 개수
+
+    Returns:
+        list[dict[str, Any]]: 목록 전체에 걸쳐 균등하게 고른 행
+    """
+    if len(rows) <= size:
+        return rows
+    step = len(rows) / size
+    return [rows[int(index * step)] for index in range(size)]
+
+
+def has_document_body(lengths: list[int], min_chars: int = MIN_BODY_CHARS) -> bool:
+    """표본 본문 길이로 문서형 데이터베이스인지 판정합니다.
+
+    한 건이라도 기준을 넘으면 문서형으로 봅니다. 표본에서 데이터 테이블은
+    전부 0자였고 문서형은 대부분이 수천 자였습니다. 둘 사이가 멀어서 느슨하게
+    잡아도 갈립니다. 느슨한 쪽으로 두는 이유는, 잘못 넣으면 행별 판정이 한 번
+    더 걸러주지만 잘못 빼면 그 데이터베이스는 영영 안 들어오기 때문입니다.
+
+    Args:
+        lengths: 표본 행의 본문 길이
+        min_chars: 문서로 볼 최소 길이
+
+    Returns:
+        bool: 문서형이면 True
+    """
+    return any(length >= min_chars for length in lengths)
 
 
 def node_title(node: dict[str, Any]) -> str:
