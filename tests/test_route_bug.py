@@ -1,6 +1,15 @@
 """버그 신고 담당자 선정 로직 테스트"""
 
-from app.route_bug import select_assignee_email, select_candidate_emails
+from unittest.mock import MagicMock, patch
+
+from app.route_bug import (
+    KNOWLEDGE_ACTOR,
+    TeamAndPriority,
+    extract_team_and_priority_from_report_text,
+    search_knowledge,
+    select_assignee_email,
+    select_candidate_emails,
+)
 
 TEAM_TO_EMAILS = {
     "fe": ["shc@team-mono.com", "kbc@team-mono.com"],
@@ -14,6 +23,58 @@ CODLE_EMAILS = [
     "peko@team-mono.com",
     "yjlee@team-mono.com",
 ]
+
+
+class TestSearchKnowledge:
+    def test_logs_queries_as_bot(self):
+        """봇이 부른 검색은 사람이 친 검색과 구분되게 기록한다"""
+        with patch("app.route_bug.connect"), patch(
+            "app.route_bug.search_items", return_value=[]
+        ) as mock_search_items:
+            search_knowledge.invoke({"query": "배부순서", "channel": "t_개발_백"})
+
+        assert mock_search_items.call_args.kwargs["actor"] == KNOWLEDGE_ACTOR
+        assert mock_search_items.call_args.kwargs["tool"] == "route_bug"
+        assert mock_search_items.call_args.kwargs["channel"] == "t_개발_백"
+
+
+class TestExtractTeamAndPriority:
+    async def test_returns_structured_response(self):
+        """에이전트의 구조화 출력을 직군/우선순위 튜플로 푼다"""
+        agent = MagicMock()
+        agent.ainvoke = _async_return(
+            {"structured_response": TeamAndPriority(team="be", priority="높음")}
+        )
+
+        with patch("app.route_bug.ChatOpenAI"), patch(
+            "app.route_bug.create_react_agent", return_value=agent
+        ):
+            team, priority = await extract_team_and_priority_from_report_text("신고")
+
+        assert (team, priority) == ("be", "높음")
+
+    async def test_gives_the_agent_the_knowledge_tool(self):
+        """에이전트가 지식베이스 검색 도구를 들고 판단한다"""
+        agent = MagicMock()
+        agent.ainvoke = _async_return(
+            {"structured_response": TeamAndPriority(team="fe", priority="보통")}
+        )
+
+        with patch("app.route_bug.ChatOpenAI"), patch(
+            "app.route_bug.create_react_agent", return_value=agent
+        ) as mock_create_agent:
+            await extract_team_and_priority_from_report_text("신고")
+
+        assert mock_create_agent.call_args.args[1] == [search_knowledge]
+
+
+def _async_return(value):
+    """await 하면 주어진 값을 돌려주는 가짜 코루틴 함수"""
+
+    async def _call(*args, **kwargs):
+        return value
+
+    return _call
 
 
 class TestSelectCandidateEmails:
