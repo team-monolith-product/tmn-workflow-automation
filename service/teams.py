@@ -13,6 +13,13 @@ TEAM_USERGROUP_IDS: dict[Literal["fe", "be", "ie"], str] = {
     "ie": "S08628PEEUQ",
 }
 
+# 제품별 Slack 사용자 그룹 ID
+# 직군 그룹과 달리 기획·개발이 함께 속하므로, 개발자만 필요한 곳에서는
+# 직군 그룹과 교집합을 취해서 쓴다.
+PRODUCT_USERGROUP_IDS: dict[str, str] = {
+    "코들": "S0APF17S6TC",
+}
+
 # 전체 팀 Slack 사용자 그룹 ID (기획팀, 탐색팀 포함)
 ALL_TEAM_USERGROUP_IDS: dict[str, str] = {
     "기획": "S092KHHE0AF",

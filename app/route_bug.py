@@ -1,8 +1,9 @@
 """
 버그 신고 채널에 게시글이 올라오면,
 그것을 다음과 같은 규칙을 바탕으로 담당자를 결정하여 멘션합니다.
+- 신고가 올라온 채널의 제품을 담당하는 사람에게 할당
+- 신고 내용과 관련한 직군 내에서 더 높은 우선 순위로 할당
 - 출근을 한 사람을 더 높은 우선 순위로 할당
-- 신고 내용과 관련한 팀 내에서 더 높은 우선 순위로 할당
 - 최근 버그 담당 수가 적은 사람에게 할당
 
 이 파일은 직접 실행되지 않고, 모듈로 import 되어 사용됩니다.
@@ -21,7 +22,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.llm import DEFAULT_MODEL
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
-from service.teams import TEAM_USERGROUP_IDS
+from service.teams import PRODUCT_USERGROUP_IDS, TEAM_USERGROUP_IDS
 from service.worktime import get_working_emails
 
 REDIS_KEY_PATTERN = "workflow_automation/bug_assigment_time_list"
@@ -31,12 +32,14 @@ ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
 async def route_bug(
     slack_client: AsyncWebClient,
     body: dict,
+    product: str,
 ) -> None:
     """
     버그 신고 메시지를 받아 담당자를 결정하고 응답합니다.
 
     Args:
         body: Slack 이벤트 페이로드 딕셔너리
+        product: 신고가 올라온 채널의 제품 (예: "코들")
     """
     message_text = body.get("event", {}).get("text", "")
     channel_id = body.get("event", {}).get("channel")
@@ -59,13 +62,24 @@ async def route_bug(
     email_to_user_id = await get_email_to_user_id_async(slack_client)
     team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
     print(f"Team to emails: {team_to_emails}")
+    product_emails = await get_product_emails(slack_client, email_to_user_id, product)
+    print(f"Product emails: {product_emails}")
     all_emails = list(
         set([email for emails in team_to_emails.values() for email in emails])
     )
     email_to_bug_count = get_email_to_bug_count(redis_client, all_emails)
     print(f"Email to bug count: {email_to_bug_count}")
+    candidate_emails, candidate_reason = select_candidate_emails(
+        team, product, team_to_emails, product_emails
+    )
+    print(f"Candidate emails: {candidate_emails}, reason: {candidate_reason}")
     reason_text, assignee_email = select_assignee_email(
-        team, priority, working_emails, team_to_emails, email_to_bug_count
+        candidate_emails,
+        candidate_reason,
+        priority,
+        working_emails,
+        team_to_emails,
+        email_to_bug_count,
     )
     print(f"Selected assignee: {assignee_email}, reason: {reason_text}")
     update_bug_count(redis_client, assignee_email)
@@ -78,6 +92,8 @@ async def route_bug(
         assignee_email,
         email_to_user_id,
         team_to_emails,
+        product_emails,
+        candidate_emails,
         working_emails,
         email_to_bug_count,
     )
@@ -171,47 +187,77 @@ def get_email_to_bug_count(
     return email_to_bug_count
 
 
-def select_assignee_email(
+def select_candidate_emails(
     team: Literal["ie", "fe", "be"],
+    product: str,
+    team_to_emails: dict[Literal["ie", "fe", "be"], list[str]],
+    product_emails: list[str],
+) -> tuple[list[str], str]:
+    """제품과 직군의 교집합으로 담당자 후보군을 좁힙니다.
+
+    제품팀에 해당 직군 인원이 아무도 없으면(예: 코들팀의 인프라) 직군 전체로 넓힙니다.
+    제품팀 전체로 넓히면 인프라 신고를 프론트·백엔드 인원에게 주게 되기 때문입니다.
+
+    Args:
+        team: 신고 내용과 관련한 직군
+        product: 신고가 올라온 채널의 제품
+        team_to_emails: 직군별 구성원 이메일 목록
+        product_emails: 제품 담당 구성원 이메일 목록
+
+    Returns:
+        tuple[list[str], str]: 후보 이메일 목록과 선택 사유
+    """
+    team_emails: list[str] = team_to_emails.get(team, [])
+    product_team_emails: list[str] = [
+        email for email in team_emails if email in product_emails
+    ]
+
+    if product_team_emails:
+        return product_team_emails, f"{product} 담당 {team}팀 영역."
+
+    return (
+        team_emails,
+        f"{product} 담당 {team}팀 영역. {product}팀에 {team} 인원이 없어 {team}팀 전체 선택.",
+    )
+
+
+def select_assignee_email(
+    candidate_emails: list[str],
+    candidate_reason: str,
     priority: Literal["보통", "높음", "긴급"],
     working_emails: list[str],
     team_to_emails: dict[Literal["ie", "fe", "be"], list[str]],
     email_to_bug_count: dict[str, int],
 ) -> tuple[str, str]:
     """주어진 조건에 따라 최적의 담당자 선택"""
-    team_emails: list[str] = team_to_emails.get(team, [])
     all_emails: list[str] = [
         email for emails in team_to_emails.values() for email in emails
     ]
-    working_team_emails: list[str] = [
-        email for email in team_emails if email in working_emails
+    working_candidate_emails: list[str] = [
+        email for email in candidate_emails if email in working_emails
     ]
     all_working_emails: list[str] = [
         email for email in all_emails if email in working_emails
     ]
 
-    reasons = [f"{team}팀 담당 영역.", f"우선순위 {priority}."]
-    candidate_emails: list[str] = []
+    reasons = [candidate_reason, f"우선순위 {priority}."]
 
     if priority == "긴급":
         reasons.append("긴급이므로 업무 여부 고려.")
 
-        # 1순위: 관련 팀에서 출근한 사람
-        if working_team_emails:
-            candidate_emails = working_team_emails
-            reasons.append("관련 팀 내 업무 중 인원 선택.")
+        # 1순위: 후보 중 출근한 사람
+        if working_candidate_emails:
+            candidate_emails = working_candidate_emails
+            reasons.append("후보 중 업무 중 인원 선택.")
         # 2순위: 다른 팀이라도 출근한 사람
         elif all_working_emails:
             candidate_emails = all_working_emails
-            reasons.append("관련 팀 내 업무 중 인원 없음. 다른 팀 업무 중 인원 선택.")
-        # 3순위: 해당 팀 구성원
+            reasons.append("후보 중 업무 중 인원 없음. 다른 팀 업무 중 인원 선택.")
+        # 3순위: 후보 전체
         else:
-            candidate_emails = team_emails
-            reasons.append("개발팀 전체 업무 중 인원 없음. 관련 팀 전체 인원 선택.")
+            reasons.append("개발팀 전체 업무 중 인원 없음. 후보 전체 유지.")
     else:  # "보통" 또는 "높음"
-        # 관련 팀 구성원 (출근 여부 상관없음)
-        reasons.append("긴급 아니므로 업무 여부 상관 없음. 관련 팀 전체 인원 선택.")
-        candidate_emails = team_emails
+        reasons.append("긴급 아니므로 업무 여부 상관 없음. 후보 전체 유지.")
 
     # 후보가 없는 경우
     if not candidate_emails:
@@ -231,9 +277,6 @@ def select_assignee_email(
         email for email, count in email_bug_count_pairs if count == min_bug_count
     ]
 
-    if not min_bug_emails:
-        return "예외 상황.", "lch@team-mono.com"
-
     reasons.append(
         f"버그 할당 건수가 최소({min_bug_count})인 인원 {len(min_bug_emails)}명 중 무작위 추첨."
     )
@@ -250,6 +293,8 @@ async def send_slack_response(
     assignee_email: str,
     email_to_user_id: dict[str, str],
     team_to_emails: dict[Literal["ie", "fe", "be"], list[str]],
+    product_emails: list[str],
+    candidate_emails: list[str],
     working_emails: list[str],
     email_to_bug_count: dict[str, int],
 ) -> None:
@@ -263,14 +308,27 @@ async def send_slack_response(
         reason_text: 담당자 선택 이유
         assignee_email: 할당된 담당자 이메일
         email_to_user_id: 이메일과 Slack 사용자 ID 매핑
-        team_to_emails: 팀별 구성원 이메일 목록
+        team_to_emails: 직군별 구성원 이메일 목록
+        product_emails: 제품 담당 구성원 이메일 목록
+        candidate_emails: 담당자를 추첨한 후보 이메일 목록
         working_emails: 출근한 사용자 이메일 목록
         email_to_bug_count: 사용자별 버그 담당 건수
     """
 
+    # 재지정은 제품 담당자 안에서 끝나는 것이 보통이므로 그들을 먼저 보여주되,
+    # 직군이 없어 후보를 넓힌 경우에는 넓힌 인원도 함께 보여준다.
+    team_to_listed_emails: dict[Literal["ie", "fe", "be"], list[str]] = {
+        team: [
+            email
+            for email in emails
+            if email in product_emails or email in candidate_emails
+        ]
+        for team, emails in team_to_emails.items()
+    }
+
     user_ids = [
         email_to_user_id[email]
-        for emails in team_to_emails.values()
+        for emails in team_to_listed_emails.values()
         for email in emails
         if email in email_to_user_id
     ]
@@ -287,7 +345,7 @@ async def send_slack_response(
         + "\n".join(
             [
                 f"- [{team}]{email_to_name[email]} 출근({'✅' if email in working_emails else '❌'}) / 최근 {email_to_bug_count.get(email, 0)}회"
-                for team, emails in team_to_emails.items()
+                for team, emails in team_to_listed_emails.items()
                 for email in emails
             ]
         )
@@ -319,6 +377,25 @@ async def get_team_to_emails(
         ]
         for k, user_ids in team_to_user_ids.items()
     }
+
+
+async def get_product_emails(
+    slack_client: AsyncWebClient,
+    email_to_user_id: dict[str, str],
+    product: str,
+) -> list[str]:
+    """특정 제품을 담당하는 구성원 목록 반환"""
+    user_ids = (
+        await slack_client.usergroups_users_list(
+            usergroup=PRODUCT_USERGROUP_IDS[product]
+        )
+    )["users"]
+
+    user_id_to_email = {v: k for k, v in email_to_user_id.items()}
+
+    return [
+        user_id_to_email[user_id] for user_id in user_ids if user_id in user_id_to_email
+    ]
 
 
 def update_bug_count(redis_client: redis.Redis, assignee_email: str) -> None:
@@ -373,21 +450,35 @@ if __name__ == "__main__":
             decode_responses=True,
         )
         message_text = "버그 신고 내용입니다."
+        product = "코들"
         team, priority = extract_team_and_priority_from_report_text(message_text)
         working_emails = get_working_emails()
         email_to_user_id = await get_email_to_user_id_async(slack_client)
         team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
+        product_emails = await get_product_emails(
+            slack_client, email_to_user_id, product
+        )
         all_emails = list(
             set([email for emails in team_to_emails.values() for email in emails])
         )
         email_to_bug_count = get_email_to_bug_count(redis_client, all_emails)
-        assignee_email = select_assignee_email(
-            team, priority, working_emails, team_to_emails, email_to_bug_count
+        candidate_emails, candidate_reason = select_candidate_emails(
+            team, product, team_to_emails, product_emails
+        )
+        reason_text, assignee_email = select_assignee_email(
+            candidate_emails,
+            candidate_reason,
+            priority,
+            working_emails,
+            team_to_emails,
+            email_to_bug_count,
         )
         print(f"team, priority: {team}, {priority}")
         print(f"working_emails: {working_emails}")
         print(f"team_to_emails: {team_to_emails}")
+        print(f"product_emails: {product_emails}")
         print(f"email_to_bug_count: {email_to_bug_count}")
-        print(f"assignee_email: {assignee_email}")
+        print(f"candidate_emails: {candidate_emails}")
+        print(f"assignee_email: {assignee_email}, reason: {reason_text}")
 
     asyncio.run(main())
