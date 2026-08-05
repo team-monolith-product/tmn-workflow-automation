@@ -18,6 +18,7 @@ from pydantic import BaseModel
 import uvicorn
 from app.common import notion_page_to_markdown
 from app.knowledge_mcp import build_mcp, build_mcp_app
+from app.knowledge_notion import router as knowledge_notion_router
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -445,6 +446,9 @@ async def handle_webhook(
         )
 
 
+app.include_router(knowledge_notion_router)
+
+
 @app.get("/")
 async def root():
     """루트 엔드포인트 - API 정보 반환"""
@@ -454,6 +458,7 @@ async def root():
         "endpoints": {
             "health": "/health",
             "webhook": "/webhook",
+            "knowledge_notion_events": "/knowledge/notion/events",
             "docs": "/docs",
         },
     }
