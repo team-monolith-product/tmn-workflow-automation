@@ -44,20 +44,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
-import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import psycopg
 from dotenv import load_dotenv
-from notion_client import Client
+from notion_client.errors import APIResponseError
 
-from app.common import notion_page_to_markdown
+from app.common import notion, notion_page_to_markdown
 from app.knowledge import DISTILL_DELAY_SECONDS
 from service.knowledge.db import connect, fetch_all
 from service.knowledge.ingest import upsert_item
 from service.knowledge.notion import (
     MIN_BODY_CHARS,
+    build_fetch_node,
     build_page_row,
     derive_roots,
     fetch_accessible,
@@ -72,6 +73,12 @@ from service.knowledge.register import upsert_source
 
 # 데이터베이스 하나를 판정할 표본 행 수.
 SAMPLE_SIZE = 8
+
+# Export 파일 이름 끝의 페이지 ID.
+EXPORT_ID = re.compile(r" ([0-9a-f]{32})\.md$")
+
+# Export 마크다운에서 제목 다음에 오는 "이름: 값" 줄.
+PROPERTY_LINE = re.compile(r"^[^\n:]{1,40}: ")
 
 # 본문 받기는 네트워크 대기가 대부분이라 동시에 돌린다. 노션 rate limit이
 # 평균 초당 3회라 그 위로는 올려도 429만 더 받는다.
@@ -102,6 +109,15 @@ WHERE item.data_source_id = data_source.id
 
 MARK_SYNCED = "UPDATE data_source SET last_synced_at = now() WHERE id = %s"
 
+# 이미 행이 색인된 데이터베이스. 부모는 build_page_row가 metadata에 남긴다.
+INDEXED_DATABASES = """
+SELECT DISTINCT item.metadata->'parent'->>'data_source_id' AS data_source_id
+FROM item
+JOIN data_source ON data_source.id = item.data_source_id
+WHERE data_source.source = 'notion'
+  AND item.metadata->'parent'->>'data_source_id' IS NOT NULL
+"""
+
 
 def body_of(page_id: str) -> str:
     """페이지 본문을 마크다운으로 받아옵니다. 실패하면 빈 문자열입니다.
@@ -118,9 +134,57 @@ def body_of(page_id: str) -> str:
     """
     try:
         return notion_page_to_markdown(page_id) or ""
-    except Exception as exc:
-        print(f"  본문 실패 {page_id}: {type(exc).__name__}")
+    except APIResponseError as exc:
+        # 상태를 남긴다. 종류 이름만 찍으면 권한 밖(404)과 한도 초과(429)가
+        # 같은 줄로 보이는데, 앞은 본문이 없는 것이 맞고 뒤는 모르는 것이다.
+        print(f"  본문 실패 {page_id}: {exc.status} {exc.code}")
         return ""
+
+
+def load_export(export_root: Path) -> dict[str, Path]:
+    """Export 디렉터리에서 페이지 ID → 파일 경로를 만듭니다.
+
+    노션은 내보낸 파일 이름 끝에 32자리 페이지 ID를 붙입니다. 그래서 실시간
+    수집과 같은 external_id를 파일명만으로 얻습니다.
+
+    Args:
+        export_root: 압축을 푼 디렉터리
+
+    Returns:
+        dict[str, Path]: 붙임표 없는 페이지 ID → .md 파일
+    """
+    files = {
+        match.group(1): path
+        for path in export_root.rglob("*.md")
+        if (match := EXPORT_ID.search(path.name))
+    }
+    print(f"Export 파일 {len(files)}개")
+    return files
+
+
+def export_body(path: Path) -> str:
+    """Export 마크다운에서 제목과 속성 블록을 떼고 본문만 남깁니다.
+
+    떼지 않으면 표의 행도 속성만으로 200자를 넘겨 전부 문서로 판정됩니다.
+    속성 블록은 제목 다음의 "이름: 값" 줄이 이어지는 구간입니다.
+
+    Args:
+        path: .md 파일
+
+    Returns:
+        str: 본문
+    """
+    lines = path.read_text(encoding="utf-8").split("\n")
+    index = 1 if lines and lines[0].startswith("# ") else 0
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    while (
+        index < len(lines)
+        and lines[index].strip()
+        and PROPERTY_LINE.match(lines[index])
+    ):
+        index += 1
+    return "\n".join(lines[index:]).strip()
 
 
 def classify_databases(
@@ -160,15 +224,20 @@ def classify_databases(
     return documental
 
 
-def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
+def sync(
+    dsn: str | None, full: bool, dry_run: bool, export_root: Path | None = None
+) -> None:
     """통합 권한 전체를 동기화합니다.
 
     Args:
         dsn: 접속 문자열. None이면 KNOWLEDGE_DATABASE_URL
         full: True면 last_synced_at을 무시하고 전부 다시 받습니다
         dry_run: True면 아무것도 쓰지 않고 대상만 셉니다
+        export_root: 워크스페이스 Export를 푼 디렉터리. 주면 본문을 API 대신
+            거기서 읽습니다. Export에 없는 페이지는 이번 회차에서 빠집니다
     """
-    client = Client(auth=os.environ["NOTION_TOKEN"].strip())
+    client = notion
+    export = load_export(export_root) if export_root else {}
     user_emails = fetch_user_emails(client)
 
     nodes = fetch_accessible(client)
@@ -176,27 +245,7 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     # 사슬을 잇느라 받아온 조상. 최상위 이름을 찾을 때도 쓴다.
     fetched: dict[str, dict | None] = {}
 
-    # search가 돌려주지 않는 조상을 종류에 맞는 API로 받아온다. 데이터소스가
-    # 여기 있는 이유는 search가 데이터소스를 다 돌려주지 않아서다. 실측에서
-    # 행이 참조하는 470개 중 28개가 빠져 있었고 그 아래 5,182행이 딸려 있었다.
-    RETRIEVE = {
-        "database_id": lambda i: client.databases.retrieve(i),
-        "data_source_id": lambda i: client.data_sources.retrieve(i),
-        "block_id": lambda i: client.blocks.retrieve(i),
-        "page_id": lambda i: client.pages.retrieve(i),
-    }
-
-    def fetch_node(kind: str, node_id: str) -> dict | None:
-        """search에 나오지 않는 조상을 받아옵니다."""
-        if node_id not in fetched:
-            retrieve = RETRIEVE.get(kind)
-            try:
-                fetched[node_id] = retrieve(node_id) if retrieve else None
-            except Exception:
-                fetched[node_id] = None
-        return fetched[node_id]
-
-    roots = derive_roots(nodes, fetch_node=fetch_node)
+    roots = derive_roots(nodes, fetch_node=build_fetch_node(client, fetched))
     # 최상위가 search에 없던 노드일 수 있다. "회의록"처럼 워크스페이스 직속
     # 데이터베이스가 그렇다.
     resolved = {**{k: v for k, v in fetched.items() if v}, **by_id}
@@ -217,11 +266,34 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     )
 
     titles = {node_id: node_title(node) for node_id, node in resolved.items()}
-    documental = classify_databases(rows_by_database, titles)
 
-    candidates = list(documents)
-    for database_id in documental:
-        candidates.extend(rows_by_database[database_id])
+    if export:
+        # Export가 있으면 행마다 직접 잰다. 표본 판정은 데이터베이스 하나를
+        # 여덟 행으로 가르는 근사였고, 본문이 파일로 있으면 근사할 이유가 없다.
+        exported = [page for page in pages if page["id"].replace("-", "") in export]
+        candidates = [
+            page
+            for page in exported
+            if not is_database_row(page)
+            or len(export_body(export[page["id"].replace("-", "")])) >= MIN_BODY_CHARS
+        ]
+        print(
+            f"Export에 없어 이번 회차에서 빠짐 {len(pages) - len(exported)}개, "
+            f"본문이 {MIN_BODY_CHARS}자 미만이라 제외 {len(exported) - len(candidates)}개"
+        )
+    else:
+        # 이미 색인에 있는 데이터베이스는 판정 대상이 아니다. 표본 여덟 행이
+        # 표라고 해도, Export로 행마다 재서 넣은 것을 지울 근거는 되지 않는다.
+        with connect(dsn) as conn:
+            indexed = {
+                row["data_source_id"] for row in fetch_all(conn, INDEXED_DATABASES)
+            }
+        documental = classify_databases(rows_by_database, titles) | (
+            indexed & set(rows_by_database)
+        )
+        candidates = list(documents)
+        for database_id in documental:
+            candidates.extend(rows_by_database[database_id])
 
     # 최상위를 못 찾은 페이지는 넣지 않는다. 사슬이 중간에 끊기면 최상위가
     # 블록이나 지워진 데이터베이스의 ID가 되는데, 그것으로 data_source를
@@ -256,7 +328,8 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
                 stored += 1
                 continue
 
-            markdown = body_of(page["id"])
+            exported = export.get(page["id"].replace("-", ""))
+            markdown = export_body(exported) if exported else body_of(page["id"])
             # 데이터베이스 행은 여기서 한 번 더 거른다. 표본 판정이 느슨해
             # 문서형으로 들어온 데이터베이스에도 빈 행이 섞여 있다.
             if is_database_row(page) and len(markdown) < MIN_BODY_CHARS:
@@ -280,6 +353,14 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
 
         print(f"\n적재 {stored}건")
         if dry_run:
+            return
+
+        if export:
+            # Export 회차는 넣기만 하고 지우지 않습니다. 삭제 판정은 전량 열거를
+            # 전제로 하는데 Export는 그것이 아닙니다. 실측에서 권한 안 페이지
+            # 84,660개 중 5,220개가 Export에 없었습니다. last_synced_at도 찍지
+            # 않습니다. 찍으면 다음 회차가 그 빈자리를 건너뜁니다.
+            print("Export 회차라 삭제와 last_synced_at을 건너뜁니다")
             return
 
         _prune(conn, root_ids, sorted(retained), known)
@@ -359,9 +440,12 @@ def main() -> None:
         "--full", action="store_true", help="last_synced_at 무시하고 전부 다시 받음"
     )
     parser.add_argument("--dry-run", action="store_true", help="쓰지 않고 대상만 셈")
+    parser.add_argument(
+        "--export-root", type=Path, help="워크스페이스 Export를 푼 디렉터리"
+    )
     args = parser.parse_args()
 
-    sync(args.dsn, args.full, args.dry_run)
+    sync(args.dsn, args.full, args.dry_run, args.export_root)
 
 
 if __name__ == "__main__":
