@@ -2,6 +2,7 @@
 OOM 분석을 위한 LangChain Tools
 """
 
+import asyncio
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -45,7 +46,7 @@ def _get_cloudwatch_client():
 
 
 @tool
-def list_log_streams(
+async def list_log_streams(
     pod_name: Annotated[
         str,
         "분석할 pod 이름 (예: class-rails-service-apne2-prd-756c9bf4ff-hz66f)",
@@ -59,6 +60,11 @@ def list_log_streams(
 
     반환값: 로그 스트림 목록 (이름, First 시간, Last 시간)
     """
+    return await asyncio.to_thread(_list_log_streams, pod_name)
+
+
+def _list_log_streams(pod_name: str) -> str:
+    """CloudWatch 로그 스트림을 조회합니다. boto3 동기 호출이라 스레드에서 실행됩니다."""
     client = _get_cloudwatch_client()
 
     try:
@@ -83,7 +89,7 @@ def list_log_streams(
 
 
 @tool
-def find_incomplete_requests(
+async def find_incomplete_requests(
     log_stream: Annotated[
         str,
         "분석할 로그 스트림 이름 (list_log_streams 결과에서 선택)",
@@ -101,6 +107,13 @@ def find_incomplete_requests(
 
     반환값: 미완료 요청 목록 (경로별 그룹화, IP, 요청 ID)
     """
+    return await asyncio.to_thread(
+        _find_incomplete_requests, log_stream, minutes_before
+    )
+
+
+def _find_incomplete_requests(log_stream: str, minutes_before: int) -> str:
+    """CloudWatch 로그에서 미완료 요청을 추립니다. 동기 호출이라 스레드에서 실행됩니다."""
     client = _get_cloudwatch_client()
 
     try:
@@ -219,7 +232,7 @@ def find_incomplete_requests(
 
 
 @tool
-def query_alb_access_logs(
+async def query_alb_access_logs(
     path: Annotated[
         str,
         "분석할 요청 경로 (예: /api/v1/heavy_endpoint)",
@@ -277,7 +290,7 @@ def query_alb_access_logs(
     """
 
     try:
-        results = athena.execute_and_wait(query, database="default")
+        results = await athena.execute_and_wait(query, database="default")
 
         if "ResultSet" not in results:
             return f"'{path}' 경로에 대한 ALB 로그를 찾을 수 없습니다."

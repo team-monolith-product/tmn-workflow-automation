@@ -80,38 +80,35 @@ class TestRedashAPI:
         assert "Content-Type" in headers
         assert headers["Content-Type"] == "application/json"
 
-    @patch("api.redash.requests.get")
-    def test_list_dashboards(self, mock_get):
+    @patch("api.redash._get_json", new_callable=AsyncMock)
+    async def test_list_dashboards(self, mock_get_json):
         """대시보드 목록 조회 테스트"""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        mock_get_json.return_value = {
             "results": [{"name": "Test Dashboard", "slug": "test-dashboard"}]
         }
-        mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
 
-        result = redash.list_dashboards(query="test")
+        result = await redash.list_dashboards(query="test")
 
         assert "results" in result
         assert len(result["results"]) == 1
-        mock_get.assert_called_once()
+        url, params = mock_get_json.call_args.args
+        assert url.endswith("/api/dashboards")
+        assert params == {"q": "test"}
 
-    @patch("api.redash.requests.get")
-    def test_get_query(self, mock_get):
+    @patch("api.redash._get_json", new_callable=AsyncMock)
+    async def test_get_query(self, mock_get_json):
         """쿼리 조회 테스트"""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        mock_get_json.return_value = {
             "id": 123,
             "name": "Test Query",
             "query": "SELECT 1",
         }
-        mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
 
-        result = redash.get_query(123)
+        result = await redash.get_query(123)
 
         assert result["id"] == 123
         assert result["name"] == "Test Query"
+        assert mock_get_json.call_args.args[0].endswith("/api/queries/123")
 
 
 class TestAthenaTools:
@@ -143,7 +140,7 @@ class TestAthenaTools:
         assert "|" in formatted  # 마크다운 테이블 형식
 
     @pytest.mark.asyncio
-    @patch("api.athena.execute_and_wait")
+    @patch("api.athena.execute_and_wait", new_callable=AsyncMock)
     async def test_execute_athena_query_tool(self, mock_execute):
         """Athena 쿼리 실행 tool 테스트"""
         mock_execute.return_value = {
@@ -167,8 +164,8 @@ class TestAthenaTools:
 class TestRedashTools:
     """Redash LangChain Tools 테스트"""
 
-    @patch("api.redash.list_dashboards")
-    def test_list_redash_dashboards_tool(self, mock_list):
+    @patch("api.redash.list_dashboards", new_callable=AsyncMock)
+    async def test_list_redash_dashboards_tool(self, mock_list):
         """Redash 대시보드 목록 조회 tool 테스트"""
         mock_list.return_value = {
             "results": [
@@ -180,21 +177,21 @@ class TestRedashTools:
             ]
         }
 
-        result = redash_tools.list_redash_dashboards.func()
+        result = await redash_tools.list_redash_dashboards.ainvoke({})
 
         assert "Sales Dashboard" in result
 
-    @patch("api.redash.list_dashboards")
-    def test_list_redash_dashboards_empty(self, mock_list):
+    @patch("api.redash.list_dashboards", new_callable=AsyncMock)
+    async def test_list_redash_dashboards_empty(self, mock_list):
         """빈 대시보드 목록 테스트"""
         mock_list.return_value = {"results": []}
 
-        result = redash_tools.list_redash_dashboards.func()
+        result = await redash_tools.list_redash_dashboards.ainvoke({})
 
         assert "검색 결과가 없습니다" in result
 
-    @patch("api.redash.get_dashboard")
-    def test_read_redash_dashboard_tool(self, mock_get_dashboard):
+    @patch("api.redash.get_dashboard", new_callable=AsyncMock)
+    async def test_read_redash_dashboard_tool(self, mock_get_dashboard):
         """Redash 대시보드 읽기 tool 테스트 - 쿼리 목록만 반환"""
         mock_get_dashboard.return_value = {
             "name": "Test Dashboard",
@@ -210,14 +207,14 @@ class TestRedashTools:
             ],
         }
 
-        result = redash_tools.read_redash_dashboard.func(dashboard_id=123)
+        result = await redash_tools.read_redash_dashboard.ainvoke({"dashboard_id": 123})
 
         assert "Test Dashboard" in result
         assert "Query ID 123" in result
         assert "Test Query" in result
 
-    @patch("api.redash.get_dashboard")
-    def test_read_redash_dashboard_textbox(self, mock_get_dashboard):
+    @patch("api.redash.get_dashboard", new_callable=AsyncMock)
+    async def test_read_redash_dashboard_textbox(self, mock_get_dashboard):
         """Redash 대시보드 읽기 tool 테스트 - textbox 위젯 포함"""
         mock_get_dashboard.return_value = {
             "name": "Dashboard with Textbox",
@@ -234,7 +231,7 @@ class TestRedashTools:
             ],
         }
 
-        result = redash_tools.read_redash_dashboard.func(dashboard_id=1)
+        result = await redash_tools.read_redash_dashboard.ainvoke({"dashboard_id": 1})
 
         assert "Dashboard with Textbox" in result
         assert "안내사항" in result
@@ -242,8 +239,8 @@ class TestRedashTools:
         assert "Query ID 456" in result
         assert "매출 쿼리" in result
 
-    @patch("api.redash.get_query")
-    def test_read_redash_query_tool(self, mock_get_query):
+    @patch("api.redash.get_query", new_callable=AsyncMock)
+    async def test_read_redash_query_tool(self, mock_get_query):
         """Redash 쿼리 상세 조회 tool 테스트"""
         mock_get_query.return_value = {
             "id": 123,
@@ -252,7 +249,7 @@ class TestRedashTools:
             "data_source_id": 1,
         }
 
-        result = redash_tools.read_redash_query.func(query_id=123)
+        result = await redash_tools.read_redash_query.ainvoke({"query_id": 123})
 
         assert "Test Query" in result
         assert "analytics.users" in result
