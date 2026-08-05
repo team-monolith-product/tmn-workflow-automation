@@ -22,7 +22,7 @@ from langchain_community.tools import TavilySearchResults
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
-from service.llm import DEFAULT_MODEL
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
 from .tool_status_handler import ToolStatusHandler
 
 # 환경 변수 로드
@@ -751,7 +751,9 @@ async def answer(
 
     user_email = user_profile.get("profile", {}).get("email")
 
-    chat_model = ChatOpenAI(model=DEFAULT_MODEL)
+    chat_model = ChatOpenAI(
+        model=DEFAULT_MODEL, output_version=RESPONSES_OUTPUT_VERSION
+    )
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
     # 툴 호출 상태를 슬랙에 표시하는 핸들러
