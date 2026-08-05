@@ -26,12 +26,14 @@ CODLE_EMAILS = [
 
 
 class TestSearchKnowledge:
-    def test_logs_queries_as_bot(self):
+    async def test_logs_queries_as_bot(self):
         """봇이 부른 검색은 사람이 친 검색과 구분되게 기록한다"""
         with patch("app.route_bug.connect"), patch(
             "app.route_bug.search_items", return_value=[]
         ) as mock_search_items:
-            search_knowledge.invoke({"query": "배부순서", "channel": "t_개발_백"})
+            await search_knowledge.ainvoke(
+                {"query": "배부순서", "channel": "t_개발_백"}
+            )
 
         assert mock_search_items.call_args.kwargs["actor"] == KNOWLEDGE_ACTOR
         assert mock_search_items.call_args.kwargs["tool"] == "route_bug"

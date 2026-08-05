@@ -14,6 +14,7 @@ content_hash 비교로 재전송이 무해하기 때문이고, app.event_dedup�
 전역 하나를 공유해서 기존 핸들러와 서로를 가로막습니다.
 """
 
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from langchain_core.tools import tool
@@ -43,20 +44,19 @@ IGNORED_SUBTYPES = {
 }
 
 
-async def _resolve_data_source_id(conn, channel_id: str) -> int | None:
+def _resolve_data_source_id(channel_id: str) -> int | None:
     """채널에 대응하는 data_source.id를 찾습니다.
 
     등록되지 않은 채널은 수집 대상이 아닙니다. 봇이 초대만 받고 아직
     data_source로 등록되지 않은 상태를 정상으로 취급합니다.
 
     Args:
-        conn: 커넥션
         channel_id: Slack 채널 ID
 
     Returns:
         int | None: data_source.id. 미등록이면 None
     """
-    with conn.cursor() as cur:
+    with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM data_source "
             "WHERE source = 'slack' AND external_id = %s AND enabled",
@@ -64,6 +64,12 @@ async def _resolve_data_source_id(conn, channel_id: str) -> int | None:
         )
         row = cur.fetchone()
     return row["id"] if row else None
+
+
+def _upsert_item(row) -> None:
+    """스레드 행을 적재합니다. psycopg는 동기라 스레드에서 실행합니다."""
+    with connect() as conn:
+        upsert_item(conn, row)
 
 
 async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> None:
@@ -83,24 +89,23 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
 
     thread_ts = event.get("thread_ts") or event.get("ts")
 
-    with connect() as conn:
-        data_source_id = await _resolve_data_source_id(conn, channel_id)
-        if data_source_id is None:
-            return
+    data_source_id = await asyncio.to_thread(_resolve_data_source_id, channel_id)
+    if data_source_id is None:
+        return
 
-        # 답글 하나가 와도 부모와 형제를 전부 다시 읽는다. 저장된 행이 항상
-        # 완결된 대화를 반영해야 하기 때문이다.
-        replies = await client.conversations_replies(channel=channel_id, ts=thread_ts)
+    # 답글 하나가 와도 부모와 형제를 전부 다시 읽는다. 저장된 행이 항상
+    # 완결된 대화를 반영해야 하기 때문이다.
+    replies = await client.conversations_replies(channel=channel_id, ts=thread_ts)
 
-        row = build_thread_row(
-            data_source_id=data_source_id,
-            channel_id=channel_id,
-            messages=replies["messages"],
-            workspace_domain=SLACK_WORKSPACE_DOMAIN,
-            distill_delay_seconds=DISTILL_DELAY_SECONDS,
-            user_emails=await fetch_user_emails(client),
-        )
-        upsert_item(conn, row)
+    row = build_thread_row(
+        data_source_id=data_source_id,
+        channel_id=channel_id,
+        messages=replies["messages"],
+        workspace_domain=SLACK_WORKSPACE_DOMAIN,
+        distill_delay_seconds=DISTILL_DELAY_SECONDS,
+        user_emails=await fetch_user_emails(client),
+    )
+    await asyncio.to_thread(_upsert_item, row)
 
 
 def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> list:
@@ -127,17 +132,17 @@ def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> l
         channel에 "t_개발" 같은 채널 이름을 주면 그 채널로 좁힙니다.
         """
         emails = await fetch_user_emails(client)
-        with connect() as conn:
-            results = search_items(
-                conn,
-                query,
-                actor=emails.get(user_id, f"slack:{user_id}"),
-                tool="slack",
-                channel=channel,
-            )
-        return render_results(results)
+        actor = emails.get(user_id, f"slack:{user_id}")
+        return await asyncio.to_thread(_search_knowledge, query, actor, channel)
 
     return [search_knowledge]
+
+
+def _search_knowledge(query: str, actor: str, channel: str | None) -> str:
+    """지식베이스를 검색합니다. psycopg는 동기라 스레드에서 실행합니다."""
+    with connect() as conn:
+        results = search_items(conn, query, actor=actor, tool="slack", channel=channel)
+    return render_results(results)
 
 
 def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list:
@@ -165,8 +170,7 @@ def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list
         rejection = validate_public_channel(info)
         if rejection:
             return rejection
-        with connect() as conn:
-            upsert_source(conn, "slack", channel_id, info["name"])
+        await asyncio.to_thread(_upsert_source, channel_id, info["name"])
         return (
             f"#{info['name']} 수집을 시작했습니다. 지금부터 오는 스레드가 적재됩니다."
         )
@@ -177,13 +181,24 @@ def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list
         이 채널의 지식베이스 수집을 중지합니다.
         "이 채널 지식 수집 그만해줘" 같은 요청에 사용합니다.
         """
-        with connect() as conn:
-            data_source_id = disable_source(conn, "slack", channel_id)
+        data_source_id = await asyncio.to_thread(_disable_source, channel_id)
         if data_source_id is None:
             return "이 채널은 수집 대상이 아니었습니다."
         return "수집을 중지했습니다. 이미 적재된 스레드는 남아 있습니다."
 
     return [enable_knowledge_collection, disable_knowledge_collection]
+
+
+def _upsert_source(channel_id: str, channel_name: str) -> None:
+    """수집 대상으로 등록합니다. psycopg는 동기라 스레드에서 실행합니다."""
+    with connect() as conn:
+        upsert_source(conn, "slack", channel_id, channel_name)
+
+
+def _disable_source(channel_id: str) -> int | None:
+    """수집을 중지합니다. psycopg는 동기라 스레드에서 실행합니다."""
+    with connect() as conn:
+        return disable_source(conn, "slack", channel_id)
 
 
 def register_knowledge_middleware(app) -> None:

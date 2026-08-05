@@ -55,18 +55,18 @@ def test_invalid_page_id_rejected(bad):
     assert "Slack 유저 ID" in str(exc_info.value)
 
 
-def test_validator_fires_through_tool_schema():
+async def test_validator_fires_through_tool_schema():
     """공용 타입이 도구 args_schema 에 연결되어 잘못된 입력을 차단하는지 검증."""
     tool = get_notion_page_tool()
     with pytest.raises(ValidationError):
-        tool.invoke({"page_id": "U07TGP2KBPC"})
+        await tool.ainvoke({"page_id": "U07TGP2KBPC"})
 
 
-def test_valid_page_id_reaches_tool_body():
+async def test_valid_page_id_reaches_tool_body():
     """유효한 page_id 는 검증을 통과하여 도구 본문(노션 조회)까지 도달한다."""
     tool = get_notion_page_tool()
     with patch("app.common.notion_page_to_markdown", return_value="# md") as mock_md:
-        result = tool.invoke({"page_id": "  12d1cc820da680ba82d1e6d560aaf4c3  "})
+        result = await tool.ainvoke({"page_id": "  12d1cc820da680ba82d1e6d560aaf4c3  "})
     assert result == "# md"
     # strip 후 정규화된 값으로 조회되었는지 확인
     mock_md.assert_called_once_with("12d1cc820da680ba82d1e6d560aaf4c3")

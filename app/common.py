@@ -2,6 +2,7 @@
 공통 유틸리티 함수들
 """
 
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -264,17 +265,21 @@ search_tool = TavilySearchResults(
 )
 
 
+def _load_web_page(url: str):
+    """WebBaseLoader는 동기 HTTP라 스레드에서 실행합니다."""
+    loader = WebBaseLoader(url)
+    return loader.load()
+
+
 @tool
-def get_web_page_from_url(
+async def get_web_page_from_url(
     url: Annotated[str, "웹 페이지 URL"],
 ):
     """
     주어진 URL에서 웹 페이지를 로드하여 문서로 반환합니다.
     www.notion.so에 대한 링크는 이 도구를 사용하지 않고 get_notion_page 도구를 사용합니다.
     """
-    loader = WebBaseLoader(url)
-    documents = loader.load()
-    return documents
+    return await asyncio.to_thread(_load_web_page, url)
 
 
 async def _get_notion_assignee_id(user_email: str | None) -> str | None:
@@ -436,35 +441,51 @@ def get_create_notion_task_tool(
             if channel_id == "C03U6N87RKN":
                 properties["아이디어 뱅크"] = {"checkbox": True}
 
-        response = notion.pages.create(
-            parent={"data_source_id": data_source_id}, properties=properties
+        return await asyncio.to_thread(
+            _create_notion_task_page,
+            data_source_id,
+            properties,
+            slack_thread_url,
+            blocks,
         )
 
-        page_id = response["id"]
+    return create_notion_task
 
-        if slack_thread_url:
-            notion.blocks.children.append(
-                block_id=page_id,
-                children=[{"type": "bookmark", "bookmark": {"url": slack_thread_url}}],
-            )
 
-        if blocks:
-            for block in parse_md(blocks):
-                flattened_block = flatten_deep_children(block)
-                notion.blocks.children.append(page_id, children=[flattened_block])
+def _create_notion_task_page(
+    data_source_id: str,
+    properties: dict,
+    slack_thread_url: str,
+    blocks: str | None,
+) -> str:
+    """작업 페이지와 본문 블록을 만듭니다. notion-client는 동기라 스레드에서 실행합니다."""
+    response = notion.pages.create(
+        parent={"data_source_id": data_source_id}, properties=properties
+    )
 
-            template = """# 작업 내용
+    page_id = response["id"]
+
+    if slack_thread_url:
+        notion.blocks.children.append(
+            block_id=page_id,
+            children=[{"type": "bookmark", "bookmark": {"url": slack_thread_url}}],
+        )
+
+    if blocks:
+        for block in parse_md(blocks):
+            flattened_block = flatten_deep_children(block)
+            notion.blocks.children.append(page_id, children=[flattened_block])
+
+        template = """# 작업 내용
 -
 # 검증
 
             """
-            for block in parse_md(template):
-                flattened_block = flatten_deep_children(block)
-                notion.blocks.children.append(page_id, children=[flattened_block])
+        for block in parse_md(template):
+            flattened_block = flatten_deep_children(block)
+            notion.blocks.children.append(page_id, children=[flattened_block])
 
-        return response["url"]
-
-    return create_notion_task
+    return response["url"]
 
 
 # 노션 페이지 ID 입력 타입 (LLM 도구 인자 공용)
@@ -505,11 +526,37 @@ NotionPageId = Annotated[
 ]
 
 
+def _update_notion_task_deadline(page_id: str, new_deadline: str) -> None:
+    """노션 타임라인을 갱신합니다. notion-client는 동기라 스레드에서 실행합니다."""
+    page_data = notion.pages.retrieve(page_id)
+
+    old_start = None
+    timeline_property = page_data["properties"].get("타임라인", {})
+    date_value = timeline_property.get("date", {})
+
+    if date_value:
+        old_start = date_value.get("start")
+
+        if old_start:
+            new_start = old_start
+        else:
+            new_start = new_deadline
+    else:
+        new_start = new_deadline
+
+    new_end = new_deadline
+
+    notion.pages.update(
+        page_id=page_id,
+        properties={"타임라인": {"date": {"start": new_start, "end": new_end}}},
+    )
+
+
 def get_update_notion_task_deadline_tool():
     """노션 작업 마감일 업데이트 도구를 반환합니다."""
 
     @tool
-    def update_notion_task_deadline(
+    async def update_notion_task_deadline(
         page_id: NotionPageId,
         new_deadline: Annotated[str, "'YYYY-MM-DD' 형태의 문자열"],
     ):
@@ -517,28 +564,7 @@ def get_update_notion_task_deadline_tool():
         노션 작업의 타임라인을 변경합니다.
         주로 노션 작업에 대한 기한, 마감 일자 변경이 요청될 때 쓰입니다.
         """
-        page_data = notion.pages.retrieve(page_id)
-
-        old_start = None
-        timeline_property = page_data["properties"].get("타임라인", {})
-        date_value = timeline_property.get("date", {})
-
-        if date_value:
-            old_start = date_value.get("start")
-
-            if old_start:
-                new_start = old_start
-            else:
-                new_start = new_deadline
-        else:
-            new_start = new_deadline
-
-        new_end = new_deadline
-
-        notion.pages.update(
-            page_id=page_id,
-            properties={"타임라인": {"date": {"start": new_start, "end": new_end}}},
-        )
+        await asyncio.to_thread(_update_notion_task_deadline, page_id, new_deadline)
 
     return update_notion_task_deadline
 
@@ -560,14 +586,16 @@ def get_update_notion_task_status_tool(data_source_id: str):
         new_status: str = status_field
 
     @tool("update_notion_task_status", args_schema=UpdateNotionTaskStatusInput)
-    def update_notion_task_status(page_id: str, new_status: str) -> None:
+    async def update_notion_task_status(page_id: str, new_status: str) -> None:
         """
         노션 작업의 상태를 변경합니다.
         주로 노션 작업을 진행 중, 완료, 중단 등으로 변경할 때 쓰입니다.
         상태 옵션은 실제 노션 데이터베이스에서 동적으로 가져옵니다.
         """
-        notion.pages.update(
-            page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
+        await asyncio.to_thread(
+            lambda: notion.pages.update(
+                page_id=page_id, properties={"상태": {"status": {"name": new_status}}}
+            )
         )
 
     return update_notion_task_status
@@ -577,16 +605,54 @@ def get_notion_page_tool():
     """노션 페이지 조회 도구를 반환합니다."""
 
     @tool
-    def get_notion_page(
+    async def get_notion_page(
         page_id: NotionPageId,
     ) -> str:
         """
         노션 페이지를 마크다운 형태로 조회합니다.
         www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
-        return notion_page_to_markdown(page_id)
+        return await asyncio.to_thread(notion_page_to_markdown, page_id)
 
     return get_notion_page
+
+
+def _create_notion_follow_up_task(
+    parent_page_id: str, component: str, data_source_id: str
+) -> str:
+    """후속 작업 페이지를 만듭니다. notion-client는 동기라 스레드에서 실행합니다."""
+    parent_page_data = notion.pages.retrieve(parent_page_id)
+
+    parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"]["content"]
+    parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][0][
+        "name"
+    ]
+
+    if parent_title.endswith(f" - {parent_component}"):
+        title = parent_title.replace(f" - {parent_component}", f" - {component}")
+    else:
+        title = f"{parent_title} - {component}"
+
+    properties = {
+        "제목": {"title": [{"text": {"content": title}}]},
+        "유형": {"select": {"name": "작업 🔨"}},
+        "구성요소": {"multi_select": [{"name": component}]},
+        "상태": {"status": {"name": "대기"}},
+        "선행 작업": {"relation": [{"id": parent_page_id}]},
+    }
+
+    if parent_page_data["properties"]["프로젝트"]["relation"]:
+        properties["프로젝트"] = {
+            "relation": [
+                {"id": parent_page_data["properties"]["프로젝트"]["relation"][0]["id"]}
+            ]
+        }
+
+    response = notion.pages.create(
+        parent={"data_source_id": data_source_id}, properties=properties
+    )
+
+    return response["url"]
 
 
 def get_create_notion_follow_up_task_tool(data_source_id: str):
@@ -602,7 +668,7 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
         )
 
     @tool("create_notion_follow_up_task", args_schema=CreateNotionFollowUpTaskInput)
-    def create_notion_follow_up_task(parent_page_id: str, component: str) -> str:
+    async def create_notion_follow_up_task(parent_page_id: str, component: str) -> str:
         """
         선행 작업(parent_page_id)에 대하여 후속 작업을 생성합니다.
         특정 구성 요소에 대해서 생성될 수 있습니다.
@@ -612,44 +678,9 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
         Returns:
             생성된 노션 페이지의 URL
         """
-        parent_page_data = notion.pages.retrieve(parent_page_id)
-
-        parent_title = parent_page_data["properties"]["제목"]["title"][0]["text"][
-            "content"
-        ]
-        parent_component = parent_page_data["properties"]["구성요소"]["multi_select"][
-            0
-        ]["name"]
-
-        if parent_title.endswith(f" - {parent_component}"):
-            title = parent_title.replace(f" - {parent_component}", f" - {component}")
-        else:
-            title = f"{parent_title} - {component}"
-
-        properties = {
-            "제목": {"title": [{"text": {"content": title}}]},
-            "유형": {"select": {"name": "작업 🔨"}},
-            "구성요소": {"multi_select": [{"name": component}]},
-            "상태": {"status": {"name": "대기"}},
-            "선행 작업": {"relation": [{"id": parent_page_id}]},
-        }
-
-        if parent_page_data["properties"]["프로젝트"]["relation"]:
-            properties["프로젝트"] = {
-                "relation": [
-                    {
-                        "id": parent_page_data["properties"]["프로젝트"]["relation"][0][
-                            "id"
-                        ]
-                    }
-                ]
-            }
-
-        response = notion.pages.create(
-            parent={"data_source_id": data_source_id}, properties=properties
+        return await asyncio.to_thread(
+            _create_notion_follow_up_task, parent_page_id, component, data_source_id
         )
-
-        return response["url"]
 
     return create_notion_follow_up_task
 
