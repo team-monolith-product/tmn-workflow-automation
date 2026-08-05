@@ -17,9 +17,14 @@ import os
 import time
 
 import redis
-from openai import OpenAI
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
 from slack_sdk.web.async_client import AsyncWebClient
 
+from service.knowledge.db import connect
+from service.knowledge.search import render_results, search_items
 from service.llm import DEFAULT_MODEL
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 from service.teams import PRODUCT_USERGROUP_IDS, TEAM_USERGROUP_IDS
@@ -27,6 +32,12 @@ from service.worktime import get_working_emails
 
 REDIS_KEY_PATTERN = "workflow_automation/bug_assigment_time_list"
 ASSIGNMENT_COUNT_SECONDS = 7 * 24 * 60 * 60
+
+# query_log에서 사람이 친 검색과 구분하기 위한 표식
+KNOWLEDGE_ACTOR = "bot:route_bug"
+
+# 검색을 끝없이 반복하는 것을 막는 상한
+KNOWLEDGE_RECURSION_LIMIT = 12
 
 
 async def route_bug(
@@ -55,7 +66,7 @@ async def route_bug(
         decode_responses=True,
     )
 
-    team, priority = extract_team_and_priority_from_report_text(message_text)
+    team, priority = await extract_team_and_priority_from_report_text(message_text)
     print(f"Extracted team={team}, priority={priority}")
     working_emails = get_working_emails()
     print(f"Working emails: {working_emails}")
@@ -99,66 +110,73 @@ async def route_bug(
     )
 
 
-def extract_team_and_priority_from_report_text(
-    text,
+class TeamAndPriority(BaseModel):
+    """버그 신고에서 뽑아낸 담당 직군과 우선순위"""
+
+    team: Literal["ie", "fe", "be"] = Field(description="버그와 관련된 직군 식별자")
+    priority: Literal["보통", "높음", "긴급"] = Field(description="버그의 우선순위")
+
+
+EXTRACT_SYSTEM_PROMPT = """
+당신은 버그 신고 내용을 분석하여 관련 직군과 우선순위를 결정하는 전문가입니다.
+
+판단하기 전에 search_knowledge 로 사내 과거 대화를 찾아보세요.
+신고에 등장하는 기능 이름, 화면 이름, 식별자를 핵심 단어로 넣습니다.
+증상만 보면 화면 문제로 보이지만 실제로는 서버 문제인 신고가 잦아서,
+같은 증상을 누가 어느 채널에서 다뤘는지가 신고 본문보다 나은 근거입니다.
+개발 채널은 직군으로 나뉘어 있습니다. t_개발_프론트는 fe, t_개발_백은 be,
+t_개발_인프라는 ie 입니다.
+
+직군 분류:
+- fe: 프론트엔드 관련 버그 (UI, 사용자 상호작용, 브라우저 렌더링 등)
+- be: 백엔드 관련 버그 (API, 데이터베이스, 서버 로직 등)
+- ie: 인프라 관련 버그 (배포, 서버 환경, 네트워크, 성능 등)
+
+우선순위 분류:
+- 신고 본문에 아래 분류가 직접 포함된다면 그 분류를 추출하세요. 그렇지 않다면 다음 기준을 사용하여 판단하세요.
+- 긴급: 수 시간 내에 즉시 해결이 필요한 경우
+- 높음: 며칠 내에 해결이 필요한 경우
+- 보통: 버그가 과거에도 존재한 것으로 추정되며 해결이 시급하지 않은 경우
+"""
+
+
+@tool
+def search_knowledge(query: str, channel: str | None = None) -> str:
+    """
+    사내 슬랙 공개 채널의 과거 대화를 검색합니다.
+    검색어는 어휘가 그대로 맞아야 하므로 문장이 아니라 핵심 단어를 넣습니다.
+    channel에 "t_개발_백" 같은 채널 이름을 주면 그 채널로 좁힙니다.
+    """
+    with connect() as conn:
+        results = search_items(
+            conn,
+            query,
+            actor=KNOWLEDGE_ACTOR,
+            tool="route_bug",
+            channel=channel,
+        )
+    return render_results(results)
+
+
+async def extract_team_and_priority_from_report_text(
+    text: str,
 ) -> tuple[Literal["ie", "fe", "be"], Literal["보통", "높음", "긴급"]]:
-    """버그 신고 메시지 내용을 분석하여 관련 팀/구성 요소 반환"""
-    client = OpenAI()
-    response = client.responses.create(
-        model=DEFAULT_MODEL,
-        input=[
-            {
-                "role": "system",
-                "content": """
-                    당신은 버그 신고 내용을 분석하여 관련 팀과 우선순위를 결정하는 전문가입니다.
-                    
-                    팀 분류:
-                    - fe: 프론트엔드 관련 버그 (UI, 사용자 상호작용, 브라우저 렌더링 등)
-                    - be: 백엔드 관련 버그 (API, 데이터베이스, 서버 로직 등)
-                    - ie: 인프라 관련 버그 (배포, 서버 환경, 네트워크, 성능 등)
-                    
-                    우선순위 분류:
-                    - 신고 본문에 아래 분류가 직접 포함된다면 그 분류를 추출하세요. 그렇지 않다면 다음 기준을 사용하여 판단하세요.
-                    - 긴급: 수 시간 내에 즉시 해결이 필요한 경우
-                    - 높음: 며칠 내에 해결이 필요한 경우
-                    - 보통: 버그가 과거에도 존재한 것으로 추정되며 해결이 시급하지 않은 경우
-                    
-                    사용자의 버그 신고 내용을 분석하여 JSON 형식으로 정확하게 응답하세요.
-                    """,
-            },
-            {"role": "user", "content": text},
-        ],
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "team_and_priority",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "team": {
-                            "type": "string",
-                            "enum": ["ie", "fe", "be"],
-                            "description": "버그와 관련된 팀 식별자",
-                        },
-                        "priority": {
-                            "type": "string",
-                            "enum": ["보통", "높음", "긴급"],
-                            "description": "버그의 우선순위",
-                        },
-                    },
-                    "required": ["team", "priority"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            }
-        },
+    """버그 신고 메시지 내용을 분석하여 관련 직군/우선순위 반환"""
+    # output_version 없이는 chat/completions로 나가는데, 그 경로는 추론 모델에
+    # 함수 도구를 붙이는 것을 400으로 막는다.
+    agent = create_react_agent(
+        ChatOpenAI(model=DEFAULT_MODEL, output_version="responses/v1"),
+        [search_knowledge],
+        prompt=EXTRACT_SYSTEM_PROMPT,
+        response_format=TeamAndPriority,
+    )
+    response = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": text}]},
+        {"recursion_limit": KNOWLEDGE_RECURSION_LIMIT},
     )
 
-    team_and_priority = json.loads(response.output_text)
-    return (
-        team_and_priority["team"],
-        team_and_priority["priority"],
-    )
+    team_and_priority: TeamAndPriority = response["structured_response"]
+    return team_and_priority.team, team_and_priority.priority
 
 
 def get_email_to_bug_count(
@@ -451,7 +469,7 @@ if __name__ == "__main__":
         )
         message_text = "버그 신고 내용입니다."
         product = "코들"
-        team, priority = extract_team_and_priority_from_report_text(message_text)
+        team, priority = await extract_team_and_priority_from_report_text(message_text)
         working_emails = get_working_emails()
         email_to_user_id = await get_email_to_user_id_async(slack_client)
         team_to_emails = await get_team_to_emails(slack_client, email_to_user_id)
