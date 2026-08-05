@@ -23,6 +23,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
+from service.notion_transport import build_client as build_notion_http_client
 from .tool_status_handler import ToolStatusHandler
 
 # 환경 변수 로드
@@ -117,8 +118,11 @@ def _collect_nested_text(blocks: list, indent_level: int = 0) -> str:
 # 시간대 설정
 KST = ZoneInfo("Asia/Seoul")
 
-# 노션 클라이언트 초기화
-notion = NotionClient(auth=os.environ.get("NOTION_TOKEN"))
+# 노션 클라이언트 초기화. 한도를 지키는 전송 계층을 끼워 프로세스 전체가
+# 한 계량기를 쓴다.
+notion = NotionClient(
+    auth=os.environ.get("NOTION_TOKEN", "").strip(), client=build_notion_http_client()
+)
 
 
 def notion_page_to_markdown(page_id: str) -> str:

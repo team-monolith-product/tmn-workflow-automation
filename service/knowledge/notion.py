@@ -104,6 +104,44 @@ def parent_ref(node: dict[str, Any]) -> tuple[str, str] | None:
     return kind, parent[kind]
 
 
+def build_fetch_node(
+    client: Client, cache: dict[str, dict[str, Any] | None]
+) -> Callable[[str, str], dict[str, Any] | None]:
+    """search에 나오지 않는 조상을 종류에 맞는 API로 받아오는 함수를 만듭니다.
+
+    데이터소스가 여기 있는 이유는 search가 데이터소스를 다 돌려주지 않아서입니다.
+    실측에서 행이 참조하는 470개 중 28개가 빠져 있었고 그 아래 5,182행이 딸려
+    있었습니다.
+
+    캐시를 호출자가 넘깁니다. 사슬을 잇느라 받아온 조상이 곧 최상위의 이름을
+    찾을 곳이기도 해서입니다.
+
+    Args:
+        client: 노션 클라이언트
+        cache: 노드 ID → 받아온 노드. 못 받았으면 None이 들어갑니다
+
+    Returns:
+        Callable[[str, str], dict[str, Any] | None]: derive_roots에 넘길 함수
+    """
+    retrieve = {
+        "database_id": client.databases.retrieve,
+        "data_source_id": client.data_sources.retrieve,
+        "block_id": client.blocks.retrieve,
+        "page_id": client.pages.retrieve,
+    }
+
+    def fetch_node(kind: str, node_id: str) -> dict[str, Any] | None:
+        if node_id not in cache:
+            get = retrieve.get(kind)
+            try:
+                cache[node_id] = get(node_id) if get else None
+            except Exception:
+                cache[node_id] = None
+        return cache[node_id]
+
+    return fetch_node
+
+
 def is_database_row(node: dict[str, Any]) -> bool:
     """데이터베이스 안의 행인지 봅니다.
 
