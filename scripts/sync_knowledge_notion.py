@@ -173,7 +173,8 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
 
     nodes = fetch_accessible(client)
     by_id = {node["id"]: node for node in nodes}
-    parents: dict[str, tuple[str, str] | None] = {}
+    # 사슬을 잇느라 받아온 조상. 최상위 이름을 찾을 때도 쓴다.
+    fetched: dict[str, dict | None] = {}
 
     # search가 돌려주지 않는 조상을 종류에 맞는 API로 받아온다. 데이터소스가
     # 여기 있는 이유는 search가 데이터소스를 다 돌려주지 않아서다. 실측에서
@@ -185,17 +186,20 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
         "page_id": lambda i: client.pages.retrieve(i),
     }
 
-    def fetch_parent(kind: str, node_id: str) -> tuple[str, str] | None:
-        """search에 나오지 않는 조상의 부모를 받아옵니다."""
-        if node_id not in parents:
+    def fetch_node(kind: str, node_id: str) -> dict | None:
+        """search에 나오지 않는 조상을 받아옵니다."""
+        if node_id not in fetched:
             retrieve = RETRIEVE.get(kind)
             try:
-                parents[node_id] = parent_ref(retrieve(node_id)) if retrieve else None
+                fetched[node_id] = retrieve(node_id) if retrieve else None
             except Exception:
-                parents[node_id] = None
-        return parents[node_id]
+                fetched[node_id] = None
+        return fetched[node_id]
 
-    roots = derive_roots(nodes, fetch_parent=fetch_parent)
+    roots = derive_roots(nodes, fetch_node=fetch_node)
+    # 최상위가 search에 없던 노드일 수 있다. "회의록"처럼 워크스페이스 직속
+    # 데이터베이스가 그렇다.
+    resolved = {**{k: v for k, v in fetched.items() if v}, **by_id}
     pages = [node for node in nodes if node["object"] == "page"]
     documents = [page for page in pages if not is_database_row(page)]
 
@@ -212,7 +216,7 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
         f"문서 페이지 {len(documents)}개, 데이터베이스 행 {len(pages) - len(documents)}개\n"
     )
 
-    titles = {node["id"]: node_title(node) for node in nodes}
+    titles = {node_id: node_title(node) for node_id, node in resolved.items()}
     documental = classify_databases(rows_by_database, titles)
 
     candidates = list(documents)
@@ -222,7 +226,7 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     # 최상위를 못 찾은 페이지는 넣지 않는다. 사슬이 중간에 끊기면 최상위가
     # 블록이나 지워진 데이터베이스의 ID가 되는데, 그것으로 data_source를
     # 만들면 이름도 실체도 없는 출처가 검색 결과에 찍힌다.
-    targets = [page for page in candidates if roots[page["id"]] in by_id]
+    targets = [page for page in candidates if roots[page["id"]] in resolved]
     dropped = len(candidates) - len(targets)
     if dropped:
         print(f"최상위를 못 찾아 제외 {dropped}개")

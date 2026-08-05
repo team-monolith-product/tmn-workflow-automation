@@ -57,6 +57,16 @@ def test_데이터소스_제목은_최상위_필드에_있다():
     assert node_title(data_source) == "회의록"
 
 
+def test_데이터베이스_제목도_최상위_필드에_있다():
+    # 워크스페이스 직속 데이터베이스가 최상위가 되면 이 이름이 출처로 찍힌다.
+    database = {
+        "object": "database",
+        "id": "db",
+        "title": [{"plain_text": "회의록"}],
+    }
+    assert node_title(database) == "회의록"
+
+
 def test_제목이_비어_있으면_대체_문구를_쓴다():
     assert node_title({"properties": {"Name": {"type": "title", "title": []}}}) == (
         "제목 없음"
@@ -99,7 +109,10 @@ def test_데이터베이스_행은_데이터베이스를_넘어_팀스페이스�
         _page("row", {"type": "data_source_id", "data_source_id": "d1"}),
     ]
 
-    roots = derive_roots(nodes, fetch_parent=lambda kind, i: ("page_id", "hq"))
+    roots = derive_roots(
+        nodes,
+        fetch_node=lambda kind, i: _page("db", {"type": "page_id", "page_id": "hq"}),
+    )
     assert roots["row"] == "hq"
 
 
@@ -110,7 +123,10 @@ def test_블록_안에_있는_페이지는_블록을_풀어_올라간다():
         _page("a", {"type": "block_id", "block_id": "토글"}),
     ]
 
-    roots = derive_roots(nodes, fetch_parent=lambda kind, i: ("page_id", "hq"))
+    roots = derive_roots(
+        nodes,
+        fetch_node=lambda kind, i: _page("db", {"type": "page_id", "page_id": "hq"}),
+    )
     assert roots["a"] == "hq"
 
 
@@ -118,6 +134,20 @@ def test_못_풀면_거기서_멈춘다():
     nodes = [_page("a", {"type": "block_id", "block_id": "토글"})]
 
     assert derive_roots(nodes)["a"] == "a"
+
+
+def test_워크스페이스_직속_데이터베이스가_최상위가_된다():
+    # "회의록"이 그렇다. 조회 실패와 "부모가 워크스페이스라 없음"을 같은
+    # None으로 뭉뚱그리면 그 아래가 전부 엉뚱한 자리에 붙는다.
+    nodes = [_page("row", {"type": "database_id", "database_id": "db"})]
+    database = {
+        "object": "database",
+        "id": "db",
+        "title": [{"plain_text": "회의록"}],
+        "parent": {"type": "workspace", "workspace": True},
+    }
+
+    assert derive_roots(nodes, fetch_node=lambda kind, i: database)["row"] == "db"
 
 
 def test_데이터베이스_행_여부():

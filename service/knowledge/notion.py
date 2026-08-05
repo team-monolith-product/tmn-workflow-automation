@@ -118,7 +118,7 @@ def is_database_row(node: dict[str, Any]) -> bool:
 
 def derive_roots(
     nodes: list[dict[str, Any]],
-    fetch_parent: Callable[[str, str], tuple[str, str] | None] | None = None,
+    fetch_node: Callable[[str, str], dict[str, Any] | None] | None = None,
 ) -> dict[str, str]:
     """각 노드가 어느 팀스페이스에 속하는지 정합니다.
 
@@ -132,17 +132,22 @@ def derive_roots(
     - 데이터베이스 행의 부모는 데이터소스이고, 데이터소스의 부모는 데이터베이스다
     - 토글이나 컬럼 안에 있는 페이지의 부모는 블록이다
 
-    둘 다 fetch_parent로 잇습니다. 실측에서 "중요 문서"는 데이터소스 →
+    둘 다 fetch_node로 잇습니다. 실측에서 "중요 문서"는 데이터소스 →
     데이터베이스 → 페이지 → 블록 → 블록 → 데이터베이스 → 페이지(보안)로
     여섯 단계였습니다.
 
+    fetch_node는 부모 참조가 아니라 노드 자체를 돌려줍니다. 부모 참조만 받으면
+    "조회 실패"와 "부모가 워크스페이스라 없음"이 똑같이 None이 되어 구분할 수
+    없습니다. 실제로 "회의록"은 팀스페이스가 아니라 워크스페이스 직속
+    데이터베이스인데, 이걸 실패로 보면 그 아래 466건이 엉뚱한 자리에 붙습니다.
+
     Args:
         nodes: fetch_accessible 결과
-        fetch_parent: (부모 종류, 부모 ID)를 받아 그 위의 (종류, ID)를 돌려주는
-            함수. 생략하면 사슬이 끊긴 자리를 최상위로 둡니다
+        fetch_node: (종류, ID)를 받아 그 노드 객체를 돌려주는 함수. 못 찾으면
+            None. 생략하면 사슬이 끊긴 자리에서 멈춥니다
 
     Returns:
-        dict[str, str]: 노드 ID → 팀스페이스 ID
+        dict[str, str]: 노드 ID → 최상위 ID
     """
     by_id = {node["id"]: node for node in nodes}
     memo: dict[str, str] = {}
@@ -157,12 +162,12 @@ def derive_roots(
         seen.add(node_id)
 
         node = by_id.get(node_id)
+        if node is None and fetch_node is not None:
+            node = fetch_node(kind, node_id)
         if node is None:
-            # 사슬이 여기서 끊긴다. 더 못 올라가면 마지막으로 아는 노드가
-            # 최상위다. 모르는 블록 ID를 최상위로 두면 이름 없는 data_source가
-            # 생기고, 권한 밖 페이지를 두면 없는 것을 가리킨다.
-            above = fetch_parent(kind, node_id) if fetch_parent else None
-            return root_of(*above, seen, known) if above else known
+            # 못 찾았다. 마지막으로 아는 노드가 최상위다. 모르는 블록 ID를
+            # 최상위로 두면 이름 없는 data_source가 생긴다.
+            return known
 
         above = parent_ref(node)
         result = root_of(*above, seen, node_id) if above else node_id
@@ -210,17 +215,19 @@ def has_document_body(lengths: list[int], min_chars: int = MIN_BODY_CHARS) -> bo
 
 
 def node_title(node: dict[str, Any]) -> str:
-    """페이지나 데이터소스의 제목을 뽑습니다.
+    """페이지·데이터소스·데이터베이스의 제목을 뽑습니다.
 
-    데이터소스는 title이 프로퍼티가 아니라 최상위 필드입니다.
+    데이터소스와 데이터베이스는 title이 프로퍼티가 아니라 최상위 필드입니다.
+    데이터베이스가 여기 있는 이유는 워크스페이스 직속 데이터베이스가 최상위가
+    될 수 있어서입니다.
 
     Args:
-        node: 노션 page 또는 data_source 객체
+        node: 노션 page·data_source·database 객체
 
     Returns:
         str: 제목. 비어 있으면 "제목 없음"
     """
-    if node.get("object") == "data_source":
+    if node.get("object") in ("data_source", "database"):
         text = "".join(part["plain_text"] for part in node.get("title", []))
         return text[:200] or "제목 없음"
 
