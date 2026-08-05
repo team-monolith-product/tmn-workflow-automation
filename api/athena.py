@@ -2,6 +2,7 @@
 AWS Athena API 래퍼 함수들
 """
 
+import asyncio
 import os
 import time
 import boto3
@@ -59,11 +60,14 @@ def get_query_status(query_execution_id: str) -> dict:
     return response["QueryExecution"]
 
 
-def wait_for_query_completion(
+async def wait_for_query_completion(
     query_execution_id: str, max_wait_seconds: int = 300
 ) -> dict:
     """
     쿼리가 완료될 때까지 대기합니다.
+
+    폴링 간격은 `asyncio.sleep`으로 기다리고 boto3 호출만 스레드로 넘깁니다.
+    대기 시간 대부분이 이벤트 루프로 돌아가므로 다른 코루틴이 계속 진행합니다.
 
     Args:
         query_execution_id: 쿼리 실행 ID
@@ -79,7 +83,7 @@ def wait_for_query_completion(
     start_time = time.time()
 
     while True:
-        status_info = get_query_status(query_execution_id)
+        status_info = await asyncio.to_thread(get_query_status, query_execution_id)
         state = status_info["Status"]["State"]
 
         if state == "SUCCEEDED":
@@ -91,7 +95,7 @@ def wait_for_query_completion(
         if time.time() - start_time > max_wait_seconds:
             raise TimeoutError(f"Query execution timed out after {max_wait_seconds}s")
 
-        time.sleep(1)
+        await asyncio.sleep(1)
 
 
 def get_query_results(query_execution_id: str, max_results: int = 1000) -> dict:
@@ -112,7 +116,9 @@ def get_query_results(query_execution_id: str, max_results: int = 1000) -> dict:
     return response
 
 
-def execute_and_wait(query: str, database: str, max_wait_seconds: int = 300) -> dict:
+async def execute_and_wait(
+    query: str, database: str, max_wait_seconds: int = 300
+) -> dict:
     """
     쿼리를 실행하고 완료될 때까지 대기한 후 결과를 반환합니다.
 
@@ -124,6 +130,6 @@ def execute_and_wait(query: str, database: str, max_wait_seconds: int = 300) -> 
     Returns:
         dict: 쿼리 결과 (원본 Athena 응답)
     """
-    query_execution_id = execute_query(query, database)
-    wait_for_query_completion(query_execution_id, max_wait_seconds)
-    return get_query_results(query_execution_id)
+    query_execution_id = await asyncio.to_thread(execute_query, query, database)
+    await wait_for_query_completion(query_execution_id, max_wait_seconds)
+    return await asyncio.to_thread(get_query_results, query_execution_id)

@@ -18,10 +18,10 @@ load_dotenv()
 class TestRedashIntegration:
     """Redash API Integration 테스트"""
 
-    def test_list_dashboards(self):
+    async def test_list_dashboards(self):
         """대시보드 목록 조회 integration 테스트"""
         try:
-            result = redash.list_dashboards()
+            result = await redash.list_dashboards()
             print(f"\n대시보드 목록 조회 성공!")
             print(f"결과 키: {result.keys()}")
 
@@ -37,11 +37,11 @@ class TestRedashIntegration:
             print(f"✗ 대시보드 목록 조회 실패: {str(e)}")
             raise
 
-    def test_search_queries(self):
+    async def test_search_queries(self):
         """쿼리 검색 integration 테스트"""
         try:
             # 빈 검색어로 전체 쿼리 조회
-            result = redash.search_queries(query="", page=1, page_size=5)
+            result = await redash.search_queries(query="", page=1, page_size=5)
             print(f"\n쿼리 검색 성공!")
             print(f"결과 키: {result.keys()}")
 
@@ -80,7 +80,7 @@ class TestAthenaIntegration:
     @pytest.mark.skip(
         reason="실제 쿼리 실행은 비용이 발생할 수 있으므로 기본적으로 스킵"
     )
-    def test_execute_simple_query(self):
+    async def test_execute_simple_query(self):
         """간단한 쿼리 실행 integration 테스트 (스킵됨)"""
         try:
             # 매우 간단한 쿼리로 테스트
@@ -88,7 +88,7 @@ class TestAthenaIntegration:
             database = "default"  # 기본 데이터베이스 사용
 
             print(f"\n쿼리 실행 시작: {query}")
-            result = athena.execute_and_wait(query, database, max_wait_seconds=30)
+            result = await athena.execute_and_wait(query, database, max_wait_seconds=30)
 
             print(f"쿼리 실행 완료!")
             print(f"결과 키: {result.keys()}")

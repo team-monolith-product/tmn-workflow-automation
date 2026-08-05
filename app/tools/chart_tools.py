@@ -2,9 +2,11 @@
 차트 시각화 관련 LangChain Tools
 """
 
+import asyncio
+import functools
 import io
-import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Callable, Any
 
 from langchain_core.tools import tool
@@ -15,6 +17,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+
+# pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다
+_code_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chart-exec")
 
 
 # 한글 폰트 설정
@@ -52,6 +57,49 @@ def setup_korean_font():
 
 # 폰트 설정 초기화
 setup_korean_font()
+
+
+def _run_code(
+    code: str, execute_athena_query: Callable[..., dict]
+) -> tuple[str, io.BytesIO | None, str | None]:
+    """
+    LLM이 만든 코드를 실행하고 결과를 반환합니다.
+
+    matplotlib 접근이 한 스레드 안에서만 일어나도록 figure 저장까지 여기서 마칩니다.
+
+    Args:
+        code: 실행할 파이썬 코드
+        execute_athena_query: 코드에 주입할 Athena 조회 함수
+
+    Returns:
+        tuple: (STDOUT 출력, 차트 PNG 버퍼 또는 None, 실패 시 스택트레이스)
+    """
+    captured_output = io.StringIO()
+    exec_globals = {
+        "execute_athena_query": execute_athena_query,
+        "plt": plt,
+        "matplotlib": matplotlib,
+        "pd": pd,
+        # sys.stdout은 프로세스 전역이라 교체하지 않고 print만 가로챈다
+        "print": functools.partial(print, file=captured_output),
+        "__builtins__": __builtins__,
+    }
+
+    try:
+        exec(code, exec_globals, {})
+
+        fig = plt.gcf()
+        if not fig.get_axes():
+            return captured_output.getvalue(), None, None
+
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format="png", dpi=150, bbox_inches="tight")
+        img_buffer.seek(0)
+        return captured_output.getvalue(), img_buffer, None
+    except Exception:
+        return captured_output.getvalue(), None, traceback.format_exc()
+    finally:
+        plt.close("all")
 
 
 def get_execute_python_with_chart_tool(
@@ -130,85 +178,43 @@ def get_execute_python_with_chart_tool(
         Returns:
             str: 실행 결과 (STDOUT 출력 + 성공/실패 메시지)
         """
-        # STDOUT 캡처를 위한 StringIO
-        captured_output = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured_output
+        loop = asyncio.get_running_loop()
 
-        try:
-            # 코드 실행을 위한 globals 준비
-            # athena.execute_and_wait 함수를 제공
-            exec_globals = {
-                "execute_athena_query": athena.execute_and_wait,
-                "plt": plt,
-                "matplotlib": matplotlib,
-                "pd": pd,
-                "__builtins__": __builtins__,
-            }
-            exec_locals = {}
+        def execute_athena_query(
+            query: str, database: str, max_wait_seconds: int = 300
+        ) -> dict:
+            """코드가 호출하는 동기 진입점. 쿼리 자체는 메인 루프에서 실행됩니다."""
+            return asyncio.run_coroutine_threadsafe(
+                athena.execute_and_wait(query, database, max_wait_seconds), loop
+            ).result()
 
-            # 코드 실행
-            exec(code, exec_globals, exec_locals)
+        stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
+            _code_executor, functools.partial(_run_code, code, execute_athena_query)
+        )
 
-            # STDOUT 복원
-            sys.stdout = old_stdout
-            stdout_output = captured_output.getvalue()
-
-            # matplotlib figure가 생성되었는지 확인
-            fig = plt.gcf()
-            if fig.get_axes():
-                # figure가 있으면 슬랙에 업로드
-                if slack_client and channel and thread_ts:
-                    # 이미지를 메모리에 저장
-                    img_buffer = io.BytesIO()
-                    plt.savefig(img_buffer, format="png", dpi=150, bbox_inches="tight")
-                    img_buffer.seek(0)
-
-                    # 슬랙에 이미지 업로드
-                    await slack_client.files_upload_v2(
-                        channel=channel,
-                        thread_ts=thread_ts,
-                        file=img_buffer,
-                        filename="chart.png",
-                        title="차트 시각화 결과",
-                    )
-
-                    # figure 닫기
-                    plt.close(fig)
-
-                    result_message = "✅ 코드 실행 성공: 차트를 슬랙에 업로드했습니다."
-                else:
-                    plt.close(fig)
-                    result_message = "✅ 코드 실행 성공: 차트가 생성되었으나 슬랙 업로드에 필요한 정보가 없습니다."
-            else:
-                # figure가 없으면 일반 코드 실행으로 간주
-                result_message = "✅ 코드 실행 성공"
-
-            # STDOUT이 있으면 포함
-            if stdout_output:
-                return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
-            else:
-                return result_message
-
-        except Exception as e:
-            # STDOUT 복원
-            sys.stdout = old_stdout
-            stdout_output = captured_output.getvalue()
-
-            # 스택트레이스 추출
-            tb = traceback.format_exc()
-
-            # 에러 메시지 구성
-            error_message = f"❌ 코드 실행 실패:\n\n{tb}"
-
-            # STDOUT이 있으면 포함
+        if error_traceback:
+            error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"
             if stdout_output:
                 error_message += f"\n\nSTDOUT:\n{stdout_output}"
-
             return error_message
-        finally:
-            # 혹시 모를 figure가 남아있으면 닫기
-            plt.close("all")
+
+        if img_buffer is None:
+            result_message = "✅ 코드 실행 성공"
+        elif slack_client and channel and thread_ts:
+            await slack_client.files_upload_v2(
+                channel=channel,
+                thread_ts=thread_ts,
+                file=img_buffer,
+                filename="chart.png",
+                title="차트 시각화 결과",
+            )
+            result_message = "✅ 코드 실행 성공: 차트를 슬랙에 업로드했습니다."
+        else:
+            result_message = "✅ 코드 실행 성공: 차트가 생성되었으나 슬랙 업로드에 필요한 정보가 없습니다."
+
+        if stdout_output:
+            return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
+        return result_message
 
     return execute_python_with_chart
 

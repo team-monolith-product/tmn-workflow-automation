@@ -58,10 +58,10 @@ class TestDataAnalysisE2E:
         assert last_blocks_call.kwargs.get("thread_ts") == "1234567890.123456"
 
     @pytest.mark.asyncio
-    @patch("api.redash.list_dashboards")
-    @patch("api.redash.get_dashboard")
-    @patch("api.redash.get_query")
-    @patch("api.athena.execute_and_wait")
+    @patch("api.redash.list_dashboards", new_callable=AsyncMock)
+    @patch("api.redash.get_dashboard", new_callable=AsyncMock)
+    @patch("api.redash.get_query", new_callable=AsyncMock)
+    @patch("api.athena.execute_and_wait", new_callable=AsyncMock)
     async def test_full_tool_chain(
         self, mock_athena_exec, mock_get_query, mock_get_dashboard, mock_list_dashboards
     ):
@@ -120,12 +120,12 @@ class TestDataAnalysisE2E:
 
         # 5. Tool 체인 실행
         # Step 1: 대시보드 목록 조회
-        dashboard_list = list_redash_dashboards.func()
+        dashboard_list = await list_redash_dashboards.ainvoke({})
         assert "매출 대시보드" in dashboard_list
         assert "ID 1" in dashboard_list
 
         # Step 2: 대시보드 상세 조회 (dashboard_id 사용)
-        dashboard_detail = read_redash_dashboard.func(dashboard_id=1)
+        dashboard_detail = await read_redash_dashboard.ainvoke({"dashboard_id": 1})
         assert "월별 매출" in dashboard_detail
 
         # Step 3: Athena 쿼리 실행 (async tool)
