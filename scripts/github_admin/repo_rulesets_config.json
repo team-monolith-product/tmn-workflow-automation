@@ -2,6 +2,10 @@
   "jce-codle-react": {
     "add": ["ruleset_develop_fe_only.json"]
   },
+  "tko-game-godot": {
+    "skip": ["ruleset_develop.json"],
+    "add": ["ruleset_tko_game_godot.json"]
+  },
   "jce-landing-react": {
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_landing_react.json"]
