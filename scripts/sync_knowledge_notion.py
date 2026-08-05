@@ -109,15 +109,6 @@ WHERE item.data_source_id = data_source.id
 
 MARK_SYNCED = "UPDATE data_source SET last_synced_at = now() WHERE id = %s"
 
-# 이미 행이 색인된 데이터베이스. 부모는 build_page_row가 metadata에 남긴다.
-INDEXED_DATABASES = """
-SELECT DISTINCT item.metadata->'parent'->>'data_source_id' AS data_source_id
-FROM item
-JOIN data_source ON data_source.id = item.data_source_id
-WHERE data_source.source = 'notion'
-  AND item.metadata->'parent'->>'data_source_id' IS NOT NULL
-"""
-
 # 이미 색인된 페이지와 그때 본 편집 시각.
 INDEXED_PAGES = """
 SELECT item.external_id, item.source_updated_at
@@ -290,20 +281,7 @@ def sync(
             f"본문이 {MIN_BODY_CHARS}자 미만이라 제외 {len(exported) - len(candidates)}개"
         )
     else:
-        # 이미 색인에 있는 데이터베이스는 판정하지 않는다. 문서형인 것을 이미
-        # 아는데 표본을 다시 재는 것은 호출 낭비이고, 표본 여덟 행이 표라고
-        # 나와도 행마다 재서 넣은 것을 지울 근거는 되지 않는다.
-        with connect(dsn) as conn:
-            indexed = {
-                row["data_source_id"] for row in fetch_all(conn, INDEXED_DATABASES)
-            }
-        known_documental = indexed & set(rows_by_database)
-        unknown = {
-            database_id: rows
-            for database_id, rows in rows_by_database.items()
-            if database_id not in known_documental
-        }
-        documental = classify_databases(unknown, titles) | known_documental
+        documental = classify_databases(rows_by_database, titles)
         candidates = list(documents)
         for database_id in documental:
             candidates.extend(rows_by_database[database_id])
@@ -323,10 +301,6 @@ def sync(
         known = {row["external_id"]: row for row in fetch_all(conn, NOTION_SOURCES)}
         source_ids = _sync_sources(conn, titles, root_ids, dry_run)
 
-        # 색인에 남아 있어야 할 페이지. 이번 회차에 건드리지 않은 것도 포함한다.
-        # 여기 없는 노션 item은 뒤에서 지운다.
-        retained = {page["id"] for page in targets}
-
         # 페이지마다 비교한다. 최상위의 last_synced_at으로 가르면 회차가 중간에
         # 끊겼을 때 이미 받은 본문을 전부 다시 받고, Export 회차처럼 그 값을
         # 일부러 안 찍는 경로와도 맞지 않는다.
@@ -334,6 +308,16 @@ def sync(
             row["external_id"]: row["source_updated_at"]
             for row in fetch_all(conn, INDEXED_PAGES)
         }
+
+        # 색인에 남아 있어야 할 페이지. 이번 회차의 대상에, 이미 색인돼 있고
+        # 아직 권한 안에 있는 페이지를 더한다.
+        #
+        # 뒤쪽이 없으면 Export가 행마다 재서 넣은 것을 표본 판정이 지운다.
+        # 판정 단위가 달라서 생기는 문제라, 후보를 데이터베이스 단위로 넓히는
+        # 대신 여기서 막는다. 넓히면 짧아서 탈락할 행까지 매 회차 본문을 받는다.
+        # 실측에서 대상이 5천 대에서 43,471개로 늘었다.
+        accessible = {page["id"] for page in pages}
+        retained = {page["id"] for page in targets} | (set(stored_at) & accessible)
 
         stored = 0
         for page in targets:
