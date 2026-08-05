@@ -118,6 +118,14 @@ WHERE data_source.source = 'notion'
   AND item.metadata->'parent'->>'data_source_id' IS NOT NULL
 """
 
+# 이미 색인된 페이지와 그때 본 편집 시각.
+INDEXED_PAGES = """
+SELECT item.external_id, item.source_updated_at
+FROM item
+JOIN data_source ON data_source.id = item.data_source_id
+WHERE data_source.source = 'notion'
+"""
+
 
 def body_of(page_id: str) -> str:
     """페이지 본문을 마크다운으로 받아옵니다. 실패하면 빈 문자열입니다.
@@ -231,7 +239,7 @@ def sync(
 
     Args:
         dsn: 접속 문자열. None이면 KNOWLEDGE_DATABASE_URL
-        full: True면 last_synced_at을 무시하고 전부 다시 받습니다
+        full: True면 이미 색인된 페이지도 전부 다시 받습니다
         dry_run: True면 아무것도 쓰지 않고 대상만 셉니다
         export_root: 워크스페이스 Export를 푼 디렉터리. 주면 본문을 API 대신
             거기서 읽습니다. Export에 없는 페이지는 이번 회차에서 빠집니다
@@ -282,15 +290,20 @@ def sync(
             f"본문이 {MIN_BODY_CHARS}자 미만이라 제외 {len(exported) - len(candidates)}개"
         )
     else:
-        # 이미 색인에 있는 데이터베이스는 판정 대상이 아니다. 표본 여덟 행이
-        # 표라고 해도, Export로 행마다 재서 넣은 것을 지울 근거는 되지 않는다.
+        # 이미 색인에 있는 데이터베이스는 판정하지 않는다. 문서형인 것을 이미
+        # 아는데 표본을 다시 재는 것은 호출 낭비이고, 표본 여덟 행이 표라고
+        # 나와도 행마다 재서 넣은 것을 지울 근거는 되지 않는다.
         with connect(dsn) as conn:
             indexed = {
                 row["data_source_id"] for row in fetch_all(conn, INDEXED_DATABASES)
             }
-        documental = classify_databases(rows_by_database, titles) | (
-            indexed & set(rows_by_database)
-        )
+        known_documental = indexed & set(rows_by_database)
+        unknown = {
+            database_id: rows
+            for database_id, rows in rows_by_database.items()
+            if database_id not in known_documental
+        }
+        documental = classify_databases(unknown, titles) | known_documental
         candidates = list(documents)
         for database_id in documental:
             candidates.extend(rows_by_database[database_id])
@@ -314,14 +327,20 @@ def sync(
         # 여기 없는 노션 item은 뒤에서 지운다.
         retained = {page["id"] for page in targets}
 
+        # 페이지마다 비교한다. 최상위의 last_synced_at으로 가르면 회차가 중간에
+        # 끊겼을 때 이미 받은 본문을 전부 다시 받고, Export 회차처럼 그 값을
+        # 일부러 안 찍는 경로와도 맞지 않는다.
+        stored_at = {
+            row["external_id"]: row["source_updated_at"]
+            for row in fetch_all(conn, INDEXED_PAGES)
+        }
+
         stored = 0
         for page in targets:
             root_id = roots[page["id"]]
-            synced_at = (
-                None if full else (known.get(root_id) or {}).get("last_synced_at")
-            )
-            if synced_at is not None:
-                if datetime.fromisoformat(page["last_edited_time"]) <= synced_at:
+            seen_at = None if full else stored_at.get(page["id"])
+            if seen_at is not None:
+                if datetime.fromisoformat(page["last_edited_time"]) <= seen_at:
                     continue
 
             if dry_run:
@@ -437,7 +456,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="노션 지식베이스 동기화")
     parser.add_argument("--dsn", help="접속 문자열. 생략하면 KNOWLEDGE_DATABASE_URL")
     parser.add_argument(
-        "--full", action="store_true", help="last_synced_at 무시하고 전부 다시 받음"
+        "--full", action="store_true", help="이미 색인된 것도 전부 다시 받음"
     )
     parser.add_argument("--dry-run", action="store_true", help="쓰지 않고 대상만 셈")
     parser.add_argument(
