@@ -10,7 +10,7 @@ from service.knowledge.notion import (
     has_document_body,
     is_database_row,
     node_title,
-    parent_id,
+    parent_ref,
     sample_evenly,
 )
 
@@ -63,12 +63,16 @@ def test_제목이_비어_있으면_대체_문구를_쓴다():
     )
 
 
-def test_부모_ID는_type이_가리키는_키에서_읽는다():
-    assert parent_id(PAGE) == "0ef104cd-477e-80e1-8571-cfd10e92339a"
-    assert parent_id({"parent": {"type": "workspace", "workspace": True}}) is True
-    assert parent_id(
+def test_부모는_type이_가리키는_키에서_읽는다():
+    assert parent_ref(PAGE) == ("page_id", "0ef104cd-477e-80e1-8571-cfd10e92339a")
+    assert parent_ref(
         {"parent": {"type": "data_source_id", "data_source_id": "d1"}}
-    ) == ("d1")
+    ) == (("data_source_id", "d1"))
+
+
+def test_워크스페이스_직속은_부모가_없다():
+    # 값이 ID가 아니라 true라 그대로 쓰면 true가 최상위로 잡힌다.
+    assert parent_ref({"parent": {"type": "workspace", "workspace": True}}) is None
 
 
 def test_권한_밖으로_나가는_자리가_최상위다():
@@ -82,10 +86,10 @@ def test_권한_밖으로_나가는_자리가_최상위다():
     assert derive_roots(nodes) == {"hq": "hq", "a": "hq", "b": "hq"}
 
 
-def test_데이터베이스_행의_최상위는_자기_데이터소스다():
-    # 켜고 끄는 단위도 검색 결과에 찍히는 출처도 데이터베이스다.
+def test_데이터베이스_행은_데이터베이스를_넘어_팀스페이스까지_올라간다():
+    # search가 database를 안 돌려줘서 데이터소스에서 사슬이 끊긴다.
     nodes = [
-        _page("hq", {"type": "page_id", "page_id": "팀스페이스"}),
+        _page("hq", {"type": "workspace", "workspace": True}),
         {
             "object": "data_source",
             "id": "d1",
@@ -95,22 +99,22 @@ def test_데이터베이스_행의_최상위는_자기_데이터소스다():
         _page("row", {"type": "data_source_id", "data_source_id": "d1"}),
     ]
 
-    assert derive_roots(nodes)["row"] == "d1"
+    roots = derive_roots(nodes, fetch_parent=lambda kind, i: ("page_id", "hq"))
+    assert roots["row"] == "hq"
 
 
 def test_블록_안에_있는_페이지는_블록을_풀어_올라간다():
-    # search가 블록을 돌려주지 않아 사슬이 거기서 끊긴다. 실측에서 문서
-    # 페이지 1,769개 중 545개가 이 경우였다.
+    # 실측에서 문서 페이지 1,769개 중 545개가 이 경우였다.
     nodes = [
         _page("hq", {"type": "workspace", "workspace": True}),
         _page("a", {"type": "block_id", "block_id": "토글"}),
     ]
 
-    roots = derive_roots(nodes, resolve_block=lambda block_id: "hq")
+    roots = derive_roots(nodes, fetch_parent=lambda kind, i: ("page_id", "hq"))
     assert roots["a"] == "hq"
 
 
-def test_블록을_못_풀면_거기서_멈춘다():
+def test_못_풀면_거기서_멈춘다():
     nodes = [_page("a", {"type": "block_id", "block_id": "토글"})]
 
     assert derive_roots(nodes)["a"] == "a"

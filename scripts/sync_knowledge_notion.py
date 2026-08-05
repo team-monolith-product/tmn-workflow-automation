@@ -24,9 +24,13 @@
 
 ## data_source 단위
 
-데이터베이스 행은 자기 데이터소스가, 문서 페이지는 워크스페이스 직속
-팀스페이스가 data_source 하나입니다. 검색 결과에 "Product HQ"나 "회의록"이
-출처로 찍히는 단위입니다.
+워크스페이스 직속 페이지, 곧 연결 설정 화면의 팀스페이스가 data_source
+하나입니다. 부여한 권한 단위와 검색 결과의 출처가 일치해야 이해하기 쉽습니다.
+데이터베이스 이름을 쓰지 않는 이유는 "스터디"나 "가이드 문서"처럼 겹치는 것이
+많아 출처로 모호하기 때문입니다.
+
+거기까지 올라가려면 사슬을 두 군데서 이어야 합니다. search가 page와
+data_source만 돌려주므로 데이터베이스와 블록은 따로 받아옵니다.
 
 사용법:
     python scripts/sync_knowledge_notion.py --dry-run
@@ -61,6 +65,7 @@ from service.knowledge.notion import (
     has_document_body,
     is_database_row,
     node_title,
+    parent_ref,
     sample_evenly,
 )
 from service.knowledge.register import upsert_source
@@ -167,26 +172,40 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     user_emails = fetch_user_emails(client)
 
     nodes = fetch_accessible(client)
-    block_parents: dict[str, str | None] = {}
+    by_id = {node["id"]: node for node in nodes}
+    parents: dict[str, tuple[str, str] | None] = {}
 
-    def resolve_block(block_id: str) -> str | None:
-        if block_id not in block_parents:
+    # search가 돌려주지 않는 조상을 종류에 맞는 API로 받아온다. 데이터소스가
+    # 여기 있는 이유는 search가 데이터소스를 다 돌려주지 않아서다. 실측에서
+    # 행이 참조하는 470개 중 28개가 빠져 있었고 그 아래 5,182행이 딸려 있었다.
+    RETRIEVE = {
+        "database_id": lambda i: client.databases.retrieve(i),
+        "data_source_id": lambda i: client.data_sources.retrieve(i),
+        "block_id": lambda i: client.blocks.retrieve(i),
+        "page_id": lambda i: client.pages.retrieve(i),
+    }
+
+    def fetch_parent(kind: str, node_id: str) -> tuple[str, str] | None:
+        """search에 나오지 않는 조상의 부모를 받아옵니다."""
+        if node_id not in parents:
+            retrieve = RETRIEVE.get(kind)
             try:
-                block = client.blocks.retrieve(block_id)
-                parent = block.get("parent", {})
-                block_parents[block_id] = parent.get(parent.get("type", ""))
+                parents[node_id] = parent_ref(retrieve(node_id)) if retrieve else None
             except Exception:
-                block_parents[block_id] = None
-        return block_parents[block_id]
+                parents[node_id] = None
+        return parents[node_id]
 
-    roots = derive_roots(nodes, resolve_block=resolve_block)
+    roots = derive_roots(nodes, fetch_parent=fetch_parent)
     pages = [node for node in nodes if node["object"] == "page"]
     documents = [page for page in pages if not is_database_row(page)]
 
+    # 판정 단위는 데이터베이스이므로 최상위가 아니라 행의 부모로 묶는다.
+    # 최상위는 팀스페이스라 그것으로 묶으면 성격이 다른 데이터베이스가 한
+    # 표본에 섞인다.
     rows_by_database: dict[str, list[dict]] = {}
     for page in pages:
         if is_database_row(page):
-            rows_by_database.setdefault(roots[page["id"]], []).append(page)
+            rows_by_database.setdefault(parent_ref(page)[1], []).append(page)
 
     print(f"노션 사용자 {len(user_emails)}명")
     print(
@@ -196,9 +215,17 @@ def sync(dsn: str | None, full: bool, dry_run: bool) -> None:
     titles = {node["id"]: node_title(node) for node in nodes}
     documental = classify_databases(rows_by_database, titles)
 
-    targets = list(documents)
+    candidates = list(documents)
     for database_id in documental:
-        targets.extend(rows_by_database[database_id])
+        candidates.extend(rows_by_database[database_id])
+
+    # 최상위를 못 찾은 페이지는 넣지 않는다. 사슬이 중간에 끊기면 최상위가
+    # 블록이나 지워진 데이터베이스의 ID가 되는데, 그것으로 data_source를
+    # 만들면 이름도 실체도 없는 출처가 검색 결과에 찍힌다.
+    targets = [page for page in candidates if roots[page["id"]] in by_id]
+    dropped = len(candidates) - len(targets)
+    if dropped:
+        print(f"최상위를 못 찾아 제외 {dropped}개")
 
     root_ids = sorted({roots[page["id"]] for page in targets})
     print(f"\n적재 후보 {len(targets)}개, 최상위 {len(root_ids)}개\n")
