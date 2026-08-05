@@ -8,6 +8,7 @@ Justin 프롬프트 MD 파일을 기반으로 피드백을 자동 생성합니�
 - 제안서: PDF 첨부파일 → Responses API에 PDF를 그대로 올려 분석 → 피드백
 """
 
+import asyncio
 import base64
 import os
 import re
@@ -229,7 +230,7 @@ async def _handle_notion_feedback(
     )
 
     try:
-        page_content = notion_page_to_markdown(page_id)
+        page_content = await asyncio.to_thread(notion_page_to_markdown, page_id)
     except Exception as e:
         await say(
             f"Notion 페이지를 읽는 데 실패했습니다. 페이지 ID를 확인해주세요.\n"

@@ -44,20 +44,19 @@ IGNORED_SUBTYPES = {
 }
 
 
-async def _resolve_data_source_id(conn, channel_id: str) -> int | None:
+def _resolve_data_source_id(channel_id: str) -> int | None:
     """채널에 대응하는 data_source.id를 찾습니다.
 
     등록되지 않은 채널은 수집 대상이 아닙니다. 봇이 초대만 받고 아직
     data_source로 등록되지 않은 상태를 정상으로 취급합니다.
 
     Args:
-        conn: 커넥션
         channel_id: Slack 채널 ID
 
     Returns:
         int | None: data_source.id. 미등록이면 None
     """
-    with conn.cursor() as cur:
+    with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM data_source "
             "WHERE source = 'slack' AND external_id = %s AND enabled",
@@ -65,6 +64,12 @@ async def _resolve_data_source_id(conn, channel_id: str) -> int | None:
         )
         row = cur.fetchone()
     return row["id"] if row else None
+
+
+def _upsert_item(row) -> None:
+    """스레드 행을 적재합니다. psycopg는 동기라 스레드에서 실행합니다."""
+    with connect() as conn:
+        upsert_item(conn, row)
 
 
 async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> None:
@@ -84,24 +89,23 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
 
     thread_ts = event.get("thread_ts") or event.get("ts")
 
-    with connect() as conn:
-        data_source_id = await _resolve_data_source_id(conn, channel_id)
-        if data_source_id is None:
-            return
+    data_source_id = await asyncio.to_thread(_resolve_data_source_id, channel_id)
+    if data_source_id is None:
+        return
 
-        # 답글 하나가 와도 부모와 형제를 전부 다시 읽는다. 저장된 행이 항상
-        # 완결된 대화를 반영해야 하기 때문이다.
-        replies = await client.conversations_replies(channel=channel_id, ts=thread_ts)
+    # 답글 하나가 와도 부모와 형제를 전부 다시 읽는다. 저장된 행이 항상
+    # 완결된 대화를 반영해야 하기 때문이다.
+    replies = await client.conversations_replies(channel=channel_id, ts=thread_ts)
 
-        row = build_thread_row(
-            data_source_id=data_source_id,
-            channel_id=channel_id,
-            messages=replies["messages"],
-            workspace_domain=SLACK_WORKSPACE_DOMAIN,
-            distill_delay_seconds=DISTILL_DELAY_SECONDS,
-            user_emails=await fetch_user_emails(client),
-        )
-        upsert_item(conn, row)
+    row = build_thread_row(
+        data_source_id=data_source_id,
+        channel_id=channel_id,
+        messages=replies["messages"],
+        workspace_domain=SLACK_WORKSPACE_DOMAIN,
+        distill_delay_seconds=DISTILL_DELAY_SECONDS,
+        user_emails=await fetch_user_emails(client),
+    )
+    await asyncio.to_thread(_upsert_item, row)
 
 
 def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> list:
