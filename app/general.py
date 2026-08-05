@@ -127,6 +127,12 @@ SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
 SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
 SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID = "C096HGFDFM1"
 
+# 버그 신고 채널은 제품별로 나뉘어 있으므로, 채널이 곧 제품이다.
+# 값은 service.teams.PRODUCT_USERGROUP_IDS 의 키와 같아야 한다.
+BUG_REPORT_CHANNEL_TO_PRODUCT = {
+    SLACK_BUG_REPORT_CHANNEL_ID: "코들",
+}
+
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
 
@@ -190,7 +196,7 @@ def register_general_handlers(app):
             await answer(
                 thread_ts, channel, user, event["text"], say, app.client, tools
             )
-        elif channel == SLACK_BUG_REPORT_CHANNEL_ID:
+        elif channel in BUG_REPORT_CHANNEL_TO_PRODUCT:
             # 메시지 편집 이벤트 필터링
             subtype = event.get("subtype")
             print(f"Subtype: {subtype}")
@@ -204,7 +210,9 @@ def register_general_handlers(app):
 
             if thread_ts is None or thread_ts == message_ts:
                 print("Routing bug report")
-                await route_bug.route_bug(app.client, body)
+                await route_bug.route_bug(
+                    app.client, body, BUG_REPORT_CHANNEL_TO_PRODUCT[channel]
+                )
         elif channel == SLACK_DEV_ENV_INFRA_BUG_CHANNEL_ID:
             # 메시지 편집 이벤트 필터링
             subtype = event.get("subtype")
