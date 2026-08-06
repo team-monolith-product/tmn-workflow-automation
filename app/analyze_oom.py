@@ -20,7 +20,7 @@ from app.tools.oom_tools import (
     list_log_streams,
     query_alb_access_logs,
 )
-from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 
 SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
 
@@ -129,12 +129,7 @@ async def analyze_oom_alert(slack_client, body, say):
             {"callbacks": [tool_status_handler], "recursion_limit": 50},
         )
 
-        # 최종 응답 추출
-        agent_answer = response["messages"][-1].content
-        if isinstance(agent_answer, list):
-            # 리스트 형태인 경우 text 타입 추출
-            text_items = [item for item in agent_answer if item.get("type") == "text"]
-            agent_answer = text_items[0]["text"] if text_items else ""
+        agent_answer = extract_text(response["messages"][-1].content)
 
         # Slack 메시지 전송 (3000자 제한)
         MAX_CHARS = 3000
