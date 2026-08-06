@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage
 from app import common
 from service.llm import extract_text
 
-
 # Responses API 응답. reasoning 블록이 앞에 붙고 본문은 text 블록에 담긴다.
 RESPONSES_CONTENT = [
     {"id": "rs_1", "summary": [], "type": "reasoning"},
