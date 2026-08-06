@@ -3,7 +3,7 @@
 
 슬랙의 Socket Mode에 대응하는 자리입니다. 슬랙은 소켓으로 이벤트를 받고
 노션은 HTTP로 받는다는 차이뿐이고, 둘 다 "바뀐 것 하나를 곧바로 반영"을
-맡습니다. 과거분과 정합성은 각각 Export 백필과 주기 실행이 맡습니다.
+맡습니다. 노션 색인은 이 자리로만 바뀝니다.
 
 구독은 노션 연결 설정 화면에서 만듭니다. 처음 한 번 verification_token만 담긴
 POST가 오는데, 그 값을 화면에 되돌려줘야 구독이 살아납니다. 받을 방법이 로그밖에
@@ -88,8 +88,8 @@ def ingest_page(page_id: str) -> str:
 
     markdown = notion_page_to_markdown(page_id) or ""
     if is_database_row(page) and len(markdown) < MIN_BODY_CHARS:
-        # 표의 행이다. 주기 실행이 데이터베이스 단위로 미리 걸러내는 것과 같은
-        # 기준을 여기서는 행 하나에 건다.
+        # 표의 행이다. 구매 내역이나 학교 목록 같은 것이 검색에 섞이지 않도록
+        # 본문 길이로 가른다.
         with connect(None) as conn:
             removed = delete_page(conn, page_id)
             conn.commit()

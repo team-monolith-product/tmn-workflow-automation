@@ -9,9 +9,6 @@
 변경이고, 두 곳을 맞춰야 하는 상태를 만들지 않습니다. 슬랙이 data_source
 등록을 SOT로 두는 것과 다른데, 슬랙은 봇이 채널 멤버인 것과 수집 대상인 것이
 별개라 따로 표시할 곳이 필요했고 노션은 권한 자체가 그 표시입니다.
-
-search는 질의 없이 부르면 통합에 공유된 페이지와 데이터소스를 전부 돌려줍니다.
-그래서 무엇이 권한 안에 있는지를 API로 알 수 있고, 사라진 것도 알 수 있습니다.
 """
 
 import json
@@ -58,30 +55,6 @@ def fetch_user_emails(client: Client) -> dict[str, str]:
         if not cursor:
             break
     return emails
-
-
-def fetch_accessible(client: Client) -> list[dict[str, Any]]:
-    """통합이 접근할 수 있는 페이지와 데이터소스를 전부 받아옵니다.
-
-    데이터소스까지 받는 이유는 부모 사슬을 잇기 위해서입니다. 데이터베이스
-    안의 행은 부모가 데이터소스라, 페이지만 받으면 사슬이 거기서 끊겨 행마다
-    자기가 최상위인 것처럼 보입니다.
-
-    Args:
-        client: 노션 클라이언트
-
-    Returns:
-        list[dict[str, Any]]: page와 data_source 객체
-    """
-    results: list[dict[str, Any]] = []
-    cursor = None
-    while True:
-        response = client.search(page_size=PAGE_SIZE, start_cursor=cursor)
-        results.extend(response["results"])
-        cursor = response.get("next_cursor")
-        if not cursor:
-            break
-    return results
 
 
 def parent_ref(node: dict[str, Any]) -> tuple[str, str] | None:
@@ -180,7 +153,7 @@ def derive_roots(
     데이터베이스인데, 이걸 실패로 보면 그 아래 466건이 엉뚱한 자리에 붙습니다.
 
     Args:
-        nodes: fetch_accessible 결과
+        nodes: 최상위를 정할 page·data_source 객체
         fetch_node: (종류, ID)를 받아 그 노드 객체를 돌려주는 함수. 못 찾으면
             None. 생략하면 사슬이 끊긴 자리에서 멈춥니다
 
@@ -213,43 +186,6 @@ def derive_roots(
         return result
 
     return {n["id"]: root_of("page_id", n["id"], set(), n["id"]) for n in nodes}
-
-
-def sample_evenly(rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
-    """표본을 고르게 뽑습니다.
-
-    난수를 쓰지 않습니다. 같은 입력에 같은 표본이 나와야 실행마다 판정이
-    뒤집히지 않습니다.
-
-    Args:
-        rows: 데이터베이스 하나의 행 목록
-        size: 뽑을 개수
-
-    Returns:
-        list[dict[str, Any]]: 목록 전체에 걸쳐 균등하게 고른 행
-    """
-    if len(rows) <= size:
-        return rows
-    step = len(rows) / size
-    return [rows[int(index * step)] for index in range(size)]
-
-
-def has_document_body(lengths: list[int], min_chars: int = MIN_BODY_CHARS) -> bool:
-    """표본 본문 길이로 문서형 데이터베이스인지 판정합니다.
-
-    한 건이라도 기준을 넘으면 문서형으로 봅니다. 표본에서 데이터 테이블은
-    전부 0자였고 문서형은 대부분이 수천 자였습니다. 둘 사이가 멀어서 느슨하게
-    잡아도 갈립니다. 느슨한 쪽으로 두는 이유는, 잘못 넣으면 행별 판정이 한 번
-    더 걸러주지만 잘못 빼면 그 데이터베이스는 영영 안 들어오기 때문입니다.
-
-    Args:
-        lengths: 표본 행의 본문 길이
-        min_chars: 문서로 볼 최소 길이
-
-    Returns:
-        bool: 문서형이면 True
-    """
-    return any(length >= min_chars for length in lengths)
 
 
 def node_title(node: dict[str, Any]) -> str:
