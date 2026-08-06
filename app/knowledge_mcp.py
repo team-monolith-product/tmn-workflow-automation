@@ -14,6 +14,7 @@ FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저
 /mcp 요청이 전부 실패합니다.
 """
 
+import asyncio
 import os
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -26,8 +27,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from api.admin_rails import get_me
+from app.sms import render_preview, render_sent, send_blocking
 from service.knowledge.db import connect
 from service.knowledge.search import DEFAULT_LIMIT, render_results, search_items
+from service.sms import send as sms_send
 
 INSTRUCTIONS = """
 팀모노리스 사내 슬랙 공개 채널의 과거 대화를 검색합니다.
@@ -116,6 +119,42 @@ def build_mcp() -> MCPServer:
                 limit=limit,
             )
         return render_results(results)
+
+    @mcp.tool()
+    async def preview_sms(template: str, targets: list[dict]) -> str:
+        """문자를 보내지 않고 문안·메시지 타입·길이만 확인합니다.
+
+        발송 전에는 항상 이걸 먼저 실행해 사람에게 보여줍니다.
+
+        Args:
+            template: 문안 파일 이름 (discord 등)
+            targets: [{"to": "010...", "name": "홍길동", "var1": "…"}] 형식
+        """
+        return render_preview(sms_send.preview(template, targets))
+
+    @mcp.tool()
+    async def send_sms(
+        campaign: str,
+        template: str,
+        targets: list[dict],
+        subject: str | None = None,
+    ) -> str:
+        """문자를 실제로 발송합니다. 대외 발신이므로 사람의 컨펌을 받은 뒤에만 씁니다.
+
+        같은 campaign 으로 이미 보낸 번호는 자동으로 빠집니다. 재발송이
+        필요하면 campaign 을 다르게 지정합니다.
+
+        Args:
+            campaign: 이 발송 건의 식별자
+            template: 문안 파일 이름
+            targets: 수신자 목록
+            subject: LMS 제목. 생략하면 campaign 을 쓴다
+        """
+        token = cast(AdminToken, get_access_token())
+        result = await asyncio.to_thread(
+            send_blocking, campaign, template, targets, subject, token.email, "mcp"
+        )
+        return render_sent(campaign, result)
 
     return mcp
 
