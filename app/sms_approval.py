@@ -36,24 +36,26 @@ _MESSAGE_TS_TO_DRAFT_ID: TTLCache = TTLCache(maxsize=100, ttl=86400)
 _background_tasks: set[asyncio.Task] = set()
 
 
-def register_draft(draft_id: str, draft: dict) -> None:
+def register_draft(draft_id: str, message_ts: str, draft: dict) -> None:
     """승인 대기 초안을 등록합니다.
 
     Args:
-        draft_id: 초안 식별자
+        draft_id: 초안 식별자 (버튼 value)
+        message_ts: 초안 카드 메시지 ts (✅ 이모지 승인용)
         draft: {"channel", "thread_ts", "recipients", "template", "subject"}
     """
     _DRAFTS[draft_id] = draft
-
-
-def attach_message_ts(draft_id: str, message_ts: str) -> None:
-    """이모지 승인을 위해 초안 카드 메시지의 ts를 초안에 연결합니다.
-
-    Args:
-        draft_id: 초안 식별자
-        message_ts: 초안 카드 메시지 ts
-    """
     _MESSAGE_TS_TO_DRAFT_ID[message_ts] = draft_id
+
+
+async def _replace_card(client: AsyncWebClient, body: dict, text: str) -> None:
+    """초안 카드를 결과 문구로 바꿔 버튼을 없앱니다."""
+    await client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        text=text,
+        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": text}}],
+    )
 
 
 async def approve_draft(
@@ -124,44 +126,21 @@ def register_sms_handlers(app) -> None:
     async def handle_sms_send(ack, body, client):
         """[발송] 버튼 클릭"""
         await ack()
-        draft_id = body["actions"][0]["value"]
         approver = body["user"]["id"]
-        message = await approve_draft(draft_id, approver, client)
-        await client.chat_update(
-            channel=body["channel"]["id"],
-            ts=body["message"]["ts"],
-            text=f":white_check_mark: <@{approver}> 승인 — {message}",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f":white_check_mark: <@{approver}> 승인 — {message}",
-                    },
-                }
-            ],
+        message = await approve_draft(body["actions"][0]["value"], approver, client)
+        await _replace_card(
+            client, body, f":white_check_mark: <@{approver}> 승인 — {message}"
         )
 
     @app.action("sms_cancel")
     async def handle_sms_cancel(ack, body, client):
         """[취소] 버튼 클릭"""
         await ack()
-        draft_id = body["actions"][0]["value"]
-        _DRAFTS.pop(draft_id, None)
-        canceller = body["user"]["id"]
-        await client.chat_update(
-            channel=body["channel"]["id"],
-            ts=body["message"]["ts"],
-            text=f":x: <@{canceller}> 취소 — 발송하지 않았습니다.",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f":x: <@{canceller}> 취소 — 발송하지 않았습니다.",
-                    },
-                }
-            ],
+        _DRAFTS.pop(body["actions"][0]["value"], None)
+        await _replace_card(
+            client,
+            body,
+            f":x: <@{body['user']['id']}> 취소 — 발송하지 않았습니다.",
         )
 
     @app.event("reaction_added")

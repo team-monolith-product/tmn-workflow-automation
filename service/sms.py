@@ -10,6 +10,7 @@ service.ppurio_result 가 웹 발송결과 페이지에서 읽어오고, 여기�
 """
 
 import asyncio
+import os
 import re
 import time
 from typing import Awaitable, Callable
@@ -95,9 +96,9 @@ def build_payload(phone: str, content: str, subject: str, ref_key: str) -> dict:
         dict: /v1/message 페이로드
     """
     payload = {
-        "account": ppurio.get_account(),
+        "account": os.environ["PPURIO_ACCOUNT"],
         "messageType": message_type(content),
-        "from": ppurio.get_sender(),
+        "from": os.environ["PPURIO_SENDER"],
         "content": content,
         "duplicateFlag": "Y",
         "targetCount": 1,

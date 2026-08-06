@@ -36,12 +36,11 @@ PAGE_TIMEOUT_MS = 30000
 LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
 
 _PHONE_PATTERN = re.compile(r"01[016789][-\s]?\d{3,4}[-\s]?\d{4}")
-# 뿌리오 발송결과 표기: 성공/실패/대기 계열. 표기가 조금씩 달라 계열 단위로 잡는다.
-_STATUS_PATTERN = re.compile(
-    r"성공|수신|도착|완료|실패|거부|차단|오류|대기|전송중|발송중|접수"
-)
+# 뿌리오 발송결과 표기가 조금씩 달라 계열 단위로 잡는다.
 _SUCCESS_WORDS = ("성공", "수신", "도착", "완료")
 _FAILURE_WORDS = ("실패", "거부", "차단", "오류")
+_PENDING_WORDS = ("대기", "전송중", "발송중", "접수")
+_STATUS_PATTERN = re.compile("|".join(_SUCCESS_WORDS + _FAILURE_WORDS + _PENDING_WORDS))
 
 DELIVERED = "성공"
 FAILED = "실패"

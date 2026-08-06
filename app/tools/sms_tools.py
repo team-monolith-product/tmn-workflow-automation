@@ -158,8 +158,15 @@ def get_sms_tools(channel: str, thread_ts: str, user: str | None, client) -> lis
 
         draft_id = uuid.uuid4().hex[:8]
         preview = sms.render_content(content, normalized[0]["name"])
+        response = await client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=f"문자 발송 승인 요청 (수신자 {len(normalized)}명)",
+            blocks=_build_draft_blocks(draft_id, normalized, preview, subject),
+        )
         sms_approval.register_draft(
             draft_id,
+            response["ts"],
             {
                 "channel": channel,
                 "thread_ts": thread_ts,
@@ -168,13 +175,6 @@ def get_sms_tools(channel: str, thread_ts: str, user: str | None, client) -> lis
                 "subject": subject or "안내",
             },
         )
-        response = await client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=f"문자 발송 승인 요청 (수신자 {len(normalized)}명)",
-            blocks=_build_draft_blocks(draft_id, normalized, preview, subject),
-        )
-        sms_approval.attach_message_ts(draft_id, response["ts"])
 
         return (
             f"초안 ID `{draft_id}` 로 승인 요청 카드를 슬랙에 올렸습니다. 아직 발송하지 않았습니다.\n"
