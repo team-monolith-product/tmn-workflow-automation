@@ -23,7 +23,7 @@ from langchain_community.tools import TavilySearchResults
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
-from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 from service.notion_transport import build_client as build_notion_http_client
 from .tool_status_handler import ToolStatusHandler
 
@@ -801,7 +801,7 @@ async def answer(
         {"callbacks": [tool_status_handler], "recursion_limit": 50},
     )
 
-    agent_answer = response["messages"][-1].content
+    agent_answer = extract_text(response["messages"][-1].content)
 
     await say(
         {
