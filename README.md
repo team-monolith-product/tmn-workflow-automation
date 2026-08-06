@@ -49,8 +49,9 @@ Slack 앱 설정에 `reactions:read` 스코프와 `reaction_added` 이벤트 구
 
 - `--no-sandbox`: 이미지가 root 로 실행돼 Chromium 샌드박스를 못 쓴다 (코드에 반영됨)
 - `--disable-dev-shm-usage`: 기본 `/dev/shm` 이 64MB 라 탭이 죽는다 (코드에 반영됨)
-- **메모리 limit 최소 1Gi** — 현재 slackbot 파드는 400Mi 라 Chromium 을 띄우면 OOMKill 된다.
-  `jce-service-helm/workflow-automation-slack` 의 `slackbot.resources` 를 올려야 한다.
+- **메모리 여유** — slackbot 파드는 1Gi 인데 봇 프로세스와 Chromium 이 같이 올라가면 빠듯하다.
+  `jce-service-helm/workflow-automation-slack` 의 `slackbot.resources` 를 2Gi 로 올린다
+  (jce-service-helm#608).
 
 ## 로컬 실행
 
