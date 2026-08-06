@@ -7,11 +7,9 @@ from service.knowledge.notion import (
     author_of,
     build_page_row,
     derive_roots,
-    has_document_body,
     is_database_row,
     node_title,
     parent_ref,
-    sample_evenly,
 )
 
 EMAILS = {
@@ -155,27 +153,6 @@ def test_데이터베이스_행_여부():
         _page("r", {"type": "data_source_id", "data_source_id": "d"})
     )
     assert not is_database_row(_page("p", {"type": "page_id", "page_id": "hq"}))
-
-
-def test_표본은_난수_없이_고르게_뽑는다():
-    # 실행마다 판정이 뒤집히면 안 된다.
-    rows = [{"id": str(i)} for i in range(100)]
-    picked = sample_evenly(rows, 4)
-
-    assert [r["id"] for r in picked] == ["0", "25", "50", "75"]
-    assert sample_evenly(rows, 4) == picked
-
-
-def test_행이_표본보다_적으면_전부_쓴다():
-    rows = [{"id": "1"}, {"id": "2"}]
-    assert sample_evenly(rows, 8) == rows
-
-
-def test_한_건이라도_기준을_넘으면_문서형이다():
-    # 잘못 넣으면 행별 판정이 한 번 더 거르지만, 잘못 빼면 영영 안 들어온다.
-    assert has_document_body([0, 0, 0, 4684])
-    assert not has_document_body([0, 0, 0, 0])
-    assert not has_document_body([99, 12, 0])
 
 
 def test_최상위가_여럿이면_각자에_붙는다():
