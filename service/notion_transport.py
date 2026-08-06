@@ -20,15 +20,24 @@ import httpx
 # 프로세스가 슬랙봇과 FastAPI 둘이라 각자 여기까지 쓰면 합이 한도에 닿습니다.
 REQUESTS_PER_SECOND = 2.5
 
-# 429를 맞았을 때 다시 칠 횟수. 한도는 평균이라 짧은 초과는 기다리면 풀립니다.
+# 다시 칠 상태. 429는 한도 초과이고 5xx는 노션 쪽 일시 장애입니다.
+#
+# 5xx를 여기서 받는 이유는 열거 때문입니다. 권한 안 8.5만 페이지를 search로
+# 850여 번에 나눠 받는데, 그중 한 번이 504면 한 페이지도 적재하기 전에 회차가
+# 끝납니다. 2026-08-06에 실제로 그렇게 죽었습니다.
+RETRY_STATUSES = {429, 502, 503, 504}
+
+# 다시 칠 횟수. 한도는 평균이라 짧은 초과는 기다리면 풀립니다.
 MAX_RETRIES = 5
 
-# Retry-After가 없을 때 기다릴 시간.
+# Retry-After가 없을 때 기다릴 시간. 5xx에는 이 헤더가 없어 회마다 배로
+# 늘립니다. 같은 간격으로 다섯 번 치면 5초 안에 다 쓰는데, 게이트웨이가
+# 그 안에 돌아오는 일은 드뭅니다.
 DEFAULT_RETRY_AFTER = 1.0
 
 
 class ThrottledTransport(httpx.HTTPTransport):
-    """호출 간격을 벌리고 429를 기다렸다 다시 칩니다.
+    """호출 간격을 벌리고 429와 5xx를 기다렸다 다시 칩니다.
 
     간격은 프로세스 전체에서 하나로 셉니다. 스레드풀로 동시에 불러도 실제
     호출은 여기서 줄을 섭니다.
@@ -43,7 +52,7 @@ class ThrottledTransport(httpx.HTTPTransport):
         """
         Args:
             requests_per_second: 초당 허용 호출 수
-            max_retries: 429를 맞았을 때 다시 칠 횟수
+            max_retries: RETRY_STATUSES를 맞았을 때 다시 칠 횟수
             kwargs: httpx.HTTPTransport에 그대로 넘길 인자
         """
         super().__init__(**kwargs)
@@ -67,18 +76,24 @@ class ThrottledTransport(httpx.HTTPTransport):
             request: 보낼 요청
 
         Returns:
-            httpx.Response: 응답. 재시도를 다 쓰면 마지막 429를 그대로 돌려줍니다
+            httpx.Response: 응답. 재시도를 다 쓰면 마지막 응답을 그대로
+                돌려줍니다. 호출자가 상태를 보고 올립니다
         """
         for attempt in range(self._max_retries + 1):
             self._wait_turn()
             response = super().handle_request(request)
-            if response.status_code != 429 or attempt == self._max_retries:
+            if (
+                response.status_code not in RETRY_STATUSES
+                or attempt == self._max_retries
+            ):
                 return response
 
             retry_after = response.headers.get("Retry-After")
             response.read()
             response.close()
-            time.sleep(float(retry_after) if retry_after else DEFAULT_RETRY_AFTER)
+            time.sleep(
+                float(retry_after) if retry_after else DEFAULT_RETRY_AFTER * 2**attempt
+            )
         return response
 
 
