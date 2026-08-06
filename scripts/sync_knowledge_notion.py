@@ -5,9 +5,6 @@
 따로 두지 않습니다. 두 곳을 맞춰야 하는 상태를 만들면 언젠가 어긋나고, 어느
 쪽이 맞는지 알 수 없게 됩니다.
 
-권한에서 빠진 것은 지웁니다. 권한을 내렸는데 검색에 계속 나오면 내린 것이
-아닙니다.
-
 ## 데이터베이스 행
 
 권한 안 페이지 8.5만 개 중 8.3만 개가 데이터베이스 행이고, 대부분은 문서가
@@ -83,29 +80,6 @@ PROPERTY_LINE = re.compile(r"^[^\n:]{1,40}: ")
 # 본문 받기는 네트워크 대기가 대부분이라 동시에 돌린다. 노션 rate limit이
 # 평균 초당 3회라 그 위로는 올려도 429만 더 받는다.
 CONCURRENCY = 3
-
-NOTION_SOURCES = """
-SELECT id, external_id, name, last_synced_at
-FROM data_source
-WHERE source = 'notion'
-"""
-
-# 권한에서 빠진 최상위 항목. item은 ON DELETE CASCADE로 함께 사라진다.
-DELETE_GONE_SOURCES = """
-DELETE FROM data_source
-WHERE source = 'notion' AND NOT (external_id = ANY(%(root_ids)s))
-"""
-
-# 최상위는 남았는데 페이지만 빠진 경우. 본문이 짧아져 기준에서 밀려난 행도
-# 여기로 온다. 인자는 "색인에 남아 있어야 할 페이지" 전체이지 이번 회차에
-# 적재한 것이 아니다. 후자를 넘기면 안 바뀐 페이지가 매번 지워진다.
-DELETE_GONE_ITEMS = """
-DELETE FROM item
-USING data_source
-WHERE item.data_source_id = data_source.id
-  AND data_source.source = 'notion'
-  AND NOT (item.external_id = ANY(%(page_ids)s))
-"""
 
 MARK_SYNCED = "UPDATE data_source SET last_synced_at = now() WHERE id = %s"
 
@@ -298,26 +272,14 @@ def sync(
     print(f"\n적재 후보 {len(targets)}개, 최상위 {len(root_ids)}개\n")
 
     with connect(dsn) as conn:
-        known = {row["external_id"]: row for row in fetch_all(conn, NOTION_SOURCES)}
         source_ids = _sync_sources(conn, titles, root_ids, dry_run)
 
         # 페이지마다 비교한다. 최상위의 last_synced_at으로 가르면 회차가 중간에
-        # 끊겼을 때 이미 받은 본문을 전부 다시 받고, Export 회차처럼 그 값을
-        # 일부러 안 찍는 경로와도 맞지 않는다.
+        # 끊겼을 때 이미 받은 본문을 전부 다시 받는다.
         stored_at = {
             row["external_id"]: row["source_updated_at"]
             for row in fetch_all(conn, INDEXED_PAGES)
         }
-
-        # 색인에 남아 있어야 할 페이지. 이번 회차의 대상에, 이미 색인돼 있고
-        # 아직 권한 안에 있는 페이지를 더한다.
-        #
-        # 뒤쪽이 없으면 Export가 행마다 재서 넣은 것을 표본 판정이 지운다.
-        # 판정 단위가 달라서 생기는 문제라, 후보를 데이터베이스 단위로 넓히는
-        # 대신 여기서 막는다. 넓히면 짧아서 탈락할 행까지 매 회차 본문을 받는다.
-        # 실측에서 대상이 5천 대에서 43,471개로 늘었다.
-        accessible = {page["id"] for page in pages}
-        retained = {page["id"] for page in targets} | (set(stored_at) & accessible)
 
         stored = 0
         for page in targets:
@@ -336,7 +298,6 @@ def sync(
             # 데이터베이스 행은 여기서 한 번 더 거른다. 표본 판정이 느슨해
             # 문서형으로 들어온 데이터베이스에도 빈 행이 섞여 있다.
             if is_database_row(page) and len(markdown) < MIN_BODY_CHARS:
-                retained.discard(page["id"])
                 continue
 
             upsert_item(
@@ -359,14 +320,12 @@ def sync(
             return
 
         if export:
-            # Export 회차는 넣기만 하고 지우지 않습니다. 삭제 판정은 전량 열거를
-            # 전제로 하는데 Export는 그것이 아닙니다. 실측에서 권한 안 페이지
-            # 84,660개 중 5,220개가 Export에 없었습니다. last_synced_at도 찍지
-            # 않습니다. 찍으면 다음 회차가 그 빈자리를 건너뜁니다.
-            print("Export 회차라 삭제와 last_synced_at을 건너뜁니다")
+            # Export 회차는 last_synced_at을 찍지 않습니다. Export에 없는
+            # 페이지는 이번 회차에서 빠지므로 권한 안을 다 본 것이 아닙니다.
+            # 실측에서 84,660개 중 5,220개가 Export에 없었습니다.
+            print("Export 회차라 last_synced_at을 건너뜁니다")
             return
 
-        _prune(conn, root_ids, sorted(retained), known)
         for root_id in root_ids:
             with conn.cursor() as cur:
                 cur.execute(MARK_SYNCED, (source_ids[root_id],))
@@ -403,35 +362,6 @@ def _sync_sources(
     }
     conn.commit()
     return source_ids
-
-
-def _prune(
-    conn: psycopg.Connection,
-    root_ids: list[str],
-    page_ids: list[str],
-    known: dict[str, dict],
-) -> None:
-    """권한에서 빠졌거나 기준에서 밀려난 것을 지웁니다.
-
-    Args:
-        conn: 커넥션
-        root_ids: 지금 적재 대상인 최상위 항목 ID
-        page_ids: 지금 적재 대상인 페이지 ID
-        known: 이미 등록된 노션 data_source
-    """
-    gone = [row["name"] for ext, row in known.items() if ext not in root_ids]
-    if gone:
-        print(f"대상에서 빠져 지움: {', '.join(gone)}")
-
-    with conn.cursor() as cur:
-        cur.execute(DELETE_GONE_SOURCES, {"root_ids": root_ids})
-        dropped_sources = cur.rowcount
-        cur.execute(DELETE_GONE_ITEMS, {"page_ids": page_ids})
-        dropped_items = cur.rowcount
-    conn.commit()
-
-    if dropped_sources or dropped_items:
-        print(f"삭제: 최상위 {dropped_sources}, 페이지 {dropped_items}")
 
 
 def main() -> None:
