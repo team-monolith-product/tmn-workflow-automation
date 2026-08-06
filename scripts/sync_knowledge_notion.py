@@ -319,14 +319,6 @@ def sync(
         accessible = {page["id"] for page in pages}
         retained = {page["id"] for page in targets} | (set(stored_at) & accessible)
 
-        # 페이지마다 비교한다. 최상위의 last_synced_at으로 가르면 회차가 중간에
-        # 끊겼을 때 이미 받은 본문을 전부 다시 받고, Export 회차처럼 그 값을
-        # 일부러 안 찍는 경로와도 맞지 않는다.
-        stored_at = {
-            row["external_id"]: row["source_updated_at"]
-            for row in fetch_all(conn, INDEXED_PAGES)
-        }
-
         stored = 0
         for page in targets:
             root_id = roots[page["id"]]
