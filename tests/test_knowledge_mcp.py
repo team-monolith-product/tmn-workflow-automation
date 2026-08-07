@@ -87,7 +87,7 @@ def test_운영_호스트로_온_요청은_통과하고_다른_호스트는_막�
             )
 
     assert allowed.status_code == 200
-    assert "search_knowledge" in allowed.text
+    assert "query_knowledge" in allowed.text
     assert blocked.status_code == 421
 
 
@@ -119,7 +119,7 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
 
 
 @pytest.mark.asyncio
-async def test_검색_도구가_등록된다(mcp_env):
+async def test_질의_도구가_등록된다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert [tool.name for tool in tools] == ["search_knowledge"]
+    assert [tool.name for tool in tools] == ["query_knowledge"]

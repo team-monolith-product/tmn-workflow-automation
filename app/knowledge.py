@@ -27,7 +27,11 @@ from service.knowledge.register import (
     upsert_source,
     validate_public_channel,
 )
-from service.knowledge.search import render_results, search_items
+from service.knowledge.query import (
+    DEFAULT_CHAR_LIMIT,
+    QUERY_TOOL_DESCRIPTION,
+    run_query,
+)
 from service.knowledge.users import fetch_user_emails
 
 SLACK_WORKSPACE_DOMAIN = "monolith-keb2010.slack.com"
@@ -108,8 +112,8 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
     await asyncio.to_thread(_upsert_item, row)
 
 
-def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> list:
-    """사내 지식베이스를 검색하는 도구를 반환합니다.
+def get_knowledge_query_tools(client: AsyncWebClient, user_id: str | None) -> list:
+    """사내 지식베이스에 질의하는 도구를 반환합니다.
 
     질의자를 도구 인자가 아니라 클로저로 받습니다. 에이전트가 남의 이름으로
     질의를 남기는 경로를 없애려는 것이고, query_log의 actor가 실제로 물어본
@@ -120,29 +124,17 @@ def get_knowledge_search_tools(client: AsyncWebClient, user_id: str | None) -> l
         user_id: 질문자의 Slack 사용자 ID
 
     Returns:
-        list: [검색 도구]
+        list: [질의 도구]
     """
 
-    @tool
-    async def search_knowledge(query: str, channel: str | None = None) -> str:
-        """
-        사내 슬랙 공개 채널의 과거 대화를 검색합니다.
-        "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 사용합니다.
-        검색어는 어휘가 그대로 맞아야 하므로 문장이 아니라 핵심 단어를 넣습니다.
-        channel에 "t_개발" 같은 채널 이름을 주면 그 채널로 좁힙니다.
-        """
+    @tool(description=QUERY_TOOL_DESCRIPTION)
+    async def query_knowledge(sql: str, char_limit: int = DEFAULT_CHAR_LIMIT) -> str:
         emails = await fetch_user_emails(client)
         actor = emails.get(user_id, f"slack:{user_id}")
-        return await asyncio.to_thread(_search_knowledge, query, actor, channel)
+        # psycopg는 동기라 스레드에서 실행합니다.
+        return await asyncio.to_thread(run_query, sql, actor, "slack", char_limit)
 
-    return [search_knowledge]
-
-
-def _search_knowledge(query: str, actor: str, channel: str | None) -> str:
-    """지식베이스를 검색합니다. psycopg는 동기라 스레드에서 실행합니다."""
-    with connect() as conn:
-        results = search_items(conn, query, actor=actor, tool="slack", channel=channel)
-    return render_results(results)
+    return [query_knowledge]
 
 
 def get_knowledge_channel_tools(client: AsyncWebClient, channel_id: str) -> list:
