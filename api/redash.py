@@ -3,7 +3,7 @@ Redash API 래퍼 함수들
 """
 
 import os
-import requests
+import aiohttp
 
 
 def get_base_url() -> str:
@@ -36,7 +36,24 @@ def get_headers() -> dict[str, str]:
     return {"Authorization": f"Key {get_api_key()}", "Content-Type": "application/json"}
 
 
-def list_dashboards(query: str | None = None) -> dict:
+async def _get_json(url: str, params: dict[str, str] | None = None) -> dict:
+    """
+    Redash API에 GET 요청을 보내고 JSON 응답을 반환합니다.
+
+    Args:
+        url: 요청할 전체 URL
+        params: 쿼리 파라미터 (aiohttp는 문자열 값만 받는다)
+
+    Returns:
+        dict: 응답 JSON
+    """
+    async with aiohttp.ClientSession(headers=get_headers()) as session:
+        async with session.get(url, params=params) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+async def list_dashboards(query: str | None = None) -> dict:
     """
     대시보드 목록을 조회합니다.
 
@@ -47,16 +64,12 @@ def list_dashboards(query: str | None = None) -> dict:
         dict: 대시보드 목록 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/dashboards"
-    params = {}
-    if query:
-        params["q"] = query
+    params = {"q": query} if query else None
 
-    response = requests.get(url, headers=get_headers(), params=params)
-    response.raise_for_status()
-    return response.json()
+    return await _get_json(url, params)
 
 
-def get_dashboard(dashboard_slug: str) -> dict:
+async def get_dashboard(dashboard_slug: str) -> dict:
     """
     특정 대시보드의 상세 정보를 조회합니다.
 
@@ -67,12 +80,11 @@ def get_dashboard(dashboard_slug: str) -> dict:
         dict: 대시보드 상세 정보 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/dashboards/{dashboard_slug}"
-    response = requests.get(url, headers=get_headers())
-    response.raise_for_status()
-    return response.json()
+
+    return await _get_json(url)
 
 
-def get_query(query_id: int) -> dict:
+async def get_query(query_id: int) -> dict:
     """
     특정 쿼리의 상세 정보를 조회합니다.
 
@@ -83,12 +95,11 @@ def get_query(query_id: int) -> dict:
         dict: 쿼리 상세 정보 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/queries/{query_id}"
-    response = requests.get(url, headers=get_headers())
-    response.raise_for_status()
-    return response.json()
+
+    return await _get_json(url)
 
 
-def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
+async def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
     """
     쿼리를 검색합니다.
 
@@ -101,7 +112,6 @@ def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
         dict: 검색 결과 (원본 Redash 응답)
     """
     url = f"{get_base_url()}/api/queries"
-    params = {"q": query, "page": page, "page_size": page_size}
-    response = requests.get(url, headers=get_headers(), params=params)
-    response.raise_for_status()
-    return response.json()
+    params = {"q": query, "page": str(page), "page_size": str(page_size)}
+
+    return await _get_json(url, params)

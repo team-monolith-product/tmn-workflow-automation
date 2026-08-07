@@ -1,8 +1,8 @@
 """
 지식베이스를 MCP로 제공하는 서버입니다.
 
-각자의 CLI 에이전트가 붙는 경로입니다. 슬랙 봇과 같은 search_items를 부르므로
-어느 쪽에서 물어도 같은 것이 잡힙니다.
+각자의 CLI 에이전트가 붙는 경로입니다. 슬랙 봇과 같은 run_query를 부르므로
+어느 쪽에서 물어도 같은 것이 잡히고, 쓰기가 막히는 지점도 한 곳입니다.
 
 인증은 admin-rails Doorkeeper가 발급한 토큰을 그대로 받습니다. 사내 OAuth
 제공자가 거기 하나이고, 그 뒤가 Google SSO라 계정 관리가 이미 되어 있습니다.
@@ -14,6 +14,7 @@ FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저
 /mcp 요청이 전부 실패합니다.
 """
 
+import asyncio
 import os
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -26,11 +27,15 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from api.admin_rails import get_me
-from service.knowledge.db import connect
-from service.knowledge.search import DEFAULT_LIMIT, render_results, search_items
+from service.knowledge.query import (
+    DEFAULT_CHAR_LIMIT,
+    QUERY_TOOL_DESCRIPTION,
+    run_query,
+)
 
 INSTRUCTIONS = """
-팀모노리스 사내 슬랙 공개 채널의 과거 대화를 검색합니다.
+팀모노리스 사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스입니다.
+읽기 전용 SQL로 질의합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
 """.strip()
 
@@ -89,33 +94,11 @@ def build_mcp() -> MCPServer:
         ),
     )
 
-    @mcp.tool()
-    async def search_knowledge(
-        query: str,
-        channel: str | None = None,
-        limit: int = DEFAULT_LIMIT,
-    ) -> str:
-        """사내 슬랙 공개 채널의 과거 대화를 검색합니다.
-
-        어휘가 그대로 맞아야 하므로 문장이 아니라 핵심 단어를 넣습니다.
-        대소문자는 구분하지 않습니다.
-
-        Args:
-            query: 검색어
-            channel: "t_개발" 같은 채널 이름. 주면 그 채널로 좁힙니다
-            limit: 최대 결과 수
-        """
+    @mcp.tool(description=QUERY_TOOL_DESCRIPTION)
+    async def query_knowledge(sql: str, char_limit: int = DEFAULT_CHAR_LIMIT) -> str:
         token = cast(AdminToken, get_access_token())
-        with connect() as conn:
-            results = search_items(
-                conn,
-                query,
-                actor=token.email,
-                tool="mcp",
-                channel=channel,
-                limit=limit,
-            )
-        return render_results(results)
+        # psycopg는 동기라 스레드에서 실행합니다.
+        return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
     return mcp
 

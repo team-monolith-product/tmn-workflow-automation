@@ -8,7 +8,7 @@ from api import redash
 
 
 @tool
-def list_redash_dashboards() -> str:
+async def list_redash_dashboards() -> str:
     """
     Redash 대시보드 목록을 조회합니다.
 
@@ -18,7 +18,7 @@ def list_redash_dashboards() -> str:
         str: 대시보드 목록 (ID와 이름)
     """
     try:
-        response = redash.list_dashboards()
+        response = await redash.list_dashboards()
         dashboards = response.get("results", [])
 
         if not dashboards:
@@ -36,7 +36,7 @@ def list_redash_dashboards() -> str:
 
 
 @tool
-def read_redash_dashboard(
+async def read_redash_dashboard(
     dashboard_id: Annotated[int, "대시보드 ID"],
 ) -> str:
     """
@@ -52,7 +52,7 @@ def read_redash_dashboard(
         str: 대시보드의 쿼리 목록 (쿼리 ID와 이름)
     """
     try:
-        dashboard_data = redash.get_dashboard(str(dashboard_id))
+        dashboard_data = await redash.get_dashboard(str(dashboard_id))
 
         name = dashboard_data.get("name", "Untitled")
         widgets = dashboard_data.get("widgets", [])
@@ -106,7 +106,7 @@ def read_redash_dashboard(
 
 
 @tool
-def read_redash_query(
+async def read_redash_query(
     query_id: Annotated[int, "쿼리 ID"],
 ) -> str:
     """
@@ -121,7 +121,7 @@ def read_redash_query(
         str: 쿼리 상세 정보 (이름, SQL 내용, 데이터베이스 정보)
     """
     try:
-        query_data = redash.get_query(query_id)
+        query_data = await redash.get_query(query_id)
 
         query_name = query_data.get("name", "Untitled Query")
         query_string = query_data.get("query", "")

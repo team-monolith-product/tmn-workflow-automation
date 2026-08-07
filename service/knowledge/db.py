@@ -20,18 +20,24 @@ def get_dsn() -> str:
 
 
 @contextmanager
-def connect(dsn: str | None = None) -> Iterator[psycopg.Connection]:
+def connect(
+    dsn: str | None = None, read_only: bool | None = None
+) -> Iterator[psycopg.Connection]:
     """지식베이스에 접속합니다.
 
     블록을 정상 종료하면 커밋하고, 예외가 나면 롤백합니다.
 
     Args:
         dsn: 접속 문자열. 생략하면 KNOWLEDGE_DATABASE_URL을 씁니다.
+        read_only: True면 트랜잭션을 READ ONLY로 엽니다. 적재와 질의가 같은
+            롤로 접속하므로 권한으로는 갈리지 않습니다. 생략하면 psycopg가
+            BEGIN에 아무 모드도 붙이지 않아 서버 기본값을 따릅니다.
 
     Yields:
         psycopg.Connection: dict_row 팩토리가 설정된 커넥션
     """
     with psycopg.connect(dsn or get_dsn(), row_factory=dict_row) as conn:
+        conn.read_only = read_only
         yield conn
 
 

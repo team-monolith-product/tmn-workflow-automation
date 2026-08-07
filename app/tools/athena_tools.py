@@ -161,7 +161,7 @@ def get_execute_athena_query_tool(
         )
 
         try:
-            results = athena.execute_and_wait(query, database=database)
+            results = await athena.execute_and_wait(query, database=database)
 
             if show_result_to_user and say and thread_ts:
                 # 1. 먼저 사용된 SQL 쿼리를 전송

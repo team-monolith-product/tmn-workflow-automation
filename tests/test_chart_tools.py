@@ -147,7 +147,9 @@ async def test_execute_python_with_chart_with_athena_mock():
         }
     }
 
-    with patch("api.athena.execute_and_wait", return_value=mock_athena_result):
+    with patch("api.athena.execute_and_wait", new_callable=AsyncMock) as mock_execute:
+        mock_execute.return_value = mock_athena_result
+
         # 도구 생성
         tool = get_execute_python_with_chart_tool(
             say=mock_say,

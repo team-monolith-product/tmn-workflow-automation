@@ -7,8 +7,9 @@ from service.knowledge.notion import (
     author_of,
     build_page_row,
     derive_roots,
+    is_database_row,
     node_title,
-    parent_id,
+    parent_ref,
 )
 
 EMAILS = {
@@ -54,18 +55,32 @@ def test_데이터소스_제목은_최상위_필드에_있다():
     assert node_title(data_source) == "회의록"
 
 
+def test_데이터베이스_제목도_최상위_필드에_있다():
+    # 워크스페이스 직속 데이터베이스가 최상위가 되면 이 이름이 출처로 찍힌다.
+    database = {
+        "object": "database",
+        "id": "db",
+        "title": [{"plain_text": "회의록"}],
+    }
+    assert node_title(database) == "회의록"
+
+
 def test_제목이_비어_있으면_대체_문구를_쓴다():
     assert node_title({"properties": {"Name": {"type": "title", "title": []}}}) == (
         "제목 없음"
     )
 
 
-def test_부모_ID는_type이_가리키는_키에서_읽는다():
-    assert parent_id(PAGE) == "0ef104cd-477e-80e1-8571-cfd10e92339a"
-    assert parent_id({"parent": {"type": "workspace", "workspace": True}}) is True
-    assert parent_id(
+def test_부모는_type이_가리키는_키에서_읽는다():
+    assert parent_ref(PAGE) == ("page_id", "0ef104cd-477e-80e1-8571-cfd10e92339a")
+    assert parent_ref(
         {"parent": {"type": "data_source_id", "data_source_id": "d1"}}
-    ) == ("d1")
+    ) == (("data_source_id", "d1"))
+
+
+def test_워크스페이스_직속은_부모가_없다():
+    # 값이 ID가 아니라 true라 그대로 쓰면 true가 최상위로 잡힌다.
+    assert parent_ref({"parent": {"type": "workspace", "workspace": True}}) is None
 
 
 def test_권한_밖으로_나가는_자리가_최상위다():
@@ -79,20 +94,65 @@ def test_권한_밖으로_나가는_자리가_최상위다():
     assert derive_roots(nodes) == {"hq": "hq", "a": "hq", "b": "hq"}
 
 
-def test_데이터베이스_행은_데이터소스를_거쳐_최상위에_붙는다():
-    # 데이터소스를 같이 받지 않으면 사슬이 끊겨 행마다 자기가 최상위가 된다.
+def test_데이터베이스_행은_데이터베이스를_넘어_팀스페이스까지_올라간다():
+    # search가 database를 안 돌려줘서 데이터소스에서 사슬이 끊긴다.
     nodes = [
-        _page("hq", {"type": "page_id", "page_id": "팀스페이스"}),
+        _page("hq", {"type": "workspace", "workspace": True}),
         {
             "object": "data_source",
             "id": "d1",
             "title": [{"plain_text": "회의록"}],
-            "parent": {"type": "page_id", "page_id": "hq"},
+            "parent": {"type": "database_id", "database_id": "db1"},
         },
         _page("row", {"type": "data_source_id", "data_source_id": "d1"}),
     ]
 
-    assert derive_roots(nodes)["row"] == "hq"
+    roots = derive_roots(
+        nodes,
+        fetch_node=lambda kind, i: _page("db", {"type": "page_id", "page_id": "hq"}),
+    )
+    assert roots["row"] == "hq"
+
+
+def test_블록_안에_있는_페이지는_블록을_풀어_올라간다():
+    # 실측에서 문서 페이지 1,769개 중 545개가 이 경우였다.
+    nodes = [
+        _page("hq", {"type": "workspace", "workspace": True}),
+        _page("a", {"type": "block_id", "block_id": "토글"}),
+    ]
+
+    roots = derive_roots(
+        nodes,
+        fetch_node=lambda kind, i: _page("db", {"type": "page_id", "page_id": "hq"}),
+    )
+    assert roots["a"] == "hq"
+
+
+def test_못_풀면_거기서_멈춘다():
+    nodes = [_page("a", {"type": "block_id", "block_id": "토글"})]
+
+    assert derive_roots(nodes)["a"] == "a"
+
+
+def test_워크스페이스_직속_데이터베이스가_최상위가_된다():
+    # "회의록"이 그렇다. 조회 실패와 "부모가 워크스페이스라 없음"을 같은
+    # None으로 뭉뚱그리면 그 아래가 전부 엉뚱한 자리에 붙는다.
+    nodes = [_page("row", {"type": "database_id", "database_id": "db"})]
+    database = {
+        "object": "database",
+        "id": "db",
+        "title": [{"plain_text": "회의록"}],
+        "parent": {"type": "workspace", "workspace": True},
+    }
+
+    assert derive_roots(nodes, fetch_node=lambda kind, i: database)["row"] == "db"
+
+
+def test_데이터베이스_행_여부():
+    assert is_database_row(
+        _page("r", {"type": "data_source_id", "data_source_id": "d"})
+    )
+    assert not is_database_row(_page("p", {"type": "page_id", "page_id": "hq"}))
 
 
 def test_최상위가_여럿이면_각자에_붙는다():

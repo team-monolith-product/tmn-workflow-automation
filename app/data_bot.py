@@ -8,7 +8,7 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from service.llm import DEFAULT_MODEL
+from service.llm import DEFAULT_MODEL, extract_text
 from .common import KST, slack_users_list
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
@@ -294,16 +294,7 @@ async def answer_data_analysis(
         {"callbacks": [tool_status_handler], "recursion_limit": 200},
     )
 
-    # GPT-5.2 reasoning 모드에서는 content가 리스트로 반환될 수 있음
-    # [{'type': 'reasoning', ...}, {'type': 'text', 'text': '실제 응답', ...}]
-    content = response["messages"][-1].content
-    if isinstance(content, list):
-        # reasoning 모드: type='text'인 항목에서 text 추출
-        text_items = [item for item in content if item.get("type") == "text"]
-        agent_answer = text_items[0]["text"] if text_items else ""
-    else:
-        # 일반 모드: 문자열 그대로 사용
-        agent_answer = content
+    agent_answer = extract_text(response["messages"][-1].content)
 
     # Slack 텍스트 블록은 최대 3000자까지만 지원
     # 긴 응답은 여러 메시지로 분할하여 전송

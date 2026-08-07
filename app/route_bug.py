@@ -10,6 +10,7 @@
 슬랙 봇(app.py)이 이 파일을 import 하여 사용하길 기대합니다.
 """
 
+import asyncio
 import json
 import random
 from typing import Literal
@@ -23,8 +24,11 @@ from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 from slack_sdk.web.async_client import AsyncWebClient
 
-from service.knowledge.db import connect
-from service.knowledge.search import render_results, search_items
+from service.knowledge.query import (
+    DEFAULT_CHAR_LIMIT,
+    QUERY_TOOL_DESCRIPTION,
+    run_query,
+)
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION
 from service.slack import get_email_to_user_id_async, get_user_id_to_user_info_async
 from service.teams import PRODUCT_USERGROUP_IDS, TEAM_USERGROUP_IDS
@@ -120,12 +124,13 @@ class TeamAndPriority(BaseModel):
 EXTRACT_SYSTEM_PROMPT = """
 당신은 버그 신고 내용을 분석하여 관련 직군과 우선순위를 결정하는 전문가입니다.
 
-판단하기 전에 search_knowledge 로 사내 과거 대화를 찾아보세요.
+판단하기 전에 query_knowledge 로 사내 과거 대화를 찾아보세요.
 신고에 등장하는 기능 이름, 화면 이름, 식별자를 핵심 단어로 넣습니다.
 증상만 보면 화면 문제로 보이지만 실제로는 서버 문제인 신고가 잦아서,
 같은 증상을 누가 어느 채널에서 다뤘는지가 신고 본문보다 나은 근거입니다.
 개발 채널은 직군으로 나뉘어 있습니다. t_개발_프론트는 fe, t_개발_백은 be,
-t_개발_인프라는 ie 입니다.
+t_개발_인프라는 ie 입니다. data_source.name 이 채널 이름이므로, 어느 채널에서
+다뤘는지는 채널별로 세어 보면 됩니다.
 
 직군 분류:
 - fe: 프론트엔드 관련 버그 (UI, 사용자 상호작용, 브라우저 렌더링 등)
@@ -140,22 +145,12 @@ t_개발_인프라는 ie 입니다.
 """
 
 
-@tool
-def search_knowledge(query: str, channel: str | None = None) -> str:
-    """
-    사내 슬랙 공개 채널의 과거 대화를 검색합니다.
-    검색어는 어휘가 그대로 맞아야 하므로 문장이 아니라 핵심 단어를 넣습니다.
-    channel에 "t_개발_백" 같은 채널 이름을 주면 그 채널로 좁힙니다.
-    """
-    with connect() as conn:
-        results = search_items(
-            conn,
-            query,
-            actor=KNOWLEDGE_ACTOR,
-            tool="route_bug",
-            channel=channel,
-        )
-    return render_results(results)
+@tool(description=QUERY_TOOL_DESCRIPTION)
+async def query_knowledge(sql: str, char_limit: int = DEFAULT_CHAR_LIMIT) -> str:
+    # psycopg는 동기라 스레드에서 실행합니다.
+    return await asyncio.to_thread(
+        run_query, sql, KNOWLEDGE_ACTOR, "route_bug", char_limit
+    )
 
 
 async def extract_team_and_priority_from_report_text(
@@ -164,7 +159,7 @@ async def extract_team_and_priority_from_report_text(
     """버그 신고 메시지 내용을 분석하여 관련 직군/우선순위 반환"""
     agent = create_react_agent(
         ChatOpenAI(model=DEFAULT_MODEL, output_version=RESPONSES_OUTPUT_VERSION),
-        [search_knowledge],
+        [query_knowledge],
         prompt=EXTRACT_SYSTEM_PROMPT,
         response_format=TeamAndPriority,
     )

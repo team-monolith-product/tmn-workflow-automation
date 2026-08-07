@@ -6,7 +6,7 @@ from app.route_bug import (
     KNOWLEDGE_ACTOR,
     TeamAndPriority,
     extract_team_and_priority_from_report_text,
-    search_knowledge,
+    query_knowledge,
     select_assignee_email,
     select_candidate_emails,
 )
@@ -25,17 +25,15 @@ CODLE_EMAILS = [
 ]
 
 
-class TestSearchKnowledge:
-    def test_logs_queries_as_bot(self):
-        """봇이 부른 검색은 사람이 친 검색과 구분되게 기록한다"""
-        with patch("app.route_bug.connect"), patch(
-            "app.route_bug.search_items", return_value=[]
-        ) as mock_search_items:
-            search_knowledge.invoke({"query": "배부순서", "channel": "t_개발_백"})
+class TestQueryKnowledge:
+    async def test_logs_queries_as_bot(self):
+        """봇이 부른 질의는 사람이 친 질의와 구분되게 기록한다"""
+        sql = "SELECT url FROM item WHERE lower(raw_text) LIKE '%배부순서%'"
 
-        assert mock_search_items.call_args.kwargs["actor"] == KNOWLEDGE_ACTOR
-        assert mock_search_items.call_args.kwargs["tool"] == "route_bug"
-        assert mock_search_items.call_args.kwargs["channel"] == "t_개발_백"
+        with patch("app.route_bug.run_query", return_value="") as mock_run_query:
+            await query_knowledge.ainvoke({"sql": sql})
+
+        assert mock_run_query.call_args.args[:3] == (sql, KNOWLEDGE_ACTOR, "route_bug")
 
 
 class TestExtractTeamAndPriority:
@@ -54,7 +52,7 @@ class TestExtractTeamAndPriority:
         assert (team, priority) == ("be", "높음")
 
     async def test_gives_the_agent_the_knowledge_tool(self):
-        """에이전트가 지식베이스 검색 도구를 들고 판단한다"""
+        """에이전트가 지식베이스 질의 도구를 들고 판단한다"""
         agent = MagicMock()
         agent.ainvoke = _async_return(
             {"structured_response": TeamAndPriority(team="fe", priority="보통")}
@@ -65,7 +63,7 @@ class TestExtractTeamAndPriority:
         ) as mock_create_agent:
             await extract_team_and_priority_from_report_text("신고")
 
-        assert mock_create_agent.call_args.args[1] == [search_knowledge]
+        assert mock_create_agent.call_args.args[1] == [query_knowledge]
 
 
 def _async_return(value):
