@@ -8,7 +8,7 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from service.llm import DEFAULT_MODEL, extract_text
+from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 from .common import KST, slack_users_list
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
@@ -262,7 +262,7 @@ async def answer_data_analysis(
         model=DEFAULT_MODEL,
         temperature=0,
         reasoning=reasoning,
-        output_version="responses/v1",
+        output_version=RESPONSES_OUTPUT_VERSION,
     )
 
     # 데이터 분석 전용 Tools
