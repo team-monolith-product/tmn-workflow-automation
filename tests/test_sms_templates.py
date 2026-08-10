@@ -80,3 +80,23 @@ def test_실제_문안이_읽힌다():
 def test_없는_문안은_사용_가능_목록을_알려준다():
     with pytest.raises(FileNotFoundError, match="discord"):
         templates.load("존재하지않는문안")
+
+
+def test_즉석_문안은_본문을_그대로_쓴다():
+    """데이터를 보고 그 자리에서 쓴 문안은 파일 없이 보낼 수 있어야 한다."""
+    assert (
+        templates.resolve(None, "이번 주 출석 안내입니다\n")
+        == "이번 주 출석 안내입니다"
+    )
+
+
+def test_저장된_문안은_파일에서_읽는다():
+    assert "[*이름*]" in templates.resolve("discord", None)
+
+
+def test_문안은_파일과_본문_중_하나만_받는다():
+    """둘 다 주면 어느 쪽이 나갔는지 사후에 알 수 없다."""
+    with pytest.raises(ValueError):
+        templates.resolve("discord", "본문")
+    with pytest.raises(ValueError):
+        templates.resolve(None, None)

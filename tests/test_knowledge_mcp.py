@@ -122,4 +122,8 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
 async def test_질의_도구가_등록된다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert [tool.name for tool in tools] == ["query_knowledge"]
+    assert [tool.name for tool in tools] == [
+        "query_knowledge",
+        "preview_sms",
+        "send_sms",
+    ]

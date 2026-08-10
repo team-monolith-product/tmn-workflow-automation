@@ -100,7 +100,8 @@ def send_campaign(
     conn: psycopg.Connection,
     *,
     campaign: str,
-    template_name: str,
+    template_name: str | None = None,
+    content: str | None = None,
     rows: list[dict[str, Any]],
     requested_by: str,
     entrypoint: str,
@@ -115,7 +116,8 @@ def send_campaign(
     Args:
         conn: 지식베이스 커넥션
         campaign: 발송 건 식별자. 재발송은 다른 값을 쓴다
-        template_name: templates/sms/{name}.txt
+        template_name: templates/sms/{name}.txt (content 와 택일)
+        content: 즉석 문안 본문 (template_name 과 택일)
         rows: to·name·var1~var8 을 담은 수신자 목록
         requested_by: 시킨 사람 이메일. 도구 인자가 아니라 인증에서 온 값
         entrypoint: slack · mcp · script
@@ -129,7 +131,7 @@ def send_campaign(
         ValueError: 문안이 LMS 한도를 넘을 때
         transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 반납한다)
     """
-    template = templates.load(template_name)
+    template = templates.resolve(template_name, content)
     normalized = [{**row, "to": templates.normalize_phone(row["to"])} for row in rows]
     message_type = templates.decide_message_type(template, normalized)
 
@@ -192,17 +194,22 @@ def send_campaign(
     }
 
 
-def preview(template_name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def preview(
+    rows: list[dict[str, Any]],
+    template_name: str | None = None,
+    content: str | None = None,
+) -> dict[str, Any]:
     """발송하지 않고 문안·타입·길이만 확인합니다.
 
     Args:
-        template_name: templates/sms/{name}.txt
         rows: 수신자 목록
+        template_name: templates/sms/{name}.txt (content 와 택일)
+        content: 즉석 문안 본문 (template_name 과 택일)
 
     Returns:
         dict[str, Any]: message_type·max_bytes·sample·targets
     """
-    template = templates.load(template_name)
+    template = templates.resolve(template_name, content)
     normalized = [{**row, "to": templates.normalize_phone(row["to"])} for row in rows]
     rendered = [templates.render(template, row) for row in normalized]
     return {

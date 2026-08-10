@@ -87,6 +87,29 @@ def load(name: str) -> str:
     return path.read_text(encoding="utf-8").rstrip("\n")
 
 
+def resolve(name: str | None, content: str | None) -> str:
+    """문안을 정합니다. 파일 이름과 본문 중 정확히 하나를 받습니다.
+
+    반복해서 쓰는 문안은 파일로 두고 컨펌 대상을 텍스트 파일로 유지합니다.
+    다만 파일만 허용하면 "이 조회 결과에 이 내용으로 보내줘"가 새 파일을 만드는
+    PR 을 거쳐야 해서 슬랙에서 끝나지 않습니다. 일회성 문안은 본문을 그대로 받되,
+    발송 전에 사람이 승인 카드에서 전문을 보고 누릅니다.
+
+    Args:
+        name: 문안 파일 이름
+        content: 즉석 문안 본문
+
+    Returns:
+        str: 치환 태그가 남아 있는 원문
+
+    Raises:
+        ValueError: 둘 다 주거나 둘 다 안 줬을 때
+    """
+    if (name is None) == (content is None):
+        raise ValueError("문안 파일 이름과 본문 중 하나만 지정해야 합니다")
+    return load(name) if name else content.rstrip("\n")
+
+
 def render(template: str, row: dict[str, Any]) -> str:
     """치환 태그를 실제 값으로 바꿉니다.
 

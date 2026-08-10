@@ -103,22 +103,28 @@ def build_mcp() -> MCPServer:
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
     @mcp.tool()
-    async def preview_sms(template: str, targets: list[dict]) -> str:
+    async def preview_sms(
+        targets: list[dict],
+        template: str | None = None,
+        content: str | None = None,
+    ) -> str:
         """문자를 보내지 않고 문안·메시지 타입·길이만 확인합니다.
 
         발송 전에는 항상 이걸 먼저 실행해 사람에게 보여줍니다.
 
         Args:
-            template: 문안 파일 이름 (discord 등)
             targets: [{"to": "010...", "name": "홍길동", "var1": "…"}] 형식
+            template: 저장된 문안 파일 이름 (content 와 택일)
+            content: 이번에 직접 쓴 본문 (template 와 택일)
         """
-        return render_preview(sms_send.preview(template, targets))
+        return render_preview(sms_send.preview(targets, template, content))
 
     @mcp.tool()
     async def send_sms(
         campaign: str,
-        template: str,
         targets: list[dict],
+        template: str | None = None,
+        content: str | None = None,
         subject: str | None = None,
     ) -> str:
         """문자를 실제로 발송합니다. 대외 발신이므로 사람의 컨펌을 받은 뒤에만 씁니다.
@@ -126,15 +132,26 @@ def build_mcp() -> MCPServer:
         같은 campaign 으로 이미 보낸 번호는 자동으로 빠집니다. 재발송이
         필요하면 campaign 을 다르게 지정합니다.
 
+        슬랙 봇에는 이 도구가 없습니다. 거기서는 승인 카드를 눌러야 나갑니다.
+        여기는 사람이 직접 명령을 치는 자리라 그대로 둡니다.
+
         Args:
             campaign: 이 발송 건의 식별자
-            template: 문안 파일 이름
             targets: 수신자 목록
+            template: 저장된 문안 파일 이름 (content 와 택일)
+            content: 이번에 직접 쓴 본문 (template 와 택일)
             subject: LMS 제목. 생략하면 campaign 을 쓴다
         """
         token = cast(AdminToken, get_access_token())
         result = await asyncio.to_thread(
-            send_blocking, campaign, template, targets, subject, token.email, "mcp"
+            send_blocking,
+            campaign,
+            template,
+            content,
+            targets,
+            subject,
+            token.email,
+            "mcp",
         )
         return render_sent(campaign, result)
 
