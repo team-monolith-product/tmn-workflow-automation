@@ -33,6 +33,9 @@ PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로�
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
 
+# create_task 참조를 유지하여 GC 방지
+_background_jobs: set[asyncio.Task] = set()
+
 
 async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad | None:
     """사용자가 속한 스쿼드를 결정합니다.
@@ -232,6 +235,8 @@ def register_general_handlers(app):
     # 자동화 작업 표 — 단일 진입 커맨드 `/wa <작업>` 로 라우팅한다.
     # 슬랙 앱 UI 에는 `/wa` 하나만 등록하면 되고, 새 작업은 이 표에 한 줄만 추가한다.
     # 각 튜플: (작업명, module_path, func_name, description[, body_kwargs])
+    # 작업명 뒤에 남은 토큰은 함수의 위치 인자로 전달한다.
+    # 예: `/wa reset-develop jce-class-rails` → func("jce-class-rails")
     # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로 전달할 매핑이다.
     # 예: {"caller_slack_user_id": "user_id"} → func(caller_slack_user_id=body.get("user_id"))
     _JOBS = [
@@ -296,6 +301,13 @@ def register_general_handlers(app):
             "main",
             "교육 외주 입찰공고 수집·평가",
         ),
+        (
+            "reset-develop",
+            "scripts.reset_develop",
+            "main",
+            "`<레포>` 의 develop 을 main 으로 초기화",
+            {"caller_slack_user_id": "user_id"},
+        ),
     ]
 
     _JOB_BY_SUB = {
@@ -304,7 +316,7 @@ def register_general_handlers(app):
     }
 
     def _wa_usage():
-        lines = ["사용법: `/wa <작업>`", "", "작업 목록:"]
+        lines = ["사용법: `/wa <작업> [인자]`", "", "작업 목록:"]
         lines += [f"• `{sub}` — {meta[2]}" for sub, meta in _JOB_BY_SUB.items()]
         return "\n".join(lines)
 
@@ -323,5 +335,10 @@ def register_general_handlers(app):
         await ack(text=f"⏳ {description} 중입니다…")
         module = importlib.import_module(module_path)
         func = getattr(module, func_name)
+        args = text.split()[1:]
         kwargs = {kw: body.get(bk) for kw, bk in (body_kwargs or {}).items()}
-        await asyncio.to_thread(func, **kwargs)
+        # 슬래시 커맨드 응답은 리스너가 끝나야 나가므로, 작업을 기다리면 3초 제한에 걸려
+        # ack 대신 타임아웃이 뜬다. 작업 결과는 각 작업이 직접 슬랙에 게시한다.
+        task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+        _background_jobs.add(task)
+        task.add_done_callback(_background_jobs.discard)
