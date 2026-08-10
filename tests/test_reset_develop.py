@@ -99,23 +99,17 @@ def test_to_mentions_falls_back_to_email_when_no_slack_account():
     assert mentions == ["<@U0859TEQNRJ>", "gone@team-mono.com"]
 
 
-def test_build_announcement_includes_cleanup_mentions_and_unlinked_pulls():
-    text = build_announcement(
-        "jce-class-rails",
-        ["<@U0859TEQNRJ>"],
-        {1848: "https://github.com/team-monolith-product/jce-class-rails/pull/1848"},
-        "U02HT4EU4VD",
-    )
+def test_build_announcement_includes_cleanup_and_mentions():
+    text = build_announcement("jce-class-rails", ["<@U0859TEQNRJ>"], "U02HT4EU4VD")
 
     assert "`jce-class-rails`" in text
     assert LOCAL_CLEANUP_COMMAND in text
     assert "<@U02HT4EU4VD>" in text
     assert "<@U0859TEQNRJ>" in text
-    assert "|#1848>" in text
 
 
 def test_build_announcement_omits_empty_sections():
-    text = build_announcement("jce-class-rails", [], {}, None)
+    text = build_announcement("jce-class-rails", [], None)
 
     assert "열린 PR" not in text
     assert "요청:" not in text

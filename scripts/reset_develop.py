@@ -162,7 +162,6 @@ def to_mentions(emails: list[str], email_to_user_id: dict[str, str]) -> list[str
 def build_announcement(
     repo_name: str,
     mentions: list[str],
-    unlinked_pull_urls: dict[int, str],
     caller_slack_user_id: str | None,
 ) -> str:
     """
@@ -171,7 +170,6 @@ def build_announcement(
     Args:
         repo_name: 레포 이름
         mentions: 열린 PR 담당자의 슬랙 멘션 목록
-        unlinked_pull_urls: 노션 작업이 연결되지 않아 담당자를 못 찾은 PR
         caller_slack_user_id: 명령을 실행한 사람
 
     Returns:
@@ -186,11 +184,6 @@ def build_announcement(
     ]
     if mentions:
         lines += ["", f"열린 PR 이 있는 분들 {' '.join(mentions)}"]
-    if unlinked_pull_urls:
-        links = " ".join(
-            f"<{url}|#{number}>" for number, url in sorted(unlinked_pull_urls.items())
-        )
-        lines += ["", f"노션 작업이 없어 담당자를 못 찾은 열린 PR {links}"]
     return "\n".join(lines)
 
 
@@ -236,15 +229,13 @@ def main(
         return
 
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"], notion_version="2025-09-03")
-    pull_urls = get_open_pull_urls(repo)
-    task_page_ids = get_task_page_ids(notion, pull_urls)
+    task_page_ids = get_task_page_ids(notion, get_open_pull_urls(repo))
     emails = get_assignee_emails(
         notion, [page_id for ids in task_page_ids.values() for page_id in ids]
     )
     announcement = build_announcement(
         repo_name,
         to_mentions(emails, get_email_to_user_id(slack_client)),
-        {n: url for n, url in pull_urls.items() if n not in task_page_ids},
         caller_slack_user_id,
     )
 
