@@ -94,20 +94,6 @@ squads:
 squad_overrides:
   "U07RP7U3FPU": "ie"  # 박기영: 인프라 팀 우선
 
-# GitHub 로그인 → 슬랙 사용자 ID
-# GitHub 프로필에 회사 이메일이 공개돼 있지 않고 org 에 SAML 도 없어 자동 매칭이 안 된다.
-github_slack_users:
-  a3626a: "U02HT4EU4VD"            # 이창환
-  BaeYeongbin: "U02JLCWGETT"       # 배영빈
-  bichikim: "U0ASBJC2SNA"          # 김비치
-  BrianPark314: "U07RP7U3FPU"      # 박기영
-  HoseonRyu: "U02PFUPCJNM"         # 류호선
-  ksy90101: "U074S4Y9PUP"          # 김세윤
-  pekopekopekopayo: "U0859TEQNRJ"  # 이동연
-  shcshcshc: "U03M4FZ6P45"         # 신희찬
-  winshine0326: "U0AH17PCH7Z"      # 류승찬
-  YejinLee1110: "U075PUFNGHX"      # 이예진
-
 scrum:
   pr_warning_excluded_members:
     - "U075PUFNGHX"  # 예진 이 (코들 PM)
