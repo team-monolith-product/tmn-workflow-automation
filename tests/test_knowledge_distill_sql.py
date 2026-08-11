@@ -40,9 +40,9 @@ def conn():
 def item_id(conn):
     """정제 대기 상태인 item 한 행. 커밋하지 않습니다."""
     source = conn.execute("""
-        INSERT INTO data_source (kind, external_id, name)
+        INSERT INTO data_source (source, external_id, name)
         VALUES ('slack', 'TEST_SQL', '테스트')
-        ON CONFLICT (kind, external_id) DO UPDATE SET name = EXCLUDED.name
+        ON CONFLICT (source, external_id) DO UPDATE SET name = EXCLUDED.name
         RETURNING id
         """).fetchone()["id"]
     row = conn.execute(
@@ -61,7 +61,9 @@ def item_id(conn):
 
 def test_실패는_한도에_닿을_때까지_pending으로_돌아온다(conn, item_id):
     # 첫 실패에 error 로 옮기면 429 한 번에 그 스레드가 영구히 사라진다.
-    states = [distill.mark_error(conn, item_id, "429") for _ in range(3)]
+    states = [
+        distill.mark_error(conn, item_id, "429") for _ in range(distill.MAX_ATTEMPTS)
+    ]
 
     assert states == ["pending"] * (distill.MAX_ATTEMPTS - 1) + ["error"]
 
@@ -83,14 +85,17 @@ def test_시도_횟수가_없던_행도_1부터_센다(conn, item_id):
     assert row["metadata"]["distill_attempts"] == 1
 
 
-def test_실패한_건은_바로_다시_잡히지_않는다(conn, item_id):
-    # distill_after 를 안 미루면 같은 건이 다음 회차에 즉시 다시 잡혀
-    # 큐 앞을 막는다.
+def test_실패한_건은_큐에서_빠지고_대기_수도_같이_준다(conn, item_id):
+    # distill_after 를 안 미루면 같은 건이 다음 회차에 즉시 다시 잡혀 큐 앞을
+    # 막는다. 그리고 count_pending 과 fetch_pending 의 조건이 갈라지면 로그의
+    # "정제 대기 N건"이 실제 큐와 달라진다.
+    #
+    # 이 DB 에는 남의 pending 행이 1.4만 건 있다. 전역 개수를 단언하면 코드가
+    # 옳아도 실패하므로, 픽스처 행 하나가 정확히 빠지는지만 본다.
+    before = distill.count_pending(conn)
+    assert item_id in {row["id"] for row in distill.fetch_pending(conn, before)}
+
     distill.mark_error(conn, item_id, "429")
 
-    assert distill.fetch_pending(conn, 50) == []
-
-
-def test_대기_건수는_잡아오는_조건과_같다(conn, item_id):
-    # 두 쿼리가 갈라지면 로그의 "정제 대기 N건"이 실제 큐와 달라진다.
-    assert distill.count_pending(conn) == len(distill.fetch_pending(conn, 1000))
+    assert item_id not in {row["id"] for row in distill.fetch_pending(conn, before)}
+    assert distill.count_pending(conn) == before - 1
