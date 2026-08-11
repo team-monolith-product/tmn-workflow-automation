@@ -51,21 +51,43 @@ PHONE_COLUMN = chr(ord("A") + HEADER.index("번호"))
 _RANGE = re.compile(r"!\D+(\d+):")
 
 
+class LedgerLayoutError(RuntimeError):
+    """발송이력 탭의 열 배치가 HEADER 와 다를 때 발생합니다."""
+
+
 def open_ledger(spreadsheet_id: str):
     """그 사업의 발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
 
     시트 ID 를 인자로 받습니다. 전역 환경변수 하나로 두면 사업 채널이 여럿인데
     이력이 한 시트에 섞입니다.
 
+    열 배치를 여기서 한 번 확인합니다. 쓰기(claim·mark)는 HEADER 순서를 위치로
+    가정하는데, 사람이 앞이나 중간에 열을 끼워 넣으면 그 가정이 조용히 깨져
+    캠페인 칸에 번호가 들어가고 승자 조회가 영영 매칭되지 않습니다. 결과는
+    "전원 중복 처리 후 한 통도 발송 안 됨"인데 종료 코드는 0 입니다.
+    뒤에 열을 덧붙이는 흔한 편집은 그대로 통과시킵니다.
+
     Args:
         spreadsheet_id: 참가자 스프레드시트 ID
 
     Returns:
         gspread.Worksheet: 발송이력 워크시트
+
+    Raises:
+        LedgerLayoutError: 기존 헤더가 HEADER 로 시작하지 않을 때
     """
     ws = google_sheets.get_worksheet(spreadsheet_id, WORKSHEET)
-    if not ws.get_all_values():
+    values = ws.get_all_values()
+    if not values:
         ws.update([HEADER], "A1")
+    elif values[0][: len(HEADER)] != HEADER:
+        raise LedgerLayoutError(
+            f"'{WORKSHEET}' 탭의 열 배치가 다릅니다.\n"
+            f"  기대: {HEADER}\n"
+            f"  실제: {values[0]}\n"
+            "열을 지우거나 중간에 끼워 넣으면 기록이 어긋납니다. "
+            "새 열은 맨 뒤에 붙여주세요."
+        )
     # 번호 열을 텍스트로 고정한다. 두지 않으면 사람이 손으로 적은 01012345678 을
     # 시트가 숫자로 바꿔 앞자리 0 이 사라진다. 조건 밖에 둔다 — 사람이 탭을 먼저
     # 만들어 두면 위 분기에 걸리지 않아 서식이 영영 안 잡힌다. 멱등하다.
@@ -76,8 +98,9 @@ def open_ledger(spreadsheet_id: str):
 def read_rows(ws) -> list[dict[str, Any]]:
     """이력 전체를 행 번호와 함께 읽습니다.
 
-    헤더 이름으로 열을 찾습니다. 사람이 열 순서를 바꿔도 깨지지 않게 하려는
-    것입니다.
+    HEADER 순서를 위치로 읽습니다. 쓰기 경로도 같은 가정을 쓰고, 배치가 다른
+    시트는 open_ledger 가 이미 막았습니다. 읽기만 이름으로 찾으면 쓰기와 계약이
+    갈라져, 열이 밀린 시트에서 아무 소리 없이 엉뚱한 값을 대조하게 됩니다.
 
     Args:
         ws: 발송이력 워크시트
@@ -86,13 +109,10 @@ def read_rows(ws) -> list[dict[str, Any]]:
         list[dict[str, Any]]: 헤더를 키로 하고 _row 에 행 번호를 담은 목록
     """
     values = ws.get_all_values()
-    if not values:
-        return []
-    header = values[0]
     rows = []
     for index, line in enumerate(values[1:], start=2):
         row = {
-            name: (line[i] if i < len(line) else "") for i, name in enumerate(header)
+            name: (line[i] if i < len(line) else "") for i, name in enumerate(HEADER)
         }
         row["_row"] = index
         rows.append(row)

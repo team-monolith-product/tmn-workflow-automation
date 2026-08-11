@@ -107,6 +107,10 @@ def main() -> None:
     if bool(args.csv) == bool(args.to):
         parser.error("--csv 와 --to 중 하나만 주세요.")
 
+    # 발송 인자 자리에서 평가하면 dry-run 이 통과시킨 명령이 실발송에서만
+    # 터진다. 이 CLI 가 없애려는 게 정확히 그 왕복이다.
+    sheet_id = spreadsheet_id(args.spreadsheet)
+
     if args.csv:
         rows = read_csv(args.csv)
     else:
@@ -147,7 +151,7 @@ def main() -> None:
         return
 
     result = sms_send.send_campaign(
-        spreadsheet_id=spreadsheet_id(args.spreadsheet),
+        spreadsheet_id=sheet_id,
         campaign=args.campaign,
         rows=rows,
         template_name=args.template,

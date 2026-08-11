@@ -26,12 +26,39 @@ def test_행_번호와_함께_읽는다():
     assert rows[0]["캠페인"] == "discord"
 
 
-def test_열_순서가_바뀌어도_이름으로_찾는다():
-    # 사람이 시트를 편집하다 열을 옮길 수 있다.
-    header = ["번호", "캠페인", "일시", "접수코드"]
-    ws = FakeWorksheet([header, ["01011111111", "discord", "2026-08-06", "1000"]])
-    rows = ledger.read_rows(ws)
-    assert rows[0]["캠페인"] == "discord" and rows[0]["접수코드"] == "1000"
+def _open(sheet: FakeWorksheet, monkeypatch) -> FakeWorksheet:
+    """open_ledger 를 이 페이크에 물립니다."""
+    monkeypatch.setattr(ledger.google_sheets, "get_worksheet", lambda _id, _name: sheet)
+    return ledger.open_ledger("S1")
+
+
+def test_빈_탭이면_헤더를_쓴다(monkeypatch):
+    sheet = _open(FakeWorksheet([]), monkeypatch)
+    assert sheet.rows[0] == ledger.HEADER
+
+
+def test_사람이_먼저_만든_탭에도_번호_열을_텍스트로_고정한다(monkeypatch):
+    # 이 서식이 없으면 손으로 적은 01012345678 이 숫자가 되어 앞자리 0 을 잃고,
+    # 그 줄은 어떤 발송과도 대조되지 않는다. 헤더 분기 안에 두면 사람이 탭을
+    # 먼저 만들어 둔 시트에서 영영 안 잡힌다.
+    sheet = _open(FakeWorksheet([ledger.HEADER]), monkeypatch)
+    assert sheet.formats[f"{ledger.PHONE_COLUMN}:{ledger.PHONE_COLUMN}"] == {
+        "numberFormat": {"type": "TEXT"}
+    }
+
+
+def test_열이_밀린_시트는_열기_전에_거절한다(monkeypatch):
+    # 쓰기는 HEADER 순서를 위치로 가정한다. 앞에 열이 하나 끼면 캠페인 칸에
+    # 번호가 들어가 승자 조회가 영영 매칭되지 않고, 전원이 '중복'으로 찍힌 뒤
+    # 한 통도 안 나간다. 종료 코드는 0 이라 사람은 발송된 줄 안다.
+    with pytest.raises(ledger.LedgerLayoutError):
+        _open(FakeWorksheet([["비고"] + ledger.HEADER]), monkeypatch)
+
+
+def test_뒤에_열을_덧붙인_시트는_그대로_쓴다(monkeypatch):
+    # 흔한 편집이고 위치 가정을 깨뜨리지 않는다.
+    sheet = _open(FakeWorksheet([ledger.HEADER + ["비고"]]), monkeypatch)
+    assert sheet.rows[0] == ledger.HEADER + ["비고"]
 
 
 def test_같은_대상은_가장_위_행이_이긴다():
