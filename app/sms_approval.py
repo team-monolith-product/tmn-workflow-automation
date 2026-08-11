@@ -22,6 +22,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from app.event_dedup import is_duplicate_event
 from app.sms_render import render_sent
+from service.sms import KST
 from service.sms import result as sms_result
 from service.sms import send as sms_send
 from service.sms.templates import normalize_phone
@@ -264,7 +265,9 @@ async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
 
     for round_no in range(1, SEND_ROUNDS + 1):
         campaign = draft.campaign if round_no == 1 else f"{draft.campaign}-r{round_no}"
-        sent_after = datetime.datetime.now() - SENT_AFTER_MARGIN
+        # 페이지 일시는 KST 벽시계다. 컨테이너의 now() 는 UTC 라 그대로 쓰면
+        # 최근 9시간이 전부 '이번 발송분'으로 통과한다.
+        sent_after = datetime.datetime.now(KST).replace(tzinfo=None) - SENT_AFTER_MARGIN
         sent = await asyncio.to_thread(
             sms_send.send_campaign,
             spreadsheet_id=draft.spreadsheet_id,
@@ -291,7 +294,10 @@ async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
         if not failed:
             break
 
-        targets = failed
+        # failed 는 {"to", "name"} 뿐이라 그대로 쓰면 재발송 문안의
+        # [*1*]~[*8*] 이 전부 빈 문자열로 치환돼 나간다. 원본 행을 되찾는다.
+        by_phone = {normalize_phone(row["to"]): row for row in draft.targets}
+        targets = [by_phone.get(normalize_phone(f["to"]), f) for f in failed]
         if round_no < SEND_ROUNDS:
             await on_progress(f"도달 실패 {len(failed)}건을 재발송합니다.")
 
@@ -375,6 +381,9 @@ def register_sms_handlers(app: Any) -> None:
         approved, message = await approve_draft(
             body["actions"][0]["value"], approver, client
         )
+        # 승인된 카드는 리액션 경로에서 빼둔다. 남겨두면 누군가 확인 표시로
+        # ✅ 를 달았을 때 "이미 처리된 초안" 문구가 승인 기록을 덮어쓴다.
+        _MESSAGE_TS_TO_DRAFT_ID.pop(body["message"]["ts"], None)
         mark = ":white_check_mark:" if approved else ":warning:"
         label = f"<@{approver}> 승인 — " if approved else ""
         await _replace_card(client, body, f"{mark} {label}{message}")
@@ -401,7 +410,13 @@ def register_sms_handlers(app: Any) -> None:
         if event["reaction"] not in APPROVE_REACTIONS:
             return
 
-        draft_id = _MESSAGE_TS_TO_DRAFT_ID.get(event["item"]["ts"])
+        if event["item"]["type"] != "message":
+            # 파일에 단 리액션에는 ts 가 없다.
+            return
+
+        # pop 이다. 이 카드는 이제 승인 대상이 아니므로, 뒤이어 달리는 ✅ 가
+        # 승인 문구를 덮어쓰지 않는다.
+        draft_id = _MESSAGE_TS_TO_DRAFT_ID.pop(event["item"]["ts"], None)
         if draft_id is None:
             return
 

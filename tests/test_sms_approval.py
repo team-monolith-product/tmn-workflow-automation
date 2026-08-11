@@ -204,6 +204,44 @@ async def test_본문의_실패라는_낱말이_상태를_뒤집지_않는다():
     assert sms_result.parse_results(html) == {"01011112222": sms_result.DELIVERED}
 
 
+async def test_발신번호_열이_앞에_있어도_수신번호를_읽는다():
+    # '번호'가 발신번호에 걸리면 모든 수신자가 wanted 필터에서 탈락해 영원히
+    # 미확정이 되는데, 열은 '찾은' 상태라 예외도 안 난다.
+    html = (
+        "<table><tr><th>발송일시</th><th>발신번호</th><th>수신번호</th>"
+        "<th>결과</th></tr>"
+        "<tr><td>2026-08-11 10:00</td><td>1577-1234</td><td>010-1111-2222</td>"
+        "<td>수신성공</td></tr></table>"
+    )
+    assert sms_result.parse_results(html) == {"01011112222": sms_result.DELIVERED}
+
+
+async def test_마지막_열이_빠진_행이_있어도_죽지_않는다():
+    # 값이 없어 <td> 가 생략된 행 하나면 IndexError 로 그 라운드 결과가
+    # 통째로 유실된다.
+    html = (
+        "<table><tr><th>수신번호</th><th>결과</th><th>내용</th>"
+        "<th>발송일시</th></tr>"
+        "<tr><td>010-3333-4444</td><td>수신성공</td></tr>"
+        "<tr><td>010-1111-2222</td><td>수신성공</td><td>본문</td>"
+        "<td>2026-08-11 10:00</td></tr></table>"
+    )
+    got = sms_result.parse_results(html, datetime.datetime(2026, 8, 11, 9, 0))
+    assert got == {"01011112222": sms_result.DELIVERED}
+
+
+async def test_일시를_한_줄도_못_읽으면_터뜨린다():
+    # 열은 있는데 형식이 다르면 전량 스킵돼 빈 결과가 나온다. 그건
+    # "아직 결과가 안 올라왔다"와 구분되지 않는다.
+    html = (
+        "<table><tr><th>발송일시</th><th>수신번호</th><th>결과</th></tr>"
+        "<tr><td>08-11 10:00</td><td>010-1111-2222</td><td>수신성공</td></tr>"
+        "</table>"
+    )
+    with pytest.raises(sms_result.ResultPageChanged):
+        sms_result.parse_results(html, datetime.datetime(2026, 8, 11, 9, 0))
+
+
 async def test_표를_못_읽으면_조용히_비우지_않고_터뜨린다():
     """빈 결과는 '아직 결과가 안 올라왔다'와 구분되지 않아 영원히 안 들킨다."""
     with pytest.raises(sms_result.ResultPageChanged):
@@ -242,6 +280,17 @@ async def test_만료된_초안은_승인으로_표시하지_않는다():
     """실패인데 '✅ 승인'을 붙이면 누른 사람이 발송된 줄 안다."""
     approved, message = await sms_approval.approve_draft("없는초안", "U1", FakeClient())
     assert not approved and "만료" in message
+
+
+async def test_재발송_대상이_치환값을_잃지_않는다():
+    # failed 는 to·name 뿐이다. 그대로 쓰면 [*1*]~[*8*] 이 빈 문자열이 된다.
+    targets = [{"to": "010-1111-2222", "name": "가", "var1": "1기", "var2": "링크"}]
+    failed = [{"to": "01011112222", "name": "가"}]
+
+    by_phone = {sms_approval.normalize_phone(t["to"]): t for t in targets}
+    restored = [by_phone.get(sms_approval.normalize_phone(f["to"]), f) for f in failed]
+
+    assert restored[0]["var1"] == "1기" and restored[0]["var2"] == "링크"
 
 
 async def test_초안_id는_매번_다르다():

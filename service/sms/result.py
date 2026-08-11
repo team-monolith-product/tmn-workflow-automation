@@ -78,9 +78,14 @@ def _column(cells: list[str], names: tuple[str, ...]) -> int | None:
     Returns:
         int | None: 열 위치. 없으면 None
     """
-    for index, cell in enumerate(cells):
-        if any(name in cell for name in names):
-            return index
+    # 이름을 바깥 루프로 돈다. 셀을 바깥으로 돌면 먼저 나오는 열이 이겨서,
+    # 발신번호 열이 수신번호보다 앞에 있으면 '번호'가 발신번호에 걸린다.
+    # 그러면 모든 수신자가 wanted 필터에서 탈락해 영원히 미확정이 되는데,
+    # 열은 '찾은' 상태라 ResultPageChanged 도 안 난다.
+    for name in names:
+        for index, cell in enumerate(cells):
+            if name in cell:
+                return index
     return None
 
 
@@ -148,17 +153,24 @@ def parse_results(
         )
 
     results: dict[str, str] = {}
+    seen_rows = 0
+    dated_rows = 0
+    needed = [phone_at, status_at] + ([time_at] if sent_after is not None else [])
     for row in rows:
         cells = _cells(row)
-        if max(phone_at, status_at) >= len(cells):
+        if max(needed) >= len(cells):
             continue
         phone = re.sub(r"\D", "", cells[phone_at])
         status = cells[status_at]
         if not phone or not status:
             continue
+        seen_rows += 1
         if sent_after is not None:
             at = _row_time(cells[time_at])
-            if at is None or at < sent_after:
+            if at is None:
+                continue
+            dated_rows += 1
+            if at < sent_after:
                 continue
         # 실패를 성공보다 먼저 본다. '수신실패'는 성공어 '수신'을 품고 있어
         # 순서를 뒤집으면 실패가 도달로 보고되고, 그 사람은 재발송 대상에서
@@ -173,6 +185,14 @@ def parse_results(
             continue
         # 같은 번호가 여러 행에 있으면 최신(위쪽) 행을 남깁니다
         results.setdefault(phone, code)
+
+    if sent_after is not None and seen_rows and not dated_rows:
+        # 열은 찾았는데 한 줄도 못 읽었다. 조용히 빈 결과를 돌려주면
+        # "아직 결과가 안 올라왔다"와 구분되지 않는다.
+        raise ResultPageChanged(
+            f"일시 열({time_at}번)을 한 줄도 읽지 못했습니다. 형식이 바뀌었는지 "
+            "`python -m service.sms.result --dump` 로 확인하세요."
+        )
 
     return results
 

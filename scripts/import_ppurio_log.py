@@ -24,8 +24,7 @@ from collections import Counter
 
 from dotenv import load_dotenv
 
-from api import google_sheets
-from service.sms import ledger, roster
+from service.sms import ledger, roster, templates
 
 
 def read_log(path: pathlib.Path) -> list[dict]:
@@ -57,7 +56,9 @@ def to_row(entry: dict, requested_by: str) -> list:
     return [
         entry["ts"],
         entry["msg"],
-        entry["to"],
+        # 발송 경로는 정규화된 숫자만 쓴다. 로그의 010-1234-5678 을 그대로
+        # 넣으면 이관은 성공하고 중복 차단에는 안 걸려 재발송된다.
+        templates.normalize_phone(entry["to"]),
         entry.get("name", ""),
         entry.get("type", "LMS"),
         entry.get("messageKey", ""),
@@ -103,19 +104,22 @@ def main() -> None:
 
     ws = ledger.open_ledger(roster.parse_spreadsheet_id(args.spreadsheet))
     already = {
-        (row.get("캠페인", ""), row.get("번호", "")) for row in ledger.read_rows(ws)
+        ledger.ledger_key(row.get("캠페인", ""), row.get("번호", ""))
+        for row in ledger.read_rows(ws)
     }
     rows = [
         to_row(e, args.requested_by)
         for e in unique
-        if (e["msg"], e["to"]) not in already
+        if ledger.ledger_key(e["msg"], e["to"]) not in already
     ]
 
     if not rows:
         print("\n이미 전부 들어가 있습니다.")
         return
 
-    google_sheets.append_rows(ws, rows)
+    # RAW 로 써야 한다. USER_ENTERED 면 시트가 번호를 숫자로 해석해 앞자리 0 을
+    # 버리고, 이관한 줄이 어떤 발송과도 대조되지 않는다.
+    ws.append_rows(rows, value_input_option="RAW", insert_data_option="INSERT_ROWS")
     print(f"\n{len(rows)}건 적재 · 기존 {len(unique) - len(rows)}건은 이미 있음")
 
 
