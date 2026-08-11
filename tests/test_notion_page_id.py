@@ -8,6 +8,7 @@ LLM 에이전트가 Slack 유저 ID 등 잘못된 값을 page_id로 넘기는 �
 from unittest.mock import patch
 
 import pytest
+from notion_client import APIResponseError
 from pydantic import BaseModel, ValidationError
 
 from app.common import (
@@ -76,6 +77,19 @@ def test_description_surfaces_in_function_tool_schema():
     """함수형 @tool(Annotated 직접 파싱) 경로에서 page_id 설명이 LLM 스키마에 노출된다."""
     tool = get_notion_page_tool()
     assert "Slack 유저 ID" in tool.args["page_id"]["description"]
+
+
+async def test_inaccessible_page_returns_friendly_message_instead_of_raising():
+    """페이지가 삭제되었거나 연동 앱에 공유되지 않아 404가 나면
+    예외를 그대로 전파하지 않고 안내 문구를 반환한다. (Sentry WORKFLOW-AUTOMATION-69)
+    """
+    tool = get_notion_page_tool()
+    error = APIResponseError.__new__(APIResponseError)
+    with patch("app.common.notion_page_to_markdown", side_effect=error):
+        result = await tool.ainvoke(
+            {"page_id": "12d1cc820da680ba82d1e6d560aaf4c3"}
+        )
+    assert "조회할 수 없습니다" in result
 
 
 def test_description_surfaces_in_basemodel_tool_schema():
