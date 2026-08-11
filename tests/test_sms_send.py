@@ -6,7 +6,7 @@ import pytest
 
 from tests.fakes_sheets import FakeWorksheet
 
-from service.sms import ledger
+from service.sms import KST, ledger
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -21,6 +21,15 @@ def ws(monkeypatch) -> FakeWorksheet:
     sheet = FakeWorksheet([ledger.HEADER])
     monkeypatch.setattr(ledger, "open_ledger", lambda _id: sheet)
     return sheet
+
+
+def _kst_now() -> datetime.datetime:
+    """사람이 예약 시각을 적을 때 보는 벽시계.
+
+    naive now() 를 쓰면 컨테이너(UTC)와 KST 로 판정하는 코드가 9시간 어긋나
+    로컬(KST)에서만 통과한다. 그 결합이 사라지면 테스트가 아무것도 못 잡는다.
+    """
+    return datetime.datetime.now(KST).replace(tzinfo=None)
 
 
 def _sent(phone: str, code: str = "1000") -> list:
@@ -132,7 +141,7 @@ def test_접수코드가_1000이_아니면_실패로_본다(ws, monkeypatch):
 
 
 def test_벤더_옵션은_그대로_통과한다(ws, monkeypatch):
-    at = datetime.datetime.now() + datetime.timedelta(hours=1)
+    at = _kst_now() + datetime.timedelta(hours=1)
     _, payload = _run(
         monkeypatch,
         {"code": "1000", "messageKey": "K"},
@@ -209,7 +218,7 @@ def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypa
 def test_예약이_3분보다_가까우면_시트를_건드리기_전에_막는다(ws, monkeypatch):
     # 벤더도 거부하지만 그 거부는 발송 시도 뒤에야 돌아온다. 그때는 이미
     # 자리를 잡은 뒤라 재시도가 막힌다.
-    soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    soon = _kst_now() + datetime.timedelta(minutes=1)
     with pytest.raises(ValueError, match="3분"):
         _run(monkeypatch, {"code": "1000"}, send_at=soon)
 
@@ -223,7 +232,7 @@ def test_예약이면_sendTime이_실린다(ws, monkeypatch):
         "send",
         lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
     )
-    at = datetime.datetime.now() + datetime.timedelta(hours=1)
+    at = _kst_now() + datetime.timedelta(hours=1)
     sms_send.send_campaign(
         spreadsheet_id="S1",
         campaign="discord",
@@ -252,7 +261,7 @@ def test_예약_판정은_컨테이너_시계가_UTC여도_KST로_한다(monkeyp
 
 def test_문제를_한_번에_모아_돌려준다():
     # 하나씩 터뜨리면 고치고 다시 돌리고를 반복하게 된다.
-    soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    soon = _kst_now() + datetime.timedelta(minutes=1)
     problems = sms_send.check(
         [{"to": "010-123"}, {"to": "010-456"}],
         template_name="discord",
