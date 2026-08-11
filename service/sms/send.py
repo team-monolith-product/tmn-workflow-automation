@@ -84,9 +84,16 @@ def send_campaign(
         dict[str, Any]: requested·skipped·sent·code·message_key·message_type
 
     Raises:
-        ValueError: 문안이 LMS 한도를 넘거나, 예약이 3분보다 가까울 때
+        ValueError: check 가 문제를 찾았을 때. 호출부가 미리 check 를 돌려
+            사람에게 보여주는 게 정상 경로이고, 이건 안전망이다
         transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 '실패'로 표시)
     """
+    problems = check(
+        rows, template_name=template_name, content=content, send_at=send_at
+    )
+    if problems:
+        raise ValueError("\n".join(problems))
+
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
     message_type = templates.decide_message_type(template, normalized)
@@ -146,27 +153,84 @@ def send_campaign(
 
 
 def reserve_time(send_at: datetime.datetime) -> str:
-    """예약 시각을 벤더 형식으로 바꿉니다.
-
-    3분보다 가까우면 벤더가 접수를 거부합니다. 거부는 발송 시도 뒤에야
-    돌아오므로, 그때는 이미 이력 시트에 자리를 잡은 뒤입니다. 여기서 먼저 막습니다.
+    """예약 시각을 벤더 형식으로 바꿉니다. 판정은 check 가 합니다.
 
     Args:
         send_at: 예약 발송 시각
 
     Returns:
         str: yyyy-MM-ddTHH:mm:ss
-
-    Raises:
-        ValueError: 지금부터 3분 안쪽일 때
     """
-    margin = (send_at - datetime.datetime.now()).total_seconds()
-    if margin < MIN_RESERVE_SECONDS:
-        raise ValueError(
-            f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
-            f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
-        )
     return send_at.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def check(
+    rows: list[dict[str, Any]],
+    *,
+    template_name: str | None = None,
+    content: str | None = None,
+    send_at: datetime.datetime | None = None,
+) -> list[str]:
+    """보내기 전에 걸릴 것들을 전부 모읍니다.
+
+    발송 경로 곳곳에서 하나씩 터뜨리면 사람이 고치고 다시 돌리고를 반복합니다.
+    한 번에 다 보여주고 한 번에 고치게 합니다. 빈 목록이면 보낼 수 있습니다.
+
+    벤더가 잡아주는 것도 여기서 먼저 봅니다. 벤더 거부는 발송 시도 뒤에야
+    돌아오는데, 그때는 이미 이력 시트에 자리를 잡아 재시도가 막힙니다.
+
+    Args:
+        rows: to·name·var1~var8 을 담은 수신자 목록
+        template_name: templates/sms/{name}.txt (content 와 택일)
+        content: 즉석 문안 본문 (template_name 과 택일)
+        send_at: 예약 발송 시각
+
+    Returns:
+        list[str]: 보낼 수 없는 이유. 비어 있으면 보낼 수 있다.
+            중복 번호처럼 접어서 처리하는 것은 여기 담지 않고 preview 가 센다
+    """
+    problems: list[str] = []
+
+    try:
+        template = templates.resolve(template_name, content)
+    except (ValueError, FileNotFoundError) as error:
+        # 문안이 없으면 길이도 치환도 볼 수 없다.
+        return [str(error)]
+
+    if not rows:
+        return ["수신자가 없습니다."]
+
+    seen: set[str] = set()
+    normalized = []
+    for row in rows:
+        try:
+            phone = templates.normalize_phone(row["to"])
+        except ValueError as error:
+            problems.append(str(error))
+            continue
+        if phone in seen:
+            continue
+        seen.add(phone)
+        normalized.append({**row, "to": phone})
+
+    if normalized:
+        longest = max(
+            templates.euckr_len(templates.render(template, row)) for row in normalized
+        )
+        if longest > templates.LMS_MAX_BYTES:
+            problems.append(
+                f"치환 후 {longest}byte — LMS 한도 {templates.LMS_MAX_BYTES} 초과"
+            )
+
+    if send_at is not None:
+        margin = (send_at - datetime.datetime.now()).total_seconds()
+        if margin < MIN_RESERVE_SECONDS:
+            problems.append(
+                f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
+                f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
+            )
+
+    return problems
 
 
 def cancel_reserved(message_key: str) -> dict[str, Any]:
@@ -199,7 +263,7 @@ def preview(
         content: 즉석 문안 본문 (template_name 과 택일)
 
     Returns:
-        dict[str, Any]: message_type·max_bytes·targets·sample
+        dict[str, Any]: message_type·max_bytes·targets·folded·sample
     """
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
@@ -208,6 +272,9 @@ def preview(
         "message_type": templates.decide_message_type(template, normalized),
         "max_bytes": max((templates.euckr_len(text) for text in rendered), default=0),
         "targets": len(normalized),
+        # 명단에 같은 사람이 두 번 있으면 접어서 보낸다. 발송 사고는 아니지만
+        # 명단이 틀렸다는 신호라 사람에게 보여준다.
+        "folded": len(rows) - len(normalized),
         "sample": rendered[0] if rendered else "",
     }
 

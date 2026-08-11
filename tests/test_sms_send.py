@@ -207,14 +207,14 @@ def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypa
     assert len(ledger.read_rows(ws)) == 1
 
 
-def test_예약은_3분보다_가까우면_거절한다():
+def test_예약은_3분보다_가까우면_걸러진다():
     # 벤더가 거부하는데, 그 거부는 발송 시도 뒤에야 돌아온다.
-    # 그때는 이미 이력 시트에 자리를 잡은 뒤라 여기서 먼저 막는다.
+    # 그때는 이미 이력 시트에 자리를 잡은 뒤라 먼저 막는다.
     import datetime
 
     soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
-    with pytest.raises(ValueError, match="3분"):
-        sms_send.reserve_time(soon)
+    problems = sms_send.check(ROWS, template_name="discord", send_at=soon)
+    assert any("3분" in p for p in problems)
 
 
 def test_예약_시각은_벤더_형식으로_바뀐다():
@@ -246,3 +246,43 @@ def test_예약이면_sendTime이_실린다(ws, monkeypatch):
         send_at=at,
     )
     assert captured["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def test_문제를_한_번에_모아_돌려준다():
+    # 하나씩 터뜨리면 고치고 다시 돌리고를 반복하게 된다.
+    import datetime
+
+    soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    problems = sms_send.check(
+        [{"to": "010-123"}, {"to": "010-456"}],
+        template_name="discord",
+        send_at=soon,
+    )
+    assert sum("형식 오류" in p for p in problems) == 2
+    assert any("3분" in p for p in problems)
+
+
+def test_중복은_차단_사유가_아니다():
+    # 접어서 보내므로 발송은 된다. 대신 preview 가 몇 건 접었는지 센다.
+    rows = [{"to": "010-1111-1111"}, {"to": "01011111111"}]
+    assert sms_send.check(rows, template_name="discord") == []
+    assert sms_send.preview(rows, "discord")["folded"] == 1
+
+
+def test_문안이_없으면_거기서_멈춘다():
+    # 문안이 없으면 길이도 치환도 볼 수 없다.
+    assert sms_send.check(ROWS, template_name="없는문안") == [
+        "문안 '없는문안' 없음. 사용 가능: discord"
+    ]
+
+
+def test_문안과_즉석본문을_동시에_주면_거른다():
+    assert sms_send.check(ROWS, template_name="discord", content="둘 다")
+
+
+def test_수신자가_없으면_거른다():
+    assert sms_send.check([], template_name="discord") == ["수신자가 없습니다."]
+
+
+def test_통과하면_빈_목록이다():
+    assert sms_send.check(ROWS, template_name="discord") == []

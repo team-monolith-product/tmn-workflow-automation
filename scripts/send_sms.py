@@ -113,15 +113,21 @@ def main() -> None:
     send_at = (
         datetime.datetime.fromisoformat(args.at.replace("/", "-")) if args.at else None
     )
-    if send_at is not None:
-        # 3분 규칙은 발송 전에 확인해야 한다. 접수 뒤에 거부당하면 이미
-        # 이력 시트에 자리를 잡은 상태다.
-        sms_send.reserve_time(send_at)
+    problems = sms_send.check(
+        rows, template_name=args.template, content=args.content, send_at=send_at
+    )
+    if problems:
+        # 하나씩 터뜨리면 고치고 다시 돌리고를 반복하게 된다.
+        print("보내기 전에 고칠 것:")
+        for problem in problems:
+            print(f"  - {problem}")
+        raise SystemExit(1)
 
     summary = sms_send.preview(rows, args.template, args.content)
     print(
         f"{summary['message_type']} · 치환 후 최대 {summary['max_bytes']}byte"
         f" · 대상 {summary['targets']}명"
+        + (f" · 중복 {summary['folded']}건 접음" if summary["folded"] else "")
         + (f" · 예약 {args.at}" if args.at else " · 즉시 발송")
     )
     print("-" * 60)
