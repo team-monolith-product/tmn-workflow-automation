@@ -16,7 +16,7 @@ def _ws(rows: list[list] | None = None) -> FakeWorksheet:
 
 
 def _row(campaign: str, phone: str, code: str = "") -> list:
-    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "a@b.c", "slack"]
+    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "", "a@b.c", "slack"]
 
 
 def test_행_번호와_함께_읽는다():
@@ -93,6 +93,35 @@ def test_표시하면_접수코드와_키가_들어간다():
     ledger.mark(ws, [2], "1000", "KEY1")
     row = ledger.read_rows(ws)[0]
     assert row["접수코드"] == "1000" and row["messageKey"] == "KEY1"
+
+
+def test_claim이_쓴_행이_헤더와_같은_폭이다():
+    # 폭이 어긋나면 값이 옆 칸으로 밀린다. 승자 판정 열(캠페인·번호·접수코드)은
+    # 앞쪽이라 중복 차단은 멀쩡한 채, 감사 기록만 조용히 틀린다.
+    ws = _ws()
+    ledger.claim(
+        ws, "discord", [{"to": "01011111111", "name": "가"}], "LMS", "a@b.c", "slack"
+    )
+
+    written = ws.rows[1]
+    assert len(written) == len(ledger.HEADER)
+
+    row = ledger.read_rows(ws)[0]
+    assert row["요청자"] == "a@b.c"
+    assert row["경로"] == "slack"
+    assert row["이름"] == "가"
+    assert row["타입"] == "LMS"
+
+
+def test_사람이_하이픈을_넣어_적어도_대조된다():
+    # 장애 중 뿌리오 웹으로 보내고 손으로 적은 줄. 사람은 010-1111-1111 로
+    # 적는데 우리는 01011111111 로 쓴다. 표기를 안 눕히면 대조가 안 돼
+    # 그 사람에게 한 번 더 나간다.
+    ws = _ws([_row("discord", "010-1111-1111", "1000")])
+    won, lost = ledger.claim(
+        ws, "discord", [{"to": "01011111111"}], "LMS", "a@b.c", "slack"
+    )
+    assert won == [] and len(lost) == 1
 
 
 def test_번호의_앞자리_0을_잃지_않는다():
