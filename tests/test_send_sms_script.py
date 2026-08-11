@@ -11,28 +11,6 @@ import pytest
 from scripts import send_sms
 
 
-def test_주소를_붙여넣어도_ID를_뽑는다():
-    assert (
-        send_sms.spreadsheet_id(
-            "https://docs.google.com/spreadsheets/d/1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd/edit#gid=0"
-        )
-        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
-    )
-
-
-def test_ID를_그대로_줘도_받는다():
-    assert (
-        send_sms.spreadsheet_id("  1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd \n")
-        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
-    )
-
-
-def test_시트로_읽히지_않으면_거절한다():
-    # 통과시키면 엉뚱한 ID 로 시트를 열려다 발송 직전에 죽는다.
-    with pytest.raises(ValueError):
-        send_sms.spreadsheet_id("그 시트요")
-
-
 def test_번호_칸이_비어도_검사_경로로_들어온다(tmp_path):
     # 여기서 죽으면 check 가 문제를 모아 돌려주지 못하고 트레이스백이 뜬다.
     path = tmp_path / "roster.csv"

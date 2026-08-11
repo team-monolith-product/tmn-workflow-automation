@@ -50,6 +50,36 @@ PHONE_COLUMN = chr(ord("A") + HEADER.index("번호"))
 
 _RANGE = re.compile(r"!\D+(\d+):")
 
+# https://docs.google.com/spreadsheets/d/<id>/edit 또는 id 자체.
+# 두 분기에 같은 길이 규칙을 건다. URL 쪽만 느슨하면 게시용 링크
+# (/spreadsheets/d/e/2PACX-.../pubhtml)의 'e' 가 ID 로 통과한다.
+_ID_IN_URL = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})")
+_BARE_ID = re.compile(r"^[A-Za-z0-9_-]{20,}$")
+
+
+def parse_spreadsheet_id(value: str) -> str:
+    """스프레드시트 주소나 ID 에서 ID 를 뽑습니다.
+
+    사람은 보통 주소창을 통째로 붙여넣습니다. 읽히지 않으면 거절합니다 —
+    통과시키면 엉뚱한 ID 로 시트를 열려다 승인이 끝난 뒤에야 죽습니다.
+
+    Args:
+        value: 스프레드시트 URL 또는 ID
+
+    Returns:
+        str: 스프레드시트 ID
+
+    Raises:
+        ValueError: 어느 쪽으로도 읽히지 않을 때
+    """
+    value = value.strip()
+    found = _ID_IN_URL.search(value)
+    if found:
+        return found.group(1)
+    if _BARE_ID.match(value):
+        return value
+    raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
+
 
 class LedgerLayoutError(RuntimeError):
     """발송이력 탭의 열 배치가 HEADER 와 다를 때 발생합니다."""
