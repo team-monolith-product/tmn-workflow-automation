@@ -8,7 +8,9 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+# 발송 이력을 시트에 적으려면 쓰기가 필요하다. 서비스 계정은 사업 폴더에
+# 이미 편집자로 공유되어 있어 권한 자체는 있었고, 스코프가 좁혀 두고 있었다.
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 def _get_client() -> gspread.Client:
@@ -17,6 +19,53 @@ def _get_client() -> gspread.Client:
     info = json.loads(sa_json)
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
+
+
+def get_worksheet(spreadsheet_id: str, worksheet_name: str) -> gspread.Worksheet:
+    """이름으로 워크시트를 가져온다. 없으면 만든다.
+
+    Args:
+        spreadsheet_id: 스프레드시트 ID
+        worksheet_name: 탭 이름
+
+    Returns:
+        gspread.Worksheet: 워크시트
+    """
+    sh = _get_client().open_by_key(spreadsheet_id)
+    try:
+        return sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        return sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
+
+
+def append_rows(ws: gspread.Worksheet, values: list[list]) -> str:
+    """워크시트 끝에 행을 덧붙이고 실제로 쓰인 범위를 반환한다.
+
+    append 는 동시에 호출돼도 서로 다른 행을 받는다. 반환된 범위가 우리가
+    받은 행 번호이고, 이 번호가 클레임 순서가 된다.
+
+    Args:
+        ws: 워크시트
+        values: 행 목록
+
+    Returns:
+        str: "'발송이력'!A5:J10" 형태의 갱신 범위
+    """
+    result = ws.append_rows(
+        values, value_input_option="USER_ENTERED", insert_data_option="INSERT_ROWS"
+    )
+    return result["updates"]["updatedRange"]
+
+
+def batch_update_cells(ws: gspread.Worksheet, updates: list[dict]) -> None:
+    """셀 범위 여러 곳을 한 번에 갱신한다.
+
+    Args:
+        ws: 워크시트
+        updates: [{"range": "G5", "values": [["1000"]]}] 형식
+    """
+    if updates:
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
 
 
 def get_worksheet_values(
