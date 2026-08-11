@@ -17,7 +17,6 @@
 합니다.
 """
 
-import hashlib
 import pathlib
 import re
 from typing import Any
@@ -113,8 +112,8 @@ def resolve(name: str | None, content: str | None) -> str:
 def render(template: str, row: dict[str, Any]) -> str:
     """치환 태그를 실제 값으로 바꿉니다.
 
-    벤더도 같은 치환을 하므로 발송에는 쓰지 않습니다. 미리보기와 길이 판정,
-    content_hash 계산에 씁니다.
+    벤더도 같은 치환을 하므로 발송에는 쓰지 않습니다. 미리보기와 길이 판정에만
+    씁니다.
 
     Args:
         template: load() 결과
@@ -173,18 +172,3 @@ def build_targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             target["changeWord"] = change_word
         targets.append(target)
     return targets
-
-
-def content_hash(template: str, row: dict[str, Any]) -> str:
-    """수신자에게 실제로 나갈 본문의 해시입니다.
-
-    문안을 고친 뒤 재발송했는지 사후에 구분하는 근거가 됩니다.
-
-    Args:
-        template: load() 결과
-        row: 수신자 한 명
-
-    Returns:
-        str: sha256 hex digest
-    """
-    return hashlib.sha256(render(template, row).encode("utf-8")).hexdigest()

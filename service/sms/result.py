@@ -160,12 +160,15 @@ def parse_results(
             at = _row_time(cells[time_at])
             if at is None or at < sent_after:
                 continue
+        # 실패를 성공보다 먼저 본다. '수신실패'는 성공어 '수신'을 품고 있어
+        # 순서를 뒤집으면 실패가 도달로 보고되고, 그 사람은 재발송 대상에서
+        # 빠진다. 미확정은 둘 다보다 먼저 본다('수신대기').
         if any(word in status for word in _PENDING_WORDS):
             continue
-        if any(word in status for word in _SUCCESS_WORDS):
-            code = DELIVERED
-        elif any(word in status for word in _FAILURE_WORDS):
+        if any(word in status for word in _FAILURE_WORDS):
             code = FAILED
+        elif any(word in status for word in _SUCCESS_WORDS):
+            code = DELIVERED
         else:
             continue
         # 같은 번호가 여러 행에 있으면 최신(위쪽) 행을 남깁니다

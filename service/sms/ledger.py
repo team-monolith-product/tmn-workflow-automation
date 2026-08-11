@@ -1,13 +1,9 @@
 """
 발송 이력 시트입니다. 참가자 스프레드시트의 '발송이력' 탭 하나입니다.
 
-DB 가 아니라 시트인 이유는 사람이 봐야 하기 때문입니다. 연수 당일 서버가
-죽으면 사람이 뿌리오 웹으로 직접 보내야 하는데, 그 발송을 기록할 곳이
-사람이 쓸 수 있는 곳이어야 합니다. 손으로 한 줄 적으면 우리 코드가 그 줄을
-읽고 중복을 피합니다. DB 였다면 사람이 우회한 발송을 영영 모릅니다.
-
-참가자 탭에는 우리가 쓰지 않습니다. 발송 상태 열을 이 탭을 가리키는 수식으로
-두면 동기화 코드가 필요 없고, 두 곳을 쓰지 않으니 어긋날 자리도 없습니다.
+DB 가 아니라 시트인 이유는 사람이 손으로 한 줄 적을 수 있어야 하기 때문입니다.
+장애 중에 사람이 뿌리오 웹으로 직접 보내면 그 줄을 우리 코드가 읽고 중복을
+피합니다. DB 였다면 사람이 우회한 발송을 영영 모릅니다.
 
 시트에는 UNIQUE 제약도 조건부 쓰기도 없습니다. 대신 append 가 만들어주는
 행 번호를 순서로 씁니다.
@@ -50,6 +46,7 @@ DEAD_CODES = {"실패", "중복"}
 
 CODE_COLUMN = chr(ord("A") + HEADER.index("접수코드"))
 KEY_COLUMN = chr(ord("A") + HEADER.index("messageKey"))
+PHONE_COLUMN = chr(ord("A") + HEADER.index("번호"))
 RESULT_COLUMN = chr(ord("A") + HEADER.index("결과"))
 
 _RANGE = re.compile(r"!\D+(\d+):")
@@ -59,7 +56,7 @@ def open_ledger(spreadsheet_id: str):
     """그 사업의 발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
 
     시트 ID 를 인자로 받습니다. 전역 환경변수 하나로 두면 사업 채널이 여럿인데
-    이력이 한 시트에 섞입니다. 채널별 매핑은 service.sms.roster 가 답합니다.
+    이력이 한 시트에 섞입니다.
 
     Args:
         spreadsheet_id: 참가자 스프레드시트 ID
@@ -70,6 +67,10 @@ def open_ledger(spreadsheet_id: str):
     ws = google_sheets.get_worksheet(spreadsheet_id, WORKSHEET)
     if not ws.get_all_values():
         ws.update([HEADER], "A1")
+        # 번호 열을 텍스트로 고정한다. 두지 않으면 사람이 손으로 적은
+        # 01012345678 을 시트가 숫자로 바꿔 앞자리 0 이 사라지고, 그 줄은
+        # 어떤 발송과도 대조되지 않는다.
+        ws.format(f"{PHONE_COLUMN}:{PHONE_COLUMN}", {"numberFormat": {"type": "TEXT"}})
     return ws
 
 
@@ -165,8 +166,12 @@ def claim(
         ]
         for entry in entries
     ]
-    updated_range = google_sheets.append_rows(ws, payload)
-    first = int(_RANGE.search(updated_range).group(1))
+    # RAW 로 써야 한다. USER_ENTERED 면 시트가 01012345678 을 숫자로 해석해
+    # 앞자리 0 을 버리고, 아래 재조회가 우리가 쓴 번호를 못 찾아 전원이 진다.
+    result = ws.append_rows(
+        payload, value_input_option="RAW", insert_data_option="INSERT_ROWS"
+    )
+    first = int(_RANGE.search(result["updates"]["updatedRange"]).group(1))
     mine = {entry["to"]: first + offset for offset, entry in enumerate(entries)}
 
     winner = owners(read_rows(ws))
@@ -195,7 +200,7 @@ def mark(ws, rows: list[int], code: str, message_key: str | None = None) -> None
         updates += [
             {"range": f"{KEY_COLUMN}{row}", "values": [[message_key]]} for row in rows
         ]
-    google_sheets.batch_update_cells(ws, updates)
+    ws.batch_update(updates, value_input_option="RAW")
 
 
 def summarize(rows: list[dict[str, Any]], campaign: str) -> dict[str, int]:
@@ -229,16 +234,15 @@ def record_results(ws, campaign: str, statuses: dict[str, str]) -> None:
         campaign: 발송 건 식별자
         statuses: {번호: 결과코드}
     """
-    updates = []
-    for row in read_rows(ws):
-        if row.get("캠페인") != campaign or row.get("결과"):
-            continue
-        code = statuses.get(row.get("번호", ""))
-        if code:
-            updates.append(
-                {"range": f"{RESULT_COLUMN}{row['_row']}", "values": [[code]]}
-            )
-    google_sheets.batch_update_cells(ws, updates)
+    updates = [
+        {"range": f"{RESULT_COLUMN}{row['_row']}", "values": [[statuses[row["번호"]]]]}
+        for row in read_rows(ws)
+        if row.get("캠페인") == campaign
+        and not row.get("결과")
+        and row.get("번호") in statuses
+    ]
+    if updates:
+        ws.batch_update(updates, value_input_option="RAW")
 
 
 def failed_targets(

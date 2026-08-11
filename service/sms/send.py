@@ -14,22 +14,28 @@
 만들어주는 행 번호가 전체 순서이고, 같은 (캠페인, 번호) 중 살아 있는 최소
 행 번호가 이깁니다.
 
-②가 실패하면 자리를 '실패'로 표시해 재시도를 열어둡니다. 벌어질 수 있는
-가장 나쁜 일은 ②와 ③ 사이에 프로세스가 죽어 접수코드가 빈 행이 남는 것인데,
-이건 "보냈는지 모름"이라 사람이 확인해야 합니다. 조용히 다시 보내는 것보다
-낫습니다.
+②에서 벤더가 명시적으로 거절하면(HTTP 오류·code≠1000) 자리를 '실패'로 표시해
+재시도를 열어둡니다. 접수되지 않은 것이 확실하기 때문입니다.
+
+타임아웃이나 연결 끊김은 다릅니다. 벤더가 이미 접수하고 응답만 못 돌려줬을 수
+있으므로 접수코드를 빈 채로 둡니다. 빈 칸은 "보냈는지 모름"이라 살아 있는
+자리로 취급되어 재시도가 막히고, 사람이 뿌리오 웹에서 확인하게 됩니다.
+여기서 '실패'로 찍으면 다음 시도가 이겨서 같은 사람에게 두 번 갑니다.
 """
 
+import datetime
 from typing import Any
 
 from service.sms import ledger, templates, transport
+
+# 뿌리오는 이보다 가까운 예약을 거부합니다.
+MIN_RESERVE_SECONDS = 180
 
 
 def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """번호를 정규화하고 같은 번호는 하나로 접습니다.
 
-    명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다(build_roster 가
-    전화번호 기준 중복 제거를 별도 단계로 두고 있는 이유입니다). 접지 않으면
+    명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다. 접지 않으면
     ledger.claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져 그 번호는
     이 캠페인에서 영영 발송되지 않습니다.
 
@@ -56,6 +62,7 @@ def send_campaign(
     requested_by: str,
     entrypoint: str,
     subject: str | None = None,
+    send_at: datetime.datetime | None = None,
     **vendor: Any,
 ) -> dict[str, Any]:
     """한 캠페인을 발송합니다. 이미 보낸 수신자는 자동으로 빠집니다.
@@ -72,18 +79,23 @@ def send_campaign(
         requested_by: 시킨 사람 이메일. 도구 인자가 아니라 인증에서 온 값
         entrypoint: slack · mcp · script
         subject: LMS 제목. 생략하면 campaign 을 쓴다
+        send_at: 예약 발송 시각. 생략하면 즉시. 최소 3분 뒤여야 한다
         **vendor: 뿌리오 payload 에 그대로 실을 추가 필드
 
     Returns:
         dict[str, Any]: requested·skipped·sent·code·message_key·message_type
 
     Raises:
-        ValueError: 문안이 LMS 한도를 넘을 때
-        transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 '실패'로 표시)
+        ValueError: 문안·번호·길이·예약 시각에 문제가 있을 때. 넷 다 시트를
+            건드리기 전에 터지므로 원장이 더러워지지 않는다. 한 번에 다 보려면
+            호출부가 먼저 check 를 돌린다
+        transport.PpurioError: 벤더가 거절했을 때 (자리는 '실패'로 표시)
     """
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
     message_type = templates.decide_message_type(template, normalized)
+    if send_at is not None:
+        vendor["sendTime"] = reserve_time(send_at)
 
     ws = ledger.open_ledger(spreadsheet_id)
     won, lost = ledger.claim(
@@ -117,7 +129,9 @@ def send_campaign(
 
     try:
         result = transport.send(payload)
-    except Exception:
+    except transport.PpurioError:
+        # 벤더가 거절한 것이 확실할 때만 재시도를 연다. 타임아웃은 접수됐을
+        # 수 있으므로 접수코드를 비운 채 터뜨린다.
         ledger.mark(ws, claimed_rows, "실패")
         raise
 
@@ -141,6 +155,103 @@ def send_campaign(
     }
 
 
+def reserve_time(send_at: datetime.datetime) -> str:
+    """예약 시각을 검사해 벤더 형식으로 바꿉니다.
+
+    Args:
+        send_at: 예약 발송 시각
+
+    Returns:
+        str: yyyy-MM-ddTHH:mm:ss
+
+    Raises:
+        ValueError: 지금부터 MIN_RESERVE_SECONDS 보다 가까울 때
+    """
+    margin = (send_at - datetime.datetime.now()).total_seconds()
+    if margin < MIN_RESERVE_SECONDS:
+        raise ValueError(
+            f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
+            f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
+        )
+    return send_at.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def check(
+    rows: list[dict[str, Any]],
+    *,
+    template_name: str | None = None,
+    content: str | None = None,
+    send_at: datetime.datetime | None = None,
+) -> list[str]:
+    """보내기 전에 걸릴 것들을 전부 모읍니다.
+
+    발송 경로 곳곳에서 하나씩 터뜨리면 사람이 고치고 다시 돌리고를 반복합니다.
+    한 번에 다 보여주고 한 번에 고치게 합니다. 빈 목록이면 보낼 수 있습니다.
+
+    벤더가 잡아주는 것도 여기서 먼저 봅니다. 벤더 거부는 발송 시도 뒤에야
+    돌아오는데, 그때는 이미 이력 시트에 자리를 잡아 재시도가 막힙니다.
+
+    Args:
+        rows: to·name·var1~var8 을 담은 수신자 목록
+        template_name: templates/sms/{name}.txt (content 와 택일)
+        content: 즉석 문안 본문 (template_name 과 택일)
+        send_at: 예약 발송 시각
+
+    Returns:
+        list[str]: 보낼 수 없는 이유. 비어 있으면 보낼 수 있다.
+            중복 번호처럼 접어서 처리하는 것은 여기 담지 않고 preview 가 센다
+    """
+    problems: list[str] = []
+
+    try:
+        template = templates.resolve(template_name, content)
+    except (ValueError, FileNotFoundError) as error:
+        # 문안이 없으면 길이도 치환도 볼 수 없다.
+        return [str(error)]
+
+    if not rows:
+        return ["수신자가 없습니다."]
+
+    # 아래는 send_campaign 이 실제로 밟는 경로를 그대로 부르고 예외만 모읍니다.
+    # 판정을 여기 따로 쓰면 사본이 갈라져 사람에게 보여준 것과 실제로 막히는
+    # 것이 달라집니다.
+    normalized = []
+    for row in rows:
+        try:
+            normalized.append({**row, "to": templates.normalize_phone(row["to"])})
+        except ValueError as error:
+            problems.append(str(error))
+
+    if normalized:
+        try:
+            templates.decide_message_type(template, normalized)
+        except ValueError as error:
+            problems.append(str(error))
+
+    if send_at is not None:
+        try:
+            reserve_time(send_at)
+        except ValueError as error:
+            problems.append(str(error))
+
+    return problems
+
+
+def cancel_reserved(message_key: str) -> dict[str, Any]:
+    """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
+
+    이력 시트의 행은 지우지 않습니다. "예약했다가 취소했다"도 기록이고,
+    지우면 같은 campaign 으로 다시 예약할 수 있게 되어 중복 차단이 풀립니다.
+
+    Args:
+        message_key: 접수 시 받은 messageKey. 발송이력 시트에 남아 있다
+
+    Returns:
+        dict[str, Any]: 벤더 응답
+    """
+    return transport.cancel(message_key)
+
+
 def preview(
     rows: list[dict[str, Any]],
     template_name: str | None = None,
@@ -156,7 +267,7 @@ def preview(
         content: 즉석 문안 본문 (template_name 과 택일)
 
     Returns:
-        dict[str, Any]: message_type·max_bytes·targets·sample
+        dict[str, Any]: message_type·max_bytes·targets·folded·sample
     """
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
@@ -165,6 +276,9 @@ def preview(
         "message_type": templates.decide_message_type(template, normalized),
         "max_bytes": max((templates.euckr_len(text) for text in rendered), default=0),
         "targets": len(normalized),
+        # 명단에 같은 사람이 두 번 있으면 접어서 보낸다. 발송 사고는 아니지만
+        # 명단이 틀렸다는 신호라 사람에게 보여준다.
+        "folded": len(rows) - len(normalized),
         "sample": rendered[0] if rendered else "",
     }
 

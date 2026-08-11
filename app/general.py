@@ -146,8 +146,6 @@ def register_general_handlers(app):
     범용 봇의 이벤트 핸들러를 등록합니다.
     """
 
-    # 문자 발송 승인(버튼·✅ 이모지) 핸들러
-
     @app.event("app_mention")
     async def app_mention(body, say):
         """

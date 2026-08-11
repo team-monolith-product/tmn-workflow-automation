@@ -15,7 +15,6 @@ requested_by 는 도구 인자가 아니라 클로저입니다. 에이전트가 
 """
 
 import asyncio
-from typing import Any
 
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
@@ -23,7 +22,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 from app import sms_approval
 from app.sms_render import render_preview
 from service.knowledge.users import fetch_user_emails
-from service.knowledge.db import connect
 from service.sms import roster
 from service.sms import send as sms_send
 
@@ -71,17 +69,20 @@ def get_sms_tools(
         문자를 보내야 하면 항상 이 도구를 씁니다. 데이터를 조회해 명단을 만들었다면
         그 결과를 targets 로 넘기고, 본문은 content 에 직접 씁니다.
         campaign 은 이 발송 건의 식별자이며 같은 값으로 이미 보낸 번호는 자동으로 빠집니다.
+        subject 는 장문(LMS)일 때 수신자에게 보이는 제목입니다. 생략하면 campaign 이
+        그대로 제목이 되므로, 본문이 길면 사람이 읽을 제목을 반드시 주세요.
         """
-        if not targets:
-            return "수신자가 없습니다. 명단을 먼저 확정하세요."
         try:
             sheet_id = await asyncio.to_thread(roster.sheet_for, channel)
         except roster.NotConnected as error:
             return str(error)
-        try:
-            summary = sms_send.preview(targets, template, content)
-        except (ValueError, FileNotFoundError) as error:
-            return f"문안 확인 실패: {error}"
+
+        problems = sms_send.check(targets, template_name=template, content=content)
+        if problems:
+            # 하나씩 돌려주면 고치고 다시 부르고를 반복한다.
+            return "보내기 전에 고칠 것:\n" + "\n".join(f"- {p}" for p in problems)
+
+        summary = sms_send.preview(targets, template, content)
 
         return await sms_approval.post_draft(
             client,
@@ -112,7 +113,7 @@ def get_sms_tools(
         except ValueError as error:
             return str(error)
         actor = await _actor(client, user_id)
-        await asyncio.to_thread(_connect_sheet_blocking, channel, sheet_id, actor)
+        await asyncio.to_thread(roster.connect_sheet, channel, sheet_id, actor)
         return (
             f"이 채널을 참가자 시트 `{sheet_id}` 에 연결했습니다.\n"
             "앞으로 이 채널에서 보내는 문자의 발송이력이 그 시트의 '발송이력' 탭에 쌓입니다."
@@ -124,7 +125,7 @@ def get_sms_tools(
         이 채널의 참가자 스프레드시트 연결을 끊습니다.
         연결이 끊기면 이 채널에서는 문자를 보낼 수 없습니다. 이미 쌓인 이력은 그대로 남습니다.
         """
-        removed = await asyncio.to_thread(_disconnect_sheet_blocking, channel)
+        removed = await asyncio.to_thread(roster.disconnect_sheet, channel)
         if removed is None:
             return "이 채널에는 연결된 참가자 시트가 없습니다."
         return "연결을 끊었습니다. 이미 쌓인 발송이력은 시트에 그대로 있습니다."
@@ -155,18 +156,6 @@ def get_sms_tools(
         disconnect_participant_sheet,
         sms_campaign_status,
     ]
-
-
-def _connect_sheet_blocking(channel: str, spreadsheet_id: str, actor: str) -> str:
-    """채널-시트 연결을 저장합니다. psycopg 가 동기라 스레드에서 부릅니다."""
-    with connect() as conn:
-        return roster.connect_sheet(conn, channel, spreadsheet_id, actor)
-
-
-def _disconnect_sheet_blocking(channel: str) -> str | None:
-    """채널-시트 연결을 지웁니다."""
-    with connect() as conn:
-        return roster.disconnect_sheet(conn, channel)
 
 
 async def _actor(client: AsyncWebClient, user_id: str | None) -> str:

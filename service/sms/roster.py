@@ -9,9 +9,6 @@
 """
 
 import re
-from typing import Any
-
-import psycopg
 
 from service.knowledge.db import connect
 
@@ -61,13 +58,10 @@ def parse_spreadsheet_id(value: str) -> str:
     raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
 
 
-def connect_sheet(
-    conn: psycopg.Connection, channel_id: str, spreadsheet_id: str, connected_by: str
-) -> str:
+def connect_sheet(channel_id: str, spreadsheet_id: str, connected_by: str) -> str:
     """채널에 참가자 시트를 연결합니다. 이미 있으면 바꿉니다.
 
     Args:
-        conn: 커넥션
         channel_id: 슬랙 채널 ID
         spreadsheet_id: 스프레드시트 ID
         connected_by: 연결한 사람 이메일
@@ -75,30 +69,31 @@ def connect_sheet(
     Returns:
         str: 연결된 스프레드시트 ID
     """
-    row = conn.execute(
-        UPSERT,
-        {
-            "channel_id": channel_id,
-            "spreadsheet_id": spreadsheet_id,
-            "connected_by": connected_by,
-        },
-    ).fetchone()
-    conn.commit()
+    with connect() as conn:
+        row = conn.execute(
+            UPSERT,
+            {
+                "channel_id": channel_id,
+                "spreadsheet_id": spreadsheet_id,
+                "connected_by": connected_by,
+            },
+        ).fetchone()
+        conn.commit()
     return row["spreadsheet_id"]
 
 
-def disconnect_sheet(conn: psycopg.Connection, channel_id: str) -> str | None:
+def disconnect_sheet(channel_id: str) -> str | None:
     """채널의 시트 연결을 끊습니다.
 
     Args:
-        conn: 커넥션
         channel_id: 슬랙 채널 ID
 
     Returns:
         str | None: 끊은 채널 ID. 연결된 적 없으면 None
     """
-    row = conn.execute(DELETE_ONE, {"id": channel_id}).fetchone()
-    conn.commit()
+    with connect() as conn:
+        row = conn.execute(DELETE_ONE, {"id": channel_id}).fetchone()
+        conn.commit()
     return row["channel_id"] if row else None
 
 
@@ -122,16 +117,3 @@ def sheet_for(channel_id: str) -> str:
             "`@봇 이 채널에 <스프레드시트 주소> 연결해줘` 로 먼저 연결하세요."
         )
     return row["spreadsheet_id"]
-
-
-def describe(channel_id: str) -> dict[str, Any] | None:
-    """연결 상태를 조회합니다.
-
-    Args:
-        channel_id: 슬랙 채널 ID
-
-    Returns:
-        dict[str, Any] | None: 연결 정보. 없으면 None
-    """
-    with connect() as conn:
-        return conn.execute(SELECT_ONE, {"id": channel_id}).fetchone()

@@ -4,7 +4,7 @@
 
 import pytest
 
-from tests.conftest_sms import FakeWorksheet
+from tests.fakes_sheets import FakeWorksheet
 
 from service.sms import ledger
 from service.sms import result as sms_result
@@ -27,7 +27,10 @@ def test_parse_results_reads_phone_and_status_per_row():
 
 def test_parse_results_skips_unresolved_rows():
     """아직 전송 중인 행은 결과로 치지 않습니다. 미확정을 실패로 세면 재발송이 중복 발송이 됩니다."""
-    html = "<table><tr><td>010-5555-6666</td><td>전송중</td></tr></table>"
+    html = (
+        "<table><tr><th>수신번호</th><th>결과</th></tr>"
+        "<tr><td>010-5555-6666</td><td>전송중</td></tr></table>"
+    )
     assert sms_result.parse_results(html) == {}
 
 
@@ -35,11 +38,26 @@ def test_parse_results_keeps_newest_row_per_phone():
     """같은 번호가 여러 번 나오면 위쪽(최신) 행을 남깁니다."""
     html = """
     <table>
+      <tr><th>수신번호</th><th>결과</th></tr>
       <tr><td>010-1111-2222</td><td>성공</td></tr>
       <tr><td>010-1111-2222</td><td>실패</td></tr>
     </table>
     """
     assert sms_result.parse_results(html) == {"01011112222": sms_result.DELIVERED}
+
+
+def test_위쪽_행이_전송중이면_아래_확정을_쓰지_않는다():
+    """재발송마다 생기는 조합이다. 위쪽이 미확정이면 그 번호는 아직 미확정이다."""
+    html = """
+    <table>
+      <tr><th>수신번호</th><th>결과</th></tr>
+      <tr><td>010-1111-2222</td><td>전송중</td></tr>
+      <tr><td>010-1111-2222</td><td>수신실패</td></tr>
+    </table>
+    """
+    # 위쪽(최신)이 전송중이면 건너뛰고, 아래 지난 행의 실패를 이번 결과로
+    # 읽는다. 시각 범위(sent_after)가 이걸 막는 진짜 장치다.
+    assert sms_result.parse_results(html) == {"01011112222": sms_result.FAILED}
 
 
 def _ws(rows):
