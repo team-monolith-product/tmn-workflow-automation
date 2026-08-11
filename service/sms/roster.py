@@ -25,6 +25,14 @@ SELECT_ONE = "SELECT spreadsheet_id FROM channel_sheet WHERE channel_id = %(id)s
 DELETE_ONE = "DELETE FROM channel_sheet WHERE channel_id = %(id)s RETURNING channel_id"
 
 
+class NotConnected(RuntimeError):
+    """채널에 참가자 시트가 연결되지 않았을 때 발생합니다.
+
+    호출부가 이걸 잡아 안내 문구로 바꿉니다. 신규 채널의 첫 사용이 반드시
+    밟는 경로라, 여기가 깨지면 기능을 처음 쓰는 사람은 100% 내부 오류를 본다.
+    """
+
+
 def connect_sheet(channel_id: str, spreadsheet_id: str, connected_by: str) -> str:
     """채널에 참가자 시트를 연결합니다. 이미 있으면 바꿉니다.
 

@@ -24,7 +24,7 @@ from collections import Counter
 
 from dotenv import load_dotenv
 
-from service.sms import ledger, roster, templates
+from service.sms import ledger, templates
 
 
 def read_log(path: pathlib.Path) -> list[dict]:
