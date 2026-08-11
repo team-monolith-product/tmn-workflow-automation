@@ -22,6 +22,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from app import sms_approval
 from app.sms_render import render_preview
 from service.knowledge.users import fetch_user_emails
+from service.sms import ledger
 from service.sms import roster
 from service.sms import send as sms_send
 
@@ -109,7 +110,7 @@ def get_sms_tools(
         '발송이력' 탭에 쌓입니다. 주소를 그대로 붙여넣어도 됩니다.
         """
         try:
-            sheet_id = roster.parse_spreadsheet_id(spreadsheet)
+            sheet_id = ledger.parse_spreadsheet_id(spreadsheet)
         except ValueError as error:
             return str(error)
         actor = await _actor(client, user_id)

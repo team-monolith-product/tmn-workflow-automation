@@ -33,7 +33,7 @@ from service.knowledge.query import (
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
-from service.sms import roster
+from service.sms import ledger, roster
 from service.sms import send as sms_send
 
 INSTRUCTIONS = """
@@ -148,7 +148,7 @@ def build_mcp() -> MCPServer:
         """
         token = cast(AdminToken, get_access_token())
         try:
-            sheet_id = roster.parse_spreadsheet_id(spreadsheet)
+            sheet_id = ledger.parse_spreadsheet_id(spreadsheet)
         except ValueError as error:
             return str(error)
         result = await asyncio.to_thread(

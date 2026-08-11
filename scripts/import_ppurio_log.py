@@ -102,7 +102,7 @@ def main() -> None:
         print("\n(dry-run — 적재하지 않음)")
         return
 
-    ws = ledger.open_ledger(roster.parse_spreadsheet_id(args.spreadsheet))
+    ws = ledger.open_ledger(ledger.parse_spreadsheet_id(args.spreadsheet))
     already = {
         ledger.ledger_key(row.get("캠페인", ""), row.get("번호", ""))
         for row in ledger.read_rows(ws)

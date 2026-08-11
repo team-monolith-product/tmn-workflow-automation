@@ -8,8 +8,6 @@
 어디 쌓였는지 아무도 모르게 되고, 그건 잘못된 시트에 적히는 것보다 나쁩니다.
 """
 
-import re
-
 from service.knowledge.db import connect
 
 UPSERT = """
@@ -25,37 +23,6 @@ RETURNING spreadsheet_id
 SELECT_ONE = "SELECT spreadsheet_id FROM channel_sheet WHERE channel_id = %(id)s"
 
 DELETE_ONE = "DELETE FROM channel_sheet WHERE channel_id = %(id)s RETURNING channel_id"
-
-# https://docs.google.com/spreadsheets/d/<id>/edit 또는 id 자체
-_ID_IN_URL = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
-_BARE_ID = re.compile(r"^[a-zA-Z0-9-_]{20,}$")
-
-
-class NotConnected(RuntimeError):
-    """채널에 참가자 시트가 연결되지 않았을 때 발생합니다."""
-
-
-def parse_spreadsheet_id(value: str) -> str:
-    """스프레드시트 주소나 ID 에서 ID 를 뽑습니다.
-
-    사람은 보통 주소창을 통째로 붙여넣습니다.
-
-    Args:
-        value: 스프레드시트 URL 또는 ID
-
-    Returns:
-        str: 스프레드시트 ID
-
-    Raises:
-        ValueError: 어느 쪽으로도 읽히지 않을 때
-    """
-    value = value.strip()
-    found = _ID_IN_URL.search(value)
-    if found:
-        return found.group(1)
-    if _BARE_ID.match(value):
-        return value
-    raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
 
 
 def connect_sheet(channel_id: str, spreadsheet_id: str, connected_by: str) -> str:

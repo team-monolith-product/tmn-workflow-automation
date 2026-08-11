@@ -2,8 +2,6 @@
 도달 결과 파싱·기록 테스트
 """
 
-import pytest
-
 from tests.fakes_sheets import FakeWorksheet
 
 from service.sms import ledger
