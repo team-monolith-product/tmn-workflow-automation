@@ -65,10 +65,10 @@ def open_ledger(spreadsheet_id: str):
     ws = google_sheets.get_worksheet(spreadsheet_id, WORKSHEET)
     if not ws.get_all_values():
         ws.update([HEADER], "A1")
-        # 번호 열을 텍스트로 고정한다. 두지 않으면 사람이 손으로 적은
-        # 01012345678 을 시트가 숫자로 바꿔 앞자리 0 이 사라지고, 그 줄은
-        # 어떤 발송과도 대조되지 않는다.
-        ws.format(f"{PHONE_COLUMN}:{PHONE_COLUMN}", {"numberFormat": {"type": "TEXT"}})
+    # 번호 열을 텍스트로 고정한다. 두지 않으면 사람이 손으로 적은 01012345678 을
+    # 시트가 숫자로 바꿔 앞자리 0 이 사라진다. 조건 밖에 둔다 — 사람이 탭을 먼저
+    # 만들어 두면 위 분기에 걸리지 않아 서식이 영영 안 잡힌다. 멱등하다.
+    ws.format(f"{PHONE_COLUMN}:{PHONE_COLUMN}", {"numberFormat": {"type": "TEXT"}})
     return ws
 
 
@@ -98,6 +98,27 @@ def read_rows(ws) -> list[dict[str, Any]]:
     return rows
 
 
+def ledger_key(campaign: str, phone: str) -> tuple[str, str]:
+    """대조에 쓸 (캠페인, 번호) 키를 만듭니다.
+
+    번호에서 숫자만 남깁니다. 우리가 쓰는 값은 정규화된 01011111111 이지만
+    사람은 010-1111-1111 로 적습니다. 표기를 안 눕히면 손으로 적은 기록이
+    대조되지 않아 그 사람에게 한 번 더 나갑니다 — 시트를 고른 이유가 바로
+    그 손기록이라 여기가 무너지면 설계 전체가 무의미해집니다.
+
+    normalize_phone 을 쓰지 않습니다. 그건 자릿수가 틀리면 raise 하는데,
+    읽기 경로는 사람이 뭘 적었든 읽어내야 합니다.
+
+    Args:
+        campaign: 캠페인 이름
+        phone: 번호 (표기 무관)
+
+    Returns:
+        tuple[str, str]: 대조용 키
+    """
+    return campaign.strip(), re.sub(r"\D", "", phone)
+
+
 def owners(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
     """(캠페인, 번호)별로 살아 있는 최소 행 번호를 찾습니다.
 
@@ -111,7 +132,7 @@ def owners(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
     for row in rows:
         if row.get("접수코드") in DEAD_CODES:
             continue
-        key = (row.get("캠페인", ""), row.get("번호", ""))
+        key = ledger_key(row.get("캠페인", ""), row.get("번호", ""))
         if key not in winner or row["_row"] < winner[key]:
             winner[key] = row["_row"]
     return winner
@@ -124,7 +145,6 @@ def claim(
     message_type: str,
     requested_by: str,
     entrypoint: str,
-    now: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[int]]:
     """발송 대상의 자리를 잡습니다.
 
@@ -135,7 +155,6 @@ def claim(
         message_type: SMS 또는 LMS
         requested_by: 시킨 사람 이메일
         entrypoint: slack · mcp · script
-        now: 기록할 시각. 생략하면 현재 시각
 
     Returns:
         tuple: (이긴 항목 목록, 진 행 번호 목록). 이긴 항목에는 _row 가 붙는다
@@ -148,7 +167,7 @@ def claim(
         # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라집니다. 호출부가
         # 접어서 넘겨야 합니다(service.sms.send._normalize).
         raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
-    stamp = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = [
         [
             stamp,
@@ -156,9 +175,8 @@ def claim(
             entry["to"],
             entry.get("name", ""),
             message_type,
-            "",
-            "",
-            "",
+            "",  # messageKey
+            "",  # 접수코드
             requested_by,
             entrypoint,
         ]
@@ -177,7 +195,7 @@ def claim(
     won, lost = [], []
     for entry in entries:
         row = mine[entry["to"]]
-        if winner.get((campaign, entry["to"])) == row:
+        if winner.get(ledger_key(campaign, entry["to"])) == row:
             won.append({**entry, "_row": row})
         else:
             lost.append(row)

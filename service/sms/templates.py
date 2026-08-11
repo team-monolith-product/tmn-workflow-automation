@@ -104,7 +104,9 @@ def resolve(name: str | None, content: str | None) -> str:
     Raises:
         ValueError: 둘 다 주거나 둘 다 안 줬을 때
     """
-    if (name is None) == (content is None):
+    # is None 으로 보면 빈 문자열이 둘 다 통과한다. --content "$MSG" 에서 MSG 가
+    # 안 잡히면 빈 본문이 그대로 발송되고, 그 캠페인은 재발송도 막힌다.
+    if bool(name) == bool(content):
         raise ValueError("문안 파일 이름과 본문 중 하나만 지정해야 합니다")
     return load(name) if name else content.rstrip("\n")
 

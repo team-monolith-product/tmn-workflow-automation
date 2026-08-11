@@ -64,6 +64,17 @@ def test_값이_없으면_changeWord를_넣지_않는다():
     assert templates.build_targets([{"to": "01012345678"}]) == [{"to": "01012345678"}]
 
 
+def test_빈_본문은_문안으로_치지_않는다():
+    # --content "$MSG" 에서 MSG 가 안 잡히면 빈 본문이 그대로 발송되고,
+    # 그 캠페인은 자리를 선점해 재발송도 막힌다.
+    import pytest
+
+    with pytest.raises(ValueError):
+        templates.resolve(None, "")
+    with pytest.raises(ValueError):
+        templates.resolve("", None)
+
+
 def test_실제_문안이_읽힌다():
     body = templates.load("discord")
     assert "[*이름*]" in body and "[*1*]" in body and "[*2*]" in body

@@ -51,7 +51,9 @@ def read_csv(path: pathlib.Path) -> list[dict]:
         list[dict]: 수신자 목록
     """
     with path.open(encoding="utf-8-sig") as file:
-        return [{k: v for k, v in row.items() if v} for row in csv.DictReader(file)]
+        # 빈 값을 걸러내지 않는다. 번호 칸이 빈 행에서 to 키까지 사라지면
+        # check 가 문제를 모아 돌려주는 대신 KeyError 로 죽는다.
+        return list(csv.DictReader(file))
 
 
 def spreadsheet_id(value: str) -> str:
