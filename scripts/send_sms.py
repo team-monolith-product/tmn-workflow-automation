@@ -53,7 +53,16 @@ def read_csv(path: pathlib.Path) -> list[dict]:
     with path.open(encoding="utf-8-sig") as file:
         # 빈 값을 걸러내지 않는다. 번호 칸이 빈 행에서 to 키까지 사라지면
         # check 가 문제를 모아 돌려주는 대신 KeyError 로 죽는다.
-        return list(csv.DictReader(file))
+        # restval 도 같은 이유다. 기본값 None 이면 짧은 행에서 to 가 None 이 되어
+        # 정규식이 TypeError 로 죽는다. 빈 문자열이면 검사 경로로 들어온다.
+        reader = csv.DictReader(file, restval="")
+        if "to" not in (reader.fieldnames or []):
+            raise ValueError(
+                f"CSV 헤더에 to 가 없습니다: {reader.fieldnames}\n"
+                "기대: to,name,var1..var8 (참가자 시트를 그대로 내보내면 "
+                "헤더가 번호,이름 이라 맞지 않습니다)"
+            )
+        return list(reader)
 
 
 def spreadsheet_id(value: str) -> str:
@@ -79,12 +88,12 @@ def main() -> None:
     """명령행 인자를 파싱해 발송합니다."""
     load_dotenv()
     parser = argparse.ArgumentParser(description="문자 발송")
+    # --cancel 은 이 둘을 쓰지 않는다. required 로 두면 예약을 잘못 걸었다는 걸
+    # 깨달은 사람이 안 쓰이는 인자를 지어내는 동안 문자가 나간다.
     parser.add_argument(
-        "--spreadsheet",
-        required=True,
-        help=f"발송이력을 적을 시트 ({SPREADSHEET_URL_HINT})",
+        "--spreadsheet", help=f"발송이력을 적을 시트 ({SPREADSHEET_URL_HINT})"
     )
-    parser.add_argument("--campaign", required=True, help="발송 건 식별자")
+    parser.add_argument("--campaign", help="발송 건 식별자")
     parser.add_argument("--template", help="templates/sms/<이름>.txt")
     parser.add_argument("--content", help="즉석 문안 본문")
     parser.add_argument("--subject", help="LMS 제목. 생략하면 campaign")
@@ -101,8 +110,17 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.cancel:
+        # 취소하려는 사람은 방금 돌린 발송 명령줄을 복사해 --cancel 을 붙인다.
+        # 그 줄에 --dry-run 이 남아 있으면 확인만 하려던 명령이 예약을 실제로
+        # 취소하고, 이력 행은 남으므로 같은 campaign 으로 다시 예약도 안 된다.
+        if args.dry_run:
+            parser.error("--cancel 은 --dry-run 과 함께 쓸 수 없습니다.")
         print(sms_send.cancel_reserved(args.cancel))
         return
+
+    for name in ("spreadsheet", "campaign"):
+        if not getattr(args, name):
+            parser.error(f"--{name} 이 필요합니다.")
 
     if bool(args.csv) == bool(args.to):
         parser.error("--csv 와 --to 중 하나만 주세요.")
