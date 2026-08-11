@@ -73,6 +73,9 @@ def test_이미_보낸_번호는_대상에서_빠진다(ws, monkeypatch):
 
     assert result["sent"] == 1 and result["skipped"] == 1
     assert [t["to"] for t in payload["targets"]] == ["01022222222"]
+    # 도달 확인은 이 목록만 기다린다. 대상 전체로 바뀌면 나가지도 않은 번호의
+    # 결과를 5회 헛기다리고 그 번호들이 '미확정'으로 보고된다.
+    assert result["sent_to"] == ["01022222222"]
 
 
 def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):

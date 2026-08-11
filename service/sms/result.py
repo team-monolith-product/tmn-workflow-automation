@@ -103,6 +103,42 @@ def _row_time(text: str) -> datetime.datetime | None:
     return datetime.datetime(year, month, day, hour, minute)
 
 
+def locate_columns(html: str) -> tuple[list[str], int, int, int | None, list]:
+    """헤더 행을 찾아 읽을 열 위치를 정합니다.
+
+    보정할 때 어느 열을 골랐는지 사람이 봐야 하므로 parse_results 와 --dump 가
+    같은 함수를 씁니다. 덤프가 "N건 파싱"만 찍으면 열을 잘못 골라도 그럴듯한
+    숫자가 나와 보정으로 잡을 수 없습니다.
+
+    Args:
+        html: 발송결과 페이지 HTML
+
+    Returns:
+        tuple: (헤더 셀, 번호 열, 상태 열, 일시 열 또는 None, 데이터 행 목록)
+
+    Raises:
+        ResultPageChanged: 수신번호·결과 열을 찾지 못했을 때
+    """
+    soup = BeautifulSoup(html, "lxml")
+    rows = soup.find_all("tr")
+    for index, row in enumerate(rows):
+        cells = _cells(row)
+        phone_at = _column(cells, _PHONE_HEADERS)
+        status_at = _column(cells, _STATUS_HEADERS)
+        if phone_at is not None and status_at is not None:
+            return (
+                cells,
+                phone_at,
+                status_at,
+                _column(cells, _TIME_HEADERS),
+                rows[index + 1 :],
+            )
+    raise ResultPageChanged(
+        "발송결과 표에서 수신번호·결과 열을 찾지 못했습니다. "
+        "페이지가 바뀌었는지 `python -m service.sms.result --dump` 로 확인하세요."
+    )
+
+
 def parse_results(
     html: str, sent_after: datetime.datetime | None = None
 ) -> dict[str, str]:
@@ -128,23 +164,7 @@ def parse_results(
         ResultPageChanged: 수신번호·결과 열을 찾지 못했을 때. sent_after 를
             줬는데 일시 열이 없을 때도 같다
     """
-    soup = BeautifulSoup(html, "lxml")
-
-    phone_at = status_at = time_at = None
-    rows = soup.find_all("tr")
-    for index, row in enumerate(rows):
-        cells = _cells(row)
-        phone_at = _column(cells, _PHONE_HEADERS)
-        status_at = _column(cells, _STATUS_HEADERS)
-        if phone_at is not None and status_at is not None:
-            time_at = _column(cells, _TIME_HEADERS)
-            rows = rows[index + 1 :]
-            break
-    else:
-        raise ResultPageChanged(
-            "발송결과 표에서 수신번호·결과 열을 찾지 못했습니다. "
-            "페이지가 바뀌었는지 `python -m service.sms.result --dump` 로 확인하세요."
-        )
+    _, phone_at, status_at, time_at, rows = locate_columns(html)
 
     if sent_after is not None and time_at is None:
         raise ResultPageChanged(
@@ -153,6 +173,7 @@ def parse_results(
         )
 
     results: dict[str, str] = {}
+    candidate_rows = 0
     seen_rows = 0
     dated_rows = 0
     needed = [phone_at, status_at] + ([time_at] if sent_after is not None else [])
@@ -160,6 +181,7 @@ def parse_results(
         cells = _cells(row)
         if max(needed) >= len(cells):
             continue
+        candidate_rows += 1
         phone = re.sub(r"\D", "", cells[phone_at])
         status = cells[status_at]
         if not phone or not status:
@@ -185,6 +207,15 @@ def parse_results(
             continue
         # 같은 번호가 여러 행에 있으면 최신(위쪽) 행을 남깁니다
         results.setdefault(phone, code)
+
+    if candidate_rows and not seen_rows:
+        # 열은 찾았는데 그 칸에서 번호도 상태도 못 읽었다. 열 제목이 바뀌어
+        # 엉뚱한 열을 골랐거나 결과가 아이콘으로 바뀐 경우다. 빈 결과를
+        # 돌려주면 "아직 결과가 안 올라왔다"와 구분되지 않는다.
+        raise ResultPageChanged(
+            "표는 찾았는데 번호·상태를 한 줄도 읽지 못했습니다. "
+            "`python -m service.sms.result --dump` 로 열 제목을 확인하세요."
+        )
 
     if sent_after is not None and seen_rows and not dated_rows:
         # 열은 찾았는데 한 줄도 못 읽었다. 조용히 빈 결과를 돌려주면
@@ -292,6 +323,19 @@ async def _dump() -> None:
         await browser.close()
 
     print(f"현재 URL 설정: 로그인 {LOGIN_URL} / 결과 {RESULT_URL}")
+
+    # 어느 열을 골랐는지 보여준다. 건수만 찍으면 열을 잘못 골라도 그럴듯한
+    # 숫자가 나와, 보정으로 잡을 수 있는 유일한 기회를 놓친다. 특히 표에
+    # '발송결과'(접수)와 '수신결과'(도달)가 함께 있으면 왼쪽이 이겨 전원
+    # 도달로 읽힌다.
+    header, phone_at, status_at, time_at, data_rows = locate_columns(html)
+    print(f"헤더: {header}")
+    print(f"  번호 열 [{phone_at}] {header[phone_at]}")
+    print(f"  상태 열 [{status_at}] {header[status_at]}")
+    print(
+        f"  일시 열 {f'[{time_at}] {header[time_at]}' if time_at is not None else '없음'}"
+    )
+    print(f"  데이터 행 {len(data_rows)}개")
     print(f"파싱된 결과 {len(parse_results(html))}건 — tmp/ppurio_*.html, *.png 확인")
 
 

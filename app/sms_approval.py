@@ -392,13 +392,19 @@ def register_sms_handlers(app: Any) -> None:
     async def handle_sms_cancel(ack, body, client):
         """[취소] 버튼 클릭"""
         await ack()
-        _DRAFTS.pop(body["actions"][0]["value"], None)
+        cancelled = _DRAFTS.pop(body["actions"][0]["value"], None)
         # 카드 ts -> 초안 매핑도 지운다. 남겨두면 취소한 카드에 달린 ✅ 가
         # 승인 경로로 들어가 조용히 아무 일도 일어나지 않는다.
         _MESSAGE_TS_TO_DRAFT_ID.pop(body["message"]["ts"], None)
-        await _replace_card(
-            client, body, f":x: <@{body['user']['id']}> 취소 — 발송하지 않았습니다."
+        # pop 결과를 봐야 한다. 누가 먼저 승인해 발송이 시작된 뒤 카드 갱신이
+        # 아직 안 닿은 사람이 [취소]를 누르면, 문자는 이미 나갔는데
+        # "발송하지 않았습니다"가 최종 기록으로 남는다.
+        text = (
+            f":x: <@{body['user']['id']}> 취소 — 발송하지 않았습니다."
+            if cancelled
+            else ":warning: 이미 처리되었거나 만료된 초안입니다."
         )
+        await _replace_card(client, body, text)
 
     @app.event("reaction_added")
     async def handle_reaction_added(body, client):

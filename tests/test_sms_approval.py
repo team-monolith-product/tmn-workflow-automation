@@ -242,6 +242,25 @@ async def test_일시를_한_줄도_못_읽으면_터뜨린다():
         sms_result.parse_results(html, datetime.datetime(2026, 8, 11, 9, 0))
 
 
+async def test_번호와_상태를_한_줄도_못_읽으면_터뜨린다():
+    # 열 제목이 바뀌어 엉뚱한 열을 골랐거나 결과가 아이콘으로 바뀌면 전 행이
+    # 조용히 빠진다. 그건 "아직 결과가 안 올라왔다"와 구분되지 않아, 도달
+    # 확인이 통째로 죽어도 영원히 안 들킨다.
+    html = (
+        "<table><tr><th>수신자</th><th>상태</th></tr>"
+        "<tr><td>홍길동</td><td></td></tr>"
+        "<tr><td>김철수</td><td></td></tr></table>"
+    )
+    with pytest.raises(sms_result.ResultPageChanged):
+        sms_result.parse_results(html)
+
+
+async def test_결과가_0건인_페이지는_터뜨리지_않는다():
+    # 데이터 행이 없는 것과 못 읽는 것은 다르다.
+    html = "<table><tr><th>수신번호</th><th>결과</th></tr></table>"
+    assert sms_result.parse_results(html) == {}
+
+
 async def test_표를_못_읽으면_조용히_비우지_않고_터뜨린다():
     """빈 결과는 '아직 결과가 안 올라왔다'와 구분되지 않아 영원히 안 들킨다."""
     with pytest.raises(sms_result.ResultPageChanged):
