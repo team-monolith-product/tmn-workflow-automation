@@ -20,9 +20,13 @@
 낫습니다.
 """
 
+import datetime
 from typing import Any
 
 from service.sms import ledger, templates, transport
+
+# 뿌리오는 이보다 가까운 예약을 거부합니다.
+MIN_RESERVE_SECONDS = 180
 
 
 def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -56,6 +60,7 @@ def send_campaign(
     requested_by: str,
     entrypoint: str,
     subject: str | None = None,
+    send_at: datetime.datetime | None = None,
     **vendor: Any,
 ) -> dict[str, Any]:
     """한 캠페인을 발송합니다. 이미 보낸 수신자는 자동으로 빠집니다.
@@ -72,18 +77,21 @@ def send_campaign(
         requested_by: 시킨 사람 이메일. 도구 인자가 아니라 인증에서 온 값
         entrypoint: slack · mcp · script
         subject: LMS 제목. 생략하면 campaign 을 쓴다
+        send_at: 예약 발송 시각. 생략하면 즉시. 최소 3분 뒤여야 한다
         **vendor: 뿌리오 payload 에 그대로 실을 추가 필드
 
     Returns:
         dict[str, Any]: requested·skipped·sent·code·message_key·message_type
 
     Raises:
-        ValueError: 문안이 LMS 한도를 넘을 때
+        ValueError: 문안이 LMS 한도를 넘거나, 예약이 3분보다 가까울 때
         transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 '실패'로 표시)
     """
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
     message_type = templates.decide_message_type(template, normalized)
+    if send_at is not None:
+        vendor["sendTime"] = reserve_time(send_at)
 
     ws = ledger.open_ledger(spreadsheet_id)
     won, lost = ledger.claim(
@@ -135,6 +143,45 @@ def send_campaign(
         "message_key": result.get("messageKey"),
         "message_type": message_type,
     }
+
+
+def reserve_time(send_at: datetime.datetime) -> str:
+    """예약 시각을 벤더 형식으로 바꿉니다.
+
+    3분보다 가까우면 벤더가 접수를 거부합니다. 거부는 발송 시도 뒤에야
+    돌아오므로, 그때는 이미 이력 시트에 자리를 잡은 뒤입니다. 여기서 먼저 막습니다.
+
+    Args:
+        send_at: 예약 발송 시각
+
+    Returns:
+        str: yyyy-MM-ddTHH:mm:ss
+
+    Raises:
+        ValueError: 지금부터 3분 안쪽일 때
+    """
+    margin = (send_at - datetime.datetime.now()).total_seconds()
+    if margin < MIN_RESERVE_SECONDS:
+        raise ValueError(
+            f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
+            f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
+        )
+    return send_at.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def cancel_reserved(message_key: str) -> dict[str, Any]:
+    """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
+
+    이력 시트의 행은 지우지 않습니다. "예약했다가 취소했다"도 기록이고,
+    지우면 같은 campaign 으로 다시 예약할 수 있게 되어 중복 차단이 풀립니다.
+
+    Args:
+        message_key: 접수 시 받은 messageKey. 발송이력 시트에 남아 있다
+
+    Returns:
+        dict[str, Any]: 벤더 응답
+    """
+    return transport.cancel(message_key)
 
 
 def preview(

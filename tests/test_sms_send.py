@@ -205,3 +205,44 @@ def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypa
     assert result["sent"] == 1
     assert [t["to"] for t in captured["targets"]] == ["01011111111"]
     assert len(ledger.read_rows(ws)) == 1
+
+
+def test_예약은_3분보다_가까우면_거절한다():
+    # 벤더가 거부하는데, 그 거부는 발송 시도 뒤에야 돌아온다.
+    # 그때는 이미 이력 시트에 자리를 잡은 뒤라 여기서 먼저 막는다.
+    import datetime
+
+    soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    with pytest.raises(ValueError, match="3분"):
+        sms_send.reserve_time(soon)
+
+
+def test_예약_시각은_벤더_형식으로_바뀐다():
+    # 뿌리오 sendTime 은 yyyy-MM-ddTHH:mm:ss 다.
+    import datetime
+
+    future = datetime.datetime.now() + datetime.timedelta(hours=1)
+    assert sms_send.reserve_time(future) == future.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def test_예약이면_sendTime이_실린다(ws, monkeypatch):
+    import datetime
+
+    captured = {}
+    monkeypatch.setattr(
+        transport,
+        "send",
+        lambda payload, token=None: captured.update(payload)
+        or {"code": "1000", "messageKey": "K"},
+    )
+    at = datetime.datetime.now() + datetime.timedelta(hours=1)
+    sms_send.send_campaign(
+        spreadsheet_id="S1",
+        campaign="discord",
+        rows=ROWS,
+        content="[*이름*]님",
+        requested_by="a@team-mono.com",
+        entrypoint="script",
+        send_at=at,
+    )
+    assert captured["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")

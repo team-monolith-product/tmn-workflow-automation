@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import csv
+import datetime
 import pathlib
 
 from dotenv import load_dotenv
@@ -84,8 +85,16 @@ def main() -> None:
     parser.add_argument("--name", default="", help="--to 의 이름")
     for key in VAR_KEYS:
         parser.add_argument(f"--{key}", default="", help=f"[*{key[3:]}*] 치환값")
+    parser.add_argument(
+        "--at", metavar="'2026-08-13 09:00'", help="예약 발송 시각. 최소 3분 뒤"
+    )
+    parser.add_argument("--cancel", metavar="MESSAGE_KEY", help="예약 취소")
     parser.add_argument("--dry-run", action="store_true", help="발송하지 않고 확인만")
     args = parser.parse_args()
+
+    if args.cancel:
+        print(sms_send.cancel_reserved(args.cancel))
+        return
 
     if bool(args.csv) == bool(args.to):
         parser.error("--csv 와 --to 중 하나만 주세요.")
@@ -101,10 +110,19 @@ def main() -> None:
             }
         ]
 
+    send_at = (
+        datetime.datetime.fromisoformat(args.at.replace("/", "-")) if args.at else None
+    )
+    if send_at is not None:
+        # 3분 규칙은 발송 전에 확인해야 한다. 접수 뒤에 거부당하면 이미
+        # 이력 시트에 자리를 잡은 상태다.
+        sms_send.reserve_time(send_at)
+
     summary = sms_send.preview(rows, args.template, args.content)
     print(
         f"{summary['message_type']} · 치환 후 최대 {summary['max_bytes']}byte"
         f" · 대상 {summary['targets']}명"
+        + (f" · 예약 {args.at}" if args.at else " · 즉시 발송")
     )
     print("-" * 60)
     print(summary["sample"])
@@ -121,6 +139,7 @@ def main() -> None:
         template_name=args.template,
         content=args.content,
         subject=args.subject,
+        send_at=send_at,
         requested_by="script",
         entrypoint="script",
     )
@@ -133,7 +152,11 @@ def main() -> None:
         f"접수 완료 — 발송 {result['sent']}명"
         + (f" · 중복 제외 {result['skipped']}명" if result["skipped"] else "")
         + f"\nmessageKey {result['message_key']}"
-        "\n접수 성공이지 도달 확인이 아닙니다. 도달 결과는 뿌리오 웹에서 확인하세요."
+        + (
+            f"\n예약됨 {args.at} — 취소는 `--cancel {result['message_key']}` (발송 1분 전까지)"
+            if args.at
+            else "\n접수 성공이지 도달 확인이 아닙니다. 도달 결과는 뿌리오 웹에서 확인하세요."
+        )
     )
 
 
