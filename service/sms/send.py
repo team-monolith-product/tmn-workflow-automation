@@ -25,8 +25,30 @@ from typing import Any
 from service.sms import ledger, templates, transport
 
 
+def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """번호를 정규화하고 같은 번호는 하나로 접습니다.
+
+    명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다(build_roster 가
+    전화번호 기준 중복 제거를 별도 단계로 두고 있는 이유입니다). 접지 않으면
+    ledger.claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져 그 번호는
+    이 캠페인에서 영영 발송되지 않습니다.
+
+    Args:
+        rows: to·name·var1~var8 을 담은 수신자 목록
+
+    Returns:
+        list[dict[str, Any]]: 번호가 유일한 목록. 먼저 나온 항목을 남긴다
+    """
+    unique: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        phone = templates.normalize_phone(row["to"])
+        unique.setdefault(phone, {**row, "to": phone})
+    return list(unique.values())
+
+
 def send_campaign(
     *,
+    spreadsheet_id: str,
     campaign: str,
     rows: list[dict[str, Any]],
     template_name: str | None = None,
@@ -42,6 +64,7 @@ def send_campaign(
     우리가 모르는 벤더 옵션도 이 경로로 통과합니다.
 
     Args:
+        spreadsheet_id: 이력을 적을 참가자 스프레드시트
         campaign: 발송 건 식별자. 재발송은 다른 값을 쓴다
         rows: to·name·var1~var8 을 담은 수신자 목록
         template_name: templates/sms/{name}.txt (content 와 택일)
@@ -59,10 +82,10 @@ def send_campaign(
         transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 '실패'로 표시)
     """
     template = templates.resolve(template_name, content)
-    normalized = [{**row, "to": templates.normalize_phone(row["to"])} for row in rows]
+    normalized = _normalize(rows)
     message_type = templates.decide_message_type(template, normalized)
 
-    ws = ledger.open_ledger()
+    ws = ledger.open_ledger(spreadsheet_id)
     won, lost = ledger.claim(
         ws, campaign, normalized, message_type, requested_by, entrypoint
     )
@@ -132,7 +155,7 @@ def preview(
         dict[str, Any]: message_type·max_bytes·targets·sample
     """
     template = templates.resolve(template_name, content)
-    normalized = [{**row, "to": templates.normalize_phone(row["to"])} for row in rows]
+    normalized = _normalize(rows)
     rendered = [templates.render(template, row) for row in normalized]
     return {
         "message_type": templates.decide_message_type(template, normalized),
@@ -142,14 +165,15 @@ def preview(
     }
 
 
-def campaign_summary(campaign: str) -> dict[str, int]:
+def campaign_summary(spreadsheet_id: str, campaign: str) -> dict[str, int]:
     """캠페인 진행 현황을 셉니다.
 
     Args:
+        spreadsheet_id: 참가자 스프레드시트
         campaign: 발송 건 식별자
 
     Returns:
         dict[str, int]: total·accepted·unknown·duplicate·failed
     """
-    ws = ledger.open_ledger()
+    ws = ledger.open_ledger(spreadsheet_id)
     return ledger.summarize(ledger.read_rows(ws), campaign)

@@ -64,9 +64,10 @@ def _row(phone, name, result=""):
 
 def test_확정된_결과를_행마다_적고_실패자를_돌려준다(monkeypatch):
     ws = _ws([_row("01011112222", "가"), _row("01033334444", "나")])
-    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+    monkeypatch.setattr(ledger, "open_ledger", lambda _id: ws)
 
     failed = sms_result.record(
+        "S1",
         "discord",
         {"01011112222": sms_result.DELIVERED, "01033334444": sms_result.FAILED},
     )
@@ -80,26 +81,28 @@ def test_확정된_결과를_행마다_적고_실패자를_돌려준다(monkeypa
 def test_이미_확정된_결과는_덮어쓰지_않는다(monkeypatch):
     # 폴링이 여러 번 돌아도 처음 확정된 결과가 남는다.
     ws = _ws([_row("01011112222", "가", sms_result.DELIVERED)])
-    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+    monkeypatch.setattr(ledger, "open_ledger", lambda _id: ws)
 
-    sms_result.record("discord", {"01011112222": sms_result.FAILED})
+    sms_result.record("S1", "discord", {"01011112222": sms_result.FAILED})
 
     assert ledger.read_rows(ws)[0]["결과"] == sms_result.DELIVERED
 
 
 def test_새로_확정된_게_없어도_기존_실패는_보고한다(monkeypatch):
     ws = _ws([_row("01033334444", "나", sms_result.FAILED)])
-    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+    monkeypatch.setattr(ledger, "open_ledger", lambda _id: ws)
 
-    assert sms_result.record("discord", {}) == [{"to": "01033334444", "name": "나"}]
+    assert sms_result.record("S1", "discord", {}) == [
+        {"to": "01033334444", "name": "나"}
+    ]
 
 
 def test_다른_캠페인은_건드리지_않는다(monkeypatch):
     other = _row("01011112222", "가")
     other[1] = "confirm"
     ws = _ws([other])
-    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+    monkeypatch.setattr(ledger, "open_ledger", lambda _id: ws)
 
-    sms_result.record("discord", {"01011112222": sms_result.FAILED})
+    sms_result.record("S1", "discord", {"01011112222": sms_result.FAILED})
 
     assert ledger.read_rows(ws)[0]["결과"] == ""

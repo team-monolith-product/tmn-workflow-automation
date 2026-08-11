@@ -3,23 +3,26 @@
 
     draft_sms → 승인 카드 → [발송] 버튼 또는 ✅ → 발송 → 도달 확인 → 실패분 재발송 → 보고
 
-대외 발신이라 사람이 누르기 전에는 아무것도 나가지 않습니다. 에이전트가 부를 수
-있는 도구에는 발송 경로가 없습니다.
+대외 발신이라 사람이 누르기 전에는 아무것도 나가지 않습니다. 슬랙 에이전트가
+부를 수 있는 도구에는 발송 경로가 없습니다.
 
-재발송은 campaign 을 -r2, -r3 으로 바꿔 부릅니다. UNIQUE (campaign, phone) 이
-같은 이름으로는 두 번 못 보내게 막기 때문이고, 그래서 성공한 사람은 재발송
-라운드에서 자동으로 빠집니다.
+재발송은 campaign 을 -r2, -r3 으로 바꿔 부릅니다. 발송이력 시트가 (캠페인, 번호)
+단위로 승자를 가리므로, 캠페인 이름이 달라지면 새로 자리를 잡을 수 있고 이미
+도달한 사람은 애초에 재발송 대상에 안 들어갑니다.
 """
 
 import asyncio
-from typing import Any
+import secrets
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable
 
 from cachetools import TTLCache
 from slack_sdk.web.async_client import AsyncWebClient
 
 from app.event_dedup import is_duplicate_event
-from app.sms import record_blocking, render_sent, send_blocking
+from app.sms_render import render_sent
 from service.sms import result as sms_result
+from service.sms import send as sms_send
 from service.sms.templates import normalize_phone
 
 APPROVE_REACTIONS = {
@@ -32,42 +35,62 @@ APPROVE_REACTIONS = {
 
 SEND_ROUNDS = 3  # 최초 발송 + 재발송 2회
 POLL_INTERVAL_SECONDS = 60
-POLL_LIMIT = 5  # 라운드당 최대 5분까지 도달 결과를 기다린다
+POLL_LIMIT = 5  # 라운드당 최대 5회까지 도달 결과를 기다린다
 ROSTER_PREVIEW_LIMIT = 20
 
-# ponytail: 승인 대기 초안은 프로세스 메모리에만 둡니다. 봇이 재시작하면 초안이
-# 사라져 다시 요청해야 하지만, 발송 자체는 DB 에 기록되므로 문자가 새지는 않습니다.
+# 승인 대기 초안은 프로세스 메모리에만 둡니다. 봇이 재시작하면 초안이 사라져
+# 다시 요청해야 하지만, 발송 사실은 발송이력 시트에 남으므로 문자가 새지는 않습니다.
 _DRAFTS: TTLCache = TTLCache(maxsize=100, ttl=86400)
 _MESSAGE_TS_TO_DRAFT_ID: TTLCache = TTLCache(maxsize=100, ttl=86400)
 
 # create_task 참조를 유지하여 GC 방지
 _background_tasks: set[asyncio.Task] = set()
 
+Progress = Callable[[str], Awaitable[None]]
 
-def _build_blocks(draft_id: str, draft: dict, summary: dict) -> list[dict]:
+
+@dataclass(frozen=True)
+class Draft:
+    """승인 대기 중인 발송 한 건."""
+
+    campaign: str
+    targets: list[dict]
+    requested_by: str
+    channel: str
+    thread_ts: str
+    spreadsheet_id: str
+    template_name: str | None = None
+    content: str | None = None
+    subject: str | None = None
+    # 초안마다 새로 뽑습니다. 승인·만료로 _DRAFTS 가 줄어들기 때문에 개수를
+    # 세어 붙이면 옛 카드와 새 초안이 같은 id 를 갖고, 옛 카드에 달린 ✅ 가
+    # 엉뚱한 초안을 승인합니다.
+    id: str = field(default_factory=lambda: secrets.token_hex(4))
+
+    @property
+    def source(self) -> str:
+        """문안 출처를 한 줄로 설명합니다."""
+        return (
+            f"문안 파일 `{self.template_name}`" if self.template_name else "즉석 문안"
+        )
+
+
+def _build_blocks(draft: Draft, summary: dict) -> list[dict]:
     """승인 카드 블록을 만듭니다.
 
     Args:
-        draft_id: 초안 식별자
         draft: 발송 초안
         summary: send.preview 결과
 
     Returns:
         list[dict]: 슬랙 blocks
     """
-    targets = draft["targets"]
     roster = "\n".join(
         f"{index}. {target.get('name', '')} {target['to']}"
-        for index, target in enumerate(targets[:ROSTER_PREVIEW_LIMIT], 1)
+        for index, target in enumerate(draft.targets[:ROSTER_PREVIEW_LIMIT], 1)
     )
-    if len(targets) > ROSTER_PREVIEW_LIMIT:
-        roster += f"\n… 외 {len(targets) - ROSTER_PREVIEW_LIMIT}명"
-
-    source = (
-        f"문안 파일 `{draft['template_name']}`"
-        if draft["template_name"]
-        else "즉석 문안"
-    )
+    if len(draft.targets) > ROSTER_PREVIEW_LIMIT:
+        roster += f"\n… 외 {len(draft.targets) - ROSTER_PREVIEW_LIMIT}명"
 
     return [
         {
@@ -78,7 +101,7 @@ def _build_blocks(draft_id: str, draft: dict, summary: dict) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*`{draft['campaign']}` · 수신자 {len(targets)}명*\n{roster}",
+                "text": f"*`{draft.campaign}` · 수신자 {len(draft.targets)}명*\n{roster}",
             },
         },
         {
@@ -94,8 +117,8 @@ def _build_blocks(draft_id: str, draft: dict, summary: dict) -> list[dict]:
                 {
                     "type": "mrkdwn",
                     "text": (
-                        f"{source} · {summary['message_type']} · 치환 후 최대 "
-                        f"{summary['max_bytes']}byte · 초안 `{draft_id}`\n"
+                        f"{draft.source} · {summary['message_type']} · 치환 후 최대 "
+                        f"{summary['max_bytes']}byte · 초안 `{draft.id}`\n"
                         "발송하려면 버튼을 누르거나 이 메시지에 :white_check_mark: 를 달아주세요."
                     ),
                 }
@@ -109,12 +132,12 @@ def _build_blocks(draft_id: str, draft: dict, summary: dict) -> list[dict]:
                     "text": {"type": "plain_text", "text": "발송"},
                     "style": "primary",
                     "action_id": "sms_send",
-                    "value": draft_id,
+                    "value": draft.id,
                     "confirm": {
                         "title": {"type": "plain_text", "text": "문자를 발송할까요?"},
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"수신자 {len(targets)}명에게 즉시 발송됩니다.",
+                            "text": f"수신자 {len(draft.targets)}명에게 즉시 발송됩니다.",
                         },
                         "confirm": {"type": "plain_text", "text": "발송"},
                         "deny": {"type": "plain_text", "text": "취소"},
@@ -124,41 +147,36 @@ def _build_blocks(draft_id: str, draft: dict, summary: dict) -> list[dict]:
                     "type": "button",
                     "text": {"type": "plain_text", "text": "취소"},
                     "action_id": "sms_cancel",
-                    "value": draft_id,
+                    "value": draft.id,
                 },
             ],
         },
     ]
 
 
-async def post_draft(
-    client: AsyncWebClient, *, channel: str, thread_ts: str, draft: dict, summary: dict
-) -> str:
+async def post_draft(client: AsyncWebClient, draft: Draft, summary: dict) -> str:
     """승인 카드를 올리고 초안을 등록합니다.
 
     Args:
         client: 슬랙 클라이언트
-        channel: 채널 ID
-        thread_ts: 스레드 ts
-        draft: campaign·template_name·content·targets·subject·requested_by
+        draft: 발송 초안
         summary: send.preview 결과
 
     Returns:
         str: 에이전트에게 돌려줄 안내
     """
-    draft_id = f"{draft['campaign']}-{len(_DRAFTS)}"
     response = await client.chat_postMessage(
-        channel=channel,
-        thread_ts=thread_ts,
-        text=f"문자 발송 승인 요청 ({draft['campaign']} · {len(draft['targets'])}명)",
-        blocks=_build_blocks(draft_id, draft, summary),
+        channel=draft.channel,
+        thread_ts=draft.thread_ts,
+        text=f"문자 발송 승인 요청 ({draft.campaign} · {len(draft.targets)}명)",
+        blocks=_build_blocks(draft, summary),
     )
-    _DRAFTS[draft_id] = {**draft, "channel": channel, "thread_ts": thread_ts}
-    _MESSAGE_TS_TO_DRAFT_ID[response["ts"]] = draft_id
+    _DRAFTS[draft.id] = draft
+    _MESSAGE_TS_TO_DRAFT_ID[response["ts"]] = draft.id
 
     return (
         f"승인 카드를 올렸습니다. 아직 발송하지 않았습니다.\n"
-        f"`{draft['campaign']}` · 수신자 {len(draft['targets'])}명 · "
+        f"`{draft.campaign}` · 수신자 {len(draft.targets)}명 · "
         f"{summary['message_type']} 최대 {summary['max_bytes']}byte\n"
         "답변에는 명단과 문안을 정리해 보여주고, [발송] 버튼이나 ✅ 로 승인해 달라고 안내하세요."
     )
@@ -184,11 +202,15 @@ async def approve_draft(
     task = asyncio.create_task(_send_and_report(draft, approver, client))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    return f"{len(draft['targets'])}명에게 발송을 시작합니다."
+    return f"{len(draft.targets)}명에게 발송을 시작합니다."
 
 
-async def _poll(phones: list[str], on_progress) -> dict[str, str]:
-    """모든 번호의 도달 결과가 확정될 때까지 웹 발송결과를 폴링합니다.
+async def _poll(phones: list[str], on_progress: Progress) -> dict[str, str]:
+    """모든 번호의 도달 결과가 확정될 때까지 웹 발송결과를 읽습니다.
+
+    확정분은 누적합니다. 매번 대입하면 페이지가 일부만 돌려줬을 때 앞서 확정된
+    결과를 잃습니다. 첫 조회는 기다리지 않고 바로 합니다 — 이미 결과가 올라와
+    있으면 그대로 끝납니다.
 
     Args:
         phones: 조회할 번호 목록
@@ -199,83 +221,117 @@ async def _poll(phones: list[str], on_progress) -> dict[str, str]:
     """
     statuses: dict[str, str] = {}
     for attempt in range(1, POLL_LIMIT + 1):
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
-        statuses = await sms_result.fetch_results(phones)
+        statuses.update(await sms_result.fetch_results(phones))
         await on_progress(
             f"도달 확인 {attempt}/{POLL_LIMIT} — 확정 {len(statuses)}/{len(phones)}건"
         )
         if len(statuses) == len(phones):
             break
+        if attempt < POLL_LIMIT:
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
     return statuses
 
 
-async def _send_and_report(
-    draft: dict, approver: str | None, client: AsyncWebClient
-) -> None:
-    """발송하고 도달 결과가 확정될 때까지 추적한 뒤 스레드에 보고합니다."""
+async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
+    """발송하고 실패분을 재발송합니다.
 
-    async def on_progress(text: str) -> None:
-        await client.chat_postMessage(
-            channel=draft["channel"], thread_ts=draft["thread_ts"], text=text
-        )
+    라운드마다 그 라운드에서 확정된 결과만 기록합니다. 누적분을 넘기면 앞
+    라운드의 실패가 이번 라운드 행에 찍혀, 실제로는 성공했는데 실패로 남습니다.
 
-    approver_label = f"<@{approver}>" if approver else "요청자"
-    await on_progress(
-        f"{approver_label} 승인 — 발송을 시작합니다. (대상 {len(draft['targets'])}명)"
-    )
+    Args:
+        draft: 발송 초안
+        on_progress: 진행 보고 콜백
 
-    targets = draft["targets"]
-    all_phones = [normalize_phone(target["to"]) for target in targets]
+    Returns:
+        dict[str, str]: 전체 라운드에서 확정된 {번호: 결과코드}
+    """
     resolved: dict[str, str] = {}
+    targets = draft.targets
 
-    try:
-        for round_no in range(1, SEND_ROUNDS + 1):
-            campaign = (
-                draft["campaign"]
-                if round_no == 1
-                else f"{draft['campaign']}-r{round_no}"
-            )
-            sent = await asyncio.to_thread(
-                send_blocking,
-                campaign,
-                draft["template_name"],
-                draft["content"],
-                targets,
-                draft["subject"],
-                draft["requested_by"],
-                "slack",
-            )
-            await on_progress(render_sent(campaign, sent))
-            if sent["sent"] == 0:
-                break
+    for round_no in range(1, SEND_ROUNDS + 1):
+        campaign = draft.campaign if round_no == 1 else f"{draft.campaign}-r{round_no}"
+        sent = await asyncio.to_thread(
+            sms_send.send_campaign,
+            spreadsheet_id=draft.spreadsheet_id,
+            campaign=campaign,
+            rows=targets,
+            template_name=draft.template_name,
+            content=draft.content,
+            subject=draft.subject,
+            requested_by=draft.requested_by,
+            entrypoint="slack",
+        )
+        await on_progress(render_sent(campaign, sent))
+        if sent["sent"] == 0:
+            break
 
-            phones = [normalize_phone(target["to"]) for target in targets]
-            resolved.update(await _poll(phones, on_progress))
-            failed = await asyncio.to_thread(record_blocking, campaign, resolved)
-            if not failed:
-                break
+        phones = [normalize_phone(target["to"]) for target in targets]
+        round_statuses = await _poll(phones, on_progress)
+        resolved.update(round_statuses)
 
-            targets = failed
-            if round_no < SEND_ROUNDS:
-                await on_progress(f"도달 실패 {len(failed)}건을 재발송합니다.")
-    except Exception as error:
-        # 백그라운드 태스크라 예외가 슬랙에 안 보이면 발송이 멈춘 줄도 모릅니다.
-        await on_progress(f":x: 발송 중 오류가 발생했습니다: `{error}`")
-        raise
+        failed = await asyncio.to_thread(
+            sms_result.record, draft.spreadsheet_id, campaign, round_statuses
+        )
+        if not failed:
+            break
 
-    delivered = [p for p in all_phones if resolved.get(p) == sms_result.DELIVERED]
-    failed_final = [p for p in all_phones if resolved.get(p) == sms_result.FAILED]
-    unknown = [p for p in all_phones if p not in resolved]
+        targets = failed
+        if round_no < SEND_ROUNDS:
+            await on_progress(f"도달 실패 {len(failed)}건을 재발송합니다.")
 
-    lines = [f"*문자 발송 완료* `{draft['campaign']}`", f"• 도달 {len(delivered)}건"]
-    if failed_final:
-        lines.append(f"• 실패 {len(failed_final)}건 — {', '.join(failed_final)}")
+    return resolved
+
+
+def _render_report(campaign: str, phones: list[str], resolved: dict[str, str]) -> str:
+    """최종 보고 문구를 만듭니다.
+
+    Args:
+        campaign: 발송 건 식별자
+        phones: 최초 대상 전체
+        resolved: 확정된 {번호: 결과코드}
+
+    Returns:
+        str: 슬랙에 올릴 보고
+    """
+    delivered = [p for p in phones if resolved.get(p) == sms_result.DELIVERED]
+    failed = [p for p in phones if resolved.get(p) == sms_result.FAILED]
+    unknown = [p for p in phones if p not in resolved]
+
+    lines = [f"*문자 발송 완료* `{campaign}`", f"• 도달 {len(delivered)}건"]
+    if failed:
+        lines.append(f"• 도달 실패 {len(failed)}건 — {', '.join(failed)}")
     if unknown:
         lines.append(
             f"• 결과 미확정 {len(unknown)}건 — {', '.join(unknown)}\n"
             "  (중복 발송을 피하려 재발송하지 않았습니다. 뿌리오 발송결과에서 확인해 주세요)"
         )
-    await on_progress("\n".join(lines))
+    return "\n".join(lines)
+
+
+async def _send_and_report(
+    draft: Draft, approver: str | None, client: AsyncWebClient
+) -> None:
+    """발송하고 도달 결과가 확정될 때까지 추적한 뒤 스레드에 보고합니다."""
+
+    async def on_progress(text: str) -> None:
+        await client.chat_postMessage(
+            channel=draft.channel, thread_ts=draft.thread_ts, text=text
+        )
+
+    approver_label = f"<@{approver}>" if approver else "요청자"
+    await on_progress(
+        f"{approver_label} 승인 — 발송을 시작합니다. (대상 {len(draft.targets)}명)"
+    )
+
+    phones = [normalize_phone(target["to"]) for target in draft.targets]
+    try:
+        resolved = await _run_rounds(draft, on_progress)
+    except Exception as error:
+        # 백그라운드 태스크라 예외가 슬랙에 안 보이면 발송이 멈춘 줄도 모릅니다.
+        await on_progress(f":x: 발송 중 오류가 발생했습니다: `{error}`")
+        raise
+
+    await on_progress(_render_report(draft.campaign, phones, resolved))
 
 
 async def _replace_card(client: AsyncWebClient, body: dict, text: str) -> None:
@@ -288,7 +344,7 @@ async def _replace_card(client: AsyncWebClient, body: dict, text: str) -> None:
     )
 
 
-def register_sms_handlers(app) -> None:
+def register_sms_handlers(app: Any) -> None:
     """문자 발송 승인 관련 슬랙 핸들러를 등록합니다.
 
     Args:

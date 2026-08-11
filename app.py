@@ -13,6 +13,7 @@ from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
 from app.general import register_general_handlers
 from app.knowledge import register_knowledge_middleware
+from app.sms_approval import register_sms_handlers
 from app.contents import register_contents_handlers
 from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
@@ -56,6 +57,7 @@ register_general_handlers(app)
 # 리스너가 아니라 미들웨어다. 대표 봇에 이미 message 리스너가 있어서
 # 리스너를 추가하면 Bolt 디스패치가 둘 중 하나에서 멈춘다.
 register_knowledge_middleware(app)
+register_sms_handlers(app)
 register_contents_handlers(app_contents)
 register_data_handlers(app_data)
 register_justin_handlers(app_justin)

@@ -25,8 +25,9 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 - `PPURIO_ACCOUNT` / `PPURIO_API_KEY` / `PPURIO_SENDER`: 발송 API 계정·인증키·발신번호
 - `PPURIO_WEB_ID` / `PPURIO_WEB_PASSWORD`: 도달 결과 확인용 웹 로그인 계정
 - `PPURIO_WEB_LOGIN_URL` / `PPURIO_WEB_RESULT_URL` / `PPURIO_WEB_ID_SELECTOR` / `PPURIO_WEB_PW_SELECTOR`: 발송결과 페이지 주소·셀렉터 (기본값 보정용)
-- `PARTICIPANT_SPREADSHEET_ID`: 발송 이력을 적는 참가자 스프레드시트. `발송이력` 탭에 한 발송이 한 행으로 쌓입니다
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: 그 시트에 쓸 서비스 계정
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: 참가자 스프레드시트에 쓸 서비스 계정
+
+발송 이력을 적을 시트는 채널마다 다릅니다. 사업 채널에서 봇에게 `이 채널에 <구글시트 주소> 연결해줘` 라고 하면 그 채널의 문자 이력이 그 시트 `발송이력` 탭에 쌓입니다. 연결하지 않은 채널에서는 발송이 막힙니다.
 
 호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 `code 3003 invalid ip`).
 

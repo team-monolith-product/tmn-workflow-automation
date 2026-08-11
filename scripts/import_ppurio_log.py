@@ -8,8 +8,8 @@
 첫 건만 넣습니다 — 재발송분은 어차피 중복 차단 대상이라 한 행이면 충분합니다.
 
 사용법:
-    python scripts/import_ppurio_log.py --file ~/Workspace/repo/industry-linked/ppurio_log.jsonl --dry-run
-    python scripts/import_ppurio_log.py --file ~/Workspace/repo/industry-linked/ppurio_log.jsonl
+    python scripts/import_ppurio_log.py --spreadsheet <시트주소> --file ~/…/ppurio_log.jsonl --dry-run
+    python scripts/import_ppurio_log.py --spreadsheet <시트주소> --file ~/…/ppurio_log.jsonl
 """
 
 import sys
@@ -25,7 +25,7 @@ from collections import Counter
 from dotenv import load_dotenv
 
 from api import google_sheets
-from service.sms import ledger
+from service.sms import ledger, roster
 
 
 def read_log(path: pathlib.Path) -> list[dict]:
@@ -73,6 +73,9 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="뿌리오 발송 로그 이관")
     parser.add_argument("--file", required=True, type=pathlib.Path)
+    parser.add_argument(
+        "--spreadsheet", required=True, help="참가자 스프레드시트 주소 또는 ID"
+    )
     parser.add_argument("--requested-by", default="imported@team-mono.com")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -98,7 +101,7 @@ def main() -> None:
         print("\n(dry-run — 적재하지 않음)")
         return
 
-    ws = ledger.open_ledger()
+    ws = ledger.open_ledger(roster.parse_spreadsheet_id(args.spreadsheet))
     already = {
         (row.get("캠페인", ""), row.get("번호", "")) for row in ledger.read_rows(ws)
     }

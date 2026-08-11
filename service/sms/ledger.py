@@ -25,7 +25,6 @@ DB 가 아니라 시트인 이유는 사람이 봐야 하기 때문입니다. �
 """
 
 import datetime
-import os
 import re
 from typing import Any
 
@@ -56,22 +55,19 @@ RESULT_COLUMN = chr(ord("A") + HEADER.index("결과"))
 _RANGE = re.compile(r"!\D+(\d+):")
 
 
-def spreadsheet_id() -> str:
-    """참가자 스프레드시트 ID를 반환합니다.
+def open_ledger(spreadsheet_id: str):
+    """그 사업의 발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
 
-    Returns:
-        str: 스프레드시트 ID
-    """
-    return os.environ["PARTICIPANT_SPREADSHEET_ID"]
+    시트 ID 를 인자로 받습니다. 전역 환경변수 하나로 두면 사업 채널이 여럿인데
+    이력이 한 시트에 섞입니다. 채널별 매핑은 service.sms.roster 가 답합니다.
 
-
-def open_ledger():
-    """발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
+    Args:
+        spreadsheet_id: 참가자 스프레드시트 ID
 
     Returns:
         gspread.Worksheet: 발송이력 워크시트
     """
-    ws = google_sheets.get_worksheet(spreadsheet_id(), WORKSHEET)
+    ws = google_sheets.get_worksheet(spreadsheet_id, WORKSHEET)
     if not ws.get_all_values():
         ws.update([HEADER], "A1")
     return ws
@@ -144,7 +140,15 @@ def claim(
 
     Returns:
         tuple: (이긴 항목 목록, 진 행 번호 목록). 이긴 항목에는 _row 가 붙는다
+
+    Raises:
+        ValueError: entries 에 같은 번호가 두 번 들어 있을 때
     """
+    phones = [entry["to"] for entry in entries]
+    if len(set(phones)) != len(phones):
+        # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라집니다. 호출부가
+        # 접어서 넘겨야 합니다(service.sms.send._normalize).
+        raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
     stamp = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = [
         [

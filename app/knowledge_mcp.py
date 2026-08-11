@@ -27,12 +27,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from api.admin_rails import get_me
-from app.sms import render_preview, render_sent, send_blocking
+from app.sms_render import render_preview, render_sent
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
+from service.sms import roster
 from service.sms import send as sms_send
 
 INSTRUCTIONS = """
@@ -121,6 +122,7 @@ def build_mcp() -> MCPServer:
 
     @mcp.tool()
     async def send_sms(
+        spreadsheet: str,
         campaign: str,
         targets: list[dict],
         template: str | None = None,
@@ -136,6 +138,8 @@ def build_mcp() -> MCPServer:
         여기는 사람이 직접 명령을 치는 자리라 그대로 둡니다.
 
         Args:
+            spreadsheet: 발송이력을 적을 참가자 스프레드시트 주소 또는 ID.
+                슬랙에서는 채널에 연결된 시트를 쓰지만 여기는 채널이 없어 직접 지정한다
             campaign: 이 발송 건의 식별자
             targets: 수신자 목록
             template: 저장된 문안 파일 이름 (content 와 택일)
@@ -143,15 +147,20 @@ def build_mcp() -> MCPServer:
             subject: LMS 제목. 생략하면 campaign 을 쓴다
         """
         token = cast(AdminToken, get_access_token())
+        try:
+            sheet_id = roster.parse_spreadsheet_id(spreadsheet)
+        except ValueError as error:
+            return str(error)
         result = await asyncio.to_thread(
-            send_blocking,
-            campaign,
-            template,
-            content,
-            targets,
-            subject,
-            token.email,
-            "mcp",
+            sms_send.send_campaign,
+            spreadsheet_id=sheet_id,
+            campaign=campaign,
+            rows=targets,
+            template_name=template,
+            content=content,
+            subject=subject,
+            requested_by=token.email,
+            entrypoint="mcp",
         )
         return render_sent(campaign, result)
 

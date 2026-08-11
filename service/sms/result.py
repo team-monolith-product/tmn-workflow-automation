@@ -21,11 +21,9 @@ code 1000 은 "받았다"이지 "도달했다"가 아니고, 우리는 수신자
 import asyncio
 import os
 import re
-from typing import Any
+from bs4 import BeautifulSoup
 
 from service.sms import ledger
-
-from bs4 import BeautifulSoup
 
 LOGIN_URL = os.environ.get("PPURIO_WEB_LOGIN_URL", "https://www.ppurio.com/login")
 RESULT_URL = os.environ.get(
@@ -41,9 +39,10 @@ PAGE_TIMEOUT_MS = 30000
 # --disable-dev-shm-usage: 쿠버네티스 기본 /dev/shm 이 64MB 라 탭이 죽습니다
 LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
 
-# sms_send.result_code 규약. 스키마의 실패 판정이 result_code <> '0000' 이라
-# 성공만 0000 이고 나머지는 실패로 셉니다. 웹에는 벤더 숫자 코드가 안 보여
-# 페이지 문구를 이 둘로 접습니다.
+# 발송이력 시트의 '결과' 열에 그대로 들어가는 값입니다. 재발송 판정이
+# 결과 == FAILED 정확 일치라, 이 둘 말고 다른 값을 내보내면 도달도 실패도
+# 아닌 상태가 되어 재발송에서 조용히 빠집니다. parse_results 는 반드시
+# 이 둘 중 하나만 돌려줍니다.
 DELIVERED = "0000"
 FAILED = "FAIL"
 
@@ -124,20 +123,23 @@ async def fetch_results(phones: list[str]) -> dict[str, str]:
     }
 
 
-def record(campaign: str, statuses: dict[str, str]) -> list[dict[str, str]]:
+def record(
+    spreadsheet_id: str, campaign: str, statuses: dict[str, str]
+) -> list[dict[str, str]]:
     """도달 결과를 이력 시트에 기록하고, 실패한 수신자를 돌려줍니다.
 
     이미 결과가 찬 행은 건드리지 않습니다. 폴링이 여러 번 돌아도 처음 확정된
     결과가 남습니다.
 
     Args:
+        spreadsheet_id: 참가자 스프레드시트
         campaign: 발송 건 식별자
         statuses: fetch_results 결과
 
     Returns:
         list[dict[str, str]]: 재발송 대상 [{"to": 번호, "name": 이름}]
     """
-    ws = ledger.open_ledger()
+    ws = ledger.open_ledger(spreadsheet_id)
     ledger.record_results(ws, campaign, statuses)
     return ledger.failed_targets(ledger.read_rows(ws), campaign, FAILED)
 

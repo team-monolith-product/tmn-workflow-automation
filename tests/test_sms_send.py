@@ -17,7 +17,7 @@ ROWS = [
 @pytest.fixture
 def ws(monkeypatch) -> FakeWorksheet:
     sheet = FakeWorksheet([ledger.HEADER])
-    monkeypatch.setattr(ledger, "open_ledger", lambda: sheet)
+    monkeypatch.setattr(ledger, "open_ledger", lambda _id: sheet)
     return sheet
 
 
@@ -32,6 +32,7 @@ def _run(monkeypatch, response=None, boom=None, **extra):
 
     monkeypatch.setattr(transport, "send", fake_send)
     result = sms_send.send_campaign(
+        spreadsheet_id="S1",
         campaign="discord",
         template_name="discord",
         rows=ROWS,
@@ -156,6 +157,7 @@ def test_즉석_문안도_보낼_수_있다(ws, monkeypatch):
         or {"code": "1000", "messageKey": "K"},
     )
     result = sms_send.send_campaign(
+        spreadsheet_id="S1",
         campaign="adhoc",
         rows=ROWS,
         content="[*이름*]선생님, 오늘 일정이 변경되었습니다.",
@@ -169,6 +171,7 @@ def test_즉석_문안도_보낼_수_있다(ws, monkeypatch):
 def test_문안과_즉석본문을_동시에_주면_거절한다(ws):
     with pytest.raises(ValueError):
         sms_send.send_campaign(
+            spreadsheet_id="S1",
             campaign="x",
             rows=ROWS,
             template_name="discord",
@@ -176,3 +179,29 @@ def test_문안과_즉석본문을_동시에_주면_거절한다(ws):
             requested_by="a@team-mono.com",
             entrypoint="slack",
         )
+
+
+def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypatch):
+    # 접지 않으면 claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져
+    # 그 번호는 이 캠페인에서 영영 발송되지 않는다.
+    captured = {}
+    monkeypatch.setattr(
+        transport,
+        "send",
+        lambda payload, token=None: captured.update(payload)
+        or {"code": "1000", "messageKey": "K"},
+    )
+    result = sms_send.send_campaign(
+        spreadsheet_id="S1",
+        campaign="discord",
+        rows=[
+            {"to": "010-1111-1111", "name": "가"},
+            {"to": "01011111111", "name": "가(표기만 다름)"},
+        ],
+        content="[*이름*]님",
+        requested_by="a@team-mono.com",
+        entrypoint="slack",
+    )
+    assert result["sent"] == 1
+    assert [t["to"] for t in captured["targets"]] == ["01011111111"]
+    assert len(ledger.read_rows(ws)) == 1

@@ -110,3 +110,13 @@ def test_현황을_센다():
         "duplicate": 1,
         "failed": 1,
     }
+
+
+def test_같은_번호를_두_번_넘기면_거절한다():
+    # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라진다. 호출부가 접어야 한다.
+    import pytest
+
+    with pytest.raises(ValueError, match="같은 번호"):
+        ledger.claim(
+            _ws(), "discord", [{"to": "010"}, {"to": "010"}], "LMS", "a@b.c", "slack"
+        )

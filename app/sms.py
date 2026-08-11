@@ -20,107 +20,12 @@ from typing import Any
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
+from app import sms_approval
+from app.sms_render import render_preview
 from service.knowledge.users import fetch_user_emails
-from service.sms import result as sms_result
+from service.knowledge.db import connect
+from service.sms import roster
 from service.sms import send as sms_send
-
-
-def send_blocking(
-    campaign: str,
-    template_name: str | None,
-    content: str | None,
-    targets: list[dict],
-    subject: str | None,
-    requested_by: str,
-    entrypoint: str,
-) -> dict[str, Any]:
-    """시트 접근과 벤더 호출을 한 스레드에서 처리합니다.
-
-    gspread 도 urllib 도 동기라 이벤트 루프에서 직접 부르면 봇 4개와
-    스케줄러가 공유하는 루프가 시트·벤더 응답을 기다리는 동안 멈춥니다.
-
-    Args:
-        campaign: 발송 건 식별자
-        template_name: 문안 파일 이름 (content 와 택일)
-        content: 즉석 문안 본문 (template_name 과 택일)
-        targets: 수신자 목록
-        subject: LMS 제목
-        requested_by: 시킨 사람 이메일
-        entrypoint: slack · mcp
-
-    Returns:
-        dict[str, Any]: send_campaign 결과
-    """
-    return sms_send.send_campaign(
-        campaign=campaign,
-        rows=targets,
-        template_name=template_name,
-        content=content,
-        requested_by=requested_by,
-        entrypoint=entrypoint,
-        subject=subject,
-    )
-
-
-def record_blocking(campaign: str, statuses: dict[str, str]) -> list[dict[str, Any]]:
-    """도달 결과를 기록하고 재발송 대상을 돌려줍니다.
-
-    Args:
-        campaign: 발송 건 식별자
-        statuses: 번호 -> 결과코드
-
-    Returns:
-        list[dict[str, Any]]: 실패한 수신자 목록
-    """
-    return sms_result.record(campaign, statuses)
-
-
-def summary_blocking(campaign: str) -> dict[str, Any]:
-    """캠페인 현황을 조회합니다.
-
-    Args:
-        campaign: 발송 건 식별자
-
-    Returns:
-        dict[str, Any]: campaign_summary 결과
-    """
-    return sms_send.campaign_summary(campaign)
-
-
-def render_preview(result: dict[str, Any]) -> str:
-    """미리보기 결과를 사람이 읽을 형태로 만듭니다.
-
-    Args:
-        result: send.preview 결과
-
-    Returns:
-        str: 요약 + 본문
-    """
-    return (
-        f"{result['message_type']} · 치환 후 최대 {result['max_bytes']}byte "
-        f"· 대상 {result['targets']}명\n"
-        f"{'─' * 40}\n{result['sample']}\n{'─' * 40}"
-    )
-
-
-def render_sent(campaign: str, result: dict[str, Any]) -> str:
-    """발송 결과를 사람이 읽을 형태로 만듭니다.
-
-    Args:
-        campaign: 발송 건 식별자
-        result: send.send_campaign 결과
-
-    Returns:
-        str: 접수 요약
-    """
-    if result["sent"] == 0:
-        return f"[{campaign}] 대상 {result['requested']}명이 모두 이미 발송된 상태라 보내지 않았습니다."
-    return (
-        f"[{campaign}] {result['message_type']} 접수 완료 — "
-        f"발송 {result['sent']}명"
-        + (f" · 중복 제외 {result['skipped']}명" if result["skipped"] else "")
-        + f"\nmessageKey {result['message_key']}"
-    )
 
 
 def get_sms_tools(
@@ -137,7 +42,6 @@ def get_sms_tools(
     Returns:
         list: [미리보기, 초안·승인요청, 현황] 도구
     """
-    from app import sms_approval
 
     @tool
     async def preview_sms(
@@ -171,39 +75,98 @@ def get_sms_tools(
         if not targets:
             return "수신자가 없습니다. 명단을 먼저 확정하세요."
         try:
+            sheet_id = await asyncio.to_thread(roster.sheet_for, channel)
+        except roster.NotConnected as error:
+            return str(error)
+        try:
             summary = sms_send.preview(targets, template, content)
         except (ValueError, FileNotFoundError) as error:
             return f"문안 확인 실패: {error}"
 
         return await sms_approval.post_draft(
             client,
-            channel=channel,
-            thread_ts=thread_ts,
-            draft={
-                "campaign": campaign,
-                "template_name": template,
-                "content": content,
-                "targets": targets,
-                "subject": subject,
-                "requested_by": await _actor(client, user_id),
-            },
-            summary=summary,
+            sms_approval.Draft(
+                campaign=campaign,
+                targets=targets,
+                requested_by=await _actor(client, user_id),
+                channel=channel,
+                thread_ts=thread_ts,
+                spreadsheet_id=sheet_id,
+                template_name=template,
+                content=content,
+                subject=subject,
+            ),
+            summary,
         )
+
+    @tool
+    async def connect_participant_sheet(spreadsheet: str) -> str:
+        """
+        이 채널에 참가자 스프레드시트를 연결합니다.
+        "이 채널에 <구글시트 주소> 연결해줘" 같은 요청에 사용합니다.
+        연결한 뒤로 이 채널에서 보내는 문자의 발송이력이 그 시트의
+        '발송이력' 탭에 쌓입니다. 주소를 그대로 붙여넣어도 됩니다.
+        """
+        try:
+            sheet_id = roster.parse_spreadsheet_id(spreadsheet)
+        except ValueError as error:
+            return str(error)
+        actor = await _actor(client, user_id)
+        await asyncio.to_thread(_connect_sheet_blocking, channel, sheet_id, actor)
+        return (
+            f"이 채널을 참가자 시트 `{sheet_id}` 에 연결했습니다.\n"
+            "앞으로 이 채널에서 보내는 문자의 발송이력이 그 시트의 '발송이력' 탭에 쌓입니다."
+        )
+
+    @tool
+    async def disconnect_participant_sheet() -> str:
+        """
+        이 채널의 참가자 스프레드시트 연결을 끊습니다.
+        연결이 끊기면 이 채널에서는 문자를 보낼 수 없습니다. 이미 쌓인 이력은 그대로 남습니다.
+        """
+        removed = await asyncio.to_thread(_disconnect_sheet_blocking, channel)
+        if removed is None:
+            return "이 채널에는 연결된 참가자 시트가 없습니다."
+        return "연결을 끊었습니다. 이미 쌓인 발송이력은 시트에 그대로 있습니다."
 
     @tool
     async def sms_campaign_status(campaign: str) -> str:
         """
         발송 건의 진행 현황을 봅니다. 접수 성공·결과 미상·실패 건수를 셉니다.
         """
-        row = await asyncio.to_thread(summary_blocking, campaign)
+        try:
+            sheet_id = await asyncio.to_thread(roster.sheet_for, channel)
+        except roster.NotConnected as error:
+            return str(error)
+        row = await asyncio.to_thread(sms_send.campaign_summary, sheet_id, campaign)
         if not row or not row.get("total"):
             return f"[{campaign}] 발송 기록이 없습니다."
         return (
             f"[{campaign}] 총 {row['total']} · 접수성공 {row['accepted']}"
-            f" · 결과미상 {row['unknown']} · 실패 {row['failed']}"
+            f" · 접수미상 {row['unknown']} · 중복제외 {row['duplicate']}"
+            f" · 접수실패 {row['failed']}"
+            "\n도달 여부가 아니라 벤더 접수 기준입니다."
         )
 
-    return [preview_sms, draft_sms, sms_campaign_status]
+    return [
+        preview_sms,
+        draft_sms,
+        connect_participant_sheet,
+        disconnect_participant_sheet,
+        sms_campaign_status,
+    ]
+
+
+def _connect_sheet_blocking(channel: str, spreadsheet_id: str, actor: str) -> str:
+    """채널-시트 연결을 저장합니다. psycopg 가 동기라 스레드에서 부릅니다."""
+    with connect() as conn:
+        return roster.connect_sheet(conn, channel, spreadsheet_id, actor)
+
+
+def _disconnect_sheet_blocking(channel: str) -> str | None:
+    """채널-시트 연결을 지웁니다."""
+    with connect() as conn:
+        return roster.disconnect_sheet(conn, channel)
 
 
 async def _actor(client: AsyncWebClient, user_id: str | None) -> str:
