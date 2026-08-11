@@ -25,6 +25,7 @@ import re
 from typing import Any
 
 from api import google_sheets
+from service.sms import KST
 
 WORKSHEET = "발송이력"
 
@@ -169,7 +170,8 @@ def claim(
         # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라집니다. 호출부가
         # 접어서 넘겨야 합니다(service.sms.send._normalize).
         raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 사람이 읽는 칸이라 KST 로 적는다. 컨테이너는 UTC 다.
+    stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     payload = [
         [
             stamp,

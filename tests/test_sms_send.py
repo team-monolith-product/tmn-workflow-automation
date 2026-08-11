@@ -236,6 +236,19 @@ def test_예약이면_sendTime이_실린다(ws, monkeypatch):
     assert captured["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def test_예약_판정은_컨테이너_시계가_UTC여도_KST로_한다(monkeypatch):
+    # 컨테이너에 TZ 가 없어 datetime.now() 는 UTC 다. 사람은 KST 벽시계로
+    # 적으므로, 그대로 빼면 이미 지난 시각이 9시간 여유로 보여 통과한다.
+    import zoneinfo
+
+    now_kst = datetime.datetime.now(zoneinfo.ZoneInfo("Asia/Seoul")).replace(
+        tzinfo=None
+    )
+    past = now_kst - datetime.timedelta(hours=1)
+    with pytest.raises(ValueError, match="3분"):
+        sms_send.reserve_time(past)
+
+
 def test_문제를_한_번에_모아_돌려준다():
     # 하나씩 터뜨리면 고치고 다시 돌리고를 반복하게 된다.
     soon = datetime.datetime.now() + datetime.timedelta(minutes=1)
