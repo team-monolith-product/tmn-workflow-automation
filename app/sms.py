@@ -20,7 +20,6 @@ from typing import Any
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
-from service.knowledge.db import connect
 from service.knowledge.users import fetch_user_emails
 from service.sms import result as sms_result
 from service.sms import send as sms_send
@@ -35,10 +34,10 @@ def send_blocking(
     requested_by: str,
     entrypoint: str,
 ) -> dict[str, Any]:
-    """DB 커넥션과 벤더 호출을 한 스레드에서 처리합니다.
+    """시트 접근과 벤더 호출을 한 스레드에서 처리합니다.
 
-    psycopg 도 urllib 도 동기라 이벤트 루프에서 직접 부르면 봇 4개와
-    스케줄러가 공유하는 루프가 벤더 응답을 기다리는 동안(최대 20초) 멈춥니다.
+    gspread 도 urllib 도 동기라 이벤트 루프에서 직접 부르면 봇 4개와
+    스케줄러가 공유하는 루프가 시트·벤더 응답을 기다리는 동안 멈춥니다.
 
     Args:
         campaign: 발송 건 식별자
@@ -52,17 +51,15 @@ def send_blocking(
     Returns:
         dict[str, Any]: send_campaign 결과
     """
-    with connect() as conn:
-        return sms_send.send_campaign(
-            conn,
-            campaign=campaign,
-            template_name=template_name,
-            content=content,
-            rows=targets,
-            requested_by=requested_by,
-            entrypoint=entrypoint,
-            subject=subject,
-        )
+    return sms_send.send_campaign(
+        campaign=campaign,
+        rows=targets,
+        template_name=template_name,
+        content=content,
+        requested_by=requested_by,
+        entrypoint=entrypoint,
+        subject=subject,
+    )
 
 
 def record_blocking(campaign: str, statuses: dict[str, str]) -> list[dict[str, Any]]:
@@ -75,8 +72,7 @@ def record_blocking(campaign: str, statuses: dict[str, str]) -> list[dict[str, A
     Returns:
         list[dict[str, Any]]: 실패한 수신자 목록
     """
-    with connect() as conn:
-        return sms_result.record(conn, campaign, statuses)
+    return sms_result.record(campaign, statuses)
 
 
 def summary_blocking(campaign: str) -> dict[str, Any]:
@@ -88,8 +84,7 @@ def summary_blocking(campaign: str) -> dict[str, Any]:
     Returns:
         dict[str, Any]: campaign_summary 결과
     """
-    with connect() as conn:
-        return sms_send.campaign_summary(conn, campaign)
+    return sms_send.campaign_summary(campaign)
 
 
 def render_preview(result: dict[str, Any]) -> str:

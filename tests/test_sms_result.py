@@ -4,6 +4,9 @@
 
 import pytest
 
+from tests.conftest_sms import FakeWorksheet
+
+from service.sms import ledger
 from service.sms import result as sms_result
 
 
@@ -39,56 +42,64 @@ def test_parse_results_keeps_newest_row_per_phone():
     assert sms_result.parse_results(html) == {"01011112222": sms_result.DELIVERED}
 
 
-class FakeCursor:
-    """execute 로 들어온 SQL 과 파라미터를 기록하는 커서"""
-
-    def __init__(self, failed_rows):
-        self.calls = []
-        self._failed_rows = failed_rows
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def execute(self, sql, params):
-        self.calls.append((sql.split()[0], params))
-
-    def fetchall(self):
-        return self._failed_rows
+def _ws(rows):
+    """발송이력 시트를 흉내냅니다."""
+    return FakeWorksheet([ledger.HEADER] + rows)
 
 
-class FakeConn:
-    def __init__(self, failed_rows):
-        self.cursor_obj = FakeCursor(failed_rows)
-        self.committed = 0
+def _row(phone, name, result=""):
+    return [
+        "2026-08-10",
+        "discord",
+        phone,
+        name,
+        "LMS",
+        "K1",
+        "1000",
+        result,
+        "a@b.c",
+        "slack",
+    ]
 
-    def cursor(self):
-        return self.cursor_obj
 
-    def commit(self):
-        self.committed += 1
-
-
-def test_record_writes_each_status_and_returns_failures():
-    """확정된 결과를 행마다 기록하고, 그 캠페인의 실패 건을 재발송 대상으로 돌려줍니다."""
-    conn = FakeConn([{"phone": "01033334444", "name": "나"}])
+def test_확정된_결과를_행마다_적고_실패자를_돌려준다(monkeypatch):
+    ws = _ws([_row("01011112222", "가"), _row("01033334444", "나")])
+    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
 
     failed = sms_result.record(
-        conn,
         "discord",
         {"01011112222": sms_result.DELIVERED, "01033334444": sms_result.FAILED},
     )
 
-    updates = [params for verb, params in conn.cursor_obj.calls if verb == "UPDATE"]
-    assert len(updates) == 2
-    assert {update["phone"] for update in updates} == {"01011112222", "01033334444"}
+    results = {r["번호"]: r["결과"] for r in ledger.read_rows(ws)}
+    assert results["01011112222"] == sms_result.DELIVERED
+    assert results["01033334444"] == sms_result.FAILED
     assert failed == [{"to": "01033334444", "name": "나"}]
-    assert conn.committed == 1
 
 
-def test_record_with_no_statuses_still_reports_failures():
-    """이번 폴링에서 새로 확정된 게 없어도 기존 실패 건은 그대로 나옵니다."""
-    conn = FakeConn([])
-    assert sms_result.record(conn, "discord", {}) == []
+def test_이미_확정된_결과는_덮어쓰지_않는다(monkeypatch):
+    # 폴링이 여러 번 돌아도 처음 확정된 결과가 남는다.
+    ws = _ws([_row("01011112222", "가", sms_result.DELIVERED)])
+    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+
+    sms_result.record("discord", {"01011112222": sms_result.FAILED})
+
+    assert ledger.read_rows(ws)[0]["결과"] == sms_result.DELIVERED
+
+
+def test_새로_확정된_게_없어도_기존_실패는_보고한다(monkeypatch):
+    ws = _ws([_row("01033334444", "나", sms_result.FAILED)])
+    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+
+    assert sms_result.record("discord", {}) == [{"to": "01033334444", "name": "나"}]
+
+
+def test_다른_캠페인은_건드리지_않는다(monkeypatch):
+    other = _row("01011112222", "가")
+    other[1] = "confirm"
+    ws = _ws([other])
+    monkeypatch.setattr(ledger, "open_ledger", lambda: ws)
+
+    sms_result.record("discord", {"01011112222": sms_result.FAILED})
+
+    assert ledger.read_rows(ws)[0]["결과"] == ""

@@ -23,7 +23,8 @@ import os
 import re
 from typing import Any
 
-import psycopg
+from service.sms import ledger
+
 from bs4 import BeautifulSoup
 
 LOGIN_URL = os.environ.get("PPURIO_WEB_LOGIN_URL", "https://www.ppurio.com/login")
@@ -52,16 +53,6 @@ _SUCCESS_WORDS = ("성공", "수신", "도착", "완료")
 _FAILURE_WORDS = ("실패", "거부", "차단", "오류")
 _PENDING_WORDS = ("대기", "전송중", "발송중", "접수")
 _STATUS_PATTERN = re.compile("|".join(_SUCCESS_WORDS + _FAILURE_WORDS + _PENDING_WORDS))
-
-RECORD = """
-UPDATE sms_send SET result_code = %(code)s, result_at = now()
-WHERE campaign = %(campaign)s AND phone = %(phone)s AND result_code IS NULL
-"""
-
-FAILED_ROWS = """
-SELECT phone, name FROM sms_send
-WHERE campaign = %(campaign)s AND result_code = %(failed)s
-"""
 
 
 def parse_results(html: str) -> dict[str, str]:
@@ -133,29 +124,22 @@ async def fetch_results(phones: list[str]) -> dict[str, str]:
     }
 
 
-def record(
-    conn: psycopg.Connection, campaign: str, statuses: dict[str, str]
-) -> list[dict[str, Any]]:
-    """도달 결과를 기록하고, 그 캠페인에서 실패한 수신자를 돌려줍니다.
+def record(campaign: str, statuses: dict[str, str]) -> list[dict[str, str]]:
+    """도달 결과를 이력 시트에 기록하고, 실패한 수신자를 돌려줍니다.
 
-    이미 result_code 가 찬 행은 건드리지 않습니다. 폴링이 여러 번 돌아도
-    처음 확정된 결과가 남습니다.
+    이미 결과가 찬 행은 건드리지 않습니다. 폴링이 여러 번 돌아도 처음 확정된
+    결과가 남습니다.
 
     Args:
-        conn: 지식베이스 커넥션
         campaign: 발송 건 식별자
         statuses: fetch_results 결과
 
     Returns:
-        list[dict[str, Any]]: 재발송 대상 [{"to": 번호, "name": 이름}]
+        list[dict[str, str]]: 재발송 대상 [{"to": 번호, "name": 이름}]
     """
-    with conn.cursor() as cur:
-        for phone, code in statuses.items():
-            cur.execute(RECORD, {"code": code, "campaign": campaign, "phone": phone})
-        cur.execute(FAILED_ROWS, {"campaign": campaign, "failed": FAILED})
-        rows = cur.fetchall()
-    conn.commit()
-    return [{"to": row["phone"], "name": row["name"]} for row in rows]
+    ws = ledger.open_ledger()
+    ledger.record_results(ws, campaign, statuses)
+    return ledger.failed_targets(ledger.read_rows(ws), campaign, FAILED)
 
 
 async def _dump() -> None:

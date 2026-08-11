@@ -1,0 +1,257 @@
+"""
+발송 이력 시트입니다. 참가자 스프레드시트의 '발송이력' 탭 하나입니다.
+
+DB 가 아니라 시트인 이유는 사람이 봐야 하기 때문입니다. 연수 당일 서버가
+죽으면 사람이 뿌리오 웹으로 직접 보내야 하는데, 그 발송을 기록할 곳이
+사람이 쓸 수 있는 곳이어야 합니다. 손으로 한 줄 적으면 우리 코드가 그 줄을
+읽고 중복을 피합니다. DB 였다면 사람이 우회한 발송을 영영 모릅니다.
+
+참가자 탭에는 우리가 쓰지 않습니다. 발송 상태 열을 이 탭을 가리키는 수식으로
+두면 동기화 코드가 필요 없고, 두 곳을 쓰지 않으니 어긋날 자리도 없습니다.
+
+시트에는 UNIQUE 제약도 조건부 쓰기도 없습니다. 대신 append 가 만들어주는
+행 번호를 순서로 씁니다.
+
+    ① append          동시에 호출해도 각자 다른 행을 받는다
+    ② 전체 재조회
+    ③ 같은 (캠페인, 번호) 중 살아 있는 행의 최소 행 번호가 나면 이긴다
+
+행 번호는 누가 읽어도 같으므로 승자가 하나로 정해집니다. 이 재조회를 지우면
+중복 차단이 그대로 뚫립니다. tests/test_sms_ledger.py 가 막고 있습니다.
+
+접수코드가 '실패'/'중복'인 행은 살아 있지 않은 것으로 봅니다. 그래야 실패한
+발송을 다시 시도할 수 있습니다. 비어 있는 행은 "보냈는지 모름"이라 살아
+있는 것으로 취급합니다 — 조용히 다시 보내는 것보다 사람이 확인하는 게 낫습니다.
+"""
+
+import datetime
+import os
+import re
+from typing import Any
+
+from api import google_sheets
+
+WORKSHEET = "발송이력"
+
+HEADER = [
+    "일시",
+    "캠페인",
+    "번호",
+    "이름",
+    "타입",
+    "messageKey",
+    "접수코드",
+    "결과",
+    "요청자",
+    "경로",
+]
+
+# 이 값이 접수코드에 있으면 그 클레임은 죽은 것으로 본다.
+DEAD_CODES = {"실패", "중복"}
+
+CODE_COLUMN = chr(ord("A") + HEADER.index("접수코드"))
+KEY_COLUMN = chr(ord("A") + HEADER.index("messageKey"))
+RESULT_COLUMN = chr(ord("A") + HEADER.index("결과"))
+
+_RANGE = re.compile(r"!\D+(\d+):")
+
+
+def spreadsheet_id() -> str:
+    """참가자 스프레드시트 ID를 반환합니다.
+
+    Returns:
+        str: 스프레드시트 ID
+    """
+    return os.environ["PARTICIPANT_SPREADSHEET_ID"]
+
+
+def open_ledger():
+    """발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
+
+    Returns:
+        gspread.Worksheet: 발송이력 워크시트
+    """
+    ws = google_sheets.get_worksheet(spreadsheet_id(), WORKSHEET)
+    if not ws.get_all_values():
+        ws.update([HEADER], "A1")
+    return ws
+
+
+def read_rows(ws) -> list[dict[str, Any]]:
+    """이력 전체를 행 번호와 함께 읽습니다.
+
+    헤더 이름으로 열을 찾습니다. 사람이 열 순서를 바꿔도 깨지지 않게 하려는
+    것입니다.
+
+    Args:
+        ws: 발송이력 워크시트
+
+    Returns:
+        list[dict[str, Any]]: 헤더를 키로 하고 _row 에 행 번호를 담은 목록
+    """
+    values = ws.get_all_values()
+    if not values:
+        return []
+    header = values[0]
+    rows = []
+    for index, line in enumerate(values[1:], start=2):
+        row = {
+            name: (line[i] if i < len(line) else "") for i, name in enumerate(header)
+        }
+        row["_row"] = index
+        rows.append(row)
+    return rows
+
+
+def owners(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    """(캠페인, 번호)별로 살아 있는 최소 행 번호를 찾습니다.
+
+    Args:
+        rows: read_rows 결과
+
+    Returns:
+        dict[tuple[str, str], int]: 키별 승자 행 번호
+    """
+    winner: dict[tuple[str, str], int] = {}
+    for row in rows:
+        if row.get("접수코드") in DEAD_CODES:
+            continue
+        key = (row.get("캠페인", ""), row.get("번호", ""))
+        if key not in winner or row["_row"] < winner[key]:
+            winner[key] = row["_row"]
+    return winner
+
+
+def claim(
+    ws,
+    campaign: str,
+    entries: list[dict[str, Any]],
+    message_type: str,
+    requested_by: str,
+    entrypoint: str,
+    now: str | None = None,
+) -> tuple[list[dict[str, Any]], list[int]]:
+    """발송 대상의 자리를 잡습니다.
+
+    Args:
+        ws: 발송이력 워크시트
+        campaign: 발송 건 식별자
+        entries: to·name 을 담은 수신자 목록
+        message_type: SMS 또는 LMS
+        requested_by: 시킨 사람 이메일
+        entrypoint: slack · mcp · script
+        now: 기록할 시각. 생략하면 현재 시각
+
+    Returns:
+        tuple: (이긴 항목 목록, 진 행 번호 목록). 이긴 항목에는 _row 가 붙는다
+    """
+    stamp = now or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = [
+        [
+            stamp,
+            campaign,
+            entry["to"],
+            entry.get("name", ""),
+            message_type,
+            "",
+            "",
+            "",
+            requested_by,
+            entrypoint,
+        ]
+        for entry in entries
+    ]
+    updated_range = google_sheets.append_rows(ws, payload)
+    first = int(_RANGE.search(updated_range).group(1))
+    mine = {entry["to"]: first + offset for offset, entry in enumerate(entries)}
+
+    winner = owners(read_rows(ws))
+
+    won, lost = [], []
+    for entry in entries:
+        row = mine[entry["to"]]
+        if winner.get((campaign, entry["to"])) == row:
+            won.append({**entry, "_row": row})
+        else:
+            lost.append(row)
+    return won, lost
+
+
+def mark(ws, rows: list[int], code: str, message_key: str | None = None) -> None:
+    """행들의 접수코드와 messageKey 를 채웁니다.
+
+    Args:
+        ws: 발송이력 워크시트
+        rows: 대상 행 번호
+        code: 접수코드 (1000 · 실패 · 중복 …)
+        message_key: 벤더가 발급한 키
+    """
+    updates = [{"range": f"{CODE_COLUMN}{row}", "values": [[code]]} for row in rows]
+    if message_key:
+        updates += [
+            {"range": f"{KEY_COLUMN}{row}", "values": [[message_key]]} for row in rows
+        ]
+    google_sheets.batch_update_cells(ws, updates)
+
+
+def summarize(rows: list[dict[str, Any]], campaign: str) -> dict[str, int]:
+    """캠페인 현황을 셉니다.
+
+    Args:
+        rows: read_rows 결과
+        campaign: 발송 건 식별자
+
+    Returns:
+        dict[str, int]: total·accepted·unknown·duplicate·failed
+    """
+    mine = [row for row in rows if row.get("캠페인") == campaign]
+    codes = [row.get("접수코드", "") for row in mine]
+    return {
+        "total": len(mine),
+        "accepted": codes.count("1000"),
+        "unknown": codes.count(""),
+        "duplicate": codes.count("중복"),
+        "failed": codes.count("실패"),
+    }
+
+
+def record_results(ws, campaign: str, statuses: dict[str, str]) -> None:
+    """도달 결과를 씁니다. 이미 찬 칸은 건드리지 않습니다.
+
+    폴링이 여러 번 돌아도 처음 확정된 결과가 남습니다.
+
+    Args:
+        ws: 발송이력 워크시트
+        campaign: 발송 건 식별자
+        statuses: {번호: 결과코드}
+    """
+    updates = []
+    for row in read_rows(ws):
+        if row.get("캠페인") != campaign or row.get("결과"):
+            continue
+        code = statuses.get(row.get("번호", ""))
+        if code:
+            updates.append(
+                {"range": f"{RESULT_COLUMN}{row['_row']}", "values": [[code]]}
+            )
+    google_sheets.batch_update_cells(ws, updates)
+
+
+def failed_targets(
+    rows: list[dict[str, Any]], campaign: str, failed_code: str
+) -> list[dict[str, str]]:
+    """그 캠페인에서 도달에 실패한 수신자를 돌려줍니다.
+
+    Args:
+        rows: read_rows 결과
+        campaign: 발송 건 식별자
+        failed_code: 실패로 보는 결과코드
+
+    Returns:
+        list[dict[str, str]]: 재발송 대상 [{"to": 번호, "name": 이름}]
+    """
+    return [
+        {"to": row["번호"], "name": row.get("이름", "")}
+        for row in rows
+        if row.get("캠페인") == campaign and row.get("결과") == failed_code
+    ]
