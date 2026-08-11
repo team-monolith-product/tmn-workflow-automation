@@ -38,36 +38,6 @@ def get_worksheet(spreadsheet_id: str, worksheet_name: str) -> gspread.Worksheet
         return sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
 
 
-def append_rows(ws: gspread.Worksheet, values: list[list]) -> str:
-    """워크시트 끝에 행을 덧붙이고 실제로 쓰인 범위를 반환한다.
-
-    append 는 동시에 호출돼도 서로 다른 행을 받는다. 반환된 범위가 우리가
-    받은 행 번호이고, 이 번호가 클레임 순서가 된다.
-
-    Args:
-        ws: 워크시트
-        values: 행 목록
-
-    Returns:
-        str: "'발송이력'!A5:J10" 형태의 갱신 범위
-    """
-    result = ws.append_rows(
-        values, value_input_option="USER_ENTERED", insert_data_option="INSERT_ROWS"
-    )
-    return result["updates"]["updatedRange"]
-
-
-def batch_update_cells(ws: gspread.Worksheet, updates: list[dict]) -> None:
-    """셀 범위 여러 곳을 한 번에 갱신한다.
-
-    Args:
-        ws: 워크시트
-        updates: [{"range": "G5", "values": [["1000"]]}] 형식
-    """
-    if updates:
-        ws.batch_update(updates, value_input_option="USER_ENTERED")
-
-
 def get_worksheet_values(
     spreadsheet_id: str,
     worksheet_id: int,

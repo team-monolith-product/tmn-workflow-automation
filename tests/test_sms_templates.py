@@ -64,14 +64,6 @@ def test_값이_없으면_changeWord를_넣지_않는다():
     assert templates.build_targets([{"to": "01012345678"}]) == [{"to": "01012345678"}]
 
 
-def test_같은_본문은_같은_해시다():
-    row = {"to": "01012345678", "name": "홍길동", "var1": "1기", "var2": "x"}
-    other = {"to": "01099999999", "name": "홍길동", "var1": "1기", "var2": "x"}
-    assert templates.content_hash(TEMPLATE, row) == templates.content_hash(
-        TEMPLATE, other
-    )
-
-
 def test_실제_문안이_읽힌다():
     body = templates.load("discord")
     assert "[*이름*]" in body and "[*1*]" in body and "[*2*]" in body

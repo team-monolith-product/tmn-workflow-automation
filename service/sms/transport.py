@@ -5,13 +5,6 @@
 나머지는 그대로 흘려보냅니다. 벤더가 필드를 추가해도, 예약 발송처럼 우리가
 아직 안 쓰는 기능을 쓰게 돼도 여기는 고치지 않습니다.
 
-앞선 구현(industry-linked/ppurio.py)은 targetCount 를 1 로 못박아 두어서
-벤더가 제공하는 다중 수신자와 changeWord 치환을 쓸 수 없었고, 그 때문에
-명단 엑셀을 만들어 사람이 웹에 올리는 경로가 따로 생겼습니다. 통과시키지
-않으면 벤더 기능을 잃습니다.
-
-비즈뿌리오로 옮길 때 새로 쓰는 파일은 여기 하나입니다.
-
 호출 IP 는 뿌리오에 사전 등록되어야 합니다. 등록되지 않은 곳에서 부르면
 토큰 발급 단계에서 code 3003(invalid ip)으로 막힙니다.
 """
@@ -28,7 +21,12 @@ TIMEOUT = 20
 
 
 class PpurioError(RuntimeError):
-    """뿌리오가 실패를 돌려줬을 때 발생합니다."""
+    """뿌리오가 접수를 거절했을 때 발생합니다.
+
+    HTTP 오류이거나, 200 이면서 code 가 성공이 아닌 경우입니다. 둘 다 '접수되지
+    않은 것이 확실하다'는 뜻이라 호출부가 재시도를 열어도 됩니다. 타임아웃처럼
+    접수 여부를 모르는 경우는 이 예외가 아닙니다.
+    """
 
     def __init__(self, status: int, body: Any):
         self.status = status
@@ -57,7 +55,7 @@ def _post(path: str, body: dict, headers: dict) -> dict:
         dict: 응답 본문
 
     Raises:
-        PpurioError: 2xx 가 아니거나 본문이 JSON 이 아닐 때
+        PpurioError: 2xx 가 아닐 때
     """
     request = urllib.request.Request(
         BASE + path,
@@ -89,7 +87,7 @@ def issue_token() -> str:
     return result["token"]
 
 
-def send(payload: dict, token: str | None = None) -> dict:
+def send(payload: dict) -> dict:
     """메시지를 발송합니다. payload 는 벤더 스펙 그대로입니다.
 
     account 만 채워 넣습니다. messageType·content·targets·sendTime 등은
@@ -97,7 +95,6 @@ def send(payload: dict, token: str | None = None) -> dict:
 
     Args:
         payload: 뿌리오 /v1/message 요청 본문 (account 제외)
-        token: 재사용할 토큰. 생략하면 새로 발급합니다
 
     Returns:
         dict: 뿌리오 응답. code 가 "1000" 이면 접수 성공
@@ -109,16 +106,15 @@ def send(payload: dict, token: str | None = None) -> dict:
     return _post(
         "/v1/message",
         {"account": account, **payload},
-        {"Authorization": "Bearer " + (token or issue_token())},
+        {"Authorization": "Bearer " + issue_token()},
     )
 
 
-def cancel(message_key: str, token: str | None = None) -> dict:
+def cancel(message_key: str) -> dict:
     """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
 
     Args:
         message_key: 접수 시 받은 messageKey
-        token: 재사용할 토큰
 
     Returns:
         dict: 뿌리오 응답
@@ -127,5 +123,5 @@ def cancel(message_key: str, token: str | None = None) -> dict:
     return _post(
         "/v1/cancel",
         {"account": account, "messageKey": message_key},
-        {"Authorization": "Bearer " + (token or issue_token())},
+        {"Authorization": "Bearer " + issue_token()},
     )

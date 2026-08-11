@@ -31,6 +31,7 @@ import argparse
 import csv
 import datetime
 import pathlib
+import re
 
 from dotenv import load_dotenv
 
@@ -61,10 +62,15 @@ def spreadsheet_id(value: str) -> str:
 
     Returns:
         str: 스프레드시트 ID
+
+    Raises:
+        ValueError: 어느 쪽으로도 읽히지 않을 때. 그냥 통과시키면 엉뚱한 ID 로
+            시트를 열려다 발송 직전에 죽는다
     """
-    if "/spreadsheets/d/" in value:
-        return value.split("/spreadsheets/d/")[1].split("/")[0]
-    return value.strip()
+    found = value.strip().split("/spreadsheets/d/")[-1].split("/")[0]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,}", found):
+        raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
+    return found
 
 
 def main() -> None:

@@ -14,10 +14,13 @@
 만들어주는 행 번호가 전체 순서이고, 같은 (캠페인, 번호) 중 살아 있는 최소
 행 번호가 이깁니다.
 
-②가 실패하면 자리를 '실패'로 표시해 재시도를 열어둡니다. 벌어질 수 있는
-가장 나쁜 일은 ②와 ③ 사이에 프로세스가 죽어 접수코드가 빈 행이 남는 것인데,
-이건 "보냈는지 모름"이라 사람이 확인해야 합니다. 조용히 다시 보내는 것보다
-낫습니다.
+②에서 벤더가 명시적으로 거절하면(HTTP 오류·code≠1000) 자리를 '실패'로 표시해
+재시도를 열어둡니다. 접수되지 않은 것이 확실하기 때문입니다.
+
+타임아웃이나 연결 끊김은 다릅니다. 벤더가 이미 접수하고 응답만 못 돌려줬을 수
+있으므로 접수코드를 빈 채로 둡니다. 빈 칸은 "보냈는지 모름"이라 살아 있는
+자리로 취급되어 재시도가 막히고, 사람이 뿌리오 웹에서 확인하게 됩니다.
+여기서 '실패'로 찍으면 다음 시도가 이겨서 같은 사람에게 두 번 갑니다.
 """
 
 import datetime
@@ -32,8 +35,7 @@ MIN_RESERVE_SECONDS = 180
 def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """번호를 정규화하고 같은 번호는 하나로 접습니다.
 
-    명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다(build_roster 가
-    전화번호 기준 중복 제거를 별도 단계로 두고 있는 이유입니다). 접지 않으면
+    명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다. 접지 않으면
     ledger.claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져 그 번호는
     이 캠페인에서 영영 발송되지 않습니다.
 
@@ -84,16 +86,11 @@ def send_campaign(
         dict[str, Any]: requested·skipped·sent·code·message_key·message_type
 
     Raises:
-        ValueError: check 가 문제를 찾았을 때. 호출부가 미리 check 를 돌려
-            사람에게 보여주는 게 정상 경로이고, 이건 안전망이다
-        transport.PpurioError: 벤더 호출이 실패했을 때 (자리는 '실패'로 표시)
+        ValueError: 문안·번호·길이·예약 시각에 문제가 있을 때. 넷 다 시트를
+            건드리기 전에 터지므로 원장이 더러워지지 않는다. 한 번에 다 보려면
+            호출부가 먼저 check 를 돌린다
+        transport.PpurioError: 벤더가 거절했을 때 (자리는 '실패'로 표시)
     """
-    problems = check(
-        rows, template_name=template_name, content=content, send_at=send_at
-    )
-    if problems:
-        raise ValueError("\n".join(problems))
-
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
     message_type = templates.decide_message_type(template, normalized)
@@ -131,7 +128,9 @@ def send_campaign(
 
     try:
         result = transport.send(payload)
-    except Exception:
+    except transport.PpurioError:
+        # 벤더가 거절한 것이 확실할 때만 재시도를 연다. 타임아웃은 접수됐을
+        # 수 있으므로 접수코드를 비운 채 터뜨린다.
         ledger.mark(ws, claimed_rows, "실패")
         raise
 
@@ -153,14 +152,23 @@ def send_campaign(
 
 
 def reserve_time(send_at: datetime.datetime) -> str:
-    """예약 시각을 벤더 형식으로 바꿉니다. 판정은 check 가 합니다.
+    """예약 시각을 검사해 벤더 형식으로 바꿉니다.
 
     Args:
         send_at: 예약 발송 시각
 
     Returns:
         str: yyyy-MM-ddTHH:mm:ss
+
+    Raises:
+        ValueError: 지금부터 MIN_RESERVE_SECONDS 보다 가까울 때
     """
+    margin = (send_at - datetime.datetime.now()).total_seconds()
+    if margin < MIN_RESERVE_SECONDS:
+        raise ValueError(
+            f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
+            f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
+        )
     return send_at.strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -200,35 +208,27 @@ def check(
     if not rows:
         return ["수신자가 없습니다."]
 
-    seen: set[str] = set()
+    # 아래는 send_campaign 이 실제로 밟는 경로를 그대로 부르고 예외만 모읍니다.
+    # 판정을 여기 따로 쓰면 사본이 갈라져 사람에게 보여준 것과 실제로 막히는
+    # 것이 달라집니다.
     normalized = []
     for row in rows:
         try:
-            phone = templates.normalize_phone(row["to"])
+            normalized.append({**row, "to": templates.normalize_phone(row["to"])})
         except ValueError as error:
             problems.append(str(error))
-            continue
-        if phone in seen:
-            continue
-        seen.add(phone)
-        normalized.append({**row, "to": phone})
 
     if normalized:
-        longest = max(
-            templates.euckr_len(templates.render(template, row)) for row in normalized
-        )
-        if longest > templates.LMS_MAX_BYTES:
-            problems.append(
-                f"치환 후 {longest}byte — LMS 한도 {templates.LMS_MAX_BYTES} 초과"
-            )
+        try:
+            templates.decide_message_type(template, normalized)
+        except ValueError as error:
+            problems.append(str(error))
 
     if send_at is not None:
-        margin = (send_at - datetime.datetime.now()).total_seconds()
-        if margin < MIN_RESERVE_SECONDS:
-            problems.append(
-                f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
-                f"(지금 {margin / 60:.1f}분 뒤로 지정됨)"
-            )
+        try:
+            reserve_time(send_at)
+        except ValueError as error:
+            problems.append(str(error))
 
     return problems
 
@@ -277,17 +277,3 @@ def preview(
         "folded": len(rows) - len(normalized),
         "sample": rendered[0] if rendered else "",
     }
-
-
-def campaign_summary(spreadsheet_id: str, campaign: str) -> dict[str, int]:
-    """캠페인 진행 현황을 셉니다.
-
-    Args:
-        spreadsheet_id: 참가자 스프레드시트
-        campaign: 발송 건 식별자
-
-    Returns:
-        dict[str, int]: total·accepted·unknown·duplicate·failed
-    """
-    ws = ledger.open_ledger(spreadsheet_id)
-    return ledger.summarize(ledger.read_rows(ws), campaign)

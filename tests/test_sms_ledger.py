@@ -4,7 +4,9 @@
 재조회를 지우면 같은 사람에게 두 번 발송된다. 이 파일이 그걸 막는다.
 """
 
-from tests.conftest_sms import FakeWorksheet
+import pytest
+
+from tests.fakes_sheets import FakeWorksheet
 
 from service.sms import ledger
 
@@ -14,7 +16,7 @@ def _ws(rows: list[list] | None = None) -> FakeWorksheet:
 
 
 def _row(campaign: str, phone: str, code: str = "") -> list:
-    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "", "a@b.c", "slack"]
+    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "a@b.c", "slack"]
 
 
 def test_행_번호와_함께_읽는다():
@@ -93,29 +95,24 @@ def test_표시하면_접수코드와_키가_들어간다():
     assert row["접수코드"] == "1000" and row["messageKey"] == "KEY1"
 
 
-def test_현황을_센다():
-    ws = _ws(
-        [
-            _row("discord", "010", "1000"),
-            _row("discord", "011", "실패"),
-            _row("discord", "012", "중복"),
-            _row("discord", "013", ""),
-            _row("confirm", "014", "1000"),
-        ]
-    )
-    assert ledger.summarize(ledger.read_rows(ws), "discord") == {
-        "total": 4,
-        "accepted": 1,
-        "unknown": 1,
-        "duplicate": 1,
-        "failed": 1,
-    }
+def test_번호의_앞자리_0을_잃지_않는다():
+    # 앞자리 0 이 날아가면 아래 재조회가 우리가 쓴 번호를 못 찾아 전원이
+    # 지고, 그 캠페인은 한 통도 나가지 않는다.
+    ws = _ws()
+    ledger.claim(ws, "discord", [{"to": "01011111111"}], "LMS", "a@b.c", "slack")
+    assert ledger.read_rows(ws)[0]["번호"] == "01011111111"
+
+
+def test_USER_ENTERED로_쓰면_앞자리_0이_사라진다():
+    # 페이크가 시트 동작을 흉내내는지 자체를 고정한다. 이게 무너지면 위
+    # 테스트가 아무것도 검증하지 못한다.
+    ws = FakeWorksheet([])
+    ws.append_rows([["01011111111"]], value_input_option="USER_ENTERED")
+    assert ws.rows[0][0] == "1011111111"
 
 
 def test_같은_번호를_두_번_넘기면_거절한다():
     # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라진다. 호출부가 접어야 한다.
-    import pytest
-
     with pytest.raises(ValueError, match="같은 번호"):
         ledger.claim(
             _ws(), "discord", [{"to": "010"}, {"to": "010"}], "LMS", "a@b.c", "slack"
