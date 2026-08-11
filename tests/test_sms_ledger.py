@@ -173,3 +173,34 @@ def test_같은_번호를_두_번_넘기면_거절한다():
         ledger.claim(
             _ws(), "discord", [{"to": "010"}, {"to": "010"}], "LMS", "a@b.c", "slack"
         )
+
+
+def test_주소를_붙여넣어도_ID를_뽑는다():
+    # 사람은 보통 주소창을 통째로 붙여넣는다.
+    assert (
+        ledger.parse_spreadsheet_id(
+            "https://docs.google.com/spreadsheets/d/1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd/edit#gid=0"
+        )
+        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
+    )
+
+
+def test_ID를_그대로_줘도_받는다():
+    assert (
+        ledger.parse_spreadsheet_id("  1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd \n")
+        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
+    )
+
+
+def test_게시용_링크는_ID로_보지_않는다():
+    # /spreadsheets/d/e/2PACX-.../pubhtml 의 'e' 를 통과시키면 연결은 성공하고
+    # 승인 카드까지 올라간 뒤, 사람이 발송을 누른 다음에야 시트 404 로 죽는다.
+    with pytest.raises(ValueError):
+        ledger.parse_spreadsheet_id(
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC/pubhtml"
+        )
+
+
+def test_시트로_읽히지_않으면_거절한다():
+    with pytest.raises(ValueError):
+        ledger.parse_spreadsheet_id("그 시트요")
