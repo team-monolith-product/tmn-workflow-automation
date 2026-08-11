@@ -26,7 +26,7 @@
 import datetime
 from typing import Any
 
-from service.sms import ledger, templates, transport
+from service.sms import KST, ledger, templates, transport
 
 # 뿌리오는 이보다 가까운 예약을 거부합니다.
 MIN_RESERVE_SECONDS = 180
@@ -163,7 +163,10 @@ def reserve_time(send_at: datetime.datetime) -> str:
     Raises:
         ValueError: 지금부터 MIN_RESERVE_SECONDS 보다 가까울 때
     """
-    margin = (send_at - datetime.datetime.now()).total_seconds()
+    # send_at 은 사람이 KST 로 적은 벽시계다. 컨테이너의 now() 는 UTC 라
+    # 그대로 빼면 9시간 어긋나 이미 지난 시각도 통과한다.
+    now = datetime.datetime.now(KST).replace(tzinfo=None)
+    margin = (send_at - now).total_seconds()
     if margin < MIN_RESERVE_SECONDS:
         raise ValueError(
             f"예약은 최소 {MIN_RESERVE_SECONDS // 60}분 뒤여야 합니다 "
