@@ -26,23 +26,18 @@ from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 
 from service.config import load_config
-from service.knowledge.db import connect, fetch_one
+from service.knowledge.db import connect
 from service.knowledge.distill import (
     Distilled,
     acquire_lock,
     build_client,
+    count_pending,
     distill_thread,
     fetch_pending,
     mark_error,
     render_distilled_text,
     store_distilled,
 )
-
-PENDING_TOTAL = """
-SELECT count(*) AS total
-FROM item
-WHERE distill_state = 'pending' AND distill_after <= now()
-"""
 
 
 def distill_batch(limit: int, concurrency: int, dsn: str | None, dry_run: bool) -> None:
@@ -63,7 +58,7 @@ def distill_batch(limit: int, concurrency: int, dsn: str | None, dry_run: bool) 
             print("다른 회차가 도는 중입니다. 건너뜁니다.")
             return
 
-        total = fetch_one(conn, PENDING_TOTAL)["total"]
+        total = count_pending(conn)
         items = fetch_pending(conn, limit)
         # LLM 호출 전에 트랜잭션을 닫는다. 안 닫으면 회차 내내(수 분) idle in
         # transaction 으로 남아 item 테이블의 vacuum 을 그만큼 막는다.

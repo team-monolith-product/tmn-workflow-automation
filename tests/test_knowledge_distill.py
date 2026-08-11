@@ -131,19 +131,20 @@ def _conn_returning(state: str):
     return conn, cursor
 
 
-def test_실패는_한도_전까지_pending으로_되돌린다():
-    # error 를 다시 꺼내는 코드가 없다. 첫 실패에 error 로 옮기면 429 한 번에
-    # 그 스레드가 영구히 사라진다.
+def test_실패_처리에_재시도_한도를_넘긴다():
+    # 상태 전이 자체는 SQL 이 정하므로 mock 으로는 확인할 수 없다.
+    # 그건 tests/test_knowledge_distill_sql.py 가 실제 Postgres 로 본다.
     conn, cursor = _conn_returning("pending")
 
-    assert distill.mark_error(conn, 7, "429") == "pending"
+    distill.mark_error(conn, 7, "429")
+
     assert cursor.execute.call_args[0][1]["max_attempts"] == distill.MAX_ATTEMPTS
 
 
 def _wire(monkeypatch, conn, items):
     monkeypatch.setattr(worker, "connect", lambda _dsn: _ctx(conn))
     monkeypatch.setattr(worker, "acquire_lock", lambda _conn: True)
-    monkeypatch.setattr(worker, "fetch_one", lambda _conn, _sql: {"total": len(items)})
+    monkeypatch.setattr(worker, "count_pending", lambda _conn: len(items))
     monkeypatch.setattr(worker, "fetch_pending", lambda _conn, _limit: items)
     monkeypatch.setattr(worker, "build_client", lambda: MagicMock())
 

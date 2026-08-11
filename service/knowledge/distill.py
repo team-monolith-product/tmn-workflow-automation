@@ -83,6 +83,15 @@ RETURNING distill_state
 TRY_LOCK = "SELECT pg_try_advisory_lock(%(key)s) AS ok"
 DISTILL_LOCK_KEY = 0x64157111
 
+# CLAIM_PENDING 과 같은 조건이어야 한다. 갈라지면 로그의 "정제 대기 N건"이
+# 실제 큐 크기와 달라지는데, 그 숫자가 백로그 소진을 지켜보는 유일한 지표라
+# 진척이 멈춘 것을 눈치채지 못한다.
+PENDING_TOTAL = """
+SELECT count(*) AS total
+FROM item
+WHERE distill_state = 'pending' AND distill_after <= now()
+"""
+
 PROMPT = """\
 사내 슬랙 스레드다. 나중에 검색해서 찾아 읽을 사람을 위해 재작성하라.
 
@@ -182,6 +191,20 @@ def acquire_lock(conn: psycopg.Connection) -> bool:
     with conn.cursor() as cur:
         cur.execute(TRY_LOCK, {"key": DISTILL_LOCK_KEY})
         return cur.fetchone()["ok"]
+
+
+def count_pending(conn: psycopg.Connection) -> int:
+    """정제를 기다리는 건수를 셉니다.
+
+    Args:
+        conn: 커넥션
+
+    Returns:
+        int: 대기 건수
+    """
+    with conn.cursor() as cur:
+        cur.execute(PENDING_TOTAL)
+        return cur.fetchone()["total"]
 
 
 def fetch_pending(conn: psycopg.Connection, limit: int) -> list[dict[str, Any]]:
