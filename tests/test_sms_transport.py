@@ -58,6 +58,24 @@ def test_인증_설정이_없으면_PpurioError로_거절한다(monkeypatch):
         transport.send({"content": "안녕"})
 
 
+def test_토큰_발급_타임아웃은_안_나간_것으로_본다(env, monkeypatch):
+    # /v1/message 는 만들어지지도 않았다. 여기서 TimeoutError 가 새어 나가면
+    # 호출부의 except PpurioError 를 우회해 접수코드가 빈 행이 남고, 그 행은
+    # 살아 있는 것으로 취급돼 같은 campaign 이 영구히 잠긴다.
+    paths = []
+
+    def fake_post(path, body, headers):
+        paths.append(path)
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr(transport, "_post", fake_post)
+
+    with pytest.raises(transport.PpurioError):
+        transport.send({"content": "안녕"})
+
+    assert paths == ["/v1/token"]
+
+
 def test_발신번호가_없어도_PpurioError로_거절한다(monkeypatch):
     monkeypatch.setenv("PPURIO_ACCOUNT", "acct")
     monkeypatch.setenv("PPURIO_API_KEY", "key")

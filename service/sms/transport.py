@@ -138,11 +138,16 @@ def send(payload: dict) -> dict:
     account, _ = _credentials()
     # from 은 필수다. 없으면 벤더가 거절하고, 그때는 이미 이력 시트에 자리를
     # 잡은 뒤라 전 행이 '실패'로 찍힌다. payload 가 이기도록 뒤에 펼쳐 둔다.
-    return _post(
-        "/v1/message",
-        {"account": account, "from": _sender(), **payload},
-        {"Authorization": "Bearer " + issue_token()},
-    )
+    body = {"account": account, "from": _sender(), **payload}
+    try:
+        token = issue_token()
+    except (urllib.error.URLError, TimeoutError) as error:
+        # 토큰이 없으면 /v1/message 는 만들어지지도 않는다. 발송 호출의
+        # 타임아웃과 달리 "접수됐을 수 있음"이 아니라 안 나간 것이 확실하므로
+        # 재시도를 연다. 여기서 새어 나가면 접수코드가 빈 행이 남고, 그 행은
+        # 살아 있는 것으로 취급돼 같은 campaign 이 영구히 잠긴다.
+        raise PpurioError(0, f"토큰 발급 실패: {error}") from error
+    return _post("/v1/message", body, {"Authorization": "Bearer " + token})
 
 
 def cancel(message_key: str) -> dict:
