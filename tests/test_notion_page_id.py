@@ -86,9 +86,7 @@ async def test_inaccessible_page_returns_friendly_message_instead_of_raising():
     tool = get_notion_page_tool()
     error = APIResponseError.__new__(APIResponseError)
     with patch("app.common.notion_page_to_markdown", side_effect=error):
-        result = await tool.ainvoke(
-            {"page_id": "12d1cc820da680ba82d1e6d560aaf4c3"}
-        )
+        result = await tool.ainvoke({"page_id": "12d1cc820da680ba82d1e6d560aaf4c3"})
     assert "조회할 수 없습니다" in result
 
 
