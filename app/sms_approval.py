@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import datetime
 import secrets
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -33,9 +34,17 @@ APPROVE_REACTIONS = {
     "ok",
 }
 
-SEND_ROUNDS = 3  # 최초 발송 + 재발송 2회
+# 자동 재발송은 1회로 둡니다. 재발송 판정이 뿌리오 웹 페이지 파싱에 걸려
+# 있는데 그 파싱은 아직 실계정으로 검증된 적이 없습니다. 잘못 읽으면 도달한
+# 사람에게 또 보내고, 그건 대외 발신이라 되돌릴 수 없습니다. 실패분은 보고만
+# 하고 사람이 승인 카드로 다시 보냅니다. 파서를 실물로 보정한 뒤 올리세요.
+SEND_ROUNDS = 1
 POLL_INTERVAL_SECONDS = 60
 POLL_LIMIT = 5  # 라운드당 최대 5회까지 도달 결과를 기다린다
+
+# 서버 시계와 뿌리오 웹 표기 시각이 조금 어긋나도 이번 발송분을 놓치지 않도록
+# 뒤로 물리는 여유입니다.
+SENT_AFTER_MARGIN = datetime.timedelta(minutes=2)
 ROSTER_PREVIEW_LIMIT = 20
 
 # 승인 대기 초안은 프로세스 메모리에만 둡니다. 봇이 재시작하면 초안이 사라져
@@ -184,7 +193,7 @@ async def post_draft(client: AsyncWebClient, draft: Draft, summary: dict) -> str
 
 async def approve_draft(
     draft_id: str, approver: str | None, client: AsyncWebClient
-) -> str:
+) -> tuple[bool, str]:
     """초안을 승인하고 발송·추적을 백그라운드로 시작합니다.
 
     Args:
@@ -193,19 +202,23 @@ async def approve_draft(
         client: 슬랙 클라이언트
 
     Returns:
-        str: 처리 결과 메시지
+        tuple[bool, str]: (승인됐는가, 카드에 적을 문구). 성공 여부를 같이
+            돌려주지 않으면 호출부가 실패에도 "✅ 승인" 을 붙여, 누른 사람이
+            발송된 줄 안다
     """
     draft = _DRAFTS.pop(draft_id, None)
     if draft is None:
-        return "이미 처리되었거나 만료된 초안입니다."
+        return False, "이미 처리되었거나 만료된 초안입니다."
 
     task = asyncio.create_task(_send_and_report(draft, approver, client))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    return f"{len(draft.targets)}명에게 발송을 시작합니다."
+    return True, f"{len(draft.targets)}명에게 발송을 시작합니다."
 
 
-async def _poll(phones: list[str], on_progress: Progress) -> dict[str, str]:
+async def _poll(
+    phones: list[str], sent_after: datetime.datetime, on_progress: Progress
+) -> dict[str, str]:
     """모든 번호의 도달 결과가 확정될 때까지 웹 발송결과를 읽습니다.
 
     확정분은 누적합니다. 매번 대입하면 페이지가 일부만 돌려줬을 때 앞서 확정된
@@ -213,7 +226,8 @@ async def _poll(phones: list[str], on_progress: Progress) -> dict[str, str]:
     있으면 그대로 끝납니다.
 
     Args:
-        phones: 조회할 번호 목록
+        phones: 조회할 번호 목록. 이번에 실제로 나간 번호만 넘겨야 한다
+        sent_after: 이 시각 이후 발송분만 본다
         on_progress: 진행 보고 콜백
 
     Returns:
@@ -221,7 +235,7 @@ async def _poll(phones: list[str], on_progress: Progress) -> dict[str, str]:
     """
     statuses: dict[str, str] = {}
     for attempt in range(1, POLL_LIMIT + 1):
-        statuses.update(await sms_result.fetch_results(phones))
+        statuses.update(await sms_result.fetch_results(phones, sent_after))
         await on_progress(
             f"도달 확인 {attempt}/{POLL_LIMIT} — 확정 {len(statuses)}/{len(phones)}건"
         )
@@ -250,6 +264,7 @@ async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
 
     for round_no in range(1, SEND_ROUNDS + 1):
         campaign = draft.campaign if round_no == 1 else f"{draft.campaign}-r{round_no}"
+        sent_after = datetime.datetime.now() - SENT_AFTER_MARGIN
         sent = await asyncio.to_thread(
             sms_send.send_campaign,
             spreadsheet_id=draft.spreadsheet_id,
@@ -265,8 +280,9 @@ async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
         if sent["sent"] == 0:
             break
 
-        phones = [normalize_phone(target["to"]) for target in targets]
-        round_statuses = await _poll(phones, on_progress)
+        # 이미 보낸 번호는 send_campaign 이 걸러내므로 대상 전체를 기다리면
+        # 오지 않을 결과를 붙들고 폴링을 끝까지 돌린다.
+        round_statuses = await _poll(sent["sent_to"], sent_after, on_progress)
         resolved.update(round_statuses)
 
         failed = await asyncio.to_thread(
@@ -356,16 +372,21 @@ def register_sms_handlers(app: Any) -> None:
         """[발송] 버튼 클릭"""
         await ack()
         approver = body["user"]["id"]
-        message = await approve_draft(body["actions"][0]["value"], approver, client)
-        await _replace_card(
-            client, body, f":white_check_mark: <@{approver}> 승인 — {message}"
+        approved, message = await approve_draft(
+            body["actions"][0]["value"], approver, client
         )
+        mark = ":white_check_mark:" if approved else ":warning:"
+        label = f"<@{approver}> 승인 — " if approved else ""
+        await _replace_card(client, body, f"{mark} {label}{message}")
 
     @app.action("sms_cancel")
     async def handle_sms_cancel(ack, body, client):
         """[취소] 버튼 클릭"""
         await ack()
         _DRAFTS.pop(body["actions"][0]["value"], None)
+        # 카드 ts -> 초안 매핑도 지운다. 남겨두면 취소한 카드에 달린 ✅ 가
+        # 승인 경로로 들어가 조용히 아무 일도 일어나지 않는다.
+        _MESSAGE_TS_TO_DRAFT_ID.pop(body["message"]["ts"], None)
         await _replace_card(
             client, body, f":x: <@{body['user']['id']}> 취소 — 발송하지 않았습니다."
         )
@@ -384,4 +405,19 @@ def register_sms_handlers(app: Any) -> None:
         if draft_id is None:
             return
 
-        await approve_draft(draft_id, event["user"], client)
+        approved, message = await approve_draft(draft_id, event["user"], client)
+        # 리액션 경로도 결과를 알려야 한다. 버리면 만료된 카드에 ✅ 를 단
+        # 사람은 발송된 줄 안다.
+        mark = ":white_check_mark:" if approved else ":warning:"
+        label = f"<@{event['user']}> 승인 — " if approved else ""
+        await client.chat_update(
+            channel=event["item"]["channel"],
+            ts=event["item"]["ts"],
+            text=f"{mark} {label}{message}",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"{mark} {label}{message}"},
+                }
+            ],
+        )

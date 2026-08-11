@@ -19,6 +19,7 @@ code 1000 은 "받았다"이지 "도달했다"가 아니고, 우리는 수신자
 """
 
 import asyncio
+import datetime
 import os
 import re
 from bs4 import BeautifulSoup
@@ -46,48 +47,139 @@ LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
 DELIVERED = "0000"
 FAILED = "FAIL"
 
-_PHONE_PATTERN = re.compile(r"01[016789][-\s]?\d{3,4}[-\s]?\d{4}")
 # 발송결과 표기가 조금씩 달라 계열 단위로 잡습니다.
 _SUCCESS_WORDS = ("성공", "수신", "도착", "완료")
 _FAILURE_WORDS = ("실패", "거부", "차단", "오류")
 _PENDING_WORDS = ("대기", "전송중", "발송중", "접수")
-_STATUS_PATTERN = re.compile("|".join(_SUCCESS_WORDS + _FAILURE_WORDS + _PENDING_WORDS))
+
+# 표의 헤더 이름 후보. 어느 열을 읽을지 여기서 정합니다.
+_PHONE_HEADERS = ("수신번호", "수신자", "휴대폰", "연락처", "번호")
+_STATUS_HEADERS = ("결과", "상태")
+_TIME_HEADERS = ("일시", "일자", "시간")
+
+_TIME_PATTERN = re.compile(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})\D+(\d{1,2}):(\d{2})")
 
 
-def parse_results(html: str) -> dict[str, str]:
+class ResultPageChanged(RuntimeError):
+    """발송결과 페이지에서 필요한 열을 찾지 못했을 때 발생합니다.
+
+    조용히 빈 결과를 돌려주면 "벤더가 아직 결과를 안 올렸다"와 구분되지 않아,
+    도달 확인이 통째로 죽어 있어도 영원히 들키지 않습니다.
+    """
+
+
+def _column(cells: list[str], names: tuple[str, ...]) -> int | None:
+    """헤더 행에서 그 이름을 담은 열의 위치를 찾습니다.
+
+    Args:
+        cells: 헤더 행의 셀 텍스트
+        names: 찾을 이름 후보
+
+    Returns:
+        int | None: 열 위치. 없으면 None
+    """
+    for index, cell in enumerate(cells):
+        if any(name in cell for name in names):
+            return index
+    return None
+
+
+def _cells(row) -> list[str]:
+    """행의 셀 텍스트를 순서대로 뽑습니다."""
+    return [cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])]
+
+
+def _row_time(text: str) -> datetime.datetime | None:
+    """셀 텍스트에서 일시를 읽습니다. 형식이 다르면 None."""
+    found = _TIME_PATTERN.search(text)
+    if not found:
+        return None
+    year, month, day, hour, minute = (int(group) for group in found.groups())
+    return datetime.datetime(year, month, day, hour, minute)
+
+
+def parse_results(
+    html: str, sent_after: datetime.datetime | None = None
+) -> dict[str, str]:
     """발송결과 페이지 HTML 에서 {번호: 결과코드} 매핑을 뽑습니다.
 
-    CSS 셀렉터를 박지 않고 '한 행에 수신번호와 상태 문구가 함께 있다'는 구조만
-    가정합니다. 뿌리오 웹은 개편이 잦아 셀렉터를 고정하면 조용히 빈 결과를
-    돌려주고, 그러면 전원 미확정으로 보여 아무도 눈치채지 못합니다.
+    헤더에서 열 위치를 찾아 그 셀만 읽습니다. 행 전체 텍스트를 훑으면 문안
+    본문에 박힌 문의 전화번호가 수신번호로, 본문의 '실패'·'오류' 같은 낱말이
+    상태로 잡힙니다. 실제 discord 문안에 담당자 번호가 들어 있어 이건 가정이
+    아니라 확정된 오분류였습니다.
+
+    발송결과 페이지는 누적 이력입니다. sent_after 를 주면 그 시각 이후 행만
+    채택합니다. 주지 않으면 같은 번호에 보낸 지난 발송의 결과를 이번 발송의
+    결과로 읽습니다.
 
     Args:
         html: 발송결과 페이지 HTML
+        sent_after: 이 시각 이후에 발송된 행만 본다
 
     Returns:
         dict[str, str]: 번호 -> DELIVERED/FAILED. 아직 결과가 없는 행은 담지 않는다
+
+    Raises:
+        ResultPageChanged: 수신번호·결과 열을 찾지 못했을 때. sent_after 를
+            줬는데 일시 열이 없을 때도 같다
     """
     soup = BeautifulSoup(html, "lxml")
-    results: dict[str, str] = {}
 
-    for row in soup.find_all("tr"):
-        text = row.get_text(" ", strip=True)
-        phone_match = _PHONE_PATTERN.search(text)
-        status_match = _STATUS_PATTERN.search(text)
-        if not phone_match or not status_match:
+    phone_at = status_at = time_at = None
+    rows = soup.find_all("tr")
+    for index, row in enumerate(rows):
+        cells = _cells(row)
+        phone_at = _column(cells, _PHONE_HEADERS)
+        status_at = _column(cells, _STATUS_HEADERS)
+        if phone_at is not None and status_at is not None:
+            time_at = _column(cells, _TIME_HEADERS)
+            rows = rows[index + 1 :]
+            break
+    else:
+        raise ResultPageChanged(
+            "발송결과 표에서 수신번호·결과 열을 찾지 못했습니다. "
+            "페이지가 바뀌었는지 `python -m service.sms.result --dump` 로 확인하세요."
+        )
+
+    if sent_after is not None and time_at is None:
+        raise ResultPageChanged(
+            "발송결과 표에 일시 열이 없어 이번 발송분만 골라낼 수 없습니다. "
+            "지난 발송 결과를 이번 것으로 읽으면 도달한 사람에게 또 보냅니다."
+        )
+
+    results: dict[str, str] = {}
+    for row in rows:
+        cells = _cells(row)
+        if max(phone_at, status_at) >= len(cells):
             continue
-        word = status_match.group()
-        if word in _PENDING_WORDS:
+        phone = re.sub(r"\D", "", cells[phone_at])
+        status = cells[status_at]
+        if not phone or not status:
             continue
-        phone = re.sub(r"\D", "", phone_match.group())
+        if sent_after is not None:
+            at = _row_time(cells[time_at])
+            if at is None or at < sent_after:
+                continue
+        if any(word in status for word in _PENDING_WORDS):
+            continue
+        if any(word in status for word in _SUCCESS_WORDS):
+            code = DELIVERED
+        elif any(word in status for word in _FAILURE_WORDS):
+            code = FAILED
+        else:
+            continue
         # 같은 번호가 여러 행에 있으면 최신(위쪽) 행을 남깁니다
-        results.setdefault(phone, DELIVERED if word in _SUCCESS_WORDS else FAILED)
+        results.setdefault(phone, code)
 
     return results
 
 
 async def _login_and_get_result_html(page) -> str:
-    """로그인 후 발송결과 페이지 HTML 을 반환합니다."""
+    """로그인 후 발송결과 페이지 HTML 을 반환합니다.
+
+    Raises:
+        ResultPageChanged: 로그인 뒤에도 로그인 페이지에 머물러 있을 때
+    """
     await page.goto(LOGIN_URL, timeout=PAGE_TIMEOUT_MS)
     await page.fill(ID_SELECTOR, os.environ["PPURIO_WEB_ID"])
     await page.fill(PW_SELECTOR, os.environ["PPURIO_WEB_PASSWORD"])
@@ -96,14 +188,24 @@ async def _login_and_get_result_html(page) -> str:
 
     await page.goto(RESULT_URL, timeout=PAGE_TIMEOUT_MS)
     await page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT_MS)
+    if page.url.rstrip("/") == LOGIN_URL.rstrip("/"):
+        # 로그인 실패면 로그인 페이지 HTML 이 돌아오고, 파싱은 빈 결과를 낸다.
+        # 그건 "아직 결과가 안 올라왔다"와 구분되지 않아 영원히 안 들킨다.
+        raise ResultPageChanged(
+            "로그인 후에도 로그인 페이지입니다. 계정이나 셀렉터를 확인하세요."
+        )
     return await page.content()
 
 
-async def fetch_results(phones: list[str]) -> dict[str, str]:
+async def fetch_results(
+    phones: list[str], sent_after: datetime.datetime | None = None
+) -> dict[str, str]:
     """뿌리오 웹에서 번호별 도달 결과를 읽습니다.
 
     Args:
         phones: 조회할 수신번호 목록 (숫자만)
+        sent_after: 이 시각 이후 발송분만 본다. 발송결과 페이지는 누적이라,
+            주지 않으면 같은 번호에 보낸 지난 발송의 결과를 읽는다
 
     Returns:
         dict[str, str]: 결과가 확정된 번호만 담은 {번호: 결과코드}
@@ -119,7 +221,9 @@ async def fetch_results(phones: list[str]) -> dict[str, str]:
     # ponytail: 결과 페이지 첫 장만 읽습니다. 한 번에 100건을 넘기면 페이지네이션이 필요합니다.
     wanted = set(phones)
     return {
-        phone: code for phone, code in parse_results(html).items() if phone in wanted
+        phone: code
+        for phone, code in parse_results(html, sent_after).items()
+        if phone in wanted
     }
 
 

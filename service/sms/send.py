@@ -97,6 +97,7 @@ def send_campaign(
             "requested": len(normalized),
             "skipped": len(normalized),
             "sent": 0,
+            "sent_to": [],
             "code": None,
             "message_key": None,
             "message_type": message_type,
@@ -131,6 +132,9 @@ def send_campaign(
         "requested": len(normalized),
         "skipped": len(normalized) - len(won),
         "sent": len(won),
+        # 이미 보낸 번호는 빠지므로 대상 전체와 다르다. 도달 확인은 이번에
+        # 실제로 나간 번호만 기다려야 오지 않을 결과를 붙들지 않는다.
+        "sent_to": [item["to"] for item in won],
         "code": code,
         "message_key": result.get("messageKey"),
         "message_type": message_type,
