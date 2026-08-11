@@ -21,11 +21,14 @@ TIMEOUT = 20
 
 
 class PpurioError(RuntimeError):
-    """뿌리오가 접수를 거절했을 때 발생합니다.
+    """접수되지 않은 것이 확실할 때 발생합니다.
 
-    HTTP 오류이거나, 200 이면서 code 가 성공이 아닌 경우입니다. 둘 다 '접수되지
-    않은 것이 확실하다'는 뜻이라 호출부가 재시도를 열어도 됩니다. 타임아웃처럼
-    접수 여부를 모르는 경우는 이 예외가 아닙니다.
+    HTTP 오류, 200 이면서 code 가 성공이 아닌 경우, 그리고 인증 설정이 없어
+    요청이 이 머신을 떠나지도 못한 경우입니다. 셋 다 '보내지 않았다'가 확실해
+    호출부가 재시도를 열어도 됩니다. 타임아웃처럼 접수 여부를 모르는 경우는
+    이 예외가 아닙니다 — 그건 접수코드를 비운 채 전파돼 사람이 확인합니다.
+
+    status 0 은 요청이 나가지 않았다는 뜻입니다.
     """
 
     def __init__(self, status: int, body: Any):
@@ -37,10 +40,40 @@ class PpurioError(RuntimeError):
 def _credentials() -> tuple[str, str]:
     """계정과 인증키를 환경변수에서 읽습니다.
 
+    없으면 PpurioError 로 바꿔 던집니다. KeyError 로 새어 나가면 호출부의
+    `except PpurioError` 를 우회해, 이력 시트에 자리는 잡힌 채 접수코드가 빈
+    행으로 남습니다. 빈 칸은 "보냈는지 모름"이라 살아 있는 것으로 취급되므로
+    환경변수를 채워 다시 돌려도 "모두 이미 발송된 상태"라며 한 통도 안 나갑니다.
+    설정 누락은 "모름"이 아니라 요청이 나가지도 않은 것이 확실한 경우입니다.
+
     Returns:
         tuple[str, str]: (계정, 인증키)
+
+    Raises:
+        PpurioError: 환경변수가 없을 때
     """
-    return os.environ["PPURIO_ACCOUNT"], os.environ["PPURIO_API_KEY"]
+    try:
+        return os.environ["PPURIO_ACCOUNT"], os.environ["PPURIO_API_KEY"]
+    except KeyError as error:
+        raise PpurioError(0, f"환경변수 {error.args[0]} 가 없습니다") from error
+
+
+def _sender() -> str:
+    """발신번호를 환경변수에서 읽습니다.
+
+    계정에 사전등록된 번호입니다(발신번호 사전등록제). 계정·토큰과 같은 성격이라
+    도메인 계층이 아니라 여기서 채웁니다.
+
+    Returns:
+        str: 발신번호
+
+    Raises:
+        PpurioError: 환경변수가 없을 때
+    """
+    try:
+        return os.environ["PPURIO_SENDER"]
+    except KeyError as error:
+        raise PpurioError(0, f"환경변수 {error.args[0]} 가 없습니다") from error
 
 
 def _post(path: str, body: dict, headers: dict) -> dict:
@@ -103,9 +136,11 @@ def send(payload: dict) -> dict:
         PpurioError: HTTP 실패
     """
     account, _ = _credentials()
+    # from 은 필수다. 없으면 벤더가 거절하고, 그때는 이미 이력 시트에 자리를
+    # 잡은 뒤라 전 행이 '실패'로 찍힌다. payload 가 이기도록 뒤에 펼쳐 둔다.
     return _post(
         "/v1/message",
-        {"account": account, **payload},
+        {"account": account, "from": _sender(), **payload},
         {"Authorization": "Bearer " + issue_token()},
     )
 

@@ -60,3 +60,14 @@ def test_헤더가_다르면_기대_헤더를_알려준다(tmp_path):
 
     with pytest.raises(ValueError, match="to"):
         send_sms.read_csv(path)
+
+
+def test_치환값_열_이름이_틀리면_거절한다(tmp_path):
+    # to 만 보면 나머지가 틀려도 통과한다. 그러면 changeWord 가 통째로 안 실려
+    # 수신자는 [*1*] 자리가 빈 문자를 받는데, 발송이 끝난 뒤에야 알게 되고
+    # 그 campaign 은 이미 잡혀 정정 발송도 막힌다.
+    path = tmp_path / "roster.csv"
+    path.write_text("to,name,기수,링크\n010-1111-1111,홍길동,1기,https://x\n")
+
+    with pytest.raises(ValueError, match="var1"):
+        send_sms.read_csv(path)

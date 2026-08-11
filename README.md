@@ -81,6 +81,7 @@ curl -X POST http://localhost:8000/webhook \
 
 ### 문자 발송 (뿌리오)
 - `PPURIO_ACCOUNT` / `PPURIO_API_KEY`: 발송 API 계정·인증키. 호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 토큰 발급에서 `3003 invalid ip`)
+- `PPURIO_SENDER`: 계정에 사전등록된 발신번호. 발신번호 사전등록제라 이 값 없이는 접수되지 않습니다
 - `GOOGLE_SERVICE_ACCOUNT_JSON`: 발송이력을 적을 참가자 스프레드시트에 쓸 서비스 계정
 
 발송 이력은 참가자 스프레드시트의 `발송이력` 탭에 한 발송이 한 행으로 쌓입니다.
