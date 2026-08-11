@@ -33,7 +33,7 @@ from service.knowledge.query import (
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
-from service.sms import ledger, roster
+from service.sms import ledger
 from service.sms import send as sms_send
 
 INSTRUCTIONS = """
