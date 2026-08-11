@@ -218,23 +218,28 @@ async def approve_draft(
 
 
 async def _poll(
-    phones: list[str], sent_after: datetime.datetime, on_progress: Progress
-) -> dict[str, str]:
+    phones: list[str],
+    sent_after: datetime.datetime,
+    on_progress: Progress,
+    statuses: dict[str, str],
+) -> None:
     """모든 번호의 도달 결과가 확정될 때까지 웹 발송결과를 읽습니다.
 
     확정분은 누적합니다. 매번 대입하면 페이지가 일부만 돌려줬을 때 앞서 확정된
     결과를 잃습니다. 첫 조회는 기다리지 않고 바로 합니다 — 이미 결과가 올라와
     있으면 그대로 끝납니다.
 
+    결과 dict 를 호출부에서 받습니다. 반환값으로 넘기면 도중에 조회가 터졌을 때
+    이미 확정된 것까지 함께 사라집니다. 문자는 이미 나갔고 누가 받았는지도
+    알고 있는데 시트의 결과 열이 통째로 비는 상황이라, 그 캠페인은 도달 여부도
+    재발송 판정도 근거를 잃습니다.
+
     Args:
         phones: 조회할 번호 목록. 이번에 실제로 나간 번호만 넘겨야 한다
         sent_after: 이 시각 이후 발송분만 본다
         on_progress: 진행 보고 콜백
-
-    Returns:
-        dict[str, str]: 확정된 {번호: 결과코드}
+        statuses: 확정분을 채워 넣을 dict. 호출부가 소유한다
     """
-    statuses: dict[str, str] = {}
     for attempt in range(1, POLL_LIMIT + 1):
         statuses.update(await sms_result.fetch_results(phones, sent_after))
         await on_progress(
@@ -244,7 +249,6 @@ async def _poll(
             break
         if attempt < POLL_LIMIT:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    return statuses
 
 
 async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
@@ -285,12 +289,16 @@ async def _run_rounds(draft: Draft, on_progress: Progress) -> dict[str, str]:
 
         # 이미 보낸 번호는 send_campaign 이 걸러내므로 대상 전체를 기다리면
         # 오지 않을 결과를 붙들고 폴링을 끝까지 돌린다.
-        round_statuses = await _poll(sent["sent_to"], sent_after, on_progress)
-        resolved.update(round_statuses)
-
-        failed = await asyncio.to_thread(
-            sms_result.record, draft.spreadsheet_id, campaign, round_statuses
-        )
+        round_statuses: dict[str, str] = {}
+        try:
+            await _poll(sent["sent_to"], sent_after, on_progress, round_statuses)
+        finally:
+            # 조회가 터져도 확정분은 시트에 남긴다. 예외는 그대로 올려 보내
+            # 시끄럽게 두되, 이미 알아낸 도달 여부까지 버리지는 않는다.
+            resolved.update(round_statuses)
+            failed = await asyncio.to_thread(
+                sms_result.record, draft.spreadsheet_id, campaign, round_statuses
+            )
         if not failed:
             break
 

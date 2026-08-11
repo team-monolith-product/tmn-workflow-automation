@@ -157,6 +157,49 @@ async def test_이미_보낸_번호는_도달_확인에서_기다리지_않는�
     assert asked == [["01033334444"]]
 
 
+async def test_조회가_터져도_이미_확정된_결과는_시트에_남긴다(monkeypatch, no_wait):
+    # fetch_results 는 시도마다 브라우저를 새로 띄우고 로그인한다. 한 번의
+    # 흔들림으로 누적분까지 버리면, 문자는 나갔고 누가 받았는지도 아는데
+    # 시트의 결과 열이 통째로 비어 재발송 판정 근거가 사라진다.
+    recorded = []
+
+    def fake_send(*, campaign, rows, **_kwargs):
+        return _accepted(rows)
+
+    calls = [
+        {"01011112222": sms_result.DELIVERED},
+        sms_result.ResultPageChanged("로그인 페이지"),
+    ]
+
+    async def flaky_fetch(phones, sent_after=None):
+        got = calls.pop(0)
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    monkeypatch.setattr(sms_send, "send_campaign", fake_send)
+    monkeypatch.setattr(sms_result, "fetch_results", flaky_fetch)
+    monkeypatch.setattr(
+        sms_result,
+        "record",
+        lambda sheet, campaign, statuses: recorded.append(dict(statuses)) or [],
+    )
+
+    with pytest.raises(sms_result.ResultPageChanged):
+        await sms_approval._send_and_report(
+            draft(
+                [
+                    {"to": "010-1111-2222", "name": "가"},
+                    {"to": "010-3333-4444", "name": "나"},
+                ]
+            ),
+            "U1",
+            FakeClient(),
+        )
+
+    assert recorded == [{"01011112222": sms_result.DELIVERED}]
+
+
 async def test_지난_발송의_결과를_이번_것으로_읽지_않는다(monkeypatch, no_wait):
     """발송결과 페이지는 누적이다. 실물 파서를 태워서 확인한다.
 
