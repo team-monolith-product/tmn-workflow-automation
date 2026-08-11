@@ -106,6 +106,16 @@ def _post(path: str, body: dict, headers: dict) -> dict:
 def issue_token() -> str:
     """액세스 토큰을 발급받습니다.
 
+    실패는 무엇이든 PpurioError 로 바꿉니다. 예외 종류를 열거하지 않는 이유는,
+    "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"가 종류와 무관하게
+    참이기 때문입니다. 프록시가 200 에 HTML 을 실어 주면 JSONDecodeError,
+    EUC-KR 로 주면 UnicodeDecodeError 가 나는데, 열거로 잡으면 그것들이 새어
+    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 이력 시트에 자리는
+    잡힌 채 접수코드가 빈 행으로 남고, 빈 칸은 "보냈는지 모름"이라 살아 있는
+    것으로 취급되어 그 campaign 이 영구히 잠깁니다.
+
+    조용히 삼키지 않습니다. 사유를 담아 타입만 바꿔 다시 던집니다.
+
     Returns:
         str: Bearer 토큰
 
@@ -114,7 +124,12 @@ def issue_token() -> str:
     """
     account, key = _credentials()
     basic = base64.b64encode(f"{account}:{key}".encode()).decode()
-    result = _post("/v1/token", {}, {"Authorization": "Basic " + basic})
+    try:
+        result = _post("/v1/token", {}, {"Authorization": "Basic " + basic})
+    except PpurioError:
+        raise
+    except Exception as error:
+        raise PpurioError(0, f"토큰 발급 실패: {error}") from error
     if "token" not in result:
         raise PpurioError(200, result)
     return result["token"]
@@ -139,15 +154,10 @@ def send(payload: dict) -> dict:
     # from 은 필수다. 없으면 벤더가 거절하고, 그때는 이미 이력 시트에 자리를
     # 잡은 뒤라 전 행이 '실패'로 찍힌다. payload 가 이기도록 뒤에 펼쳐 둔다.
     body = {"account": account, "from": _sender(), **payload}
-    try:
-        token = issue_token()
-    except (urllib.error.URLError, TimeoutError) as error:
-        # 토큰이 없으면 /v1/message 는 만들어지지도 않는다. 발송 호출의
-        # 타임아웃과 달리 "접수됐을 수 있음"이 아니라 안 나간 것이 확실하므로
-        # 재시도를 연다. 여기서 새어 나가면 접수코드가 빈 행이 남고, 그 행은
-        # 살아 있는 것으로 취급돼 같은 campaign 이 영구히 잠긴다.
-        raise PpurioError(0, f"토큰 발급 실패: {error}") from error
-    return _post("/v1/message", body, {"Authorization": "Bearer " + token})
+    # 토큰 단계의 실패는 issue_token 이 PpurioError 로 바꿔 던진다.
+    # 이 호출의 타임아웃은 다르다 — 접수됐을 수 있으므로 그대로 전파해
+    # 접수코드를 비운 채 사람이 확인하게 둔다.
+    return _post("/v1/message", body, {"Authorization": "Bearer " + issue_token()})
 
 
 def cancel(message_key: str) -> dict:

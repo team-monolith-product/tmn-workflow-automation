@@ -5,6 +5,9 @@
 실계정에서만 100% 거절된다.
 """
 
+import json
+import urllib.error
+
 import pytest
 
 from service.sms import transport
@@ -58,21 +61,37 @@ def test_인증_설정이_없으면_PpurioError로_거절한다(monkeypatch):
         transport.send({"content": "안녕"})
 
 
-def test_토큰_발급_타임아웃은_안_나간_것으로_본다(env, monkeypatch):
-    # /v1/message 는 만들어지지도 않았다. 여기서 TimeoutError 가 새어 나가면
-    # 호출부의 except PpurioError 를 우회해 접수코드가 빈 행이 남고, 그 행은
-    # 살아 있는 것으로 취급돼 같은 campaign 이 영구히 잠긴다.
+@pytest.mark.parametrize(
+    "boom",
+    [
+        TimeoutError("read timed out"),
+        urllib.error.URLError("unreachable"),
+        # urlopen 이 getresponse() 에서 내는 것은 URLError 로 감싸이지 않는다.
+        ConnectionResetError("peer reset"),
+        # 프록시가 200 에 HTML 이나 EUC-KR 을 실어 주는 경우.
+        json.JSONDecodeError("Expecting value", "<html>", 0),
+        UnicodeDecodeError("utf-8", b"\xb0\xa1", 0, 1, "invalid start byte"),
+    ],
+)
+def test_토큰_단계_실패는_종류를_가리지_않고_안_나간_것으로_본다(
+    env, monkeypatch, boom
+):
+    # 종류를 열거해 잡으면 빠진 것이 새어 나가 호출부의 except PpurioError 를
+    # 비켜가고, 접수코드가 빈 행이 남아 campaign 이 영구히 잠긴다.
+    # "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"는 종류와
+    # 무관하게 참이라, 여기서는 넓게 잡는 쪽이 정확하다.
     paths = []
 
     def fake_post(path, body, headers):
         paths.append(path)
-        raise TimeoutError("read timed out")
+        raise boom
 
     monkeypatch.setattr(transport, "_post", fake_post)
 
     with pytest.raises(transport.PpurioError):
         transport.send({"content": "안녕"})
 
+    # /v1/message 는 만들어지지도 않았다 — 그래서 안 나간 것이 확실하다.
     assert paths == ["/v1/token"]
 
 
