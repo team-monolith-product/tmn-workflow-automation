@@ -56,11 +56,18 @@ def read_csv(path: pathlib.Path) -> list[dict]:
         # restval 도 같은 이유다. 기본값 None 이면 짧은 행에서 to 가 None 이 되어
         # 정규식이 TypeError 로 죽는다. 빈 문자열이면 검사 경로로 들어온다.
         reader = csv.DictReader(file, restval="")
-        if "to" not in (reader.fieldnames or []):
+        fields = reader.fieldnames or []
+        # to 만 보면 나머지 열 이름이 틀렸을 때 changeWord 가 통째로 안 실리고,
+        # 수신자는 [*1*] 자리가 빈 문자를 받는다. 관문을 전부 통과하고 발송까지
+        # 끝난 뒤에야 알게 되며, 그 campaign 은 이미 잡혀 정정 발송도 막힌다.
+        allowed = {"to", "name", *VAR_KEYS}
+        unknown = [name for name in fields if name not in allowed]
+        if "to" not in fields or unknown:
             raise ValueError(
-                f"CSV 헤더에 to 가 없습니다: {reader.fieldnames}\n"
-                "기대: to,name,var1..var8 (참가자 시트를 그대로 내보내면 "
-                "헤더가 번호,이름 이라 맞지 않습니다)"
+                f"CSV 헤더가 맞지 않습니다: {fields}\n"
+                f"기대: to,name,{','.join(VAR_KEYS)}\n"
+                "참가자 시트를 그대로 내보내면 헤더가 번호,이름 이라 맞지 않습니다. "
+                "치환값 열은 var1~var8 로 바꿔주세요."
             )
         return list(reader)
 
