@@ -85,7 +85,7 @@ def test_보내기_전에_자리를_잡는다(ws, monkeypatch):
 
     # 명단 두 사람 모두 캠페인 열이 채워진다.
     at = _campaign(ws)
-    assert [ws.rows[1][at], ws.rows[2][at]] != ["", ""]
+    assert "" not in (ws.rows[1][at], ws.rows[2][at])
     assert result["sent"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
@@ -364,3 +364,60 @@ def test_수신자가_없으면_거른다():
 
 def test_통과하면_빈_목록이다():
     assert sms_send.check(ROWS, template_name="discord") == []
+
+
+def test_수신자가_없으면_시트를_건드리지_않는다(ws, monkeypatch):
+    # check 는 막는데 send 가 통과시키면, 벤더도 안 부른 실행이 운영 시트에
+    # 빈 캠페인 열만 남긴다.
+    monkeypatch.setattr(transport, "send", lambda payload: {"code": "1000"})
+
+    with pytest.raises(ValueError, match="수신자가 없습니다"):
+        sms_send.send_campaign(
+            spreadsheet_id="S1",
+            campaign="discord",
+            rows=[],
+            content="본문",
+            requested_by="a@team-mono.com",
+            entrypoint="slack",
+        )
+
+    assert ws.rows[0] == ROSTER_HEADER
+
+
+def test_예약이면_나갈_시각을_적는다(ws, monkeypatch):
+    # 접수 시각을 적으면 아직 안 나간 문자가 "그날 발송됨"으로 읽힌다.
+    at_time = _kst_now() + datetime.timedelta(hours=3)
+    _run(monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=at_time)
+
+    assert ws.rows[1][_campaign(ws)] == f"예약 {at_time.strftime('%Y-%m-%d %H:%M')}"
+
+
+def test_오프셋을_붙여도_시트와_벤더가_같은_시각을_본다(ws, monkeypatch):
+    # 한쪽만 KST 로 눕히면 시트에 적힌 시각과 실제 발송 시각이 9시간 어긋난다.
+    aware = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
+    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=aware)
+
+    kst = aware.astimezone(KST).replace(tzinfo=None)
+    assert payload["sendTime"] == kst.strftime("%Y-%m-%dT%H:%M:%S")
+    assert ws.rows[1][_campaign(ws)] == f"예약 {kst.strftime('%Y-%m-%d %H:%M')}"
+
+
+def test_취소가_거절되면_성공으로_보지_않는다(monkeypatch):
+    # 응답을 안 보면 "1분 전 초과"로 거절당한 취소가 성공처럼 출력되고,
+    # 사람은 취소된 줄 알고 자리를 뜨는데 문자는 나간다.
+    monkeypatch.setattr(
+        transport, "cancel", lambda key: {"code": "7000", "description": "too late"}
+    )
+
+    with pytest.raises(transport.PpurioError):
+        sms_send.cancel_reserved("K1")
+
+
+def test_발송중으로_막힌_사람은_따로_알린다(ws, monkeypatch):
+    # 끝난 것과 섞으면 접수도 안 된 캠페인을 끝난 것으로 알고 넘어간다.
+    ledger.mark(ws, "discord", ["01011111111"], f"{ledger.SENDING} 2026-08-05 10:00")
+    result, _ = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    assert result["blocked"] == ["01011111111"]
+    assert result["skipped"] == 0
+    assert result["sent"] == 1

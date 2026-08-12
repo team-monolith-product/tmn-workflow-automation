@@ -27,47 +27,50 @@ def _column(ws, name: str) -> int:
 
 
 def test_번호_열을_이름으로_찾는다():
-    header, people = ledger.parse_roster([HEADER, _person("홍길동", "010-1111-1111")])
+    header, at, by_phone = ledger._parse_roster(
+        [HEADER, _person("홍길동", "010-1111-1111")]
+    )
 
     assert header == HEADER
-    assert people == [{"phone": "01011111111", "_row": 2}]
+    assert at == 2
+    assert by_phone == {"01011111111": [2]}
 
 
 def test_연락처든_휴대전화든_찾는다():
-    _, people = ledger.parse_roster(
+    _, _, by_phone = ledger._parse_roster(
         [["연번", "성명", "연락처"], ["1", "홍길동", "010-1111-1111"]]
     )
 
-    assert people[0]["phone"] == "01011111111"
+    assert by_phone == {"01011111111": [2]}
 
 
 def test_연번이_번호로_잡히지_않는다():
     # 이름 후보를 셀보다 바깥에서 돌지 않으면 '번호'가 연번에 걸려
     # 모든 수신자가 엉뚱한 값으로 대조된다.
-    _, people = ledger.parse_roster(
+    _, _, by_phone = ledger._parse_roster(
         [["연번", "성명", "휴대폰"], ["1", "홍길동", "010-1111-1111"]]
     )
 
-    assert people[0]["phone"] == "01011111111"
+    assert by_phone == {"01011111111": [2]}
 
 
 def test_대표전화가_휴대전화보다_먼저_잡히지_않는다():
     # 후보 순서가 '전화번호' 먼저면 학교 대표전화를 수신자 번호로 읽어
     # 명단 전체가 대조에 실패하고 한 통도 안 나간다.
-    _, people = ledger.parse_roster(
+    _, _, by_phone = ledger._parse_roster(
         [
             ["성명", "학교 대표 전화번호", "휴대전화 번호"],
             ["홍길동", "02-123-4567", "010-1111-1111"],
         ]
     )
 
-    assert people[0]["phone"] == "01011111111"
+    assert by_phone == {"01011111111": [2]}
 
 
 def test_번호_열이_없으면_거절한다():
     # 조용히 빈 명단으로 넘어가면 아무에게도 안 보내고 성공으로 끝난다.
     with pytest.raises(ledger.RosterLayoutError):
-        ledger.parse_roster([["연번", "성명", "소속"]])
+        ledger._parse_roster([["연번", "성명", "소속"]])
 
 
 def test_캠페인_열이_없으면_맨_뒤에_만든다():
@@ -93,10 +96,10 @@ def test_캠페인_이름의_공백은_무시한다():
     ws = _ws([_person("홍길동", "01011111111")])
     ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    won, already, _ = ledger.claim(ws, " discord ", [{"to": "01011111111"}])
+    won, _, blocked, _ = ledger.claim(ws, " discord ", [{"to": "01011111111"}])
 
-    assert len(ws.rows[0]) == 5
-    assert won == [] and len(already) == 1
+    assert ws.rows[0] == HEADER + ["discord"]
+    assert won == [] and len(blocked) == 1
 
 
 def test_빈_칸인_사람만_보낸다():
@@ -106,7 +109,7 @@ def test_빈_칸인_사람만_보낸다():
     )
     ws.rows[1].append("2026-08-11 20:14")  # 홍길동은 이미 받음
 
-    won, already, missing = ledger.claim(
+    won, already, _, missing = ledger.claim(
         ws, "discord", [{"to": "01011111111"}, {"to": "01022222222"}]
     )
 
@@ -120,7 +123,7 @@ def test_사람이_손으로_적은_표시도_존중한다():
     ws = _ws([_person("홍길동", "01011111111")], header=HEADER + ["discord"])
     ws.rows[1].append("수기 발송")
 
-    won, already, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    won, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
     assert won == [] and len(already) == 1
 
@@ -129,7 +132,7 @@ def test_명단에_없으면_보내지_않고_알린다():
     # 조용히 빼면 안 간 줄 모르고, 그냥 보내면 기록할 곳이 없다.
     ws = _ws([_person("홍길동", "01011111111")])
 
-    won, _, missing = ledger.claim(
+    won, _, _, missing = ledger.claim(
         ws, "discord", [{"to": "01011111111"}, {"to": "01099999999"}]
     )
 
@@ -141,7 +144,7 @@ def test_명단_표기가_달라도_대조된다():
     # 우리는 01011111111 로 쓰고 명단에는 사람이 010-1111-1111 로 적는다.
     ws = _ws([_person("홍길동", "010-1111-1111")])
 
-    won, _, missing = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    won, _, _, missing = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
     assert len(won) == 1 and missing == []
 
@@ -157,12 +160,74 @@ def test_보내기_전에_칸을_선점한다():
 
 def test_선점을_풀면_다시_대상이_된다():
     ws = _ws([_person("홍길동", "01011111111")])
-    won, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    won, _, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
     ledger.mark(ws, "discord", [w["to"] for w in won], "")
 
-    won2, already, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    won2, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
     assert len(won2) == 1 and already == []
+
+
+def test_폼_재응답으로_같은_번호가_두_줄이면_두_번_보내지_않는다():
+    # 폼 재응답은 맨 아래에 새 줄로 붙고 그 줄의 캠페인 열은 늘 비어 있다.
+    # 마지막 줄만 보면 재응답자 전원이 캠페인마다 두 번씩 받는다.
+    ws = _ws([_person("홍길동", "010-1111-1111")], header=HEADER + ["discord"])
+    ws.rows[1].append("2026-08-01 10:00")
+    ws.rows.append(_person("홍길동", "010-1111-1111"))  # 같은 사람 재응답
+
+    won, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+
+    assert won == [] and len(already) == 1
+
+
+def test_중복_줄에는_선점도_전부_쓴다():
+    # 한 줄만 선점하면 나머지 줄이 빈 채로 남아 다음 실행이 또 보낸다.
+    ws = _ws(
+        [_person("홍길동", "010-1111-1111"), _person("홍길동", "01011111111")],
+    )
+
+    ledger.claim(ws, "discord", [{"to": "01011111111"}])
+
+    at = _column(ws, "discord")
+    assert all(row[at].startswith(ledger.SENDING) for row in ws.rows[1:])
+
+
+def test_한_명도_대조되지_않으면_열을_만들지_않는다():
+    # 번호 열을 잘못 잡아 전원이 명단 밖으로 빠진 실행이 남의 운영 시트에
+    # 빈 열만 남기면, 인자를 고쳐 다시 돌릴 때마다 열이 하나씩 늘어난다.
+    ws = _ws([_person("홍길동", "01011111111")])
+
+    won, _, _, missing = ledger.claim(ws, "discord", [{"to": "01099999999"}])
+
+    assert won == [] and len(missing) == 1
+    assert ws.rows[0] == HEADER
+
+
+def test_번호_열_제목을_캠페인으로_주면_거절한다():
+    # 그대로 두면 발송 기록이 번호를 덮어써 명단이 복구 불가능해진다.
+    ws = _ws([_person("홍길동", "01011111111")])
+
+    with pytest.raises(ledger.RosterLayoutError, match="번호 열"):
+        ledger.claim(ws, "휴대폰", [{"to": "01011111111"}])
+
+
+def test_발송중은_끝난_것과_갈라_돌려준다():
+    # '발송중' 은 접수 여부를 모르는 상태다. 끝난 것과 섞으면 사람이
+    # "이미 발송됨"으로 읽고 접수도 안 된 캠페인을 끝난 것으로 안다.
+    ws = _ws(
+        [_person("가", "01011111111"), _person("나", "01022222222")],
+        header=HEADER + ["discord"],
+    )
+    ws.rows[1].append(f"{ledger.SENDING} 2026-08-11 20:14")
+    ws.rows[2].append("2026-08-11 20:14")
+
+    won, done, blocked, _ = ledger.claim(
+        ws, "discord", [{"to": "01011111111"}, {"to": "01022222222"}]
+    )
+
+    assert won == []
+    assert [b["to"] for b in blocked] == ["01011111111"]
+    assert [d["to"] for d in done] == ["01022222222"]
 
 
 def test_같은_번호를_두_번_넘기면_거절한다():
@@ -183,7 +248,7 @@ def test_선점_뒤에_행이_지워져도_남의_칸에_쓰지_않는다():
             _person("다", "01033333333"),
         ]
     )
-    won, _, _ = ledger.claim(
+    won, _, _, _ = ledger.claim(
         ws, "discord", [{"to": "01022222222"}, {"to": "01033333333"}]
     )
     del ws.rows[1]  # '가' 응답이 지워져 아래가 한 칸씩 올라온다
@@ -202,7 +267,7 @@ def test_선점_뒤에_열이_생겨도_번호_열을_덮지_않는다():
     # 폼에 문항이 추가되면 열이 삽입되어 캠페인 열이 오른쪽으로 밀린다.
     # 선점 때의 열 번호를 그대로 쓰면 그 자리에 있던 열을 덮는다.
     ws = _ws([_person("홍길동", "01011111111")])
-    won, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    won, _, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
     for row in ws.rows:  # 새 문항이 맨 앞에 끼어든 상황
         row.insert(0, "새 문항")
 
@@ -213,46 +278,30 @@ def test_선점_뒤에_열이_생겨도_번호_열을_덮지_않는다():
     assert ws.rows[1][_column(ws, "discord")] == "2026-08-11 20:14"
 
 
-def test_주소를_붙여넣어도_ID를_뽑는다():
-    assert (
-        ledger.parse_spreadsheet_id(
-            "https://docs.google.com/spreadsheets/d/1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd/edit#gid=0"
-        )
-        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
-    )
+def test_주소를_붙여넣어도_ID와_탭을_뽑는다():
+    assert ledger.parse_spreadsheet_ref(
+        "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku/"
+        "edit?gid=1077887383#gid=1077887383"
+    ) == ("1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku", 1077887383)
 
 
 def test_ID를_그대로_줘도_받는다():
-    assert (
-        ledger.parse_spreadsheet_id("  1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd \n")
-        == "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd"
+    assert ledger.parse_spreadsheet_ref("  1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd \n") == (
+        "1ceFWQKdOQXgbII6lZIV2ruuyWR_gBZyd",
+        None,
     )
 
 
 def test_게시용_링크는_ID로_보지_않는다():
     with pytest.raises(ValueError):
-        ledger.parse_spreadsheet_id(
+        ledger.parse_spreadsheet_ref(
             "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC/pubhtml"
         )
 
 
 def test_시트로_읽히지_않으면_거절한다():
     with pytest.raises(ValueError):
-        ledger.parse_spreadsheet_id("그 시트요")
-
-
-def test_주소의_탭_ID를_뽑는다():
-    assert (
-        ledger.parse_gid(
-            "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku/"
-            "edit?gid=1077887383#gid=1077887383"
-        )
-        == 1077887383
-    )
-
-
-def test_탭_ID가_없으면_None():
-    assert ledger.parse_gid("1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku") is None
+        ledger.parse_spreadsheet_ref("그 시트요")
 
 
 # 아래는 실제 운영 시트("기업연계 정보 교원 사업 참여 조사(응답)")의 헤더다.
@@ -298,12 +347,12 @@ def test_폼_응답_시트에서_휴대전화_번호_열을_찾는다():
     # '휴대전화 번호' 는 띄어쓰기 때문에 후보 '전화번호' 로는 안 잡힌다.
     # '휴대전화' 가 잡아야 하고, 그보다 뒤에 있는 '번호' 가 먼저 걸리면
     # 엉뚱한 열을 번호로 읽는다.
-    header, people = ledger.parse_roster(
+    header, at, by_phone = ledger._parse_roster(
         [FORM_HEADER, _form_row("010-6245-4553", "김태서")]
     )
 
-    assert header[2] == "휴대전화 번호"
-    assert people == [{"phone": "01062454553", "_row": 2}]
+    assert header[at] == "휴대전화 번호"
+    assert by_phone == {"01062454553": [2]}
 
 
 def test_폼_응답_시트에서_캠페인_열은_맨_뒤에_붙는다():
@@ -338,7 +387,7 @@ def test_사람이_쓰던_문자발송_열을_그대로_쓴다():
         ]
     )
 
-    won, already, missing = ledger.claim(
+    won, already, _, missing = ledger.claim(
         ws, "문자발송", [{"to": "01062454553"}, {"to": "01022731905"}]
     )
 

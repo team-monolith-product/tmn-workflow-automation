@@ -40,43 +40,27 @@ class PpurioError(RuntimeError):
         super().__init__(f"뿌리오 응답 [{status}] {body}")
 
 
-def _credentials() -> tuple[str, str]:
-    """계정과 인증키를 환경변수에서 읽습니다.
+def _env(name: str) -> str:
+    """뿌리오 인증 설정을 환경변수에서 읽습니다.
 
     없으면 PpurioError 로 바꿔 던집니다. KeyError 로 새어 나가면 호출부의
     `except PpurioError` 를 우회해, 명단의 캠페인 열이 '발송중' 인 채 굳습니다.
     값이 있는 칸은 발송 대상에서 빠지므로, 환경변수를 채워 다시 돌려도
-    "모두 이미 발송된 상태"라며 한 통도 안 나갑니다. 설정 누락은 "모름"이
-    아니라 요청이 나가지도 않은 것이 확실한 경우입니다.
+    "모두 이미 발송된 상태"라며 한 통도 안 나갑니다.
+
+    Args:
+        name: PPURIO_ACCOUNT · PPURIO_API_KEY · PPURIO_SENDER
 
     Returns:
-        tuple[str, str]: (계정, 인증키)
+        str: 환경변수 값
 
     Raises:
         PpurioError: 환경변수가 없을 때
     """
     try:
-        return os.environ["PPURIO_ACCOUNT"], os.environ["PPURIO_API_KEY"]
+        return os.environ[name]
     except KeyError as error:
-        raise PpurioError(0, f"환경변수 {error.args[0]} 가 없습니다") from error
-
-
-def _sender() -> str:
-    """발신번호를 환경변수에서 읽습니다.
-
-    계정에 사전등록된 번호입니다(발신번호 사전등록제). 계정·토큰과 같은 성격이라
-    도메인 계층이 아니라 여기서 채웁니다.
-
-    Returns:
-        str: 발신번호
-
-    Raises:
-        PpurioError: 환경변수가 없을 때
-    """
-    try:
-        return os.environ["PPURIO_SENDER"]
-    except KeyError as error:
-        raise PpurioError(0, f"환경변수 {error.args[0]} 가 없습니다") from error
+        raise PpurioError(0, f"환경변수 {name} 가 없습니다") from error
 
 
 def _post(path: str, body: dict, headers: dict) -> dict:
@@ -110,7 +94,12 @@ def _post(path: str, body: dict, headers: dict) -> dict:
         # 여기서 바꾸면 재시도가 열려 같은 사람에게 두 번 나간다.
         if error.code >= 500:
             raise
-        raise PpurioError(error.code, error.read().decode()[:600]) from error
+        # errors="replace" 가 없으면 벤더가 EUC-KR 로 준 오류 본문에서
+        # UnicodeDecodeError 가 나 PpurioError 를 비켜간다. 그러면 안 나간 것이
+        # 확실한데도 선점이 안 풀려 캠페인이 영구히 잠긴다. 본문은 사람이 읽을
+        # 텍스트일 뿐이고 중요한 건 예외 타입이다.
+        body = error.read().decode(errors="replace")[:600]
+        raise PpurioError(error.code, body) from error
 
 
 def issue_token() -> str:
@@ -132,8 +121,8 @@ def issue_token() -> str:
     Raises:
         PpurioError: 발급에 실패했을 때
     """
-    account, key = _credentials()
-    basic = base64.b64encode(f"{account}:{key}".encode()).decode()
+    pair = f'{_env("PPURIO_ACCOUNT")}:{_env("PPURIO_API_KEY")}'
+    basic = base64.b64encode(pair.encode()).decode()
     try:
         result = _post("/v1/token", {}, {"Authorization": "Basic " + basic})
     except PpurioError:
@@ -160,10 +149,14 @@ def send(payload: dict) -> dict:
     Raises:
         PpurioError: HTTP 실패
     """
-    account, _ = _credentials()
-    # from 은 필수다. 없으면 벤더가 4xx 로 거절하고, 그때는 이미 선점한 뒤라
-    # 전 행이 다시 비워진다. payload 가 이기도록 뒤에 펼쳐 둔다.
-    body = {"account": account, "from": _sender(), **payload}
+    # from 은 필수다(발신번호 사전등록제). 없으면 벤더가 4xx 로 거절하고,
+    # 그때는 이미 선점한 뒤라 전 행이 다시 비워진다. payload 가 이기도록
+    # 뒤에 펼쳐 둔다.
+    body = {
+        "account": _env("PPURIO_ACCOUNT"),
+        "from": _env("PPURIO_SENDER"),
+        **payload,
+    }
     # 토큰 단계의 실패는 issue_token 이 PpurioError 로 바꿔 던진다.
     # 이 호출의 타임아웃과 5xx 는 다르다 — 접수됐을 수 있으므로 그대로
     # 전파해 선점을 남긴 채 사람이 확인하게 둔다.
@@ -179,9 +172,8 @@ def cancel(message_key: str) -> dict:
     Returns:
         dict: 뿌리오 응답
     """
-    account, _ = _credentials()
     return _post(
         "/v1/cancel",
-        {"account": account, "messageKey": message_key},
+        {"account": _env("PPURIO_ACCOUNT"), "messageKey": message_key},
         {"Authorization": "Bearer " + issue_token()},
     )

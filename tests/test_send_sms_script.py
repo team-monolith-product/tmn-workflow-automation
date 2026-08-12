@@ -49,3 +49,22 @@ def test_치환값_열_이름이_틀리면_거절한다(tmp_path):
 
     with pytest.raises(ValueError, match="var1"):
         send_sms.read_csv(path)
+
+
+def test_한글_엑셀이_저장한_CP949도_읽는다(tmp_path):
+    # 이 CLI 를 쓸 사람이 가장 흔히 만드는 파일이다. utf-8 로 고정하면
+    # 명단을 만들자마자 트레이스백을 본다.
+    path = tmp_path / "roster.csv"
+    path.write_bytes("to,name\n010-1111-1111,홍길동\n".encode("cp949"))
+
+    assert send_sms.read_csv(path)[0]["name"] == "홍길동"
+
+
+def test_열이_밀린_줄은_거절한다(tmp_path):
+    # 따옴표 없는 쉼표로 열이 밀리면 초과 필드가 조용히 버려지고 헤더 검사는
+    # 통과한다. 그대로 두면 치환값이 한 칸씩 밀린 채 발송된다.
+    path = tmp_path / "roster.csv"
+    path.write_text("to,name,var1\n010-1111-1111,홍길동, 팀장,1기\n")
+
+    with pytest.raises(ValueError, match="열 수가 헤더보다 많은"):
+        send_sms.read_csv(path)

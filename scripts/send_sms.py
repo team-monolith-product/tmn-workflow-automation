@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import argparse
 import csv
 import datetime
+import io
 import pathlib
 
 from dotenv import load_dotenv
@@ -51,12 +52,26 @@ def read_csv(path: pathlib.Path) -> list[dict]:
     Returns:
         list[dict]: 수신자 목록
     """
-    with path.open(encoding="utf-8-sig") as file:
+    # 한글 엑셀은 CSV 를 CP949 로 저장한다. utf-8 로 고정하면 이 CLI 를 쓸
+    # 사람이 가장 흔히 만드는 파일이 트레이스백으로 죽는다.
+    raw = path.read_bytes()
+    for encoding in ("utf-8-sig", "cp949"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError(f"CSV 인코딩을 읽지 못했습니다(UTF-8·CP949 아님): {path}")
+
+    with io.StringIO(text, newline="") as file:
         # 빈 값을 걸러내지 않는다. 번호 칸이 빈 행에서 to 키까지 사라지면
         # check 가 문제를 모아 돌려주는 대신 KeyError 로 죽는다.
         # restval 도 같은 이유다. 기본값 None 이면 짧은 행에서 to 가 None 이 되어
         # 정규식이 TypeError 로 죽는다. 빈 문자열이면 검사 경로로 들어온다.
-        reader = csv.DictReader(file, restval="")
+        # restkey 가 없으면 따옴표 없는 쉼표로 열이 밀렸을 때 초과 필드가
+        # None 키로 조용히 버려지고 헤더 검사는 통과한다.
+        reader = csv.DictReader(file, restval="", restkey="__extra__")
         fields = reader.fieldnames or []
         # to 만 보면 나머지 열 이름이 틀렸을 때 changeWord 가 통째로 안 실리고,
         # 수신자는 [*1*] 자리가 빈 문자를 받는다. 관문을 전부 통과하고 발송까지
@@ -70,7 +85,15 @@ def read_csv(path: pathlib.Path) -> list[dict]:
                 "참가자 시트를 그대로 내보내면 헤더가 번호,이름 이라 맞지 않습니다. "
                 "치환값 열은 var1~var8 로 바꿔주세요."
             )
-        return list(reader)
+        rows = list(reader)
+    overflow = [index for index, row in enumerate(rows, start=2) if "__extra__" in row]
+    if overflow:
+        raise ValueError(
+            f"열 수가 헤더보다 많은 줄이 있습니다: {overflow}\n"
+            "따옴표 없는 쉼표가 들어갔는지 확인하세요. 그대로 두면 치환값이 "
+            "한 칸씩 밀린 채 발송됩니다."
+        )
+    return rows
 
 
 def main() -> None:
@@ -108,6 +131,10 @@ def main() -> None:
         if args.dry_run:
             parser.error("--cancel 은 --dry-run 과 함께 쓸 수 없습니다.")
         print(sms_send.cancel_reserved(args.cancel))
+        print(
+            "취소됐습니다. 명단의 캠페인 열에는 '예약 …' 이 그대로 남아 있으니, "
+            "다시 보내려면 그 칸을 지우세요."
+        )
         return
 
     for name in ("spreadsheet", "campaign"):
@@ -119,8 +146,7 @@ def main() -> None:
 
     # 발송 인자 자리에서 평가하면 dry-run 이 통과시킨 명령이 실발송에서만
     # 터진다. 이 CLI 가 없애려는 게 정확히 그 왕복이다.
-    sheet_id = ledger.parse_spreadsheet_id(args.spreadsheet)
-    gid = ledger.parse_gid(args.spreadsheet)
+    sheet_id, gid = ledger.parse_spreadsheet_ref(args.spreadsheet)
 
     if args.csv:
         rows = read_csv(args.csv)
@@ -179,12 +205,22 @@ def main() -> None:
             f"명단에 없어 보내지 않은 번호 {len(result['missing'])}건: "
             + ", ".join(result["missing"])
         )
+    if result["blocked"]:
+        # '발송중' 은 끝난 것이 아니라 막힌 것이다. 이걸 "이미 발송됨"에
+        # 섞으면, 접수도 안 된 캠페인을 끝난 것으로 알고 넘어간다.
+        print(
+            f"'발송중' 으로 막힌 {len(result['blocked'])}건: "
+            + ", ".join(result["blocked"])
+            + "\n뿌리오 웹에서 접수 여부를 확인하고, 안 나갔으면 그 칸을 지우세요."
+        )
     if result["sent"] == 0:
         # 이유를 뭉뚱그리면 안 된다. 번호 열을 잘못 잡아 전원이 명단 밖으로
         # 빠진 것을 "이미 발송됨"으로 읽으면, 아무에게도 안 나간 캠페인을
         # 끝난 것으로 알고 넘어간다.
         if result["skipped"]:
             print(f"이미 발송된 {result['skipped']}명을 제외하니 보낼 사람이 없습니다.")
+        elif result["blocked"]:
+            print("보낼 사람이 전부 '발송중' 으로 막혀 있어 보내지 않았습니다.")
         else:
             print(
                 f"대상 {result['requested']}명이 모두 명단에 없어 한 통도 "

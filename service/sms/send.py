@@ -8,15 +8,11 @@
     ③ 그 칸을 발송 시각으로 바꾼다
 
 보내고 기록하면 ②와 ③ 사이가 경합 구간이 되어, 슬랙과 MCP 가 동시에 돌 때
-같은 사람에게 두 번 갑니다. 먼저 자리를 잡고 보내면 진 쪽은 발송하지 않습니다.
+같은 사람에게 두 번 갑니다. 먼저 자리를 잡고 보내면 그 창이 좁아집니다.
 
-②에서 벤더가 명시적으로 거절하면(HTTP 오류·code≠1000) 칸을 다시 비워
-재시도를 열어둡니다. 접수되지 않은 것이 확실하기 때문입니다.
-
-타임아웃이나 연결 끊김은 다릅니다. 벤더가 이미 접수하고 응답만 못 돌려줬을 수
-있으므로 '발송중'을 그대로 남긴 채 터뜨립니다. 값이 있는 칸은 발송 대상에서
-빠지므로 재시도가 막히고, 사람이 뿌리오 웹에서 확인하게 됩니다. 여기서
-칸을 비우면 다음 시도가 같은 사람에게 두 번 보냅니다.
+②의 실패는 두 갈래입니다. "안 나간 것이 확실"이면 칸을 비워 재시도를 열고,
+"접수 여부를 모른다"면 '발송중'을 남긴 채 터뜨려 사람이 확인하게 합니다.
+어느 쪽인지는 transport.PpurioError 가 정합니다 — 그 예외가 곧 "확실"입니다.
 """
 
 import datetime
@@ -84,108 +80,79 @@ def send_campaign(
         **vendor: 뿌리오 payload 에 그대로 실을 추가 필드
 
     Returns:
-        dict[str, Any]: requested·skipped·missing·sent·sent_to·code·
+        dict[str, Any]: requested·skipped·blocked·missing·sent·sent_to·code·
             message_key·message_type
 
     Raises:
-        ValueError: 문안·번호·길이·예약 시각에 문제가 있을 때. 넷 다 시트를
-            건드리기 전에 터지므로 원장이 더러워지지 않는다. 한 번에 다 보려면
-            호출부가 먼저 check 를 돌린다
+        ValueError: check 가 걸러내는 것에 걸렸을 때. 시트를 건드리기 전에
+            터지므로 명단이 더러워지지 않는다
         transport.PpurioError: 벤더가 거절했을 때 (선점을 풀어 재시도를 연다)
         Exception: 타임아웃·5xx 처럼 접수 여부를 모를 때. 선점이 '발송중'
             으로 남아 재시도가 막히고 사람이 뿌리오 웹에서 확인한다
     """
+    # check 를 실제로 부른다. 판정을 여기 따로 쓰면 사본이 갈라져, 나중에
+    # 규칙 하나가 한쪽에만 들어가는 순간 check 가 통과시킨 발송이 선점
+    # 직전에 터진다.
+    problems = check(
+        rows, template_name=template_name, content=content, send_at=send_at
+    )
+    if problems:
+        raise ValueError(" / ".join(problems))
+
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
-    # 시트를 건드리기 전에 전원 기준으로 한 번 본다. 여기서 길이 초과가
-    # 걸리면 선점 없이 터져 원장이 더러워지지 않는다.
     message_type = templates.decide_message_type(template, normalized)
     if send_at is not None:
+        send_at = _kst_naive(send_at)
         vendor["sendTime"] = reserve_time(send_at)
 
     ws = ledger.open_roster(spreadsheet_id, worksheet, gid)
-    won, already, missing = ledger.claim(ws, campaign, normalized)
+    won, done, blocked, missing = ledger.claim(ws, campaign, normalized)
+    code = message_key = None
 
-    if not won:
-        return _summary(normalized, already, missing, [], None, None, message_type)
+    if won:
+        sent_to = [item["to"] for item in won]
+        # 실제로 보낼 사람만으로 다시 판정한다. 전원 기준으로 정하면 이미
+        # 받아서 빠진 사람의 긴 치환값 때문에 캠페인 전체가 LMS 로 올라가
+        # 요금을 더 낸다. won 은 normalized 의 부분집합이라 여기서 안 터진다.
+        message_type = templates.decide_message_type(template, won)
+        payload = {
+            "messageType": message_type,
+            "content": template,
+            "targetCount": len(won),
+            "targets": templates.build_targets(won),
+            "refKey": campaign,
+            **vendor,
+        }
+        if message_type != "SMS":
+            payload["subject"] = subject or campaign
 
-    sent_to = [item["to"] for item in won]
-    # 실제로 보낼 사람만으로 다시 판정한다. 전원 기준으로 정하면 이미 받아서
-    # 빠진 사람의 긴 치환값 때문에 캠페인 전체가 LMS 로 올라가 요금을 더 낸다.
-    # won 은 normalized 의 부분집합이라 위에서 통과한 이상 여기서 터지지 않는다.
-    message_type = templates.decide_message_type(template, won)
-    payload = {
-        "messageType": message_type,
-        "content": template,
-        "targetCount": len(won),
-        "targets": templates.build_targets(won),
-        "refKey": campaign,
-        **vendor,
-    }
-    if message_type != "SMS":
-        payload["subject"] = subject or campaign
+        try:
+            result = transport.send(payload)
+        except transport.PpurioError:
+            # PpurioError 의 뜻이 "안 나간 것이 확실"이다(transport 참고).
+            ledger.mark(ws, campaign, sent_to, "")
+            raise
+        try:
+            _require_accepted(result)
+        except transport.PpurioError:
+            ledger.mark(ws, campaign, sent_to, "")
+            raise
 
-    try:
-        result = transport.send(payload)
-    except transport.PpurioError:
-        # 벤더가 거절한 것이 확실할 때만 선점을 풀어 재시도를 연다. 타임아웃과
-        # 5xx 는 PpurioError 가 아니라 그대로 올라오므로 '발송중' 이 남는다.
-        ledger.mark(ws, campaign, sent_to, "")
-        raise
+        # 예약이면 접수 시각이 아니라 나갈 시각을 적는다. 접수 시각을 적으면
+        # 아직 안 나간 문자가 시트에서 "그날 발송됨"으로 읽힌다.
+        stamp = (
+            f"예약 {send_at.strftime('%Y-%m-%d %H:%M')}"
+            if send_at is not None
+            else datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+        )
+        ledger.mark(ws, campaign, sent_to, stamp)
+        code, message_key = str(result["code"]), result.get("messageKey")
 
-    # code 를 문자열로만 비교하면 벤더가 수로 돌려주는 순간 접수 성공이
-    # 실패로 뒤집힌다. 그러면 선점을 풀고 사람이 재실행해 두 번 나간다.
-    if str(result.get("code")) != "1000":
-        ledger.mark(ws, campaign, sent_to, "")
-        raise transport.PpurioError(200, result)
-
-    # 예약이면 접수 시각이 아니라 나갈 시각을 적는다. 접수 시각을 적으면
-    # 아직 안 나간 문자가 시트에서 "그날 발송됨"으로 읽힌다.
-    stamp = (
-        f"예약 {send_at.strftime('%Y-%m-%d %H:%M')}"
-        if send_at is not None
-        else datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    )
-    ledger.mark(ws, campaign, sent_to, stamp)
-
-    return _summary(
-        normalized,
-        already,
-        missing,
-        won,
-        str(result.get("code")),
-        result.get("messageKey"),
-        message_type,
-    )
-
-
-def _summary(
-    normalized: list[dict[str, Any]],
-    already: list[dict[str, Any]],
-    missing: list[dict[str, Any]],
-    won: list[dict[str, Any]],
-    code: str | None,
-    message_key: str | None,
-    message_type: str,
-) -> dict[str, Any]:
-    """발송 결과 한 벌을 만듭니다.
-
-    Args:
-        normalized: 번호를 접은 뒤의 요청 전체
-        already: 그 캠페인을 이미 받은 사람
-        missing: 명단에 없는 사람
-        won: 실제로 보낸 사람
-        code: 벤더 접수코드
-        message_key: 벤더 messageKey
-        message_type: SMS · LMS · MMS
-
-    Returns:
-        dict[str, Any]: requested·skipped·missing·sent·sent_to·code·
-            message_key·message_type
-    """
     return {
         "requested": len(normalized),
-        "skipped": len(already),
+        "skipped": len(done),
+        "blocked": [entry["to"] for entry in blocked],
         "missing": [entry["to"] for entry in missing],
         "sent": len(won),
         "sent_to": [entry["to"] for entry in won],
@@ -193,6 +160,39 @@ def _summary(
         "message_key": message_key,
         "message_type": message_type,
     }
+
+
+def _require_accepted(result: dict[str, Any]) -> None:
+    """벤더가 접수했는지 확인합니다.
+
+    code 를 문자열로만 비교하면 벤더가 수로 돌려주는 순간 접수 성공이 실패로
+    뒤집힌다. 그러면 선점을 풀고 사람이 재실행해 두 번 나간다.
+
+    Args:
+        result: 뿌리오 응답
+
+    Raises:
+        transport.PpurioError: 접수코드가 1000 이 아닐 때
+    """
+    if str(result.get("code")) != "1000":
+        raise transport.PpurioError(200, result)
+
+
+def _kst_naive(when: datetime.datetime) -> datetime.datetime:
+    """오프셋이 붙어 있으면 KST 벽시계로 눕힙니다.
+
+    눕히지 않으면 naive 와의 뺄셈이 TypeError 로 터지고, 눕힌 값을 한 곳에서만
+    쓰면 벤더에 보낸 시각과 시트에 적은 시각이 9시간 어긋납니다.
+
+    Args:
+        when: 사람이 준 예약 시각
+
+    Returns:
+        datetime.datetime: tzinfo 없는 KST 벽시계
+    """
+    if when.tzinfo is None:
+        return when
+    return when.astimezone(KST).replace(tzinfo=None)
 
 
 def reserve_time(send_at: datetime.datetime) -> str:
@@ -209,10 +209,7 @@ def reserve_time(send_at: datetime.datetime) -> str:
     """
     # send_at 은 사람이 KST 로 적은 벽시계다. 컨테이너의 now() 는 UTC 라
     # 그대로 빼면 9시간 어긋나 이미 지난 시각도 통과한다.
-    # 오프셋을 붙여 준 경우(2026-08-13T09:00+09:00)는 그 뜻을 살려 KST 로
-    # 눕힌다. 안 눕히면 naive 와의 뺄셈이 TypeError 로 터진다.
-    if send_at.tzinfo is not None:
-        send_at = send_at.astimezone(KST).replace(tzinfo=None)
+    send_at = _kst_naive(send_at)
     now = datetime.datetime.now(KST).replace(tzinfo=None)
     margin = (send_at - now).total_seconds()
     if margin < MIN_RESERVE_SECONDS:
@@ -287,17 +284,24 @@ def check(
 def cancel_reserved(message_key: str) -> dict[str, Any]:
     """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
 
-    명단의 캠페인 열은 지우지 않습니다. "예약했다가 취소했다"도 기록이고,
-    지우면 같은 campaign 으로 다시 예약할 수 있게 되어 중복 차단이 풀립니다.
-    정말 다시 보내야 하면 사람이 그 칸을 지웁니다.
+    응답 코드를 발송과 똑같이 봅니다. 안 보면 "1분 전 초과"로 거절당한 취소가
+    성공처럼 출력되고, 사람은 취소된 줄 알고 자리를 뜨는데 문자는 나갑니다.
+
+    명단의 캠페인 열은 지우지 않습니다. 취소했는지 우리가 아는 것과 시트에
+    적힌 것이 갈라지므로, 정말 다시 보내야 하면 사람이 그 칸을 지웁니다.
 
     Args:
         message_key: 접수 시 받은 messageKey. 발송 직후 출력에 있다
 
     Returns:
         dict[str, Any]: 벤더 응답
+
+    Raises:
+        transport.PpurioError: 취소가 접수되지 않았을 때
     """
-    return transport.cancel(message_key)
+    result = transport.cancel(message_key)
+    _require_accepted(result)
+    return result
 
 
 def preview(
