@@ -16,7 +16,7 @@ def _ws(rows: list[list] | None = None) -> FakeWorksheet:
 
 
 def _row(campaign: str, phone: str, code: str = "") -> list:
-    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "a@b.c", "slack"]
+    return ["2026-08-06", campaign, phone, "가", "LMS", "", code, "", "a@b.c", "slack"]
 
 
 def test_행_번호와_함께_읽는다():

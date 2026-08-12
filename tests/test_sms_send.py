@@ -34,7 +34,7 @@ def _kst_now() -> datetime.datetime:
 
 def _sent(phone: str, code: str = "1000") -> list:
     """이미 발송된 것으로 시트에 남아 있는 한 줄."""
-    return ["2026-08-05", "discord", phone, "가", "LMS", "K0", code, "b", "slack"]
+    return ["2026-08-05", "discord", phone, "가", "LMS", "K0", code, "", "b", "slack"]
 
 
 def _run(monkeypatch, response=None, boom=None, **extra):
@@ -87,7 +87,7 @@ def test_이미_보낸_번호는_대상에서_빠진다(ws, monkeypatch):
 def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):
     # 서버가 죽어 뿌리오 웹으로 직접 보낸 뒤 손으로 남긴 기록. 사람은 번호를
     # 하이픈까지 넣어 적는다 — 그 표기로도 대조돼야 두 번 가지 않는다.
-    ws.rows.append(["", "discord", "010-1111-1111", "", "", "", "1000", "형관", ""])
+    ws.rows.append(["", "discord", "010-1111-1111", "", "", "", "1000", "", "형관", ""])
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 1

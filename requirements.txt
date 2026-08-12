@@ -15,7 +15,7 @@ tavily-python
 beautifulsoup4
 lxml
 aiohttp
-browser-use
+playwright
 markdown
 pypandoc_binary
 tabulate[widechars]

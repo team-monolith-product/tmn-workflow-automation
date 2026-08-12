@@ -37,6 +37,7 @@ HEADER = [
     "타입",
     "messageKey",
     "접수코드",
+    "결과",
     "요청자",
     "경로",
 ]
@@ -47,6 +48,7 @@ DEAD_CODES = {"실패", "중복"}
 CODE_COLUMN = chr(ord("A") + HEADER.index("접수코드"))
 KEY_COLUMN = chr(ord("A") + HEADER.index("messageKey"))
 PHONE_COLUMN = chr(ord("A") + HEADER.index("번호"))
+RESULT_COLUMN = chr(ord("A") + HEADER.index("결과"))
 
 _RANGE = re.compile(r"!\D+(\d+):")
 
@@ -229,6 +231,7 @@ def claim(
             message_type,
             "",  # messageKey
             "",  # 접수코드
+            "",  # 결과 (도달 확인이 채운다)
             requested_by,
             entrypoint,
         ]
@@ -269,3 +272,44 @@ def mark(ws, rows: list[int], code: str, message_key: str | None = None) -> None
             {"range": f"{KEY_COLUMN}{row}", "values": [[message_key]]} for row in rows
         ]
     ws.batch_update(updates, value_input_option="RAW")
+
+
+def record_results(ws, campaign: str, statuses: dict[str, str]) -> None:
+    """도달 결과를 씁니다. 이미 찬 칸은 건드리지 않습니다.
+
+    폴링이 여러 번 돌아도 처음 확정된 결과가 남습니다.
+
+    Args:
+        ws: 발송이력 워크시트
+        campaign: 발송 건 식별자
+        statuses: {번호: 결과코드}
+    """
+    updates = [
+        {"range": f"{RESULT_COLUMN}{row['_row']}", "values": [[statuses[row["번호"]]]]}
+        for row in read_rows(ws)
+        if row.get("캠페인") == campaign
+        and not row.get("결과")
+        and row.get("번호") in statuses
+    ]
+    if updates:
+        ws.batch_update(updates, value_input_option="RAW")
+
+
+def failed_targets(
+    rows: list[dict[str, Any]], campaign: str, failed_code: str
+) -> list[dict[str, str]]:
+    """그 캠페인에서 도달에 실패한 수신자를 돌려줍니다.
+
+    Args:
+        rows: read_rows 결과
+        campaign: 발송 건 식별자
+        failed_code: 실패로 보는 결과코드
+
+    Returns:
+        list[dict[str, str]]: 재발송 대상 [{"to": 번호, "name": 이름}]
+    """
+    return [
+        {"to": row["번호"], "name": row.get("이름", "")}
+        for row in rows
+        if row.get("캠페인") == campaign and row.get("결과") == failed_code
+    ]
