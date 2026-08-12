@@ -27,11 +27,14 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from api.admin_rails import get_me
+from app.sms_render import render_preview, render_sent
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
+from service.sms import ledger
+from service.sms import send as sms_send
 
 INSTRUCTIONS = """
 팀모노리스 사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스입니다.
@@ -99,6 +102,67 @@ def build_mcp() -> MCPServer:
         token = cast(AdminToken, get_access_token())
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
+
+    @mcp.tool()
+    async def preview_sms(
+        targets: list[dict],
+        template: str | None = None,
+        content: str | None = None,
+    ) -> str:
+        """문자를 보내지 않고 문안·메시지 타입·길이만 확인합니다.
+
+        발송 전에는 항상 이걸 먼저 실행해 사람에게 보여줍니다.
+
+        Args:
+            targets: [{"to": "010...", "name": "홍길동", "var1": "…"}] 형식
+            template: 저장된 문안 파일 이름 (content 와 택일)
+            content: 이번에 직접 쓴 본문 (template 와 택일)
+        """
+        return render_preview(sms_send.preview(targets, template, content))
+
+    @mcp.tool()
+    async def send_sms(
+        spreadsheet: str,
+        campaign: str,
+        targets: list[dict],
+        template: str | None = None,
+        content: str | None = None,
+        subject: str | None = None,
+    ) -> str:
+        """문자를 실제로 발송합니다. 대외 발신이므로 사람의 컨펌을 받은 뒤에만 씁니다.
+
+        같은 campaign 으로 이미 보낸 번호는 자동으로 빠집니다. 재발송이
+        필요하면 campaign 을 다르게 지정합니다.
+
+        슬랙 봇에는 이 도구가 없습니다. 거기서는 승인 카드를 눌러야 나갑니다.
+        여기는 사람이 직접 명령을 치는 자리라 그대로 둡니다.
+
+        Args:
+            spreadsheet: 발송이력을 적을 참가자 스프레드시트 주소 또는 ID.
+                슬랙에서는 채널에 연결된 시트를 쓰지만 여기는 채널이 없어 직접 지정한다
+            campaign: 이 발송 건의 식별자
+            targets: 수신자 목록
+            template: 저장된 문안 파일 이름 (content 와 택일)
+            content: 이번에 직접 쓴 본문 (template 와 택일)
+            subject: LMS 제목. 생략하면 campaign 을 쓴다
+        """
+        token = cast(AdminToken, get_access_token())
+        try:
+            sheet_id = ledger.parse_spreadsheet_id(spreadsheet)
+        except ValueError as error:
+            return str(error)
+        result = await asyncio.to_thread(
+            sms_send.send_campaign,
+            spreadsheet_id=sheet_id,
+            campaign=campaign,
+            rows=targets,
+            template_name=template,
+            content=content,
+            subject=subject,
+            requested_by=token.email,
+            entrypoint="mcp",
+        )
+        return render_sent(campaign, result)
 
     return mcp
 
