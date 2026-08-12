@@ -82,20 +82,30 @@ curl -X POST http://localhost:8000/webhook \
 ### 문자 발송 (뿌리오)
 - `PPURIO_ACCOUNT` / `PPURIO_API_KEY`: 발송 API 계정·인증키. 호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 토큰 발급에서 `3003 invalid ip`)
 - `PPURIO_SENDER`: 계정에 사전등록된 발신번호. 발신번호 사전등록제라 이 값 없이는 접수되지 않습니다
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: 발송이력을 적을 참가자 스프레드시트에 쓸 서비스 계정
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: 참가자 명단 시트에 쓸 서비스 계정. `google-drive-bot@elegant-circle-503206-a1.iam.gserviceaccount.com` 을 쓰며, 그 계정이 대상 시트에 **편집자**로 공유되어 있어야 합니다(캠페인 열을 새로 만듭니다)
 
-발송 이력은 참가자 스프레드시트의 `발송이력` 탭에 한 발송이 한 행으로 쌓입니다.
-같은 `campaign` 으로 이미 보낸 번호는 자동으로 빠지므로 같은 명령을 여러 번 돌려도
-같은 사람에게 두 번 가지 않습니다.
+발송 기록은 참가자 명단 시트에 **캠페인마다 열 하나**로 남습니다. 사람이 보던 그
+시트에서 누가 무엇을 받았는지 바로 보입니다.
+
+| 성명 | 휴대폰 | … | discord안내 | 8월정산안내 |
+|---|---|---|---|---|
+| 홍길동 | 010-… | | 2026-08-11 20:14 | |
+| 김철수 | 010-… | | 2026-08-11 20:14 | 2026-08-20 09:00 |
+
+그 열이 빈 사람만 보냅니다. 사람이 손으로 아무 값이나 적어도 "보냈다"로 읽히므로,
+장애 중에 뿌리오 웹으로 직접 보내고 표시하는 경로가 그대로 살아 있습니다.
+
+**공식 문자만 기록합니다.** 개인 CS 문자는 슬랙 스레드가 기록입니다 — 같은 사람에게
+여러 번 보내는 게 정상이라 "이미 보냈으니 빼자"는 판정 자체가 틀립니다.
 
 ```bash
 # 문안·타입·길이만 확인
 python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \
-    --template discord --csv roster.csv --dry-run
+    --content "[*이름*]선생님, 안내드립니다" --csv roster.csv --dry-run
 
 # 실제 발송
 python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \
-    --template discord --csv roster.csv
+    --content "[*이름*]선생님, 안내드립니다" --csv roster.csv
 ```
 
 문안은 반복해서 쓰면 `templates/sms/*.txt`, 일회성이면 `--content` 로 바로 넣습니다.

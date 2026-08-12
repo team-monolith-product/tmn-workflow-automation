@@ -16,10 +16,20 @@ ROWS = [
 ]
 
 
+ROSTER_HEADER = ["연번", "성명", "휴대폰"]
+
+
 @pytest.fixture
 def ws(monkeypatch) -> FakeWorksheet:
-    sheet = FakeWorksheet([ledger.HEADER])
-    monkeypatch.setattr(ledger, "open_ledger", lambda _id: sheet)
+    """ROWS 두 명이 올라 있는 명단 탭."""
+    sheet = FakeWorksheet(
+        [
+            ROSTER_HEADER,
+            ["1", "가", "010-1111-1111"],
+            ["2", "나", "010-2222-2222"],
+        ]
+    )
+    monkeypatch.setattr(ledger, "open_roster", lambda _id, _ws=None: sheet)
     return sheet
 
 
@@ -32,9 +42,11 @@ def _kst_now() -> datetime.datetime:
     return datetime.datetime.now(KST).replace(tzinfo=None)
 
 
-def _sent(phone: str, code: str = "1000") -> list:
-    """이미 발송된 것으로 시트에 남아 있는 한 줄."""
-    return ["2026-08-05", "discord", phone, "가", "LMS", "K0", code, "b", "slack"]
+def _already(ws, row: int, value: str = "2026-08-05 10:00") -> None:
+    """그 사람은 이 캠페인을 이미 받은 것으로 표시한다."""
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    ledger.write_column(ws, at, [row], value)
 
 
 def _run(monkeypatch, response=None, boom=None, **extra):
@@ -62,32 +74,37 @@ def _run(monkeypatch, response=None, boom=None, **extra):
 def test_보내기_전에_자리를_잡는다(ws, monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
-    # 벤더에 넘어간 대상이 시트에 잡힌 행과 일치한다.
-    rows = ledger.read_rows(ws)
-    assert len(rows) == 2
-    assert {r["번호"] for r in rows} == {"01011111111", "01022222222"}
+    # 명단 두 사람 모두 캠페인 열이 채워진다.
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    assert [ws.rows[1][at], ws.rows[2][at]] != ["", ""]
     assert result["sent"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
 
-def test_접수하면_코드와_키가_시트에_남는다(ws, monkeypatch):
+def test_보내고_나면_선점_표시가_일시로_바뀐다(ws, monkeypatch):
     _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
-    assert all(r["접수코드"] == "1000" for r in ledger.read_rows(ws))
-    assert all(r["messageKey"] == "K1" for r in ledger.read_rows(ws))
+
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    assert not ws.rows[1][at].startswith(ledger.SENDING)
+    assert ws.rows[1][at]
 
 
 def test_이미_보낸_번호는_대상에서_빠진다(ws, monkeypatch):
-    ws.rows.append(_sent("01011111111"))
+    _already(ws, 2)
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 1 and result["skipped"] == 1
     assert [t["to"] for t in payload["targets"]] == ["01022222222"]
+    # 도달 확인은 이 목록만 기다린다.
+    assert result["sent_to"] == ["01022222222"]
 
 
 def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):
     # 서버가 죽어 뿌리오 웹으로 직접 보낸 뒤 손으로 남긴 기록. 사람은 번호를
     # 하이픈까지 넣어 적는다 — 그 표기로도 대조돼야 두 번 가지 않는다.
-    ws.rows.append(["", "discord", "010-1111-1111", "", "", "", "1000", "형관", ""])
+    _already(ws, 2, "수기 발송")
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 1
@@ -95,20 +112,33 @@ def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):
 
 
 def test_전원_중복이면_벤더를_부르지_않는다(ws, monkeypatch):
-    for phone in ("01011111111", "01022222222"):
-        ws.rows.append(_sent(phone))
+    _already(ws, 2)
+    _already(ws, 3)
     result, payload = _run(monkeypatch, {"code": "1000"})
 
     assert result["sent"] == 0 and result["skipped"] == 2
     assert payload == {}
 
 
-def test_진_행은_중복으로_표시한다(ws, monkeypatch):
-    ws.rows.append(_sent("01011111111"))
-    _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
+def test_명단에_없는_번호는_보내지_않고_알린다(ws, monkeypatch):
+    # 조용히 빼면 안 간 줄 모르고, 그냥 보내면 기록할 곳이 없다.
+    captured = {}
+    monkeypatch.setattr(
+        transport,
+        "send",
+        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
+    )
+    result = sms_send.send_campaign(
+        spreadsheet_id="S1",
+        campaign="discord",
+        rows=[{"to": "010-1111-1111"}, {"to": "010-9999-9999"}],
+        content="[*이름*]님",
+        requested_by="a@team-mono.com",
+        entrypoint="slack",
+    )
 
-    codes = [r["접수코드"] for r in ledger.read_rows(ws)]
-    assert "중복" in codes
+    assert result["sent"] == 1
+    assert result["missing"] == ["01099999999"]
 
 
 def test_벤더가_거절하면_실패로_표시해_재시도를_연다(ws, monkeypatch):
@@ -116,25 +146,30 @@ def test_벤더가_거절하면_실패로_표시해_재시도를_연다(ws, monk
     with pytest.raises(transport.PpurioError):
         _run(monkeypatch, boom=transport.PpurioError(500, "boom"))
 
-    assert all(r["접수코드"] == "실패" for r in ledger.read_rows(ws))
-    assert ledger.owners(ledger.read_rows(ws)) == {}
+    # 선점을 풀어 다시 대상이 된다.
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    assert [ws.rows[1][at], ws.rows[2][at]] == ["", ""]
 
 
-def test_타임아웃이면_접수코드를_비워_재시도를_막는다(ws, monkeypatch):
-    # 벤더가 이미 접수하고 응답만 못 돌려줬을 수 있다. 여기서 '실패'로 찍으면
-    # 그 행이 죽은 것으로 취급돼 다음 시도가 이기고, 같은 사람에게 두 번 간다.
+def test_타임아웃이면_선점을_남겨_재시도를_막는다(ws, monkeypatch):
+    # 벤더가 이미 접수하고 응답만 못 돌려줬을 수 있다. 선점을 풀면 다음 시도가
+    # 빈 칸을 보고 같은 사람에게 두 번 보낸다.
     with pytest.raises(TimeoutError):
         _run(monkeypatch, boom=TimeoutError("read timed out"))
 
-    assert all(r["접수코드"] == "" for r in ledger.read_rows(ws))
-    assert len(ledger.owners(ledger.read_rows(ws))) == 2
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    assert ws.rows[1][at].startswith(ledger.SENDING)
 
 
 def test_접수코드가_1000이_아니면_실패로_본다(ws, monkeypatch):
     with pytest.raises(transport.PpurioError):
         _run(monkeypatch, {"code": "2000", "description": "invalid"})
 
-    assert all(r["접수코드"] == "실패" for r in ledger.read_rows(ws))
+    header, _ = ledger.read_roster(ws)
+    at = ledger.campaign_column(ws, header, "discord")
+    assert ws.rows[1][at] == ""
 
 
 def test_벤더_옵션은_그대로_통과한다(ws, monkeypatch):
@@ -209,7 +244,6 @@ def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypa
     )
     assert result["sent"] == 1
     assert [t["to"] for t in captured["targets"]] == ["01011111111"]
-    assert len(ledger.read_rows(ws)) == 1
 
 
 def test_예약이_3분보다_가까우면_시트를_건드리기_전에_막는다(ws, monkeypatch):
@@ -219,7 +253,8 @@ def test_예약이_3분보다_가까우면_시트를_건드리기_전에_막는�
     with pytest.raises(ValueError, match="3분"):
         _run(monkeypatch, {"code": "1000"}, send_at=soon)
 
-    assert ledger.read_rows(ws) == []
+    # 시트에 캠페인 열조차 생기지 않는다.
+    assert ws.rows[0] == ROSTER_HEADER
 
 
 def test_예약이면_sendTime이_실린다(ws, monkeypatch):

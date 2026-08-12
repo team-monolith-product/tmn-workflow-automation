@@ -43,11 +43,29 @@ class FakeWorksheet:
     def get_all_values(self, **_kwargs) -> list[list]:
         return [list(row) for row in self.rows]
 
-    def update(self, values: list[list], _range_name: str = "A1", **_kwargs) -> None:
-        for offset, row in enumerate(values):
-            while len(self.rows) <= offset:
-                self.rows.append([])
-            self.rows[offset] = list(row)
+    def _put(self, row_index: int, column_index: int, value) -> None:
+        while len(self.rows) <= row_index:
+            self.rows.append([])
+        line = self.rows[row_index]
+        while len(line) <= column_index:
+            line.append("")
+        line[column_index] = value
+
+    def update(self, values: list[list], range_name: str = "A1", **_kwargs) -> None:
+        # range_name 을 무시하면 어디에 쓰든 A1 부터 덮어써서, 헤더 뒤에 열을
+        # 하나 붙이는 호출이 헤더 전체를 날린다.
+        column, row = _CELL.match(range_name).groups()
+        top = int(row) - 1
+        left = (
+            sum(
+                (ord(char) - ord("A") + 1) * 26**power
+                for power, char in enumerate(reversed(column))
+            )
+            - 1
+        )
+        for row_offset, line in enumerate(values):
+            for column_offset, cell in enumerate(line):
+                self._put(top + row_offset, left + column_offset, cell)
 
     def format(self, range_name: str, cell_format: dict) -> None:
         self.formats[range_name] = cell_format

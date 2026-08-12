@@ -62,6 +62,7 @@ def send_campaign(
     requested_by: str,
     entrypoint: str,
     subject: str | None = None,
+    worksheet: str | None = None,
     send_at: datetime.datetime | None = None,
     **vendor: Any,
 ) -> dict[str, Any]:
@@ -79,11 +80,13 @@ def send_campaign(
         requested_by: 시킨 사람 이메일. 도구 인자가 아니라 인증에서 온 값
         entrypoint: slack · mcp · script
         subject: LMS 제목. 생략하면 campaign 을 쓴다
+        worksheet: 명단 탭 이름. 생략하면 첫 번째 탭
         send_at: 예약 발송 시각. 생략하면 즉시. 최소 3분 뒤여야 한다
         **vendor: 뿌리오 payload 에 그대로 실을 추가 필드
 
     Returns:
-        dict[str, Any]: requested·skipped·sent·code·message_key·message_type
+        dict[str, Any]: requested·skipped·missing·sent·sent_to·code·
+            message_key·message_type
 
     Raises:
         ValueError: 문안·번호·길이·예약 시각에 문제가 있을 때. 넷 다 시트를
@@ -97,18 +100,17 @@ def send_campaign(
     if send_at is not None:
         vendor["sendTime"] = reserve_time(send_at)
 
-    ws = ledger.open_ledger(spreadsheet_id)
-    won, lost = ledger.claim(
-        ws, campaign, normalized, message_type, requested_by, entrypoint
-    )
-    if lost:
-        ledger.mark(ws, lost, "중복")
+    ws = ledger.open_roster(spreadsheet_id, worksheet)
+    header, _ = ledger.read_roster(ws)
+    won, already, missing = ledger.claim(ws, header, campaign, normalized)
 
     if not won:
         return {
             "requested": len(normalized),
-            "skipped": len(normalized),
+            "skipped": len(already),
+            "missing": [entry["to"] for entry in missing],
             "sent": 0,
+            "sent_to": [],
             "code": None,
             "message_key": None,
             "message_type": message_type,
@@ -129,22 +131,25 @@ def send_campaign(
     try:
         result = transport.send(payload)
     except transport.PpurioError:
-        # 벤더가 거절한 것이 확실할 때만 재시도를 연다. 타임아웃은 접수됐을
-        # 수 있으므로 접수코드를 비운 채 터뜨린다.
-        ledger.mark(ws, claimed_rows, "실패")
+        # 벤더가 거절한 것이 확실할 때만 선점을 풀어 재시도를 연다. 타임아웃은
+        # 접수됐을 수 있으므로 '발송중' 을 남긴 채 터뜨린다 — 사람이 확인한다.
+        ledger.mark(ws, header, campaign, claimed_rows, "")
         raise
 
     code = result.get("code")
     if code != "1000":
-        ledger.mark(ws, claimed_rows, "실패")
+        ledger.mark(ws, header, campaign, claimed_rows, "")
         raise transport.PpurioError(200, result)
 
-    ledger.mark(ws, claimed_rows, code, result.get("messageKey"))
+    stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    ledger.mark(ws, header, campaign, claimed_rows, stamp)
 
     return {
         "requested": len(normalized),
-        "skipped": len(normalized) - len(won),
+        "skipped": len(already),
+        "missing": [entry["to"] for entry in missing],
         "sent": len(won),
+        "sent_to": [item["to"] for item in won],
         "code": code,
         "message_key": result.get("messageKey"),
         "message_type": message_type,

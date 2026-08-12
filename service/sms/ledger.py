@@ -1,23 +1,24 @@
 """
-발송 이력 시트입니다. 참가자 스프레드시트의 '발송이력' 탭 하나입니다.
+발송 기록입니다. 참가자 시트의 명단 탭에 캠페인마다 열 하나를 씁니다.
 
-DB 가 아니라 시트인 이유는 사람이 손으로 한 줄 적을 수 있어야 하기 때문입니다.
-장애 중에 사람이 뿌리오 웹으로 직접 보내면 그 줄을 우리 코드가 읽고 중복을
-피합니다. DB 였다면 사람이 우회한 발송을 영영 모릅니다.
+    이름 | 소속 | 휴대폰      | … | discord안내        | 8월정산안내
+    홍길동 | …   | 010-…      |   | 2026-08-11 20:14   |
+    김철수 | …   | 010-…      |   | 2026-08-11 20:14   | 2026-08-20 09:00
 
-시트에는 UNIQUE 제약도 조건부 쓰기도 없습니다. 대신 append 가 만들어주는
-행 번호를 순서로 씁니다.
+사람이 보던 그 시트에서 누가 무엇을 받았는지 바로 보입니다. 별도 이력 탭을
+두면 사람은 안 보고, 안 보는 기록은 틀려도 아무도 모릅니다.
 
-    ① append          동시에 호출해도 각자 다른 행을 받는다
-    ② 전체 재조회
-    ③ 같은 (캠페인, 번호) 중 살아 있는 행의 최소 행 번호가 나면 이긴다
+**공식 문자만 기록합니다.** 개인 CS 문자는 슬랙 스레드가 기록입니다 — 같은
+사람에게 여러 번 보내는 게 정상이라 "이미 보냈으니 빼자"는 판정 자체가
+틀립니다. 여기 기록하면 두 번째 CS 가 막힙니다.
 
-행 번호는 누가 읽어도 같으므로 승자가 하나로 정해집니다. 이 재조회를 지우면
-중복 차단이 그대로 뚫립니다. tests/test_sms_ledger.py 가 막고 있습니다.
+중복 차단은 **그 열이 비어 있는 사람만 보낸다**는 규칙 하나입니다. 사람이
+손으로 아무 값이나 적어 넣어도 "보냈다"로 읽힙니다 — 장애 중에 뿌리오 웹으로
+직접 보내고 시트에 표시하는 경로가 그대로 살아 있습니다.
 
-접수코드가 '실패'/'중복'인 행은 살아 있지 않은 것으로 봅니다. 그래야 실패한
-발송을 다시 시도할 수 있습니다. 비어 있는 행은 "보냈는지 모름"이라 살아
-있는 것으로 취급합니다 — 조용히 다시 보내는 것보다 사람이 확인하는 게 낫습니다.
+벤더를 부르기 전에 그 칸을 먼저 채웁니다(선점). 채우지 않고 보내면 그 사이
+다른 실행이 같은 사람을 빈 칸으로 보고 또 보냅니다. 벤더가 거절하면 다시
+비워 재시도를 엽니다.
 """
 
 import datetime
@@ -27,34 +28,21 @@ from typing import Any
 from api import google_sheets
 from service.sms import KST
 
-WORKSHEET = "발송이력"
+# 명단에서 번호 열을 찾을 때 쓰는 이름 후보. 구체적인 것부터 봅니다 —
+# 셀을 먼저 돌면 '번호'가 연번 열에 걸립니다.
+PHONE_HEADERS = ("휴대폰", "연락처", "전화번호", "휴대전화", "전화", "번호")
 
-HEADER = [
-    "일시",
-    "캠페인",
-    "번호",
-    "이름",
-    "타입",
-    "messageKey",
-    "접수코드",
-    "요청자",
-    "경로",
-]
-
-# 이 값이 접수코드에 있으면 그 클레임은 죽은 것으로 본다.
-DEAD_CODES = {"실패", "중복"}
-
-CODE_COLUMN = chr(ord("A") + HEADER.index("접수코드"))
-KEY_COLUMN = chr(ord("A") + HEADER.index("messageKey"))
-PHONE_COLUMN = chr(ord("A") + HEADER.index("번호"))
-
-_RANGE = re.compile(r"!\D+(\d+):")
+SENDING = "발송중"
 
 # https://docs.google.com/spreadsheets/d/<id>/edit 또는 id 자체.
 # 두 분기에 같은 길이 규칙을 건다. URL 쪽만 느슨하면 게시용 링크
 # (/spreadsheets/d/e/2PACX-.../pubhtml)의 'e' 가 ID 로 통과한다.
 _ID_IN_URL = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})")
 _BARE_ID = re.compile(r"^[A-Za-z0-9_-]{20,}$")
+
+
+class RosterLayoutError(RuntimeError):
+    """명단 탭에서 번호 열을 찾지 못했을 때 발생합니다."""
 
 
 def parse_spreadsheet_id(value: str) -> str:
@@ -81,191 +69,197 @@ def parse_spreadsheet_id(value: str) -> str:
     raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
 
 
-class LedgerLayoutError(RuntimeError):
-    """발송이력 탭의 열 배치가 HEADER 와 다를 때 발생합니다."""
+def _column_letter(index: int) -> str:
+    """0-based 열 번호를 A1 표기로 바꿉니다."""
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return letters
 
 
-def open_ledger(spreadsheet_id: str):
-    """그 사업의 발송이력 탭을 엽니다. 없으면 만들고 헤더를 씁니다.
+def digits(phone: str) -> str:
+    """대조에 쓸 번호를 만듭니다. 숫자만 남깁니다.
 
-    시트 ID 를 인자로 받습니다. 전역 환경변수 하나로 두면 사업 채널이 여럿인데
-    이력이 한 시트에 섞입니다.
-
-    열 배치를 여기서 한 번 확인합니다. 쓰기(claim·mark)는 HEADER 순서를 위치로
-    가정하는데, 사람이 앞이나 중간에 열을 끼워 넣으면 그 가정이 조용히 깨져
-    캠페인 칸에 번호가 들어가고 승자 조회가 영영 매칭되지 않습니다. 결과는
-    "전원 중복 처리 후 한 통도 발송 안 됨"인데 종료 코드는 0 입니다.
-    뒤에 열을 덧붙이는 흔한 편집은 그대로 통과시킵니다.
-
-    Args:
-        spreadsheet_id: 참가자 스프레드시트 ID
-
-    Returns:
-        gspread.Worksheet: 발송이력 워크시트
-
-    Raises:
-        LedgerLayoutError: 기존 헤더가 HEADER 로 시작하지 않을 때
-    """
-    ws = google_sheets.get_worksheet(spreadsheet_id, WORKSHEET)
-    values = ws.get_all_values()
-    if not values:
-        ws.update([HEADER], "A1")
-    elif values[0][: len(HEADER)] != HEADER:
-        raise LedgerLayoutError(
-            f"'{WORKSHEET}' 탭의 열 배치가 다릅니다.\n"
-            f"  기대: {HEADER}\n"
-            f"  실제: {values[0]}\n"
-            "열을 지우거나 중간에 끼워 넣으면 기록이 어긋납니다. "
-            "새 열은 맨 뒤에 붙여주세요."
-        )
-    # 번호 열을 텍스트로 고정한다. 두지 않으면 사람이 손으로 적은 01012345678 을
-    # 시트가 숫자로 바꿔 앞자리 0 이 사라진다. 조건 밖에 둔다 — 사람이 탭을 먼저
-    # 만들어 두면 위 분기에 걸리지 않아 서식이 영영 안 잡힌다. 멱등하다.
-    ws.format(f"{PHONE_COLUMN}:{PHONE_COLUMN}", {"numberFormat": {"type": "TEXT"}})
-    return ws
-
-
-def read_rows(ws) -> list[dict[str, Any]]:
-    """이력 전체를 행 번호와 함께 읽습니다.
-
-    HEADER 순서를 위치로 읽습니다. 쓰기 경로도 같은 가정을 쓰고, 배치가 다른
-    시트는 open_ledger 가 이미 막았습니다. 읽기만 이름으로 찾으면 쓰기와 계약이
-    갈라져, 열이 밀린 시트에서 아무 소리 없이 엉뚱한 값을 대조하게 됩니다.
-
-    Args:
-        ws: 발송이력 워크시트
-
-    Returns:
-        list[dict[str, Any]]: 헤더를 키로 하고 _row 에 행 번호를 담은 목록
-    """
-    values = ws.get_all_values()
-    rows = []
-    for index, line in enumerate(values[1:], start=2):
-        row = {
-            name: (line[i] if i < len(line) else "") for i, name in enumerate(HEADER)
-        }
-        row["_row"] = index
-        rows.append(row)
-    return rows
-
-
-def ledger_key(campaign: str, phone: str) -> tuple[str, str]:
-    """대조에 쓸 (캠페인, 번호) 키를 만듭니다.
-
-    번호에서 숫자만 남깁니다. 우리가 쓰는 값은 정규화된 01011111111 이지만
-    사람은 010-1111-1111 로 적습니다. 표기를 안 눕히면 손으로 적은 기록이
-    대조되지 않아 그 사람에게 한 번 더 나갑니다 — 시트를 고른 이유가 바로
-    그 손기록이라 여기가 무너지면 설계 전체가 무의미해집니다.
+    우리가 쓰는 값은 정규화된 01011111111 이지만 명단에는 사람이 적은
+    010-1111-1111 이 들어 있습니다. 표기를 안 눕히면 같은 사람을 못 알아봅니다.
 
     normalize_phone 을 쓰지 않습니다. 그건 자릿수가 틀리면 raise 하는데,
-    읽기 경로는 사람이 뭘 적었든 읽어내야 합니다.
+    명단 읽기는 사람이 뭘 적었든 읽어내야 합니다.
 
     Args:
-        campaign: 캠페인 이름
         phone: 번호 (표기 무관)
 
     Returns:
-        tuple[str, str]: 대조용 키
+        str: 숫자만 남은 번호
     """
-    return campaign.strip(), re.sub(r"\D", "", phone)
+    return re.sub(r"\D", "", phone)
 
 
-def owners(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
-    """(캠페인, 번호)별로 살아 있는 최소 행 번호를 찾습니다.
+def open_roster(spreadsheet_id: str, worksheet: str | None = None):
+    """참가자 명단 탭을 엽니다.
 
     Args:
-        rows: read_rows 결과
+        spreadsheet_id: 참가자 스프레드시트 ID
+        worksheet: 탭 이름. 생략하면 첫 번째 탭
 
     Returns:
-        dict[tuple[str, str], int]: 키별 승자 행 번호
+        gspread.Worksheet: 명단 워크시트
     """
-    winner: dict[tuple[str, str], int] = {}
-    for row in rows:
-        if row.get("접수코드") in DEAD_CODES:
-            continue
-        key = ledger_key(row.get("캠페인", ""), row.get("번호", ""))
-        if key not in winner or row["_row"] < winner[key]:
-            winner[key] = row["_row"]
-    return winner
+    return google_sheets.get_first_worksheet(spreadsheet_id, worksheet)
+
+
+def read_roster(ws) -> tuple[list[str], list[dict[str, Any]]]:
+    """명단을 읽어 번호와 행 번호를 뽑습니다.
+
+    Args:
+        ws: 명단 워크시트
+
+    Returns:
+        tuple: (헤더 셀, [{"phone": 숫자만, "_row": 행번호}])
+
+    Raises:
+        RosterLayoutError: 번호로 읽을 열이 없을 때
+    """
+    values = ws.get_all_values()
+    if not values:
+        raise RosterLayoutError("명단 탭이 비어 있습니다.")
+
+    header = values[0]
+    at = None
+    for name in PHONE_HEADERS:
+        for index, cell in enumerate(header):
+            if name in cell:
+                at = index
+                break
+        if at is not None:
+            break
+    if at is None:
+        raise RosterLayoutError(
+            f"명단에서 번호 열을 찾지 못했습니다: {header}\n"
+            f"열 제목에 {' · '.join(PHONE_HEADERS)} 중 하나가 있어야 합니다."
+        )
+
+    people = []
+    for row_number, line in enumerate(values[1:], start=2):
+        phone = digits(line[at]) if at < len(line) else ""
+        if phone:
+            people.append({"phone": phone, "_row": row_number})
+    return header, people
+
+
+def campaign_column(ws, header: list[str], campaign: str) -> int:
+    """캠페인 열을 찾습니다. 없으면 맨 뒤에 만듭니다.
+
+    맨 뒤에 붙입니다. 중간에 끼우면 사람이 만든 수식과 조건부 서식이 밀립니다.
+
+    Args:
+        ws: 명단 워크시트
+        header: read_roster 가 돌려준 헤더
+        campaign: 발송 건 식별자
+
+    Returns:
+        int: 0-based 열 번호
+    """
+    for index, cell in enumerate(header):
+        if cell.strip() == campaign:
+            return index
+    at = len(header)
+    ws.update([[campaign]], f"{_column_letter(at)}1", value_input_option="RAW")
+    return at
+
+
+def column_values(ws, at: int) -> dict[int, str]:
+    """그 열의 행별 값을 읽습니다.
+
+    Args:
+        ws: 명단 워크시트
+        at: 0-based 열 번호
+
+    Returns:
+        dict[int, str]: 행 번호 -> 값
+    """
+    values = ws.get_all_values()
+    return {
+        row_number: (line[at] if at < len(line) else "")
+        for row_number, line in enumerate(values[1:], start=2)
+    }
+
+
+def write_column(ws, at: int, rows: list[int], value: str) -> None:
+    """그 열의 여러 행에 같은 값을 씁니다.
+
+    Args:
+        ws: 명단 워크시트
+        at: 0-based 열 번호
+        rows: 대상 행 번호
+        value: 적을 값. 빈 문자열이면 지운다
+    """
+    if not rows:
+        return
+    letter = _column_letter(at)
+    ws.batch_update(
+        [{"range": f"{letter}{row}", "values": [[value]]} for row in rows],
+        value_input_option="RAW",
+    )
 
 
 def claim(
-    ws,
-    campaign: str,
-    entries: list[dict[str, Any]],
-    message_type: str,
-    requested_by: str,
-    entrypoint: str,
-) -> tuple[list[dict[str, Any]], list[int]]:
-    """발송 대상의 자리를 잡습니다.
+    ws, header: list[str], campaign: str, entries: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """보낼 사람의 자리를 선점합니다.
+
+    명단에 있고 그 캠페인 열이 빈 사람만 대상입니다. 벤더를 부르기 전에 칸을
+    '발송중'으로 채웁니다 — 채우지 않고 보내면 그 사이 다른 실행이 같은 사람을
+    빈 칸으로 보고 또 보냅니다.
 
     Args:
-        ws: 발송이력 워크시트
+        ws: 명단 워크시트
+        header: read_roster 가 돌려준 헤더
         campaign: 발송 건 식별자
-        entries: to·name 을 담은 수신자 목록
-        message_type: SMS 또는 LMS
-        requested_by: 시킨 사람 이메일
-        entrypoint: slack · mcp · script
+        entries: to·name·var1~var8 을 담은 수신자 목록 (번호는 정규화된 값)
 
     Returns:
-        tuple: (이긴 항목 목록, 진 행 번호 목록). 이긴 항목에는 _row 가 붙는다
+        tuple: (보낼 사람, 이미 보낸 사람, 명단에 없는 사람).
+            보낼 사람에는 _row 가 붙는다
 
     Raises:
-        ValueError: entries 에 같은 번호가 두 번 들어 있을 때
+        ValueError: entries 에 같은 번호가 두 번 있을 때
     """
-    phones = [entry["to"] for entry in entries]
+    phones = [digits(entry["to"]) for entry in entries]
     if len(set(phones)) != len(phones):
-        # 번호 -> 행 매핑이 덮여 승자 행의 주인이 사라집니다. 호출부가
-        # 접어서 넘겨야 합니다(service.sms.send._normalize).
         raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
-    # 사람이 읽는 칸이라 KST 로 적는다. 컨테이너는 UTC 다.
-    stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-    payload = [
-        [
-            stamp,
-            campaign,
-            entry["to"],
-            entry.get("name", ""),
-            message_type,
-            "",  # messageKey
-            "",  # 접수코드
-            requested_by,
-            entrypoint,
-        ]
-        for entry in entries
-    ]
-    # RAW 로 써야 한다. USER_ENTERED 면 시트가 01012345678 을 숫자로 해석해
-    # 앞자리 0 을 버리고, 아래 재조회가 우리가 쓴 번호를 못 찾아 전원이 진다.
-    result = ws.append_rows(
-        payload, value_input_option="RAW", insert_data_option="INSERT_ROWS"
-    )
-    first = int(_RANGE.search(result["updates"]["updatedRange"]).group(1))
-    mine = {entry["to"]: first + offset for offset, entry in enumerate(entries)}
 
-    winner = owners(read_rows(ws))
+    _, people = read_roster(ws)
+    by_phone = {person["phone"]: person["_row"] for person in people}
 
-    won, lost = [], []
-    for entry in entries:
-        row = mine[entry["to"]]
-        if winner.get(ledger_key(campaign, entry["to"])) == row:
-            won.append({**entry, "_row": row})
+    at = campaign_column(ws, header, campaign)
+    filled = column_values(ws, at)
+
+    won, already, missing = [], [], []
+    for entry, phone in zip(entries, phones):
+        row = by_phone.get(phone)
+        if row is None:
+            missing.append(entry)
+        elif filled.get(row, "").strip():
+            already.append(entry)
         else:
-            lost.append(row)
-    return won, lost
+            won.append({**entry, "_row": row})
+
+    stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    write_column(ws, at, [item["_row"] for item in won], f"{SENDING} {stamp}")
+    return won, already, missing
 
 
-def mark(ws, rows: list[int], code: str, message_key: str | None = None) -> None:
-    """행들의 접수코드와 messageKey 를 채웁니다.
+def mark(ws, header: list[str], campaign: str, rows: list[int], value: str) -> None:
+    """선점한 칸을 최종 값으로 바꿉니다.
 
     Args:
-        ws: 발송이력 워크시트
+        ws: 명단 워크시트
+        header: read_roster 가 돌려준 헤더
+        campaign: 발송 건 식별자
         rows: 대상 행 번호
-        code: 접수코드 (1000 · 실패 · 중복 …)
-        message_key: 벤더가 발급한 키
+        value: 적을 값. 빈 문자열이면 지워 재시도를 연다
     """
-    updates = [{"range": f"{CODE_COLUMN}{row}", "values": [[code]]} for row in rows]
-    if message_key:
-        updates += [
-            {"range": f"{KEY_COLUMN}{row}", "values": [[message_key]]} for row in rows
-        ]
-    ws.batch_update(updates, value_input_option="RAW")
+    write_column(ws, campaign_column(ws, header, campaign), rows, value)

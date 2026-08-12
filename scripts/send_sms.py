@@ -1,25 +1,26 @@
 """
-문자를 보내고 발송이력 시트에 남깁니다.
+문자를 보내고 참가자 명단 시트의 캠페인 열에 표시합니다.
 
 슬랙 승인 카드와 MCP 도구는 별도 PR 로 붙습니다. 이 스크립트는 그 전에
 발송 계층을 사람이 직접 확인하는 손잡이입니다.
 
-같은 campaign 으로 이미 보낸 번호는 자동으로 빠지므로, 여러 번 돌려도
-같은 사람에게 두 번 가지 않습니다. 재발송이 필요하면 campaign 을 바꿉니다.
+명단에서 그 캠페인 열이 빈 사람만 보냅니다. 여러 번 돌려도 같은 사람에게 두 번
+가지 않습니다. 재발송이 필요하면 campaign 을 바꾸거나 그 칸을 지웁니다.
+
+공식 문자만 여기로 보냅니다. 개인 CS 문자는 슬랙 스레드가 기록입니다.
 
 사용법:
     # 문안·타입·길이만 확인 (발송하지 않음)
     python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \\
-        --template discord --to 010-1111-1111 --name 홍길동 \\
-        --var1 "1기 (서울)" --var2 https://discord.gg/xxx --dry-run
+        --content "[*이름*]선생님, 안내드립니다" --to 010-1111-1111 --name 홍길동 --dry-run
 
     # 명단 파일로 (헤더: to,name,var1..var8)
     python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \\
-        --template discord --csv roster.csv --dry-run
+        --content "..." --csv roster.csv --dry-run
 
     # 실제 발송
     python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \\
-        --template discord --csv roster.csv
+        --content "..." --csv roster.csv
 """
 
 import sys
@@ -79,8 +80,9 @@ def main() -> None:
     # --cancel 은 이 둘을 쓰지 않는다. required 로 두면 예약을 잘못 걸었다는 걸
     # 깨달은 사람이 안 쓰이는 인자를 지어내는 동안 문자가 나간다.
     parser.add_argument(
-        "--spreadsheet", help=f"발송이력을 적을 시트 ({SPREADSHEET_URL_HINT})"
+        "--spreadsheet", help=f"참가자 명단 시트 ({SPREADSHEET_URL_HINT})"
     )
+    parser.add_argument("--worksheet", help="명단 탭 이름. 생략하면 첫 번째 탭")
     parser.add_argument("--campaign", help="발송 건 식별자")
     parser.add_argument("--template", help="templates/sms/<이름>.txt")
     parser.add_argument("--content", help="즉석 문안 본문")
@@ -166,7 +168,13 @@ def main() -> None:
         send_at=send_at,
         requested_by="script",
         entrypoint="script",
+        worksheet=args.worksheet,
     )
+    if result["missing"]:
+        print(
+            f"명단에 없어 보내지 않은 번호 {len(result['missing'])}건: "
+            + ", ".join(result["missing"])
+        )
     if result["sent"] == 0:
         print(
             f"대상 {result['requested']}명이 모두 이미 발송된 상태라 보내지 않았습니다."
