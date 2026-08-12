@@ -11,6 +11,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
+from .sms import get_sms_tools
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -122,6 +123,7 @@ async def _build_tools(
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
+        + get_sms_tools(client, user_id, channel, thread_ts)
     )
 
 

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app import sms as sms_tools
 from service.sms import roster
 
 
@@ -65,6 +66,8 @@ def test_연결을_끊으면_채널_ID를_돌려준다(monkeypatch):
     assert roster.disconnect_sheet("C1") == "C1"
 
 
-def test_NotConnected는_잡을_수_있는_예외다():
-    # 호출부가 `except roster.NotConnected` 로 잡아 안내 문구로 바꾼다.
+def test_호출부가_잡을_수_있는_이름이다():
+    # `except roster.NotConnected` 가 성립하려면 모듈에 그 이름이 있어야 한다.
+    # 없으면 AttributeError 로 바뀌어 도구가 내부 오류로 터진다.
     assert issubclass(roster.NotConnected, Exception)
+    assert hasattr(sms_tools.roster, "NotConnected")

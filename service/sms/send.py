@@ -109,6 +109,7 @@ def send_campaign(
             "requested": len(normalized),
             "skipped": len(normalized),
             "sent": 0,
+            "sent_to": [],
             "code": None,
             "message_key": None,
             "message_type": message_type,
@@ -145,6 +146,9 @@ def send_campaign(
         "requested": len(normalized),
         "skipped": len(normalized) - len(won),
         "sent": len(won),
+        # 이미 보낸 번호는 빠지므로 대상 전체와 다르다. 도달 확인은 이번에
+        # 실제로 나간 번호만 기다려야 오지 않을 결과를 붙들지 않는다.
+        "sent_to": [item["to"] for item in won],
         "code": code,
         "message_key": result.get("messageKey"),
         "message_type": message_type,
@@ -280,3 +284,17 @@ def preview(
         "folded": len(rows) - len(normalized),
         "sample": rendered[0] if rendered else "",
     }
+
+
+def campaign_summary(spreadsheet_id: str, campaign: str) -> dict[str, int]:
+    """캠페인 진행 현황을 셉니다.
+
+    Args:
+        spreadsheet_id: 참가자 스프레드시트
+        campaign: 발송 건 식별자
+
+    Returns:
+        dict[str, int]: total·accepted·unknown·duplicate·failed
+    """
+    ws = ledger.open_ledger(spreadsheet_id)
+    return ledger.summarize(ledger.read_rows(ws), campaign)

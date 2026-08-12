@@ -274,6 +274,27 @@ def mark(ws, rows: list[int], code: str, message_key: str | None = None) -> None
     ws.batch_update(updates, value_input_option="RAW")
 
 
+def summarize(rows: list[dict[str, Any]], campaign: str) -> dict[str, int]:
+    """캠페인 현황을 셉니다.
+
+    Args:
+        rows: read_rows 결과
+        campaign: 발송 건 식별자
+
+    Returns:
+        dict[str, int]: total·accepted·unknown·duplicate·failed
+    """
+    mine = [row for row in rows if row.get("캠페인") == campaign]
+    codes = [row.get("접수코드", "") for row in mine]
+    return {
+        "total": len(mine),
+        "accepted": codes.count("1000"),
+        "unknown": codes.count(""),
+        "duplicate": codes.count("중복"),
+        "failed": codes.count("실패"),
+    }
+
+
 def record_results(ws, campaign: str, statuses: dict[str, str]) -> None:
     """도달 결과를 씁니다. 이미 찬 칸은 건드리지 않습니다.
 
