@@ -179,3 +179,100 @@ def test_게시용_링크는_ID로_보지_않는다():
 def test_시트로_읽히지_않으면_거절한다():
     with pytest.raises(ValueError):
         ledger.parse_spreadsheet_id("그 시트요")
+
+
+def test_주소의_탭_ID를_뽑는다():
+    assert (
+        ledger.parse_gid(
+            "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku/"
+            "edit?gid=1077887383#gid=1077887383"
+        )
+        == 1077887383
+    )
+
+
+def test_탭_ID가_없으면_None():
+    assert ledger.parse_gid("1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zku") is None
+
+
+# 아래는 실제 운영 시트("기업연계 정보 교원 사업 참여 조사(응답)")의 헤더다.
+# 구글 폼 응답 시트라 열 제목이 설문 문항 그대로이고, 우리가 가정한
+# '휴대폰' 같은 짧은 이름이 하나도 없다. 이 헤더로 안 돌면 현장에서 못 쓴다.
+FORM_HEADER = [
+    "타임스탬프",
+    "이메일 주소",
+    "휴대전화 번호",
+    "소속 학교명",
+    "성함",
+    "담당교과",
+    "학교급",
+    "시·도 교육청",
+    "교직경력(N년)",
+    "표시 과목이 *정보·컴퓨터*입니까?",
+    "2024~2025년 디지털 활용 연수 이수 이력 (복수 선택 가능)",
+    "실습 희망 트랙(희망 트랙에 따라 실습해보는 활동내용이 달라집니다)",
+    "희망 기수 (15차시 기반연수)",
+    "기반연수 숙박 신청(2인 1실 배정)",
+    "코딩 경험 자가 진단",
+    "AI 도구 활용 경험 (복수 선택 가능)",
+    "본인이 *해결하고 싶은 수업 문제*를 한 줄로 적어주세요",
+    "개인정보 수집·이용 동의",
+    "운영진에 전달하고 싶은 의견·질문이 있으면 자유롭게 적어주세요",
+    "성별",
+    "비고",
+    "연수 참여에 대한 공문 발송 여부",
+    "발송여부",
+    "문자발송",
+]
+
+
+def _form_row(phone: str, name: str, 문자발송: str = "") -> list:
+    row = [""] * len(FORM_HEADER)
+    row[2] = phone
+    row[4] = name
+    row[23] = 문자발송
+    return row
+
+
+def test_폼_응답_시트에서_휴대전화_번호_열을_찾는다():
+    # '휴대전화 번호' 는 띄어쓰기 때문에 후보 '전화번호' 로는 안 잡힌다.
+    # '휴대전화' 가 잡아야 하고, 그보다 뒤에 있는 '번호' 가 먼저 걸리면
+    # 엉뚱한 열을 번호로 읽는다.
+    ws = FakeWorksheet([FORM_HEADER, _form_row("010-6245-4553", "김태서")])
+    header, people = ledger.read_roster(ws)
+
+    assert header[2] == "휴대전화 번호"
+    assert people == [{"phone": "01062454553", "_row": 2}]
+
+
+def test_폼_응답_시트에서_캠페인_열은_맨_뒤에_붙는다():
+    # 폼이 응답을 추가할 때 건드리지 않는 자리여야 한다.
+    ws = FakeWorksheet([FORM_HEADER, _form_row("010-6245-4553", "김태서")])
+    header, _ = ledger.read_roster(ws)
+
+    at = ledger.campaign_column(ws, header, "discord안내")
+
+    assert at == len(FORM_HEADER)
+    assert ws.rows[0][at] == "discord안내"
+
+
+def test_사람이_쓰던_문자발송_열을_그대로_쓴다():
+    # 이미 손으로 '7.8' 을 적어둔 열이다. 같은 이름을 campaign 으로 주면
+    # 새 열을 만들지 않고 그 값을 "이미 보냄"으로 읽어야 한다.
+    ws = FakeWorksheet(
+        [
+            FORM_HEADER,
+            _form_row("010-6245-4553", "김태서", 문자발송="7.8"),
+            _form_row("010-2273-1905", "안베티"),
+        ]
+    )
+    header, _ = ledger.read_roster(ws)
+
+    won, already, missing = ledger.claim(
+        ws, header, "문자발송", [{"to": "01062454553"}, {"to": "01022731905"}]
+    )
+
+    assert len(ws.rows[0]) == len(FORM_HEADER)
+    assert [item["to"] for item in already] == ["01062454553"]
+    assert [item["to"] for item in won] == ["01022731905"]
+    assert missing == []

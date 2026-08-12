@@ -3,24 +3,20 @@
 
 핵심은 순서입니다.
 
-    ① 이력 시트에 자리를 잡는다(append + 행 번호로 승자 판정)
-    ② 벤더 호출
-    ③ 접수코드·messageKey 기록
+    ① 명단의 캠페인 열에서 빈 칸인 사람만 골라 '발송중'으로 선점한다
+    ② 벤더 호출 (캠페인 전체가 요청 1회)
+    ③ 그 칸을 발송 시각으로 바꾼다
 
 보내고 기록하면 ②와 ③ 사이가 경합 구간이 되어, 슬랙과 MCP 가 동시에 돌 때
 같은 사람에게 두 번 갑니다. 먼저 자리를 잡고 보내면 진 쪽은 발송하지 않습니다.
 
-승자 판정 원리는 service/sms/ledger.py 에 있습니다. 요약하면 append 가
-만들어주는 행 번호가 전체 순서이고, 같은 (캠페인, 번호) 중 살아 있는 최소
-행 번호가 이깁니다.
-
-②에서 벤더가 명시적으로 거절하면(HTTP 오류·code≠1000) 자리를 '실패'로 표시해
+②에서 벤더가 명시적으로 거절하면(HTTP 오류·code≠1000) 칸을 다시 비워
 재시도를 열어둡니다. 접수되지 않은 것이 확실하기 때문입니다.
 
 타임아웃이나 연결 끊김은 다릅니다. 벤더가 이미 접수하고 응답만 못 돌려줬을 수
-있으므로 접수코드를 빈 채로 둡니다. 빈 칸은 "보냈는지 모름"이라 살아 있는
-자리로 취급되어 재시도가 막히고, 사람이 뿌리오 웹에서 확인하게 됩니다.
-여기서 '실패'로 찍으면 다음 시도가 이겨서 같은 사람에게 두 번 갑니다.
+있으므로 '발송중'을 그대로 남긴 채 터뜨립니다. 값이 있는 칸은 발송 대상에서
+빠지므로 재시도가 막히고, 사람이 뿌리오 웹에서 확인하게 됩니다. 여기서
+칸을 비우면 다음 시도가 같은 사람에게 두 번 보냅니다.
 """
 
 import datetime
@@ -63,6 +59,7 @@ def send_campaign(
     entrypoint: str,
     subject: str | None = None,
     worksheet: str | None = None,
+    gid: int | None = None,
     send_at: datetime.datetime | None = None,
     **vendor: Any,
 ) -> dict[str, Any]:
@@ -80,7 +77,8 @@ def send_campaign(
         requested_by: 시킨 사람 이메일. 도구 인자가 아니라 인증에서 온 값
         entrypoint: slack · mcp · script
         subject: LMS 제목. 생략하면 campaign 을 쓴다
-        worksheet: 명단 탭 이름. 생략하면 첫 번째 탭
+        worksheet: 명단 탭 이름. 주면 gid 보다 우선한다
+        gid: 명단 탭 ID. worksheet 와 둘 다 없으면 첫 번째 탭
         send_at: 예약 발송 시각. 생략하면 즉시. 최소 3분 뒤여야 한다
         **vendor: 뿌리오 payload 에 그대로 실을 추가 필드
 
@@ -100,7 +98,7 @@ def send_campaign(
     if send_at is not None:
         vendor["sendTime"] = reserve_time(send_at)
 
-    ws = ledger.open_roster(spreadsheet_id, worksheet)
+    ws = ledger.open_roster(spreadsheet_id, worksheet, gid)
     header, _ = ledger.read_roster(ws)
     won, already, missing = ledger.claim(ws, header, campaign, normalized)
 
@@ -244,11 +242,12 @@ def check(
 def cancel_reserved(message_key: str) -> dict[str, Any]:
     """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
 
-    이력 시트의 행은 지우지 않습니다. "예약했다가 취소했다"도 기록이고,
+    명단의 캠페인 열은 지우지 않습니다. "예약했다가 취소했다"도 기록이고,
     지우면 같은 campaign 으로 다시 예약할 수 있게 되어 중복 차단이 풀립니다.
+    정말 다시 보내야 하면 사람이 그 칸을 지웁니다.
 
     Args:
-        message_key: 접수 시 받은 messageKey. 발송이력 시트에 남아 있다
+        message_key: 접수 시 받은 messageKey. 발송 직후 출력에 있다
 
     Returns:
         dict[str, Any]: 벤더 응답

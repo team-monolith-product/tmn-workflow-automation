@@ -82,7 +82,9 @@ def main() -> None:
     parser.add_argument(
         "--spreadsheet", help=f"참가자 명단 시트 ({SPREADSHEET_URL_HINT})"
     )
-    parser.add_argument("--worksheet", help="명단 탭 이름. 생략하면 첫 번째 탭")
+    parser.add_argument(
+        "--worksheet", help="명단 탭 이름. 생략하면 주소의 gid, 그것도 없으면 첫 탭"
+    )
     parser.add_argument("--campaign", help="발송 건 식별자")
     parser.add_argument("--template", help="templates/sms/<이름>.txt")
     parser.add_argument("--content", help="즉석 문안 본문")
@@ -118,6 +120,7 @@ def main() -> None:
     # 발송 인자 자리에서 평가하면 dry-run 이 통과시킨 명령이 실발송에서만
     # 터진다. 이 CLI 가 없애려는 게 정확히 그 왕복이다.
     sheet_id = ledger.parse_spreadsheet_id(args.spreadsheet)
+    gid = ledger.parse_gid(args.spreadsheet)
 
     if args.csv:
         rows = read_csv(args.csv)
@@ -169,6 +172,7 @@ def main() -> None:
         requested_by="script",
         entrypoint="script",
         worksheet=args.worksheet,
+        gid=gid,
     )
     if result["missing"]:
         print(

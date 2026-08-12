@@ -39,6 +39,7 @@ SENDING = "발송중"
 # (/spreadsheets/d/e/2PACX-.../pubhtml)의 'e' 가 ID 로 통과한다.
 _ID_IN_URL = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]{20,})")
 _BARE_ID = re.compile(r"^[A-Za-z0-9_-]{20,}$")
+_GID_IN_URL = re.compile(r"[?&#]gid=(\d+)")
 
 
 class RosterLayoutError(RuntimeError):
@@ -69,6 +70,23 @@ def parse_spreadsheet_id(value: str) -> str:
     raise ValueError(f"스프레드시트 주소나 ID 로 읽히지 않습니다: {value}")
 
 
+def parse_gid(value: str) -> int | None:
+    """스프레드시트 주소에서 탭 ID 를 뽑습니다. 없으면 None.
+
+    사람이 붙여넣는 주소에는 보고 있던 탭이 이미 들어 있습니다. 이걸 버리고
+    첫 번째 탭을 열면, 명단이 두 번째 탭인 시트에서 엉뚱한 탭에 캠페인 열을
+    만듭니다. 그 탭에도 번호 열이 있으면 아무도 모른 채 잘못 기록됩니다.
+
+    Args:
+        value: 스프레드시트 URL 또는 ID
+
+    Returns:
+        int | None: 탭 ID. 주소에 없으면 None
+    """
+    found = _GID_IN_URL.search(value)
+    return int(found.group(1)) if found else None
+
+
 def _column_letter(index: int) -> str:
     """0-based 열 번호를 A1 표기로 바꿉니다."""
     letters = ""
@@ -97,17 +115,20 @@ def digits(phone: str) -> str:
     return re.sub(r"\D", "", phone)
 
 
-def open_roster(spreadsheet_id: str, worksheet: str | None = None):
+def open_roster(
+    spreadsheet_id: str, worksheet: str | None = None, gid: int | None = None
+):
     """참가자 명단 탭을 엽니다.
 
     Args:
         spreadsheet_id: 참가자 스프레드시트 ID
-        worksheet: 탭 이름. 생략하면 첫 번째 탭
+        worksheet: 탭 이름. 주면 gid 보다 우선한다
+        gid: 탭 ID. 둘 다 없으면 첫 번째 탭
 
     Returns:
         gspread.Worksheet: 명단 워크시트
     """
-    return google_sheets.get_first_worksheet(spreadsheet_id, worksheet)
+    return google_sheets.open_worksheet(spreadsheet_id, name=worksheet, gid=gid)
 
 
 def read_roster(ws) -> tuple[list[str], list[dict[str, Any]]]:

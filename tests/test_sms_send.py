@@ -21,7 +21,7 @@ ROSTER_HEADER = ["연번", "성명", "휴대폰"]
 
 @pytest.fixture
 def ws(monkeypatch) -> FakeWorksheet:
-    """ROWS 두 명이 올라 있는 명단 탭."""
+    """ROWS 두 명이 올라 있는 명단 탭. 어느 탭을 열었는지도 기록한다."""
     sheet = FakeWorksheet(
         [
             ROSTER_HEADER,
@@ -29,7 +29,12 @@ def ws(monkeypatch) -> FakeWorksheet:
             ["2", "나", "010-2222-2222"],
         ]
     )
-    monkeypatch.setattr(ledger, "open_roster", lambda _id, _ws=None: sheet)
+
+    def fake_open(spreadsheet_id, worksheet=None, gid=None):
+        sheet.opened = {"id": spreadsheet_id, "worksheet": worksheet, "gid": gid}
+        return sheet
+
+    monkeypatch.setattr(ledger, "open_roster", fake_open)
     return sheet
 
 
@@ -80,6 +85,14 @@ def test_보내기_전에_자리를_잡는다(ws, monkeypatch):
     assert [ws.rows[1][at], ws.rows[2][at]] != ["", ""]
     assert result["sent"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
+
+
+def test_지정한_탭을_연다(ws, monkeypatch):
+    # 주소에 gid 가 있는데 첫 탭을 열면, 명단이 두 번째 탭인 시트에서
+    # 엉뚱한 탭에 캠페인 열을 만들고 아무도 모른다.
+    _run(monkeypatch, {"code": "1000", "messageKey": "K1"}, gid=1077887383)
+
+    assert ws.opened["gid"] == 1077887383
 
 
 def test_보내고_나면_선점_표시가_일시로_바뀐다(ws, monkeypatch):
