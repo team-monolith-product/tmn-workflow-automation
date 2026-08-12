@@ -21,6 +21,44 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 ### FastAPI 전용
 - `WORKFLOW_AUTOMATION_API_KEY`: 웹훅 API 인증을 위한 API 키 (필수)
 
+### 문자 발송 (뿌리오)
+- `PPURIO_ACCOUNT` / `PPURIO_API_KEY` / `PPURIO_SENDER`: 발송 API 계정·인증키·발신번호
+- `PPURIO_WEB_ID` / `PPURIO_WEB_PASSWORD`: 도달 결과 확인용 웹 로그인 계정
+- `PPURIO_WEB_LOGIN_URL` / `PPURIO_WEB_RESULT_URL` / `PPURIO_WEB_ID_SELECTOR` / `PPURIO_WEB_PW_SELECTOR`: 발송결과 페이지 주소·셀렉터 (기본값 보정용)
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: 참가자 스프레드시트에 쓸 서비스 계정
+
+발송 이력을 적을 시트는 채널마다 다릅니다. 사업 채널에서 봇에게 `이 채널에 <구글시트 주소> 연결해줘` 라고 하면 그 채널의 문자 이력이 그 시트 `발송이력` 탭에 쌓입니다. 연결하지 않은 채널에서는 발송이 막힙니다.
+
+호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 `code 3003 invalid ip`).
+
+#### 흐름
+1. 데이터를 조회해 명단을 만들고, 봇이 `draft_sms` 로 **명단·문안 승인 카드**를 올립니다 (발송 안 함)
+2. 사람이 **[발송] 버튼**이나 **✅ 이모지**로 승인합니다
+3. 발송이력 시트에 **자리를 먼저 잡고**(append 후 재조회 — 같은 `(캠페인, 번호)` 중 살아 있는 최소 행번호가 이깁니다) 이미 보낸 번호를 뺀 뒤 **한 번의 API 호출로 전원 발송**합니다
+4. 웹 발송결과를 폴링해 시트의 `결과` 열을 채우고, **도달 실패분은 보고만 합니다** — 자동 재발송은 하지 않습니다. 다시 보내려면 사람이 승인 카드를 한 번 더 거칩니다
+
+> 시트에는 UNIQUE 제약이 없습니다. 중복 차단은 위 3번의 append + 재조회 규칙이 전부이고,
+> `service/sms/ledger.py` 의 재조회를 지우면 같은 사람에게 두 번 나갑니다.
+> 자동 재발송(`campaign-r2`)은 `SEND_ROUNDS` 로 열 수 있지만, 재발송 판정이 아직 실계정으로
+> 검증되지 않은 웹 페이지 파싱에 걸려 있어 지금은 1회로 두었습니다.
+
+문안은 반복해서 쓰면 `templates/sms/*.txt`, 일회성이면 대화에서 바로 작성합니다.
+
+#### 도달 확인 (Playwright)
+뿌리오 v1 에는 결과 조회 API 가 없어 웹 페이지를 브라우저로 읽습니다. 주소·셀렉터
+기본값은 추정치이므로 최초 1회 보정이 필요합니다.
+
+```bash
+python -m service.sms.result --dump   # tmp/ppurio_*.html, *.png 확인
+```
+
+헤드리스로 돌지만 컨테이너에서는 `--no-sandbox`(root 실행)와
+`--disable-dev-shm-usage`(/dev/shm 64MB)가 필요하며 코드에 반영돼 있습니다.
+파드 메모리는 봇 프로세스와 Chromium 이 함께 올라갈 여유가 있어야 합니다
+(jce-service-helm#608 에서 2Gi 로 상향).
+
+Slack 앱에 `reactions:read` 스코프와 `reaction_added` 이벤트 구독, Interactivity 활성화가 필요합니다.
+
 ## 로컬 실행
 
 ### Slack Bot
@@ -78,25 +116,3 @@ curl -X POST http://localhost:8000/webhook \
 본 애플리케이션은 `jce-service-helm/workflow-automation-slack` Helm Chart를 통해 배포됩니다.
 - Slack Bot과 FastAPI 서버는 동일한 Docker 이미지를 사용하며, 서로 다른 CMD로 실행됩니다.
 - ArgoCD를 통해 자동 배포됩니다.
-
-### 문자 발송 (뿌리오)
-- `PPURIO_ACCOUNT` / `PPURIO_API_KEY`: 발송 API 계정·인증키. 호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 토큰 발급에서 `3003 invalid ip`)
-- `PPURIO_SENDER`: 계정에 사전등록된 발신번호. 발신번호 사전등록제라 이 값 없이는 접수되지 않습니다
-- `GOOGLE_SERVICE_ACCOUNT_JSON`: 발송이력을 적을 참가자 스프레드시트에 쓸 서비스 계정
-
-발송 이력은 참가자 스프레드시트의 `발송이력` 탭에 한 발송이 한 행으로 쌓입니다.
-같은 `campaign` 으로 이미 보낸 번호는 자동으로 빠지므로 같은 명령을 여러 번 돌려도
-같은 사람에게 두 번 가지 않습니다.
-
-```bash
-# 문안·타입·길이만 확인
-python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \
-    --template discord --csv roster.csv --dry-run
-
-# 실제 발송
-python scripts/send_sms.py --spreadsheet <시트주소> --campaign discord \
-    --template discord --csv roster.csv
-```
-
-문안은 반복해서 쓰면 `templates/sms/*.txt`, 일회성이면 `--content` 로 바로 넣습니다.
-치환은 뿌리오 태그를 그대로 씁니다 — 이름은 `[*이름*]`, 나머지는 `[*1*]`~`[*8*]`.
