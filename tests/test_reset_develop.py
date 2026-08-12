@@ -1,6 +1,6 @@
 """develop 초기화의 담당자 탐색과 안내문 생성 테스트"""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from scripts.reset_develop import (
     LOCAL_CLEANUP_COMMAND,
@@ -8,6 +8,7 @@ from scripts.reset_develop import (
     get_assignee_emails,
     get_open_pull_urls,
     get_task_page_ids,
+    main,
     to_mentions,
 )
 
@@ -113,3 +114,17 @@ def test_build_announcement_omits_empty_sections():
 
     assert "열린 PR" not in text
     assert "요청:" not in text
+
+
+def test_main_stops_when_bot_cannot_push(monkeypatch):
+    """푸시 권한이 없으면 ref 를 건드리지 않고 이유를 돌려준다"""
+    monkeypatch.setenv("GITHUB_TOKEN", "test-dummy-token")
+    repo = MagicMock()
+    repo.permissions.push = False
+
+    with patch("scripts.reset_develop.Github") as github:
+        github.return_value.get_repo.return_value = repo
+        result = main("enk-opencode")
+
+    assert "푸시 권한이 없습니다" in result
+    repo.get_git_ref.return_value.edit.assert_not_called()
