@@ -5,8 +5,10 @@
 import asyncio
 from datetime import datetime, timedelta
 import importlib
+import traceback
 
 from cachetools import TTLCache
+from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
@@ -139,6 +141,36 @@ BUG_REPORT_CHANNEL_TO_PRODUCT = {
 USER_ID_TO_LAST_HUDDLE_JOINED_AT = {}
 
 
+async def _run_wa_job(
+    func,
+    args: list[str],
+    kwargs: dict,
+    description: str,
+    respond: AsyncRespond,
+) -> None:
+    """
+    `/wa` 작업을 스레드에서 실행하고 결과를 실행한 사람에게만 보여줍니다.
+
+    ack 이후에는 응답 경로가 response_url 뿐이라, 예외를 여기서 잡지 않으면 실패가 파드
+    로그에만 남고 사용자에게는 "진행 중" 에서 멈춘 것처럼 보인다.
+
+    Args:
+        func: 작업 함수
+        args: 작업 함수의 위치 인자
+        kwargs: 작업 함수의 키워드 인자
+        description: 작업 표의 설명. 실패 안내에 쓴다
+        respond: 슬래시 커맨드의 response_url 응답 함수
+    """
+    try:
+        result = await asyncio.to_thread(func, *args, **kwargs)
+    except Exception as error:
+        traceback.print_exc()
+        await respond(f":x: {description} 에 실패했습니다.\n```{error}```")
+        return
+    if isinstance(result, str):
+        await respond(result)
+
+
 def register_general_handlers(app):
     """
     범용 봇의 이벤트 핸들러를 등록합니다.
@@ -239,6 +271,7 @@ def register_general_handlers(app):
     # 예: `/wa reset-develop jce-class-rails` → func("jce-class-rails")
     # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로 전달할 매핑이다.
     # 예: {"caller_slack_user_id": "user_id"} → func(caller_slack_user_id=body.get("user_id"))
+    # 함수가 문자열을 반환하면 실행한 사람에게만 보이는 응답으로 되돌려준다.
     _JOBS = [
         (
             "validate-customer-reports",
@@ -305,7 +338,7 @@ def register_general_handlers(app):
             "reset-develop",
             "scripts.reset_develop",
             "main",
-            "`<레포>` 의 develop 을 main 으로 초기화",
+            "develop 을 main 으로 초기화",
             {"caller_slack_user_id": "user_id"},
         ),
     ]
@@ -321,7 +354,7 @@ def register_general_handlers(app):
         return "\n".join(lines)
 
     @app.command("/wa")
-    async def handle_wa(ack, body):
+    async def handle_wa(ack, body, respond):
         text = (body.get("text") or "").strip()
         sub = text.split()[0] if text else ""
         if sub in ("", "help", "list"):
@@ -338,7 +371,9 @@ def register_general_handlers(app):
         args = text.split()[1:]
         kwargs = {kw: body.get(bk) for kw, bk in (body_kwargs or {}).items()}
         # 슬래시 커맨드 응답은 리스너가 끝나야 나가므로, 작업을 기다리면 3초 제한에 걸려
-        # ack 대신 타임아웃이 뜬다. 작업 결과는 각 작업이 직접 슬랙에 게시한다.
-        task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+        # ack 대신 타임아웃이 뜬다. 작업 결과와 실패는 _run_wa_job 이 response_url 로 보낸다.
+        task = asyncio.create_task(
+            _run_wa_job(func, args, kwargs, description, respond)
+        )
         _background_jobs.add(task)
         task.add_done_callback(_background_jobs.discard)

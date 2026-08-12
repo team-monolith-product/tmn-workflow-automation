@@ -5,8 +5,9 @@ develop 은 dev 배포 누적 브랜치라 main 의 머지를 자동으로 따�
 main 과 어긋난다. 초기화는 develop ref 를 main 커밋으로 강제 이동시키는 것이며, 이
 push 가 dev 이미지 빌드를 트리거해 dev 환경이 main 상태로 재배포된다.
 
-fast-forward 가 아니므로 develop ruleset(non_fast_forward)의 bypass 가 필요하다.
-GITHUB_TOKEN 계정(github-machine-monolith)은 bypass 대상인 Bot 팀 소속이다.
+GITHUB_TOKEN 계정(github-machine-monolith)이 Bot 팀 소속이므로, 대상 레포에 Bot 팀이
+write 로 추가되어 있어야 한다. fast-forward 가 아니라서 develop ruleset(non_fast_forward)
+이 있는 레포에서는 bypass 도 필요하고, Bot 팀이 그 bypass 대상이다.
 
 로컬 develop 은 각자 손으로 정리해야 하므로 초기화 후 안내에서 열린 PR 의 담당자를
 멘션한다. 담당자는 PR → 노션 작업 → 담당자 → 이메일 → 슬랙 사용자로 찾는다.
@@ -191,7 +192,7 @@ def main(
     repo_name: str = "",
     caller_slack_user_id: str | None = None,
     dry_run: bool = False,
-) -> None:
+) -> str:
     """
     develop 브랜치를 main 으로 초기화하고 슬랙에 안내합니다.
 
@@ -199,35 +200,33 @@ def main(
         repo_name: GitHub 레포 이름 (예: jce-class-rails)
         caller_slack_user_id: 명령을 실행한 슬랙 사용자 ID
         dry_run: True 면 초기화와 슬랙 발송 없이 대상만 출력
+
+    Returns:
+        str: 실행한 사람에게만 보여줄 결과. 안내가 아니라 명령 결과이므로 공개하지 않는다
     """
-    slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-
-    def reply(text: str) -> None:
-        """실행한 사람에게만 보이는 응답. 안내가 아니라 명령 결과이므로 공개하지 않는다."""
-        print(text)
-        if caller_slack_user_id and not dry_run:
-            slack_client.chat_postEphemeral(
-                channel=SLACK_CHANNEL_ID, user=caller_slack_user_id, text=text
-            )
-
     if not repo_name:
-        reply("사용법: `/wa reset-develop <레포 이름>` (예: `jce-class-rails`)")
-        return
+        return "사용법: `/wa reset-develop <레포 이름>` (예: `jce-class-rails`)"
 
     github_client = Github(os.environ["GITHUB_TOKEN"])
     try:
         repo = github_client.get_repo(f"{ORG_NAME}/{repo_name}")
         develop_ref = repo.get_git_ref("heads/develop")
     except UnknownObjectException:
-        reply(f"`{repo_name}` 레포 또는 그 develop 브랜치를 찾을 수 없습니다.")
-        return
+        return f"`{repo_name}` 레포 또는 그 develop 브랜치를 찾을 수 없습니다."
+
+    # 푸시 권한이 없으면 ref 이동이 404 로 떨어져 원인을 알기 어렵다.
+    if not repo.permissions.push:
+        return (
+            f"봇 계정에 `{repo_name}` 푸시 권한이 없습니다. "
+            "Bot 팀을 해당 레포에 write 로 추가해 주세요."
+        )
 
     old_sha = develop_ref.object.sha
     main_sha = repo.get_git_ref("heads/main").object.sha
     if old_sha == main_sha:
-        reply(f"`{repo_name}` 의 develop 은 이미 main 과 같습니다.")
-        return
+        return f"`{repo_name}` 의 develop 은 이미 main 과 같습니다."
 
+    slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"], notion_version="2025-09-03")
     task_page_ids = get_task_page_ids(notion, get_open_pull_urls(repo))
     emails = get_assignee_emails(
@@ -243,11 +242,13 @@ def main(
     print(f"develop {old_sha} → {main_sha}")
 
     if dry_run:
-        print(announcement)
-        return
+        return announcement
 
     develop_ref.edit(sha=main_sha, force=True)
     slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=announcement)
+    return (
+        f"`{repo_name}` 의 develop 을 초기화하고 <#{SLACK_CHANNEL_ID}> 에 안내했습니다."
+    )
 
 
 if __name__ == "__main__":
@@ -261,4 +262,4 @@ if __name__ == "__main__":
         help="초기화와 슬랙 발송 없이 대상만 출력합니다.",
     )
     args = parser.parse_args()
-    main(args.repo, dry_run=args.dry_run)
+    print(main(args.repo, dry_run=args.dry_run))
