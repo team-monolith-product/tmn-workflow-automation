@@ -81,8 +81,15 @@ def load(name: str) -> str:
     """
     path = TEMPLATE_DIR / f"{name}.txt"
     if not path.is_file():
+        # 저장된 문안은 아직 하나도 없다. 목록만 비워서 돌려주면 "사용 가능: "
+        # 뒤가 잘린 것처럼 보여, 오타를 의심하며 있지도 않은 파일을 찾는다.
         available = ", ".join(sorted(p.stem for p in TEMPLATE_DIR.glob("*.txt")))
-        raise FileNotFoundError(f"문안 '{name}' 없음. 사용 가능: {available}")
+        raise FileNotFoundError(
+            f"문안 '{name}' 없음. 사용 가능: {available}"
+            if available
+            else f"문안 '{name}' 없음. 저장된 문안이 하나도 없습니다 — "
+            f"{TEMPLATE_DIR} 에 .txt 를 두거나 --content 로 본문을 바로 주세요."
+        )
     return path.read_text(encoding="utf-8").rstrip("\n")
 
 

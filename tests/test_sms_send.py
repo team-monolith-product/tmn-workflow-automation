@@ -1,6 +1,7 @@
 """발송 게이트 테스트 — 자리를 먼저 잡고 보내는 순서가 지켜지는지 본다."""
 
 import datetime
+import urllib.error
 
 import pytest
 
@@ -47,11 +48,14 @@ def _kst_now() -> datetime.datetime:
     return datetime.datetime.now(KST).replace(tzinfo=None)
 
 
-def _already(ws, row: int, value: str = "2026-08-05 10:00") -> None:
+def _already(ws, phone: str, value: str = "2026-08-05 10:00") -> None:
     """그 사람은 이 캠페인을 이미 받은 것으로 표시한다."""
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
-    ledger.write_column(ws, at, [row], value)
+    ledger.mark(ws, "discord", [phone], value)
+
+
+def _campaign(ws, name: str = "discord") -> int:
+    """캠페인 열 번호. 테스트가 열 위치를 가정하지 않게 한다."""
+    return ws.rows[0].index(name)
 
 
 def _run(monkeypatch, response=None, boom=None, **extra):
@@ -80,8 +84,7 @@ def test_보내기_전에_자리를_잡는다(ws, monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     # 명단 두 사람 모두 캠페인 열이 채워진다.
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
+    at = _campaign(ws)
     assert [ws.rows[1][at], ws.rows[2][at]] != ["", ""]
     assert result["sent"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
@@ -98,14 +101,13 @@ def test_지정한_탭을_연다(ws, monkeypatch):
 def test_보내고_나면_선점_표시가_일시로_바뀐다(ws, monkeypatch):
     _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
+    at = _campaign(ws)
     assert not ws.rows[1][at].startswith(ledger.SENDING)
     assert ws.rows[1][at]
 
 
 def test_이미_보낸_번호는_대상에서_빠진다(ws, monkeypatch):
-    _already(ws, 2)
+    _already(ws, "01011111111")
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 1 and result["skipped"] == 1
@@ -117,7 +119,7 @@ def test_이미_보낸_번호는_대상에서_빠진다(ws, monkeypatch):
 def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):
     # 서버가 죽어 뿌리오 웹으로 직접 보낸 뒤 손으로 남긴 기록. 사람은 번호를
     # 하이픈까지 넣어 적는다 — 그 표기로도 대조돼야 두 번 가지 않는다.
-    _already(ws, 2, "수기 발송")
+    _already(ws, "01011111111", "수기 발송")
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 1
@@ -125,8 +127,8 @@ def test_사람이_손으로_적은_줄도_존중한다(ws, monkeypatch):
 
 
 def test_전원_중복이면_벤더를_부르지_않는다(ws, monkeypatch):
-    _already(ws, 2)
-    _already(ws, 3)
+    _already(ws, "01011111111")
+    _already(ws, "01022222222")
     result, payload = _run(monkeypatch, {"code": "1000"})
 
     assert result["sent"] == 0 and result["skipped"] == 2
@@ -154,25 +156,32 @@ def test_명단에_없는_번호는_보내지_않고_알린다(ws, monkeypatch):
     assert result["missing"] == ["01099999999"]
 
 
-def test_벤더가_거절하면_실패로_표시해_재시도를_연다(ws, monkeypatch):
-    # 접수되지 않은 것이 확실할 때만 재시도를 연다.
+def test_벤더가_거절하면_선점을_풀어_재시도를_연다(ws, monkeypatch):
+    # 4xx 는 접수되지 않은 것이 확실하다. 그때만 재시도를 연다.
     with pytest.raises(transport.PpurioError):
-        _run(monkeypatch, boom=transport.PpurioError(500, "boom"))
+        _run(monkeypatch, boom=transport.PpurioError(400, "bad request"))
 
-    # 선점을 풀어 다시 대상이 된다.
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
+    at = _campaign(ws)
     assert [ws.rows[1][at], ws.rows[2][at]] == ["", ""]
 
 
-def test_타임아웃이면_선점을_남겨_재시도를_막는다(ws, monkeypatch):
+@pytest.mark.parametrize(
+    "boom",
+    [
+        TimeoutError("read timed out"),
+        urllib.error.HTTPError("u", 504, "gateway timeout", {}, None),
+        ConnectionResetError("peer reset"),
+    ],
+    ids=["timeout", "504", "reset"],
+)
+def test_접수_여부를_모르면_선점을_남겨_재시도를_막는다(ws, monkeypatch, boom):
     # 벤더가 이미 접수하고 응답만 못 돌려줬을 수 있다. 선점을 풀면 다음 시도가
-    # 빈 칸을 보고 같은 사람에게 두 번 보낸다.
-    with pytest.raises(TimeoutError):
-        _run(monkeypatch, boom=TimeoutError("read timed out"))
+    # 빈 칸을 보고 같은 사람에게 두 번 보낸다. 504 는 게이트웨이가 대신
+    # 돌려주는 타임아웃이라 소켓 타임아웃과 같은 취급이어야 한다.
+    with pytest.raises(type(boom)):
+        _run(monkeypatch, boom=boom)
 
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
+    at = _campaign(ws)
     assert ws.rows[1][at].startswith(ledger.SENDING)
 
 
@@ -180,8 +189,7 @@ def test_접수코드가_1000이_아니면_실패로_본다(ws, monkeypatch):
     with pytest.raises(transport.PpurioError):
         _run(monkeypatch, {"code": "2000", "description": "invalid"})
 
-    header, _ = ledger.read_roster(ws)
-    at = ledger.campaign_column(ws, header, "discord")
+    at = _campaign(ws)
     assert ws.rows[1][at] == ""
 
 

@@ -23,10 +23,13 @@ TIMEOUT = 20
 class PpurioError(RuntimeError):
     """접수되지 않은 것이 확실할 때 발생합니다.
 
-    HTTP 오류, 200 이면서 code 가 성공이 아닌 경우, 그리고 인증 설정이 없어
-    요청이 이 머신을 떠나지도 못한 경우입니다. 셋 다 '보내지 않았다'가 확실해
-    호출부가 재시도를 열어도 됩니다. 타임아웃처럼 접수 여부를 모르는 경우는
-    이 예외가 아닙니다 — 그건 접수코드를 비운 채 전파돼 사람이 확인합니다.
+    4xx, 200 이면서 code 가 성공이 아닌 경우, 그리고 인증 설정이 없어 요청이
+    이 머신을 떠나지도 못한 경우입니다. 셋 다 '보내지 않았다'가 확실해
+    호출부가 선점을 풀고 재시도를 열어도 됩니다.
+
+    접수 여부를 모르는 경우는 이 예외가 아닙니다 — 타임아웃과 5xx 는 원래
+    예외 그대로 올라갑니다. 그러면 선점이 '발송중' 인 채 남아 재시도가 막히고
+    사람이 뿌리오 웹에서 확인합니다.
 
     status 0 은 요청이 나가지 않았다는 뜻입니다.
     """
@@ -41,10 +44,10 @@ def _credentials() -> tuple[str, str]:
     """계정과 인증키를 환경변수에서 읽습니다.
 
     없으면 PpurioError 로 바꿔 던집니다. KeyError 로 새어 나가면 호출부의
-    `except PpurioError` 를 우회해, 이력 시트에 자리는 잡힌 채 접수코드가 빈
-    행으로 남습니다. 빈 칸은 "보냈는지 모름"이라 살아 있는 것으로 취급되므로
-    환경변수를 채워 다시 돌려도 "모두 이미 발송된 상태"라며 한 통도 안 나갑니다.
-    설정 누락은 "모름"이 아니라 요청이 나가지도 않은 것이 확실한 경우입니다.
+    `except PpurioError` 를 우회해, 명단의 캠페인 열이 '발송중' 인 채 굳습니다.
+    값이 있는 칸은 발송 대상에서 빠지므로, 환경변수를 채워 다시 돌려도
+    "모두 이미 발송된 상태"라며 한 통도 안 나갑니다. 설정 누락은 "모름"이
+    아니라 요청이 나가지도 않은 것이 확실한 경우입니다.
 
     Returns:
         tuple[str, str]: (계정, 인증키)
@@ -88,7 +91,8 @@ def _post(path: str, body: dict, headers: dict) -> dict:
         dict: 응답 본문
 
     Raises:
-        PpurioError: 2xx 가 아닐 때
+        PpurioError: 4xx 일 때 (거절이 확실하다)
+        urllib.error.HTTPError: 5xx 일 때 (접수 여부를 모른다)
     """
     request = urllib.request.Request(
         BASE + path,
@@ -100,6 +104,12 @@ def _post(path: str, body: dict, headers: dict) -> dict:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
+        # 5xx 를 PpurioError 로 바꾸면 안 된다. 504 는 게이트웨이가 대신
+        # 돌려주는 타임아웃이라, 뿌리오가 이미 접수하고 응답만 못 온 경우와
+        # 구분되지 않는다. PpurioError 는 호출부가 선점을 푸는 신호이므로
+        # 여기서 바꾸면 재시도가 열려 같은 사람에게 두 번 나간다.
+        if error.code >= 500:
+            raise
         raise PpurioError(error.code, error.read().decode()[:600]) from error
 
 
@@ -110,9 +120,9 @@ def issue_token() -> str:
     "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"가 종류와 무관하게
     참이기 때문입니다. 프록시가 200 에 HTML 을 실어 주면 JSONDecodeError,
     EUC-KR 로 주면 UnicodeDecodeError 가 나는데, 열거로 잡으면 그것들이 새어
-    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 이력 시트에 자리는
-    잡힌 채 접수코드가 빈 행으로 남고, 빈 칸은 "보냈는지 모름"이라 살아 있는
-    것으로 취급되어 그 campaign 이 영구히 잠깁니다.
+    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 명단의 캠페인 열이
+    '발송중' 인 채 굳고, 값이 있는 칸은 발송 대상에서 빠지므로 그 campaign 이
+    영구히 잠깁니다.
 
     조용히 삼키지 않습니다. 사유를 담아 타입만 바꿔 다시 던집니다.
 
@@ -151,12 +161,12 @@ def send(payload: dict) -> dict:
         PpurioError: HTTP 실패
     """
     account, _ = _credentials()
-    # from 은 필수다. 없으면 벤더가 거절하고, 그때는 이미 이력 시트에 자리를
-    # 잡은 뒤라 전 행이 '실패'로 찍힌다. payload 가 이기도록 뒤에 펼쳐 둔다.
+    # from 은 필수다. 없으면 벤더가 4xx 로 거절하고, 그때는 이미 선점한 뒤라
+    # 전 행이 다시 비워진다. payload 가 이기도록 뒤에 펼쳐 둔다.
     body = {"account": account, "from": _sender(), **payload}
     # 토큰 단계의 실패는 issue_token 이 PpurioError 로 바꿔 던진다.
-    # 이 호출의 타임아웃은 다르다 — 접수됐을 수 있으므로 그대로 전파해
-    # 접수코드를 비운 채 사람이 확인하게 둔다.
+    # 이 호출의 타임아웃과 5xx 는 다르다 — 접수됐을 수 있으므로 그대로
+    # 전파해 선점을 남긴 채 사람이 확인하게 둔다.
     return _post("/v1/message", body, {"Authorization": "Bearer " + issue_token()})
 
 

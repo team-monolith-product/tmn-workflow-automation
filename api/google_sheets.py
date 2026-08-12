@@ -21,25 +21,18 @@ def _get_client() -> gspread.Client:
     return gspread.authorize(creds)
 
 
-def open_worksheet(
-    spreadsheet_id: str, *, name: str | None = None, gid: int | None = None
-) -> gspread.Worksheet:
-    """탭을 연다. 이름도 gid 도 안 주면 첫 번째 탭.
+def open_spreadsheet(spreadsheet_id: str) -> gspread.Spreadsheet:
+    """스프레드시트를 연다.
+
+    어느 탭을 쓸지 고르는 것은 호출하는 기능의 결정이라 여기서 하지 않는다.
 
     Args:
         spreadsheet_id: 스프레드시트 ID
-        name: 탭 이름. 주면 gid 보다 우선한다
-        gid: 탭 ID. 주소창의 #gid= 값
 
     Returns:
-        gspread.Worksheet: 워크시트
+        gspread.Spreadsheet: 스프레드시트
     """
-    sh = _get_client().open_by_key(spreadsheet_id)
-    if name:
-        return sh.worksheet(name)
-    if gid is not None:
-        return sh.get_worksheet_by_id(gid)
-    return sh.get_worksheet(0)
+    return _get_client().open_by_key(spreadsheet_id)
 
 
 def get_worksheet_values(

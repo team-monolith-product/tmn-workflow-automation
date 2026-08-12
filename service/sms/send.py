@@ -32,8 +32,9 @@ def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """번호를 정규화하고 같은 번호는 하나로 접습니다.
 
     명단에 같은 사람이 두 번 들어오는 일이 실제로 있습니다. 접지 않으면
-    ledger.claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져 그 번호는
-    이 캠페인에서 영영 발송되지 않습니다.
+    ledger.claim 은 같은 번호가 두 번 들어오면 거절합니다 — 명단의 한 사람에게
+    문안 두 벌을 보내라는 뜻이라 어느 쪽이 맞는지 코드가 정할 수 없습니다.
+    여기서 접어 두면 그 거절을 볼 일이 없습니다.
 
     Args:
         rows: to·name·var1~var8 을 담은 수신자 목록
@@ -90,31 +91,29 @@ def send_campaign(
         ValueError: 문안·번호·길이·예약 시각에 문제가 있을 때. 넷 다 시트를
             건드리기 전에 터지므로 원장이 더러워지지 않는다. 한 번에 다 보려면
             호출부가 먼저 check 를 돌린다
-        transport.PpurioError: 벤더가 거절했을 때 (자리는 '실패'로 표시)
+        transport.PpurioError: 벤더가 거절했을 때 (선점을 풀어 재시도를 연다)
+        Exception: 타임아웃·5xx 처럼 접수 여부를 모를 때. 선점이 '발송중'
+            으로 남아 재시도가 막히고 사람이 뿌리오 웹에서 확인한다
     """
     template = templates.resolve(template_name, content)
     normalized = _normalize(rows)
+    # 시트를 건드리기 전에 전원 기준으로 한 번 본다. 여기서 길이 초과가
+    # 걸리면 선점 없이 터져 원장이 더러워지지 않는다.
     message_type = templates.decide_message_type(template, normalized)
     if send_at is not None:
         vendor["sendTime"] = reserve_time(send_at)
 
     ws = ledger.open_roster(spreadsheet_id, worksheet, gid)
-    header, _ = ledger.read_roster(ws)
-    won, already, missing = ledger.claim(ws, header, campaign, normalized)
+    won, already, missing = ledger.claim(ws, campaign, normalized)
 
     if not won:
-        return {
-            "requested": len(normalized),
-            "skipped": len(already),
-            "missing": [entry["to"] for entry in missing],
-            "sent": 0,
-            "sent_to": [],
-            "code": None,
-            "message_key": None,
-            "message_type": message_type,
-        }
+        return _summary(normalized, already, missing, [], None, None, message_type)
 
-    claimed_rows = [item["_row"] for item in won]
+    sent_to = [item["to"] for item in won]
+    # 실제로 보낼 사람만으로 다시 판정한다. 전원 기준으로 정하면 이미 받아서
+    # 빠진 사람의 긴 치환값 때문에 캠페인 전체가 LMS 로 올라가 요금을 더 낸다.
+    # won 은 normalized 의 부분집합이라 위에서 통과한 이상 여기서 터지지 않는다.
+    message_type = templates.decide_message_type(template, won)
     payload = {
         "messageType": message_type,
         "content": template,
@@ -129,27 +128,69 @@ def send_campaign(
     try:
         result = transport.send(payload)
     except transport.PpurioError:
-        # 벤더가 거절한 것이 확실할 때만 선점을 풀어 재시도를 연다. 타임아웃은
-        # 접수됐을 수 있으므로 '발송중' 을 남긴 채 터뜨린다 — 사람이 확인한다.
-        ledger.mark(ws, header, campaign, claimed_rows, "")
+        # 벤더가 거절한 것이 확실할 때만 선점을 풀어 재시도를 연다. 타임아웃과
+        # 5xx 는 PpurioError 가 아니라 그대로 올라오므로 '발송중' 이 남는다.
+        ledger.mark(ws, campaign, sent_to, "")
         raise
 
-    code = result.get("code")
-    if code != "1000":
-        ledger.mark(ws, header, campaign, claimed_rows, "")
+    # code 를 문자열로만 비교하면 벤더가 수로 돌려주는 순간 접수 성공이
+    # 실패로 뒤집힌다. 그러면 선점을 풀고 사람이 재실행해 두 번 나간다.
+    if str(result.get("code")) != "1000":
+        ledger.mark(ws, campaign, sent_to, "")
         raise transport.PpurioError(200, result)
 
-    stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    ledger.mark(ws, header, campaign, claimed_rows, stamp)
+    # 예약이면 접수 시각이 아니라 나갈 시각을 적는다. 접수 시각을 적으면
+    # 아직 안 나간 문자가 시트에서 "그날 발송됨"으로 읽힌다.
+    stamp = (
+        f"예약 {send_at.strftime('%Y-%m-%d %H:%M')}"
+        if send_at is not None
+        else datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    )
+    ledger.mark(ws, campaign, sent_to, stamp)
 
+    return _summary(
+        normalized,
+        already,
+        missing,
+        won,
+        str(result.get("code")),
+        result.get("messageKey"),
+        message_type,
+    )
+
+
+def _summary(
+    normalized: list[dict[str, Any]],
+    already: list[dict[str, Any]],
+    missing: list[dict[str, Any]],
+    won: list[dict[str, Any]],
+    code: str | None,
+    message_key: str | None,
+    message_type: str,
+) -> dict[str, Any]:
+    """발송 결과 한 벌을 만듭니다.
+
+    Args:
+        normalized: 번호를 접은 뒤의 요청 전체
+        already: 그 캠페인을 이미 받은 사람
+        missing: 명단에 없는 사람
+        won: 실제로 보낸 사람
+        code: 벤더 접수코드
+        message_key: 벤더 messageKey
+        message_type: SMS · LMS · MMS
+
+    Returns:
+        dict[str, Any]: requested·skipped·missing·sent·sent_to·code·
+            message_key·message_type
+    """
     return {
         "requested": len(normalized),
         "skipped": len(already),
         "missing": [entry["to"] for entry in missing],
         "sent": len(won),
-        "sent_to": [item["to"] for item in won],
+        "sent_to": [entry["to"] for entry in won],
         "code": code,
-        "message_key": result.get("messageKey"),
+        "message_key": message_key,
         "message_type": message_type,
     }
 
@@ -168,6 +209,10 @@ def reserve_time(send_at: datetime.datetime) -> str:
     """
     # send_at 은 사람이 KST 로 적은 벽시계다. 컨테이너의 now() 는 UTC 라
     # 그대로 빼면 9시간 어긋나 이미 지난 시각도 통과한다.
+    # 오프셋을 붙여 준 경우(2026-08-13T09:00+09:00)는 그 뜻을 살려 KST 로
+    # 눕힌다. 안 눕히면 naive 와의 뺄셈이 TypeError 로 터진다.
+    if send_at.tzinfo is not None:
+        send_at = send_at.astimezone(KST).replace(tzinfo=None)
     now = datetime.datetime.now(KST).replace(tzinfo=None)
     margin = (send_at - now).total_seconds()
     if margin < MIN_RESERVE_SECONDS:
@@ -191,7 +236,7 @@ def check(
     한 번에 다 보여주고 한 번에 고치게 합니다. 빈 목록이면 보낼 수 있습니다.
 
     벤더가 잡아주는 것도 여기서 먼저 봅니다. 벤더 거부는 발송 시도 뒤에야
-    돌아오는데, 그때는 이미 이력 시트에 자리를 잡아 재시도가 막힙니다.
+    돌아오는데, 그때는 이미 명단의 칸을 선점한 뒤입니다.
 
     Args:
         rows: to·name·var1~var8 을 담은 수신자 목록

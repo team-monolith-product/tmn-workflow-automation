@@ -5,8 +5,10 @@
 실계정에서만 100% 거절된다.
 """
 
+import io
 import json
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -93,6 +95,45 @@ def test_토큰_단계_실패는_종류를_가리지_않고_안_나간_것으로
 
     # /v1/message 는 만들어지지도 않았다 — 그래서 안 나간 것이 확실하다.
     assert paths == ["/v1/token"]
+
+
+def _raise_http(status: int):
+    """urlopen 이 그 상태 코드로 터지게 만든다."""
+
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(
+            request.full_url, status, "boom", {}, io.BytesIO(b'{"code":"9999"}')
+        )
+
+    return fake_urlopen
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_5xx는_PpurioError로_바꾸지_않는다(env, monkeypatch, status):
+    # PpurioError 는 호출부가 선점을 푸는 신호다. 504 는 게이트웨이가 대신
+    # 돌려주는 타임아웃이라 뿌리오가 이미 접수했을 수 있는데, 여기서 바꾸면
+    # 재시도가 열려 같은 사람에게 두 번 나간다.
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http(status))
+
+    with pytest.raises(urllib.error.HTTPError):
+        transport._post("/v1/message", {}, {})
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 429])
+def test_4xx는_안_나간_것이_확실하다(env, monkeypatch, status):
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http(status))
+
+    with pytest.raises(transport.PpurioError):
+        transport._post("/v1/message", {}, {})
+
+
+def test_토큰_단계의_5xx는_안_나간_것으로_본다(env, monkeypatch):
+    # 토큰이 없으면 /v1/message 는 만들어지지도 않는다. 같은 5xx 라도
+    # 토큰 단계는 "안 나갔다"가 확실하므로 여기서는 바꾸는 것이 맞다.
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http(503))
+
+    with pytest.raises(transport.PpurioError):
+        transport.issue_token()
 
 
 def test_발신번호가_없어도_PpurioError로_거절한다(monkeypatch):

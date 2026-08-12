@@ -17,8 +17,17 @@
 직접 보내고 시트에 표시하는 경로가 그대로 살아 있습니다.
 
 벤더를 부르기 전에 그 칸을 먼저 채웁니다(선점). 채우지 않고 보내면 그 사이
-다른 실행이 같은 사람을 빈 칸으로 보고 또 보냅니다. 벤더가 거절하면 다시
-비워 재시도를 엽니다.
+다른 실행이 같은 사람을 빈 칸으로 보고 또 보냅니다.
+
+**선점은 완전한 잠금이 아닙니다.** 시트에는 조건부 쓰기가 없어 읽고-쓰는
+사이가 열려 있고, 두 실행이 그 틈에 겹치면 둘 다 이깁니다. 경합 구간을
+벤더 왕복(수십 초)에서 시트 왕복(1~2초)으로 줄일 뿐입니다. 진입점이 여럿이
+되면 한 프로세스 안에서 직렬화해야 합니다.
+
+자리는 번호와 캠페인 이름으로 잡습니다. 행 번호나 열 번호를 들고 벤더 왕복을
+건너지 않습니다 — 폼 응답 시트는 사람이 열어둔 채 응답을 지우거나 문항을
+추가하고, 그 사이 위치는 밀립니다. 밀린 위치에 쓰면 남의 칸을, 최악에는
+번호 열 자체를 덮습니다.
 """
 
 import datetime
@@ -28,9 +37,10 @@ from typing import Any
 from api import google_sheets
 from service.sms import KST
 
-# 명단에서 번호 열을 찾을 때 쓰는 이름 후보. 구체적인 것부터 봅니다 —
-# 셀을 먼저 돌면 '번호'가 연번 열에 걸립니다.
-PHONE_HEADERS = ("휴대폰", "연락처", "전화번호", "휴대전화", "전화", "번호")
+# 명단에서 번호 열을 찾을 때 쓰는 이름 후보. 휴대폰이 대표전화보다 앞이어야
+# 합니다 — '학교 대표 전화번호'가 있는 시트에서 '전화번호'를 먼저 보면
+# 지역번호를 수신자 번호로 읽고 명단 전체가 대조에 실패합니다.
+PHONE_HEADERS = ("휴대폰", "휴대전화", "연락처", "전화번호", "전화", "번호")
 
 SENDING = "발송중"
 
@@ -120,6 +130,9 @@ def open_roster(
 ):
     """참가자 명단 탭을 엽니다.
 
+    어느 탭이 명단인지 고르는 규칙은 문자 발송의 결정이라 여기 둡니다.
+    api/ 는 gspread 를 그대로 감싸기만 합니다.
+
     Args:
         spreadsheet_id: 참가자 스프레드시트 ID
         worksheet: 탭 이름. 주면 gid 보다 우선한다
@@ -128,14 +141,19 @@ def open_roster(
     Returns:
         gspread.Worksheet: 명단 워크시트
     """
-    return google_sheets.open_worksheet(spreadsheet_id, name=worksheet, gid=gid)
+    sh = google_sheets.open_spreadsheet(spreadsheet_id)
+    if worksheet:
+        return sh.worksheet(worksheet)
+    if gid is not None:
+        return sh.get_worksheet_by_id(gid)
+    return sh.get_worksheet(0)
 
 
-def read_roster(ws) -> tuple[list[str], list[dict[str, Any]]]:
-    """명단을 읽어 번호와 행 번호를 뽑습니다.
+def parse_roster(values: list[list[str]]) -> tuple[list[str], list[dict[str, Any]]]:
+    """읽어둔 시트 값에서 헤더와 번호를 뽑습니다. 시트를 건드리지 않습니다.
 
     Args:
-        ws: 명단 워크시트
+        values: get_all_values() 결과
 
     Returns:
         tuple: (헤더 셀, [{"phone": 숫자만, "_row": 행번호}])
@@ -143,12 +161,13 @@ def read_roster(ws) -> tuple[list[str], list[dict[str, Any]]]:
     Raises:
         RosterLayoutError: 번호로 읽을 열이 없을 때
     """
-    values = ws.get_all_values()
     if not values:
         raise RosterLayoutError("명단 탭이 비어 있습니다.")
 
     header = values[0]
     at = None
+    # 이름 후보를 셀보다 바깥에서 돕니다. 셀을 먼저 돌면 앞쪽 열이 뒤쪽
+    # 후보에 걸려 '번호'가 연번 열을 집습니다.
     for name in PHONE_HEADERS:
         for index, cell in enumerate(header):
             if name in cell:
@@ -170,15 +189,15 @@ def read_roster(ws) -> tuple[list[str], list[dict[str, Any]]]:
     return header, people
 
 
-def campaign_column(ws, header: list[str], campaign: str) -> int:
+def _campaign_column(ws, header: list[str], campaign: str) -> int:
     """캠페인 열을 찾습니다. 없으면 맨 뒤에 만듭니다.
 
     맨 뒤에 붙입니다. 중간에 끼우면 사람이 만든 수식과 조건부 서식이 밀립니다.
 
     Args:
         ws: 명단 워크시트
-        header: read_roster 가 돌려준 헤더
-        campaign: 발송 건 식별자
+        header: parse_roster 가 돌려준 헤더
+        campaign: 발송 건 식별자 (앞뒤 공백이 없어야 한다)
 
     Returns:
         int: 0-based 열 번호
@@ -191,24 +210,7 @@ def campaign_column(ws, header: list[str], campaign: str) -> int:
     return at
 
 
-def column_values(ws, at: int) -> dict[int, str]:
-    """그 열의 행별 값을 읽습니다.
-
-    Args:
-        ws: 명단 워크시트
-        at: 0-based 열 번호
-
-    Returns:
-        dict[int, str]: 행 번호 -> 값
-    """
-    values = ws.get_all_values()
-    return {
-        row_number: (line[at] if at < len(line) else "")
-        for row_number, line in enumerate(values[1:], start=2)
-    }
-
-
-def write_column(ws, at: int, rows: list[int], value: str) -> None:
+def _write_column(ws, at: int, rows: list[int], value: str) -> None:
     """그 열의 여러 행에 같은 값을 씁니다.
 
     Args:
@@ -227,7 +229,7 @@ def write_column(ws, at: int, rows: list[int], value: str) -> None:
 
 
 def claim(
-    ws, header: list[str], campaign: str, entries: list[dict[str, Any]]
+    ws, campaign: str, entries: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """보낼 사람의 자리를 선점합니다.
 
@@ -235,28 +237,37 @@ def claim(
     '발송중'으로 채웁니다 — 채우지 않고 보내면 그 사이 다른 실행이 같은 사람을
     빈 칸으로 보고 또 보냅니다.
 
+    시트는 한 번만 읽습니다. 헤더·번호·캠페인 열 값을 따로 읽으면 그 사이
+    행이 지워졌을 때 서로 다른 스냅샷을 대조하게 됩니다.
+
+    campaign 의 앞뒤 공백을 떼는 것은 취향이 아닙니다. 시트 셀은 strip 해서
+    비교하므로, 공백이 붙은 campaign 은 자기가 만든 열조차 못 찾아 매번 새
+    열을 만들고 그때마다 전원에게 다시 보냅니다.
+
     Args:
         ws: 명단 워크시트
-        header: read_roster 가 돌려준 헤더
         campaign: 발송 건 식별자
         entries: to·name·var1~var8 을 담은 수신자 목록 (번호는 정규화된 값)
 
     Returns:
-        tuple: (보낼 사람, 이미 보낸 사람, 명단에 없는 사람).
-            보낼 사람에는 _row 가 붙는다
+        tuple: (보낼 사람, 이미 보낸 사람, 명단에 없는 사람)
 
     Raises:
         ValueError: entries 에 같은 번호가 두 번 있을 때
     """
+    campaign = campaign.strip()
     phones = [digits(entry["to"]) for entry in entries]
     if len(set(phones)) != len(phones):
         raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
 
-    _, people = read_roster(ws)
+    values = ws.get_all_values()
+    header, people = parse_roster(values)
+    at = _campaign_column(ws, header, campaign)
     by_phone = {person["phone"]: person["_row"] for person in people}
-
-    at = campaign_column(ws, header, campaign)
-    filled = column_values(ws, at)
+    filled = {
+        row_number: (line[at] if at < len(line) else "")
+        for row_number, line in enumerate(values[1:], start=2)
+    }
 
     won, already, missing = [], [], []
     for entry, phone in zip(entries, phones):
@@ -266,21 +277,34 @@ def claim(
         elif filled.get(row, "").strip():
             already.append(entry)
         else:
-            won.append({**entry, "_row": row})
+            won.append(entry)
 
     stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    write_column(ws, at, [item["_row"] for item in won], f"{SENDING} {stamp}")
+    _write_column(
+        ws, at, [by_phone[digits(entry["to"])] for entry in won], f"{SENDING} {stamp}"
+    )
     return won, already, missing
 
 
-def mark(ws, header: list[str], campaign: str, rows: list[int], value: str) -> None:
+def mark(ws, campaign: str, phones: list[str], value: str) -> None:
     """선점한 칸을 최종 값으로 바꿉니다.
+
+    행과 열을 번호·이름으로 다시 찾습니다. 선점 때의 위치를 그대로 쓰면,
+    벤더 왕복 사이에 응답이 지워지거나 폼 문항이 추가돼 열이 밀렸을 때
+    남의 칸에 씁니다 — 열이 밀린 경우 번호 열 자체를 덮습니다.
 
     Args:
         ws: 명단 워크시트
-        header: read_roster 가 돌려준 헤더
         campaign: 발송 건 식별자
-        rows: 대상 행 번호
+        phones: 대상 번호 (표기 무관)
         value: 적을 값. 빈 문자열이면 지워 재시도를 연다
     """
-    write_column(ws, campaign_column(ws, header, campaign), rows, value)
+    if not phones:
+        return
+    campaign = campaign.strip()
+    values = ws.get_all_values()
+    header, people = parse_roster(values)
+    at = _campaign_column(ws, header, campaign)
+    wanted = {digits(phone) for phone in phones}
+    rows = [person["_row"] for person in people if person["phone"] in wanted]
+    _write_column(ws, at, rows, value)

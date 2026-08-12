@@ -180,9 +180,16 @@ def main() -> None:
             + ", ".join(result["missing"])
         )
     if result["sent"] == 0:
-        print(
-            f"대상 {result['requested']}명이 모두 이미 발송된 상태라 보내지 않았습니다."
-        )
+        # 이유를 뭉뚱그리면 안 된다. 번호 열을 잘못 잡아 전원이 명단 밖으로
+        # 빠진 것을 "이미 발송됨"으로 읽으면, 아무에게도 안 나간 캠페인을
+        # 끝난 것으로 알고 넘어간다.
+        if result["skipped"]:
+            print(f"이미 발송된 {result['skipped']}명을 제외하니 보낼 사람이 없습니다.")
+        else:
+            print(
+                f"대상 {result['requested']}명이 모두 명단에 없어 한 통도 "
+                "보내지 않았습니다. 번호 표기와 명단의 번호 열을 확인하세요."
+            )
         return
     print(
         f"접수 완료 — 발송 {result['sent']}명"
