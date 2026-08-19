@@ -88,26 +88,23 @@ def get_open_pull_urls(pulls: list[PullRequest]) -> dict[int, str]:
     return {pull.number: pull.html_url for pull in pulls}
 
 
-def get_pull_author_emails(pulls: list[PullRequest]) -> dict[int, str | None]:
+def get_pull_author_email(pull: PullRequest) -> str | None:
     """
-    PR 작성자의 이메일을 모읍니다.
+    PR 작성자의 이메일을 가져옵니다.
 
     GitHub 계정의 이메일은 비공개일 수 있어, PR 의 첫 커밋 author 이메일을 대신 쓴다.
+    이 이메일은 개인 이메일일 수 있어 슬랙 계정을 찾는 용도로만 쓰고, 찾지 못했을 때
+    노션 담당자 이메일처럼 안내문에 그대로 노출하지는 않는다.
     커밋이 없거나 이메일을 알 수 없으면 None.
 
     Args:
-        pulls: 열린 PR 목록
+        pull: 대상 PR
 
     Returns:
-        dict[int, str | None]: PR 번호 → 작성자 이메일
+        str | None: 작성자 이메일
     """
-    author_emails: dict[int, str | None] = {}
-    for pull in pulls:
-        first_commit = next(iter(pull.get_commits()), None)
-        author_emails[pull.number] = (
-            first_commit.commit.author.email if first_commit else None
-        )
-    return author_emails
+    first_commit = next(iter(pull.get_commits()), None)
+    return first_commit.commit.author.email if first_commit else None
 
 
 def _query_pr_pages(notion: NotionClient, numbers: list[int]) -> Iterator[dict]:
@@ -215,8 +212,9 @@ def build_open_pull_report(
     """
     열린 PR 마다 담당자를 찾아 멘션 목록과, 끝내 찾지 못한 PR 목록으로 나눕니다.
 
-    담당자는 PR 별로 두 경로를 모두 시도해 합친다: 노션 작업 담당자, PR 작성자.
-    둘 다 슬랙 사용자를 찾지 못한 PR 만 미해결로 남긴다.
+    담당자는 PR 별로 노션 작업 담당자를 먼저 찾고, 못 찾으면 PR 작성자로 대신한다.
+    작성자 커밋 이메일 조회는 GitHub API 호출이라, 노션 경로로 이미 찾은 PR 에는
+    시도하지 않는다. 그래도 슬랙 사용자를 찾지 못한 PR 만 미해결로 남긴다.
 
     Args:
         pulls: 열린 PR 목록
@@ -229,7 +227,6 @@ def build_open_pull_report(
             - 담당자를 찾지 못한 PR 목록
     """
     task_page_ids = get_task_page_ids(notion, get_open_pull_urls(pulls))
-    author_emails = get_pull_author_emails(pulls)
 
     mentions: list[str] = []
     unmentioned: list[UnmentionedPull] = []
@@ -237,11 +234,10 @@ def build_open_pull_report(
         task_emails = get_assignee_emails(notion, task_page_ids.get(pull.number, []))
         pull_mentions = to_mentions(task_emails, email_to_user_id)
 
-        author_user_id = email_to_user_id.get(author_emails.get(pull.number) or "")
-        if author_user_id:
-            author_mention = f"<@{author_user_id}>"
-            if author_mention not in pull_mentions:
-                pull_mentions.append(author_mention)
+        if not pull_mentions:
+            author_user_id = email_to_user_id.get(get_pull_author_email(pull))
+            if author_user_id:
+                pull_mentions = [f"<@{author_user_id}>"]
 
         if not pull_mentions:
             unmentioned.append(

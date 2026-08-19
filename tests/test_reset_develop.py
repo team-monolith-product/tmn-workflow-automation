@@ -10,7 +10,7 @@ from scripts.reset_develop import (
     get_assignee_emails,
     get_open_pulls,
     get_open_pull_urls,
-    get_pull_author_emails,
+    get_pull_author_email,
     get_task_page_ids,
     main,
     to_mentions,
@@ -57,16 +57,16 @@ def test_get_open_pull_urls():
     assert get_open_pull_urls([pull]) == {1851: pull.html_url}
 
 
-def test_get_pull_author_emails_uses_first_commit_author_email():
+def test_get_pull_author_email_uses_first_commit_author_email():
     pull = _pull(1851, "https://example.com/1851", "octocat", "octocat@team-mono.com")
 
-    assert get_pull_author_emails([pull]) == {1851: "octocat@team-mono.com"}
+    assert get_pull_author_email(pull) == "octocat@team-mono.com"
 
 
-def test_get_pull_author_emails_is_none_without_commits():
+def test_get_pull_author_email_is_none_without_commits():
     pull = _pull(1851, "https://example.com/1851", "octocat", None)
 
-    assert get_pull_author_emails([pull]) == {1851: None}
+    assert get_pull_author_email(pull) is None
 
 
 def test_get_task_page_ids_ignores_other_repos_with_same_number():
@@ -182,6 +182,29 @@ def test_build_open_pull_report_falls_back_to_pull_author_without_task():
 
     assert mentions == ["<@U0ASBJC2SNA>"]
     assert unmentioned == []
+
+
+def test_build_open_pull_report_skips_author_lookup_when_task_assignee_found():
+    """작성자 커밋 조회는 GitHub API 호출이라, 노션 경로로 이미 찾았으면 시도하지 않는다"""
+    pull = _pull(1851, "https://example.com/1851", "octocat", "octocat@team-mono.com")
+    notion = MagicMock()
+    notion.data_sources.query.return_value = {
+        "results": [_pr_page(1851, pull.html_url, ["task-a"])],
+        "has_more": False,
+    }
+    notion.pages.retrieve.return_value = {
+        "properties": {
+            "담당자": {"people": [{"person": {"email": "peko@team-mono.com"}}]}
+        }
+    }
+
+    mentions, unmentioned = build_open_pull_report(
+        [pull], notion, {"peko@team-mono.com": "U0859TEQNRJ"}
+    )
+
+    assert mentions == ["<@U0859TEQNRJ>"]
+    assert unmentioned == []
+    pull.get_commits.assert_not_called()
 
 
 def test_build_open_pull_report_lists_pull_when_no_mention_found():
