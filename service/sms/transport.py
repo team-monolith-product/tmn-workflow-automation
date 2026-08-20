@@ -27,8 +27,6 @@ class PpurioError(RuntimeError):
     """접수되지 않은 것이 확실할 때 발생합니다. status 0 은 요청이 나가지 않은 것."""
 
     def __init__(self, status: int, body: Any):
-        self.status = status
-        self.body = body
         super().__init__(f"뿌리오 응답 [{status}] {body}")
 
 

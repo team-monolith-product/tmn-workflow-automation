@@ -114,7 +114,7 @@ def test_치환값이_태그보다_짧아도_원문_길이로_판정한다(monke
     # 재면 SMS 로 판정해 놓고 90byte 넘는 원문을 보내게 된다.
     captured = {}
     _accept(monkeypatch, captured)
-    # 원문 94byte, 치환 후 88byte 가 되도록 맞춘다.
+    # 원문 93byte, 치환 후 84byte 가 되도록 맞춘다.
     content = "[*이름*][*1*]" + "가" * 40
     rows = [{"to": "010-1111-1111", "name": "가", "var1": "나"}]
 
