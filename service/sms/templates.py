@@ -1,20 +1,10 @@
 """
 문안과 수신자 데이터를 다루는 도메인 계층입니다.
 
-문안은 코드가 아니라 templates/sms/*.txt 파일입니다. 문안을 하나 더 만들 때
-파이썬을 고치지 않게 하려는 것이고, 그래야 발송 전 컨펌 대상이 "코드 리뷰"가
-아니라 "텍스트 파일"이 됩니다. 앞선 구현은 문안이 f-string 으로 코드 안에
-있어서, 잘못된 수강신청 링크가 들어간 채 발송되고도 리뷰에서 걸러지지
-않았습니다(2026-07-29 courseSeq 정정).
-
 치환은 뿌리오 태그를 그대로 씁니다.
 
     [*이름*]        targets[].name
     [*1*] ~ [*8*]   targets[].changeWord.var1 ~ var8
-
-메시지 타입은 치환이 끝난 뒤에야 정해집니다. 이름이 긴 사람 한 명 때문에
-90바이트를 넘으면 그 사람만 실패하므로, 판정은 발송 대상 전체의 최댓값으로
-합니다.
 """
 
 import re
@@ -69,7 +59,7 @@ def render(template: str, row: dict[str, Any]) -> str:
     씁니다.
 
     Args:
-        template: load() 결과
+        template: 치환 태그가 남아 있는 원문
         row: to·name·var1~var8 을 담은 수신자 한 명
 
     Returns:
@@ -91,7 +81,7 @@ def decide_message_type(template: str, rows: list[dict[str, Any]]) -> str:
     치환 결과가 가장 긴 수신자를 기준으로 잡아야 한 명만 실패하는 일이 없습니다.
 
     Args:
-        template: load() 결과
+        template: 치환 태그가 남아 있는 원문
         rows: 발송 대상 전체
 
     Returns:
@@ -100,7 +90,12 @@ def decide_message_type(template: str, rows: list[dict[str, Any]]) -> str:
     Raises:
         ValueError: 가장 긴 본문이 LMS 한도를 넘을 때
     """
-    longest = max((euckr_len(render(template, row)) for row in rows), default=0)
+    # 벤더로 나가는 것은 치환 전 원문이다. 치환값이 태그보다 짧으면 치환 후만
+    # 재서 SMS 로 판정해 놓고 90byte 넘는 원문을 보내게 된다.
+    longest = max(
+        euckr_len(template),
+        max((euckr_len(render(template, row)) for row in rows), default=0),
+    )
     if longest > LMS_MAX_BYTES:
         raise ValueError(f"치환 후 {longest}byte — LMS 한도 {LMS_MAX_BYTES} 초과")
     return "SMS" if longest <= SMS_MAX_BYTES else "LMS"
@@ -119,7 +114,7 @@ def build_targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         target: dict[str, Any] = {"to": normalize_phone(row["to"])}
         if row.get("name"):
-            target["name"] = row["name"]
+            target["name"] = str(row["name"])
         change_word = {key: str(row[key]) for key in VAR_KEYS if row.get(key)}
         if change_word:
             target["changeWord"] = change_word

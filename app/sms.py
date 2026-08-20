@@ -90,11 +90,10 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        problems = sms_send.check(targets, content)
-        if problems:
-            return "보내기 전에 고칠 것: " + " / ".join(problems)
-
         summary = sms_send.preview(targets, content)
+        if summary["problems"]:
+            return "보내기 전에 고칠 것: " + " / ".join(summary["problems"])
+
         draft_id = uuid.uuid4().hex[:12]
         _DRAFTS[draft_id] = {"rows": targets, "content": content}
         await client.chat_postMessage(
@@ -147,12 +146,18 @@ def register_sms_handlers(app):
     @app.action(CANCEL)
     async def cancel(ack, body, client):
         await ack()
-        _DRAFTS.pop(body["actions"][0]["value"], None)
+        # 이미 발송이 시작된 초안을 "취소했습니다" 로 덮으면, 누른 사람은
+        # 막았다고 믿는데 문자는 나가는 중이다.
+        draft = _DRAFTS.pop(body["actions"][0]["value"], None)
         await _replace(
             client,
             body["container"]["channel_id"],
             body["container"]["message_ts"],
-            f"<@{body['user']['id']}> 님이 취소했습니다.",
+            (
+                f"<@{body['user']['id']}> 님이 취소했습니다."
+                if draft
+                else "이미 처리된 초안입니다."
+            ),
         )
 
 

@@ -65,9 +65,19 @@ async def _draft(client, targets=ROWS, content="[*이름*]님"):
     return await tool.ainvoke({"content": content, "targets": targets})
 
 
-def _body(draft_id):
+def _press(client, action_id):
+    """카드에 실제로 실린 버튼을 누른다.
+
+    _DRAFTS 키를 손으로 넣으면, 카드가 엉뚱한 value 를 싣고 있어도 테스트가
+    통과한다. 운영에서는 그때 [보내기] 가 늘 "이미 처리된 초안" 만 뱉는다.
+    """
+    button = next(
+        element
+        for element in client.posted[-1]["blocks"][1]["elements"]
+        if element["action_id"] == action_id
+    )
     return {
-        "actions": [{"value": draft_id}],
+        "actions": [{"value": button["value"]}],
         "user": {"id": "U1"},
         "container": {"channel_id": "C1", "message_ts": "111.222"},
     }
@@ -75,6 +85,12 @@ def _body(draft_id):
 
 async def _ack():
     return None
+
+
+async def _click(handlers, action_id, body, client):
+    # Bolt 는 파라미터 이름을 보고 kwargs 로 주입한다. 위치 인자로 부르면
+    # 이름을 바꿔도 테스트가 통과하고 운영에서만 리스너가 안 붙는다.
+    await handlers[action_id](ack=_ack, body=body, client=client)
 
 
 async def test_도구는_문자를_보내지_않는다(client, monkeypatch):
@@ -104,7 +120,7 @@ async def test_보내기를_누르면_그때_나간다(client, handlers, monkeyp
     )
     await _draft(client)
 
-    await handlers[sms.APPROVE](_ack, _body(next(iter(sms._DRAFTS))), client)
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
     assert [row["to"] for row in sent["rows"]] == ["010-1111-1111", "010-2222-2222"]
     assert "2명" in client.updated[0]["text"]
@@ -118,10 +134,10 @@ async def test_두_번_누르면_한_번만_나간다(client, handlers, monkeypa
         lambda **kw: calls.append(kw) or {"sent": 2, "message_key": "K"},
     )
     await _draft(client)
-    draft_id = next(iter(sms._DRAFTS))
+    body = _press(client, sms.APPROVE)
 
-    await handlers[sms.APPROVE](_ack, _body(draft_id), client)
-    await handlers[sms.APPROVE](_ack, _body(draft_id), client)
+    await _click(handlers, sms.APPROVE, body, client)
+    await _click(handlers, sms.APPROVE, body, client)
 
     assert len(calls) == 1
 
@@ -129,16 +145,37 @@ async def test_두_번_누르면_한_번만_나간다(client, handlers, monkeypa
 async def test_취소하면_안_나간다(client, handlers, monkeypatch):
     monkeypatch.setattr(sms_send, "send", lambda **kw: pytest.fail("취소했는데 나갔다"))
     await _draft(client)
-    draft_id = next(iter(sms._DRAFTS))
+    approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
 
-    await handlers[sms.CANCEL](_ack, _body(draft_id), client)
-    await handlers[sms.APPROVE](_ack, _body(draft_id), client)
+    await _click(handlers, sms.CANCEL, cancel, client)
+    await _click(handlers, sms.APPROVE, approve, client)
 
     assert "취소" in client.updated[0]["text"]
 
 
+async def test_발송_중인_초안을_취소로_덮지_않는다(client, handlers, monkeypatch):
+    # pop 결과를 안 보면, 이미 나가는 중인데 카드가 "취소했습니다" 로 바뀌어
+    # 누른 사람이 막았다고 믿는다.
+    monkeypatch.setattr(sms_send, "send", lambda **kw: {"sent": 2, "message_key": "K"})
+    await _draft(client)
+    approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
+    await _click(handlers, sms.APPROVE, approve, client)
+
+    await _click(handlers, sms.CANCEL, cancel, client)
+
+    assert "취소" not in client.updated[1]["text"]
+
+
 async def test_번호가_틀리면_초안을_안_올린다(client):
     answer = await _draft(client, targets=[{"to": "010-123"}])
+
+    assert "고칠 것" in answer
+    assert client.posted == []
+
+
+async def test_번호_없는_대상도_모아서_알린다(client):
+    # 모델이 to 를 빼먹거나 수로 주는 일이 실제로 있다.
+    answer = await _draft(client, targets=[{"name": "홍길동"}, {"to": 1011111111}])
 
     assert "고칠 것" in answer
     assert client.posted == []
@@ -152,6 +189,6 @@ async def test_발송이_터지면_카드에_사유가_남는다(client, handler
     await _draft(client)
 
     with pytest.raises(TimeoutError):
-        await handlers[sms.APPROVE](_ack, _body(next(iter(sms._DRAFTS))), client)
+        await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
     assert "TimeoutError" in client.updated[0]["text"]

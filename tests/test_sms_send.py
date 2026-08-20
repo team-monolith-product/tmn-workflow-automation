@@ -1,10 +1,7 @@
 """발송 계층 테스트."""
 
-import datetime
-
 import pytest
 
-from service.sms import KST
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -13,11 +10,6 @@ ROWS = [
     {"to": "010-2222-2222", "name": "나", "var1": "2기"},
 ]
 CONTENT = "[*이름*]선생님, [*1*] 안내드립니다"
-
-
-def _kst_now() -> datetime.datetime:
-    """컨테이너(UTC)와 KST 판정이 어긋나지 않도록 벽시계를 맞춘다."""
-    return datetime.datetime.now(KST).replace(tzinfo=None)
 
 
 def _run(monkeypatch, response=None, boom=None, **extra):
@@ -47,6 +39,12 @@ def test_치환값이_벤더로_넘어간다(monkeypatch):
 
     assert payload["targets"][0]["changeWord"]["var1"] == "1기"
     assert payload["targets"][0]["name"] == "가"
+
+
+def test_벤더로_나가는_것은_치환_전_원문이다(monkeypatch):
+    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    assert payload["content"] == CONTENT
 
 
 def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):
@@ -82,69 +80,52 @@ def test_LMS면_제목을_붙인다(monkeypatch):
     assert result["message_type"] == "LMS"
 
 
-def test_벤더_옵션은_그대로_통과한다(monkeypatch):
-    at = _kst_now() + datetime.timedelta(hours=1)
-    _, payload = _run(
-        monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=at, duplicateFlag="N"
-    )
-
-    assert payload["duplicateFlag"] == "N"
-    assert payload["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def test_예약이_3분보다_가까우면_보내기_전에_막는다(monkeypatch):
-    def boom(payload):
-        raise AssertionError("막았어야 했다")
-
-    monkeypatch.setattr(transport, "send", boom)
-    soon = _kst_now() + datetime.timedelta(minutes=1)
-
-    with pytest.raises(ValueError, match="3분"):
-        sms_send.send(rows=ROWS, content=CONTENT, send_at=soon)
-
-
-def test_예약_판정은_컨테이너_시계가_UTC여도_KST로_한다():
-    past = _kst_now() - datetime.timedelta(hours=1)
-
-    with pytest.raises(ValueError, match="3분"):
-        sms_send.reserve_time(past)
-
-
-def test_오프셋을_붙여도_KST로_읽는다():
-    aware = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
-    kst = aware.astimezone(KST).replace(tzinfo=None)
-
-    assert sms_send.reserve_time(aware) == kst.strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def test_취소가_거절되면_성공으로_보지_않는다(monkeypatch):
+def test_치환값이_태그보다_짧아도_원문_길이로_판정한다(monkeypatch):
+    # 벤더로 나가는 것은 원문이다. 치환 후만 재면 SMS 로 판정해 놓고
+    # 90byte 넘는 원문을 보내게 된다.
+    captured = {}
     monkeypatch.setattr(
-        transport, "cancel", lambda key: {"code": "7000", "description": "too late"}
+        transport,
+        "send",
+        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
     )
+    # 원문 94byte, 치환 후 88byte 가 되도록 맞춘다.
+    content = "[*이름*][*1*]" + "가" * 40
+    rows = [{"to": "010-1111-1111", "name": "가", "var1": "나"}]
 
-    with pytest.raises(transport.PpurioError):
-        sms_send.cancel_reserved("K1")
+    sms_send.send(rows=rows, content=content, subject="공지")
 
-
-def test_문제를_한_번에_모아_돌려준다():
-    soon = _kst_now() + datetime.timedelta(minutes=1)
-
-    problems = sms_send.check([{"to": "010-123"}, {"to": "010-456"}], CONTENT, soon)
-
-    assert sum("형식 오류" in p for p in problems) == 2
-    assert any("3분" in p for p in problems)
+    assert captured["messageType"] == "LMS"
 
 
 def test_수신자가_없으면_거른다():
-    assert sms_send.check([], CONTENT) == ["수신자가 없습니다."]
+    assert sms_send.preview([], CONTENT)["problems"] == ["수신자가 없습니다."]
 
 
 def test_문안이_비면_거른다():
-    assert sms_send.check(ROWS, "") == ["문안이 비어 있습니다."]
+    assert sms_send.preview(ROWS, "")["problems"] == ["문안이 비어 있습니다."]
 
 
-def test_통과하면_빈_목록이다():
-    assert sms_send.check(ROWS, CONTENT) == []
+def test_번호가_없거나_수여도_형식_오류로_모은다():
+    # 모델이 만든 목록이라 to 가 빠지거나 수로 올 수 있다.
+    problems = sms_send.preview([{"name": "홍길동"}, {"to": 1011111111}], CONTENT)[
+        "problems"
+    ]
+
+    assert len(problems) == 1
+    assert "형식 오류" in problems[0]
+
+
+def test_문제를_한_번에_모아_돌려준다():
+    problems = sms_send.preview([{"to": "010-123"}, {"to": "010-456"}], CONTENT)[
+        "problems"
+    ]
+
+    assert sum("형식 오류" in p for p in problems) == 2
+
+
+def test_보낼_수_있으면_problems가_비어_있다():
+    assert sms_send.preview(ROWS, CONTENT)["problems"] == []
 
 
 def test_미리보기는_치환한_본문을_보여준다():
@@ -153,3 +134,10 @@ def test_미리보기는_치환한_본문을_보여준다():
     assert summary["sample"] == "가선생님, 1기 안내드립니다"
     assert summary["targets"] == 2
     assert summary["message_type"] == "SMS"
+
+
+def test_보낼_수_없으면_send가_터진다(monkeypatch):
+    monkeypatch.setattr(transport, "send", lambda payload: pytest.fail("막았어야 했다"))
+
+    with pytest.raises(ValueError, match="형식 오류"):
+        sms_send.send(rows=[{"to": "010-123"}], content=CONTENT)

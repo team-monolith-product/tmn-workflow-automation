@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
-import datetime
 
 from dotenv import load_dotenv
 
@@ -34,43 +33,26 @@ def main() -> None:
     parser.add_argument("--subject", help="LMS 제목")
     for key in VAR_KEYS:
         parser.add_argument(f"--{key}", default="", help=f"[*{key[3:]}*] 치환값")
-    parser.add_argument(
-        "--at", metavar="'2026-08-13 09:00'", help="예약 발송 시각. 최소 3분 뒤"
-    )
-    parser.add_argument("--cancel", metavar="MESSAGE_KEY", help="예약 취소")
     parser.add_argument("--dry-run", action="store_true", help="발송하지 않고 확인만")
     args = parser.parse_args()
 
-    if args.cancel:
-        print(sms_send.cancel_reserved(args.cancel))
-        return
-
-    if not args.to:
-        parser.error("--to 가 필요합니다.")
-
     rows = [
         {
-            "to": args.to,
+            "to": args.to or "",
             "name": args.name,
             **{key: getattr(args, key) for key in VAR_KEYS},
         }
     ]
-    send_at = (
-        datetime.datetime.fromisoformat(args.at.replace("/", "-")) if args.at else None
-    )
-
-    problems = sms_send.check(rows, args.content, send_at)
-    if problems:
+    summary = sms_send.preview(rows, args.content)
+    if summary["problems"]:
         print("보내기 전에 고칠 것:")
-        for problem in problems:
+        for problem in summary["problems"]:
             print(f"  - {problem}")
         raise SystemExit(1)
 
-    summary = sms_send.preview(rows, args.content)
     print(
-        f"{summary['message_type']} · 치환 후 최대 {summary['max_bytes']}byte"
+        f"{summary['message_type']} · 최대 {summary['max_bytes']}byte"
         f" · 대상 {summary['targets']}명"
-        + (f" · 예약 {args.at}" if args.at else " · 즉시 발송")
     )
     print("-" * 60)
     print(summary["sample"])
@@ -80,9 +62,7 @@ def main() -> None:
         print("(dry-run — 발송하지 않음)")
         return
 
-    result = sms_send.send(
-        rows=rows, content=args.content, subject=args.subject, send_at=send_at
-    )
+    result = sms_send.send(rows=rows, content=args.content, subject=args.subject)
     print(
         f"접수 완료 — {result['sent']}명\nmessageKey {result['message_key']}\n"
         "접수 성공이지 도달 확인이 아닙니다."

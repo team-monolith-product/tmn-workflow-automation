@@ -1,9 +1,8 @@
 """
 뿌리오 HTTP 계층입니다.
 
-이 모듈은 벤더 payload 를 해석하지 않습니다. 인증(계정·토큰)만 채워 넣고
-나머지는 그대로 흘려보냅니다. 벤더가 필드를 추가해도, 예약 발송처럼 우리가
-아직 안 쓰는 기능을 쓰게 돼도 여기는 고치지 않습니다.
+이 모듈은 벤더 payload 를 해석하지 않습니다. 인증(계정·발신번호·토큰)만
+채워 넣고 나머지는 그대로 흘려보냅니다.
 
 호출 IP 는 뿌리오에 사전 등록되어야 합니다. 등록되지 않은 곳에서 부르면
 토큰 발급 단계에서 code 3003(invalid ip)으로 막힙니다.
@@ -24,12 +23,10 @@ class PpurioError(RuntimeError):
     """접수되지 않은 것이 확실할 때 발생합니다.
 
     4xx, 200 이면서 code 가 성공이 아닌 경우, 그리고 인증 설정이 없어 요청이
-    이 머신을 떠나지도 못한 경우입니다. 셋 다 '보내지 않았다'가 확실해
-    호출부가 선점을 풀고 재시도를 열어도 됩니다.
+    이 머신을 떠나지도 못한 경우입니다. 셋 다 "안 나갔다"가 확실합니다.
 
-    접수 여부를 모르는 경우는 이 예외가 아닙니다 — 타임아웃과 5xx 는 원래
-    예외 그대로 올라갑니다. 그러면 기록에 sent_at·failed_at 이 둘 다 빈 채로
-    남아 재시도가 막히고, 사람이 뿌리오 웹에서 확인합니다.
+    접수 여부를 모르는 경우(타임아웃·5xx)는 이 예외가 아닙니다 — 원래 예외
+    그대로 올라가고, 사람이 뿌리오 웹에서 확인해야 합니다.
 
     status 0 은 요청이 나가지 않았다는 뜻입니다.
     """
@@ -44,8 +41,7 @@ def _env(name: str) -> str:
     """뿌리오 인증 설정을 환경변수에서 읽습니다.
 
     없으면 PpurioError 로 바꿔 던집니다. KeyError 로 새어 나가면 호출부의
-    `except PpurioError` 를 우회해 기록이 "접수 여부 모름" 인 채 굳고,
-    환경변수를 채워 다시 돌려도 한 통도 안 나갑니다.
+    `except PpurioError` 를 우회해, 설정 누락이 벤더 거절과 구분되지 않습니다.
 
     Args:
         name: PPURIO_ACCOUNT · PPURIO_API_KEY · PPURIO_SENDER
@@ -87,16 +83,13 @@ def _post(path: str, body: dict, headers: dict) -> dict:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
-        # 5xx 를 PpurioError 로 바꾸면 안 된다. 504 는 게이트웨이가 대신
-        # 돌려주는 타임아웃이라, 뿌리오가 이미 접수하고 응답만 못 온 경우와
-        # 구분되지 않는다. PpurioError 는 호출부가 선점을 푸는 신호이므로
-        # 여기서 바꾸면 재시도가 열려 같은 사람에게 두 번 나간다.
+        # 504 는 게이트웨이가 대신 돌려주는 타임아웃이라, 뿌리오가 이미
+        # 접수하고 응답만 못 온 경우와 구분되지 않는다. "안 나갔다"로 단정하면
+        # 안 된다.
         if error.code >= 500:
             raise
-        # errors="replace" 가 없으면 벤더가 EUC-KR 로 준 오류 본문에서
-        # UnicodeDecodeError 가 나 PpurioError 를 비켜간다. 그러면 안 나간 것이
-        # 확실한데도 선점이 안 풀려 캠페인이 영구히 잠긴다. 본문은 사람이 읽을
-        # 텍스트일 뿐이고 중요한 건 예외 타입이다.
+        # 국내 벤더가 EUC-KR 로 오류 본문을 주면 UnicodeDecodeError 가 나
+        # PpurioError 를 비켜간다. 본문은 사람이 읽을 텍스트일 뿐이다.
         body = error.read().decode(errors="replace")[:600]
         raise PpurioError(error.code, body) from error
 
@@ -104,12 +97,11 @@ def _post(path: str, body: dict, headers: dict) -> dict:
 def issue_token() -> str:
     """액세스 토큰을 발급받습니다.
 
-    실패는 무엇이든 PpurioError 로 바꿉니다. 예외 종류를 열거하지 않는 이유는,
-    "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"가 종류와 무관하게
-    참이기 때문입니다. 프록시가 200 에 HTML 을 실어 주면 JSONDecodeError,
-    EUC-KR 로 주면 UnicodeDecodeError 가 나는데, 열거로 잡으면 그것들이 새어
-    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 기록이 "접수 여부
-    모름" 인 채 굳어 그 campaign 이 영구히 잠깁니다.
+    실패는 종류를 가리지 않고 PpurioError 로 바꿉니다. "토큰 단계에서 터졌으면
+    /v1/message 는 만들어지지도 않았다"가 종류와 무관하게 참이기 때문입니다.
+    프록시가 200 에 HTML 이나 EUC-KR 을 실어 주면 JSONDecodeError·
+    UnicodeDecodeError 가 나는데, 열거로 잡으면 그것들이 새어 나가 호출부의
+    except PpurioError 를 비켜갑니다.
 
     조용히 삼키지 않습니다. 사유를 담아 타입만 바꿔 다시 던집니다.
 
@@ -135,8 +127,8 @@ def issue_token() -> str:
 def send(payload: dict) -> dict:
     """메시지를 발송합니다. payload 는 벤더 스펙 그대로입니다.
 
-    account 만 채워 넣습니다. messageType·content·targets·sendTime 등은
-    호출부가 준 값을 그대로 보냅니다.
+    account·from 만 채워 넣습니다. messageType·content·targets 는 호출부가
+    준 값을 그대로 보냅니다.
 
     Args:
         payload: 뿌리오 /v1/message 요청 본문 (account 제외)
@@ -147,31 +139,10 @@ def send(payload: dict) -> dict:
     Raises:
         PpurioError: HTTP 실패
     """
-    # from 은 필수다(발신번호 사전등록제). 없으면 벤더가 4xx 로 거절하고,
-    # 그때는 이미 자리를 잡은 뒤라 전 건이 failed 로 찍힌다. payload 가
-    # 이기도록 뒤에 펼쳐 둔다.
+    # from 은 필수다(발신번호 사전등록제). payload 가 이기도록 뒤에 펼친다.
     body = {
         "account": _env("PPURIO_ACCOUNT"),
         "from": _env("PPURIO_SENDER"),
         **payload,
     }
-    # 토큰 단계의 실패는 issue_token 이 PpurioError 로 바꿔 던진다.
-    # 이 호출의 타임아웃과 5xx 는 다르다 — 접수됐을 수 있으므로 그대로
-    # 전파해 선점을 남긴 채 사람이 확인하게 둔다.
     return _post("/v1/message", body, {"Authorization": "Bearer " + issue_token()})
-
-
-def cancel(message_key: str) -> dict:
-    """예약 발송을 취소합니다. 발송 1분 전까지만 가능합니다.
-
-    Args:
-        message_key: 접수 시 받은 messageKey
-
-    Returns:
-        dict: 뿌리오 응답
-    """
-    return _post(
-        "/v1/cancel",
-        {"account": _env("PPURIO_ACCOUNT"), "messageKey": message_key},
-        {"Authorization": "Bearer " + issue_token()},
-    )
