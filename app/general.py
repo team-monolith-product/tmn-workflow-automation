@@ -125,7 +125,7 @@ async def _build_tools(
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
-        + get_sms_tools(client, user_id, channel, thread_ts)
+        + get_sms_tools(client, channel, thread_ts)
     )
 
 

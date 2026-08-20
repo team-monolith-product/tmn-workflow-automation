@@ -17,13 +17,8 @@
 합니다.
 """
 
-import pathlib
 import re
 from typing import Any
-
-TEMPLATE_DIR = (
-    pathlib.Path(__file__).resolve().parent.parent.parent / "templates" / "sms"
-)
 
 SMS_MAX_BYTES = 90
 LMS_MAX_BYTES = 2000
@@ -65,57 +60,6 @@ def normalize_phone(raw: str) -> str:
     if not 10 <= len(digits) <= 11:
         raise ValueError(f"수신번호 형식 오류: {raw}")
     return digits
-
-
-def load(name: str) -> str:
-    """문안 파일을 읽습니다.
-
-    Args:
-        name: 확장자를 뺀 파일명 (discord, confirm …)
-
-    Returns:
-        str: 치환 태그가 남아 있는 원문
-
-    Raises:
-        FileNotFoundError: 그런 문안이 없을 때
-    """
-    path = TEMPLATE_DIR / f"{name}.txt"
-    if not path.is_file():
-        # 저장된 문안은 아직 하나도 없다. 목록만 비워서 돌려주면 "사용 가능: "
-        # 뒤가 잘린 것처럼 보여, 오타를 의심하며 있지도 않은 파일을 찾는다.
-        available = ", ".join(sorted(p.stem for p in TEMPLATE_DIR.glob("*.txt")))
-        raise FileNotFoundError(
-            f"문안 '{name}' 없음. 사용 가능: {available}"
-            if available
-            else f"문안 '{name}' 없음. 저장된 문안이 하나도 없습니다 — "
-            f"{TEMPLATE_DIR} 에 .txt 를 두거나 --content 로 본문을 바로 주세요."
-        )
-    return path.read_text(encoding="utf-8").rstrip("\n")
-
-
-def resolve(name: str | None, content: str | None) -> str:
-    """문안을 정합니다. 파일 이름과 본문 중 정확히 하나를 받습니다.
-
-    반복해서 쓰는 문안은 파일로 두고 컨펌 대상을 텍스트 파일로 유지합니다.
-    다만 파일만 허용하면 "이 조회 결과에 이 내용으로 보내줘"가 새 파일을 만드는
-    PR 을 거쳐야 해서 슬랙에서 끝나지 않습니다. 일회성 문안은 본문을 그대로 받되,
-    발송 전에 사람이 승인 카드에서 전문을 보고 누릅니다.
-
-    Args:
-        name: 문안 파일 이름
-        content: 즉석 문안 본문
-
-    Returns:
-        str: 치환 태그가 남아 있는 원문
-
-    Raises:
-        ValueError: 둘 다 주거나 둘 다 안 줬을 때
-    """
-    # is None 으로 보면 빈 문자열이 둘 다 통과한다. --content "$MSG" 에서 MSG 가
-    # 안 잡히면 빈 본문이 그대로 발송되고, 그 캠페인은 재발송도 막힌다.
-    if bool(name) == bool(content):
-        raise ValueError("문안 파일 이름과 본문 중 하나만 지정해야 합니다")
-    return load(name) if name else content.rstrip("\n")
 
 
 def render(template: str, row: dict[str, Any]) -> str:
