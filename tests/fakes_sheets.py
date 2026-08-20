@@ -7,15 +7,16 @@ value_input_option 을 실제로 해석하는 것이 이 페이크의 핵심입�
 앞자리 0 을 버리는 사고를 테스트가 구조적으로 못 잡습니다.
 """
 
-from gspread.utils import a1_to_rowcol
+import re
+
+_CELL = re.compile(r"([A-Z]+)(\d+)")
 
 
 def _cell_index(range_name: str) -> tuple[int, int]:
     """A1 표기를 0-based (행, 열) 로 바꿉니다.
 
-    파싱을 직접 짜면 페이크와 프로덕션이 서로 다른 두 구현이 되어, 둘이 같은
-    규칙을 쓴다는 보장이 사라집니다. 실제로 한 글자만 처리하던 시절 Z 다음
-    열(AA)에서 죽었고 운영 명단은 이미 24열입니다.
+    26진수로 풉니다. 한 글자만 처리하면 Z 다음 열(AA)부터 죽는데, 운영
+    명단이 이미 24열이라 캠페인 두 개면 거기에 닿습니다.
 
     Args:
         range_name: "A1" · "AA27" 같은 셀 주소
@@ -23,8 +24,15 @@ def _cell_index(range_name: str) -> tuple[int, int]:
     Returns:
         tuple[int, int]: (0-based 행, 0-based 열)
     """
-    row, column = a1_to_rowcol(range_name)
-    return row - 1, column - 1
+    column, row = _CELL.match(range_name).groups()
+    left = (
+        sum(
+            (ord(char) - ord("A") + 1) * 26**power
+            for power, char in enumerate(reversed(column))
+        )
+        - 1
+    )
+    return int(row) - 1, left
 
 
 def _as_sheet_value(value, value_input_option: str):

@@ -195,6 +195,8 @@ def main() -> None:
         content=args.content,
         subject=args.subject,
         send_at=send_at,
+        requested_by="script",
+        entrypoint="script",
         worksheet=args.worksheet,
         gid=gid,
     )
