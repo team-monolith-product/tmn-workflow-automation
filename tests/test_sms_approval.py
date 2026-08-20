@@ -72,10 +72,11 @@ def _press(client, action_id):
     _DRAFTS 키를 손으로 넣으면, 카드가 엉뚱한 value 를 싣고 있어도 테스트가
     통과한다. 운영에서는 그때 [보내기] 가 늘 "이미 처리된 초안" 만 뱉는다.
     """
+    actions = next(
+        block for block in client.posted[-1]["blocks"] if block["type"] == "actions"
+    )
     button = next(
-        element
-        for element in client.posted[-1]["blocks"][1]["elements"]
-        if element["action_id"] == action_id
+        element for element in actions["elements"] if element["action_id"] == action_id
     )
     return {
         "actions": [{"value": button["value"]}],
@@ -106,10 +107,34 @@ async def test_도구는_문자를_보내지_않는다(client, monkeypatch):
     assert len(sms._DRAFTS) == 1
 
 
-async def test_카드에_미리보기가_실린다(client):
+def _card(client) -> str:
+    return str(client.posted[-1]["blocks"])
+
+
+async def test_카드는_치환_전_원문을_보여준다(client):
+    # 치환 후만 보여주면 "[*이름*] 팀장" 이 되어야 할 자리에 수신자 이름이
+    # 박혀 있어도 문장이 자연스러워서 승인자가 못 잡는다.
+    await _draft(client, content="[*이름*]선생님, 문의는 최형관 팀장")
+
+    assert "[*이름*]선생님, 문의는 최형관 팀장" in _card(client)
+
+
+async def test_카드에_치환값_목록이_실린다(client):
     await _draft(client)
 
-    assert "가님" in str(client.posted[0]["blocks"])
+    card = _card(client)
+    assert "010-1111-1111".replace("-", "") in card
+    assert "가" in card and "나" in card
+
+
+async def test_수신자가_많으면_접되_마지막_한_줄은_남긴다(client):
+    # 이름이 한 칸씩 밀리는 사고는 앞줄만 보면 안 보이고 끝에서 티가 난다.
+    targets = [{"to": f"010-1111-{i:04d}", "name": f"이름{i}"} for i in range(1, 31)]
+    await _draft(client, targets=targets)
+
+    card = _card(client)
+    assert "이름30" in card
+    assert "명 접음" in card
 
 
 async def test_보내기를_누르면_그때_나간다(client, handlers, monkeypatch):
@@ -213,3 +238,20 @@ async def test_타임아웃은_안_나갔다고_말하지_않는다(client, hand
     text = client.updated[0]["text"]
     assert "안 나갔" not in text and "실패" not in text
     assert "모릅니다" in text
+
+
+async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
+    # 넘으면 슬랙이 invalid_blocks 로 거절해 카드가 아예 안 올라간다.
+    targets = [
+        {
+            "to": f"010-1111-{i:04d}",
+            "name": f"이름{i}",
+            "var1": "https://x/" + "a" * 300,
+        }
+        for i in range(1, 31)
+    ]
+    await _draft(client, targets=targets, content="[*이름*] [*1*]")
+
+    for block in client.posted[-1]["blocks"]:
+        if block["type"] == "section":
+            assert len(block["text"]["text"]) <= 3000

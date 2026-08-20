@@ -26,9 +26,55 @@ CANCEL = "sms_cancel"
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
+# 카드에 펼칠 수신자 줄 수와, 슬랙 section text 의 3000자 제한에 둘 여유.
+MAX_ROWS = 20
+MAX_CHARS = 2800
+
+
+def _value_table(targets: list[dict]) -> str:
+    """치환값 목록을 표로 만듭니다.
+
+    벤더로 나가는 targets 를 그대로 씁니다. 카드가 보여주는 것과 실제 나가는
+    것이 같아야, 사람이 확인한 것이 곧 발송된 것이 됩니다.
+
+    중간을 접을 때 마지막 한 줄은 남깁니다. 이름이 한 칸씩 밀리는 사고는
+    앞줄만 보면 안 보이고 끝에서 티가 납니다.
+    """
+    head = ["번호"]
+    if any("name" in target for target in targets):
+        head.append("이름")
+    head += [f"[*{key[3:]}*]" for key in targets[0].get("changeWord", {})]
+
+    def line(target: dict) -> str:
+        cells = [target["to"]]
+        if len(head) > 1 and head[1] == "이름":
+            cells.append(target.get("name") or "-")
+        cells += [value or "-" for value in target.get("changeWord", {}).values()]
+        return "  ".join(cells)
+
+    lines = [" ".join(head)]
+    if len(targets) <= MAX_ROWS:
+        lines += [line(target) for target in targets]
+    else:
+        lines += [line(target) for target in targets[: MAX_ROWS - 1]]
+        lines.append(f"… {len(targets) - MAX_ROWS}명 접음 …")
+        lines.append(line(targets[-1]))
+
+    table = "\n".join(lines)
+    # 치환값이 길면(URL 여러 개) 줄 수를 줄여도 3000자를 넘는다. 넘으면 슬랙이
+    # invalid_blocks 로 거절해 카드가 아예 안 올라가고, 그러면 발송도 못 한다.
+    if len(table) > MAX_CHARS:
+        table = table[:MAX_CHARS] + "\n… 너무 길어 잘림 …"
+    return table
+
 
 def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
-    """승인 카드를 만듭니다."""
+    """승인 카드를 만듭니다.
+
+    치환 후 문장이 아니라 태그가 살아 있는 원문을 보여줍니다. 벤더로 나가는
+    것이 그것이고, 태그가 있어야 할 자리에 이름이 박혀 있는 실수도 그래야
+    보입니다.
+    """
     head = f"{len(plan.rows)}명 · {plan.message_type}"
     if plan.folded:
         head += f" · 중복 {plan.folded}건 접음"
@@ -37,7 +83,14 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*문자 발송 확인* — {head}\n```{plan.sample}```",
+                "text": f"*문자 발송 확인* — {head}\n```{plan.template}```",
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*치환값*\n```{_value_table(plan.targets)}```",
             },
         },
         {

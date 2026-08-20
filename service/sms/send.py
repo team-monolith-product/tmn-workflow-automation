@@ -20,6 +20,7 @@ class Plan(NamedTuple):
     message_type: str | None
     sample: str
     max_bytes: int
+    targets: list[dict[str, Any]]  # 벤더로 그대로 나가는 값. 카드도 이걸 보여준다
 
 
 def preview(rows: list[dict[str, Any]], content: str | None = None) -> Plan:
@@ -37,9 +38,9 @@ def preview(rows: list[dict[str, Any]], content: str | None = None) -> Plan:
     """
     template = (content or "").strip()
     if not template:
-        return Plan(["문안이 비어 있습니다."], "", [], 0, None, "", 0)
+        return Plan(["문안이 비어 있습니다."], "", [], 0, None, "", 0, [])
     if not rows:
-        return Plan(["수신자가 없습니다."], template, [], 0, None, "", 0)
+        return Plan(["수신자가 없습니다."], template, [], 0, None, "", 0, [])
 
     problems: list[str] = []
     unique: dict[str, dict[str, Any]] = {}
@@ -71,6 +72,7 @@ def preview(rows: list[dict[str, Any]], content: str | None = None) -> Plan:
         "SMS" if max_bytes <= templates.SMS_MAX_BYTES else "LMS",
         rendered[0] if rendered else "",
         max_bytes,
+        templates.build_targets(template, kept),
     )
 
 
@@ -99,7 +101,7 @@ def send(
         "messageType": plan.message_type,
         "content": plan.template,
         "targetCount": len(plan.rows),
-        "targets": templates.build_targets(plan.template, plan.rows),
+        "targets": plan.targets,
     }
     if plan.message_type != "SMS":
         payload["subject"] = subject
