@@ -75,14 +75,14 @@ def preview(rows: list[dict[str, Any]], content: str | None = None) -> Plan:
 
 
 def send(
-    *, rows: list[dict[str, Any]], content: str, subject: str | None = None
+    *, rows: list[dict[str, Any]], content: str, subject: str = "안내"
 ) -> dict[str, Any]:
     """문자를 보냅니다.
 
     Args:
         rows: to·name·var1~var8 을 담은 수신자 목록
         content: 문안 본문
-        subject: LMS 제목. 생략하면 '안내'
+        subject: LMS 제목. SMS 로 판정되면 쓰이지 않는다
 
     Returns:
         dict[str, Any]: sent·message_key·message_type
@@ -102,7 +102,7 @@ def send(
         "targets": templates.build_targets(plan.template, plan.rows),
     }
     if plan.message_type != "SMS":
-        payload["subject"] = subject or "안내"
+        payload["subject"] = subject
 
     result = transport.send(payload)
     if str(result.get("code")) != "1000":

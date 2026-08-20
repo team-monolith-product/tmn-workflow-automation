@@ -79,12 +79,34 @@ def test_접수코드가_1000이_아니면_실패로_본다(monkeypatch):
 
 
 def test_LMS면_제목을_붙인다(monkeypatch):
+    # 뿌리오는 LMS 에 subject 가 없으면 거절한다. payload 를 안 보면 이 두
+    # 줄을 지워도 전부 초록이고, 90byte 넘는 문안이 실계정에서만 터진다.
     long_body = "가" * 100  # EUC-KR 200byte — SMS 90byte 한도를 넘는다
-    _accept(monkeypatch)
+    captured = {}
+    _accept(monkeypatch, captured)
 
-    result = sms_send.send(rows=ROWS, content=long_body, subject="공지")
+    result = sms_send.send(rows=ROWS, content=long_body)
 
     assert result["message_type"] == "LMS"
+    assert captured["subject"] == "안내"
+
+
+def test_제목을_주면_그것을_싣는다(monkeypatch):
+    captured = {}
+    _accept(monkeypatch, captured)
+
+    sms_send.send(rows=ROWS, content="가" * 100, subject="공지")
+
+    assert captured["subject"] == "공지"
+
+
+def test_SMS면_제목을_붙이지_않는다(monkeypatch):
+    captured = {}
+    _accept(monkeypatch, captured)
+
+    sms_send.send(rows=ROWS, content=CONTENT)
+
+    assert "subject" not in captured
 
 
 def test_치환값이_태그보다_짧아도_원문_길이로_판정한다(monkeypatch):
@@ -96,7 +118,7 @@ def test_치환값이_태그보다_짧아도_원문_길이로_판정한다(monke
     content = "[*이름*][*1*]" + "가" * 40
     rows = [{"to": "010-1111-1111", "name": "가", "var1": "나"}]
 
-    sms_send.send(rows=rows, content=content, subject="공지")
+    sms_send.send(rows=rows, content=content)
 
     assert captured["messageType"] == "LMS"
 

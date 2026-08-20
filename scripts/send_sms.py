@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument("--content", help="문안 본문")
     parser.add_argument("--to", help="수신번호")
     parser.add_argument("--name", default="", help="[*이름*] 치환값")
-    parser.add_argument("--subject", help="LMS 제목")
+    parser.add_argument("--subject", default="안내", help="LMS 제목")
     for key in VAR_KEYS:
         parser.add_argument(f"--{key}", default="", help=f"[*{key[3:]}*] 치환값")
     parser.add_argument("--dry-run", action="store_true", help="발송하지 않고 확인만")
