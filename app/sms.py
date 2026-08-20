@@ -26,55 +26,46 @@ CANCEL = "sms_cancel"
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
-# 카드에 펼칠 수신자 줄 수와, 슬랙 section text 의 3000자 제한에 둘 여유.
+# 줄 수와 줄 폭. 22줄 × 121자면 슬랙 section text 3000자에 든다.
 MAX_ROWS = 20
-MAX_CHARS = 2800
+MAX_WIDTH = 120
 
 
 def _value_table(targets: list[dict]) -> str:
-    """치환값 목록을 표로 만듭니다.
+    """치환값 목록을 표로 만듭니다. 벤더로 나가는 targets 를 그대로 씁니다.
 
-    벤더로 나가는 targets 를 그대로 씁니다. 카드가 보여주는 것과 실제 나가는
-    것이 같아야, 사람이 확인한 것이 곧 발송된 것이 됩니다.
-
-    중간을 접을 때 마지막 한 줄은 남깁니다. 이름이 한 칸씩 밀리는 사고는
-    앞줄만 보면 안 보이고 끝에서 티가 납니다.
+    접을 때 마지막 한 줄은 남깁니다. 이름이 한 칸씩 밀리는 사고는 앞줄만
+    보면 안 보이고 끝에서 티가 납니다.
     """
-    head = ["번호"]
-    if any("name" in target for target in targets):
-        head.append("이름")
-    head += [f"[*{key[3:]}*]" for key in targets[0].get("changeWord", {})]
+    # targets 의 키는 문안의 태그로 정해지므로 전 행이 같다. 첫 행이 대표값이다.
+    first = targets[0]
+    change = list(first.get("changeWord", {}))
+    named = "name" in first
+    head = ["번호", *(["이름"] if named else []), *(f"[*{k[3:]}*]" for k in change)]
 
     def line(target: dict) -> str:
-        cells = [target["to"]]
-        if len(head) > 1 and head[1] == "이름":
-            cells.append(target.get("name") or "-")
-        cells += [value or "-" for value in target.get("changeWord", {}).values()]
-        return "  ".join(cells)
+        cells = [
+            target["to"],
+            *([target["name"] or "-"] if named else []),
+            *(target["changeWord"][key] or "-" for key in change),
+        ]
+        # 값에 개행이 있으면 한 행이 두 줄로 쪼개져 딱 "한 칸 밀림" 처럼 보이고,
+        # 백틱이 있으면 코드펜스가 거기서 닫혀 표가 무너진다.
+        text = "  ".join(cells).replace("\n", " ").replace("`", "'")
+        return text if len(text) <= MAX_WIDTH else text[: MAX_WIDTH - 1] + "…"
 
-    lines = [" ".join(head)]
+    lines = ["  ".join(head)]
     if len(targets) <= MAX_ROWS:
-        lines += [line(target) for target in targets]
-    else:
-        lines += [line(target) for target in targets[: MAX_ROWS - 1]]
-        lines.append(f"… {len(targets) - MAX_ROWS}명 접음 …")
-        lines.append(line(targets[-1]))
-
-    table = "\n".join(lines)
-    # 치환값이 길면(URL 여러 개) 줄 수를 줄여도 3000자를 넘는다. 넘으면 슬랙이
-    # invalid_blocks 로 거절해 카드가 아예 안 올라가고, 그러면 발송도 못 한다.
-    if len(table) > MAX_CHARS:
-        table = table[:MAX_CHARS] + "\n… 너무 길어 잘림 …"
-    return table
+        return "\n".join(lines + [line(target) for target in targets])
+    return "\n".join(
+        lines
+        + [line(target) for target in targets[: MAX_ROWS - 1]]
+        + [f"… {len(targets) - MAX_ROWS}명 접음 …", line(targets[-1])]
+    )
 
 
 def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
-    """승인 카드를 만듭니다.
-
-    치환 후 문장이 아니라 태그가 살아 있는 원문을 보여줍니다. 벤더로 나가는
-    것이 그것이고, 태그가 있어야 할 자리에 이름이 박혀 있는 실수도 그래야
-    보입니다.
-    """
+    """승인 카드를 만듭니다. 치환 후 문장이 아니라 태그가 살아 있는 원문입니다."""
     head = f"{len(plan.rows)}명 · {plan.message_type}"
     if plan.folded:
         head += f" · 중복 {plan.folded}건 접음"

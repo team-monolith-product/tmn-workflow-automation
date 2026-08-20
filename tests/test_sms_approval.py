@@ -119,12 +119,29 @@ async def test_카드는_치환_전_원문을_보여준다(client):
     assert "[*이름*]선생님, 문의는 최형관 팀장" in _card(client)
 
 
-async def test_카드에_치환값_목록이_실린다(client):
+async def test_카드에_번호와_치환값이_짝지어_실린다(client):
+    # 존재 여부만 보면 짝이 뒤바뀌어도 통과한다. 이 카드의 존재 이유가 짝이다.
     await _draft(client)
 
     card = _card(client)
-    assert "010-1111-1111".replace("-", "") in card
-    assert "가" in card and "나" in card
+    assert "01011111111  가" in card
+    assert "01022222222  나" in card
+
+
+async def test_값의_개행과_백틱이_표를_깨지_않는다(client):
+    # 개행은 한 행을 두 줄로 쪼개 딱 "한 칸 밀림" 처럼 보이고, 백틱은
+    # 코드펜스를 닫아버린다. 둘 다 모델이 만든 값에서 나올 수 있다.
+    await _draft(
+        client,
+        targets=[
+            {"to": "010-1111-1111", "name": "가\n나"},
+            {"to": "010-2222-2222", "name": "```"},
+        ],
+    )
+
+    table = client.posted[-1]["blocks"][1]["text"]["text"]
+    assert "01011111111  가 나" in table
+    assert "```" not in table.replace("```", "", 2)
 
 
 async def test_수신자가_많으면_접되_마지막_한_줄은_남긴다(client):
@@ -255,3 +272,7 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
     for block in client.posted[-1]["blocks"]:
         if block["type"] == "section":
             assert len(block["text"]["text"]) <= 3000
+    # 길이만 보면, 자르면서 접음 표시와 마지막 줄을 같이 날려도 통과한다.
+    card = _card(client)
+    assert "명 접음" in card
+    assert "이름30" in card
