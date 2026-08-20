@@ -46,17 +46,16 @@ def test_계정과_발신번호를_채워_보낸다(env, posted):
     assert posted["body"]["content"] == "안녕"
 
 
-def test_호출부가_준_값이_이긴다(env, posted):
-    # 벤더 옵션 통과 계약. 우리가 채운 기본값을 호출부가 덮을 수 있어야 한다.
+def test_호출부가_발신번호를_덮을_수_없다(env, posted):
+    # 사전등록된 발신번호가 아니면 통신사가 막는다.
     transport.send({"from": "0316000000"})
 
-    assert posted["body"]["from"] == "0316000000"
+    assert posted["body"]["from"] == "025770000"
 
 
 def test_인증_설정이_없으면_PpurioError로_거절한다(monkeypatch):
-    # KeyError 로 새어 나가면 호출부의 except PpurioError 를 우회해, 이력에
-    # 자리는 잡힌 채 접수코드가 빈 행으로 남는다. 그 행은 살아 있는 것으로
-    # 취급되어 환경변수를 채워 다시 돌려도 한 통도 안 나간다.
+    # KeyError 로 새어 나가면 호출부의 except PpurioError 를 비켜가, 설정
+    # 누락이 "접수 여부를 모른다" 로 보고된다.
     monkeypatch.delenv("PPURIO_ACCOUNT", raising=False)
 
     with pytest.raises(transport.PpurioError):
@@ -78,8 +77,6 @@ def test_인증_설정이_없으면_PpurioError로_거절한다(monkeypatch):
 def test_토큰_단계_실패는_종류를_가리지_않고_안_나간_것으로_본다(
     env, monkeypatch, boom
 ):
-    # 종류를 열거해 잡으면 빠진 것이 새어 나가 호출부의 except PpurioError 를
-    # 비켜가고, 접수코드가 빈 행이 남아 campaign 이 영구히 잠긴다.
     # "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"는 종류와
     # 무관하게 참이라, 여기서는 넓게 잡는 쪽이 정확하다.
     paths = []
@@ -110,9 +107,8 @@ def _raise_http(status: int):
 
 @pytest.mark.parametrize("status", [500, 502, 503, 504])
 def test_5xx는_PpurioError로_바꾸지_않는다(env, monkeypatch, status):
-    # PpurioError 는 호출부가 선점을 푸는 신호다. 504 는 게이트웨이가 대신
-    # 돌려주는 타임아웃이라 뿌리오가 이미 접수했을 수 있는데, 여기서 바꾸면
-    # 재시도가 열려 같은 사람에게 두 번 나간다.
+    # PpurioError 는 호출부가 "안 나갔다"고 단정하는 신호다. 504 는 게이트웨이가
+    # 대신 돌려주는 타임아웃이라 뿌리오가 이미 접수했을 수 있다.
     monkeypatch.setattr(urllib.request, "urlopen", _raise_http(status))
 
     with pytest.raises(urllib.error.HTTPError):

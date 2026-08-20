@@ -127,8 +127,8 @@ def issue_token() -> str:
 def send(payload: dict) -> dict:
     """메시지를 발송합니다. payload 는 벤더 스펙 그대로입니다.
 
-    account·from 만 채워 넣습니다. messageType·content·targets 는 호출부가
-    준 값을 그대로 보냅니다.
+    account·from 은 여기서 정합니다. 호출부가 발신번호를 덮을 수 없습니다.
+    messageType·content·targets 는 준 값을 그대로 보냅니다.
 
     Args:
         payload: 뿌리오 /v1/message 요청 본문 (account 제외)
@@ -139,10 +139,9 @@ def send(payload: dict) -> dict:
     Raises:
         PpurioError: HTTP 실패
     """
-    # from 은 필수다(발신번호 사전등록제). payload 가 이기도록 뒤에 펼친다.
     body = {
+        **payload,
         "account": _env("PPURIO_ACCOUNT"),
         "from": _env("PPURIO_SENDER"),
-        **payload,
     }
     return _post("/v1/message", body, {"Authorization": "Bearer " + issue_token()})

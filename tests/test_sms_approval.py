@@ -3,6 +3,7 @@
 import pytest
 
 from service.sms import send as sms_send
+from service.sms import transport
 
 from app import sms
 
@@ -174,14 +175,29 @@ async def test_번호가_틀리면_초안을_안_올린다(client):
 
 
 async def test_번호_없는_대상도_모아서_알린다(client):
-    # 모델이 to 를 빼먹거나 수로 주는 일이 실제로 있다.
-    answer = await _draft(client, targets=[{"name": "홍길동"}, {"to": 1011111111}])
+    # 모델이 to 를 빼먹거나 선행 0 없는 수로 주는 일이 실제로 있다.
+    answer = await _draft(client, targets=[{"to": 1011111111}])
 
     assert "고칠 것" in answer
     assert client.posted == []
 
 
-async def test_발송이_터지면_카드에_사유가_남는다(client, handlers, monkeypatch):
+async def test_벤더가_거절하면_안_나갔다고_말한다(client, handlers, monkeypatch):
+    def boom(**kwargs):
+        raise transport.PpurioError(400, "invalid sender")
+
+    monkeypatch.setattr(sms_send, "send", boom)
+    await _draft(client)
+
+    with pytest.raises(transport.PpurioError):
+        await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert "안 나갔습니다" in client.updated[0]["text"]
+
+
+async def test_타임아웃은_안_나갔다고_말하지_않는다(client, handlers, monkeypatch):
+    # 뿌리오가 이미 접수했을 수 있다. "실패" 라고 하면 다시 보내고, 같은
+    # 사람이 두 번 받는다.
     def boom(**kwargs):
         raise TimeoutError("read timed out")
 
@@ -191,4 +207,6 @@ async def test_발송이_터지면_카드에_사유가_남는다(client, handler
     with pytest.raises(TimeoutError):
         await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
-    assert "TimeoutError" in client.updated[0]["text"]
+    text = client.updated[0]["text"]
+    assert "안 나갔" not in text and "실패" not in text
+    assert "모릅니다" in text

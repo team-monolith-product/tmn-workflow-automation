@@ -47,7 +47,9 @@ def normalize_phone(raw: str) -> str:
         ValueError: 숫자만 남겼을 때 10~11자리가 아니면
     """
     digits = re.sub(r"[^0-9]", "", raw)
-    if not 10 <= len(digits) <= 11:
+    # 자릿수만 보면 모델이 낸 1011111111(JSON 수는 선행 0 을 못 쓴다)이
+    # 통과해, 유효하지 않은 번호가 그대로 벤더로 나간다.
+    if not (10 <= len(digits) <= 11 and digits.startswith("0")):
         raise ValueError(f"수신번호 형식 오류: {raw}")
     return digits
 
@@ -105,14 +107,14 @@ def build_targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """벤더 targets 배열을 만듭니다.
 
     Args:
-        rows: to·name·var1~var8 을 담은 수신자 목록
+        rows: to 가 normalize_phone 을 거친 수신자 목록
 
     Returns:
         list[dict[str, Any]]: 뿌리오 targets 형식
     """
     targets = []
     for row in rows:
-        target: dict[str, Any] = {"to": normalize_phone(row["to"])}
+        target: dict[str, Any] = {"to": row["to"]}
         if row.get("name"):
             target["name"] = str(row["name"])
         change_word = {key: str(row[key]) for key in VAR_KEYS if row.get(key)}

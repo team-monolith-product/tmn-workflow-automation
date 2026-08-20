@@ -50,7 +50,7 @@ def test_LMS_한도를_넘으면_거절한다():
 
 
 def test_targets에_changeWord를_싣는다():
-    rows = [{"to": "010-1234-5678", "name": "홍길동", "var1": "1기", "var2": "링크"}]
+    rows = [{"to": "01012345678", "name": "홍길동", "var1": "1기", "var2": "링크"}]
     assert templates.build_targets(rows) == [
         {
             "to": "01012345678",

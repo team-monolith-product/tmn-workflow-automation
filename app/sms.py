@@ -13,17 +13,19 @@ import asyncio
 import uuid
 from typing import Any
 
+from cachetools import TTLCache
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import send as sms_send
+from service.sms import transport
 
 APPROVE = "sms_approve"
 CANCEL = "sms_cancel"
 
 # 슬랙 버튼 value 는 2000자 제한이라 수신자 목록을 통째로 못 싣는다.
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
-_DRAFTS: dict[str, dict[str, Any]] = {}
+_DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
 
 def _blocks(draft_id: str, summary: dict[str, Any]) -> list[dict]:
@@ -129,9 +131,18 @@ def register_sms_handlers(app):
             result = await asyncio.to_thread(
                 sms_send.send, rows=draft["rows"], content=draft["content"]
             )
+        except transport.PpurioError as error:
+            await _replace(client, channel, ts, f"안 나갔습니다 — {error}")
+            raise
         except Exception as error:
+            # 타임아웃·5xx 는 뿌리오가 이미 접수했을 수 있다. "실패" 라고 하면
+            # 다시 보내고, 같은 사람이 두 번 받는다.
             await _replace(
-                client, channel, ts, f"발송 실패 — {type(error).__name__}: {error}"
+                client,
+                channel,
+                ts,
+                f"접수 여부를 모릅니다 ({type(error).__name__})"
+                " — 뿌리오 웹에서 확인하고 보내세요",
             )
             raise
 

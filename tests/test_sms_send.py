@@ -107,13 +107,13 @@ def test_문안이_비면_거른다():
 
 
 def test_번호가_없거나_수여도_형식_오류로_모은다():
-    # 모델이 만든 목록이라 to 가 빠지거나 수로 올 수 있다.
+    # 모델이 만든 목록이라 to 가 빠지거나 수로 올 수 있다. JSON 수는 선행 0 을
+    # 못 써서 1011111111 로 오는데, 자릿수만 보면 통과해 그대로 벤더로 나간다.
     problems = sms_send.preview([{"name": "홍길동"}, {"to": 1011111111}], CONTENT)[
         "problems"
     ]
 
-    assert len(problems) == 1
-    assert "형식 오류" in problems[0]
+    assert len(problems) == 2
 
 
 def test_문제를_한_번에_모아_돌려준다():
