@@ -96,10 +96,10 @@ def test_캠페인_이름의_공백은_무시한다():
     ws = _ws([_person("홍길동", "01011111111")])
     ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    won, _, blocked, _ = ledger.claim(ws, " discord ", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, " discord ", [{"to": "01011111111"}])
 
     assert ws.rows[0] == HEADER + ["discord"]
-    assert won == [] and len(blocked) == 1
+    assert claimed.won == [] and len(claimed.blocked) == 1
 
 
 def test_빈_칸인_사람만_보낸다():
@@ -109,13 +109,13 @@ def test_빈_칸인_사람만_보낸다():
     )
     ws.rows[1].append("2026-08-11 20:14")  # 홍길동은 이미 받음
 
-    won, already, _, missing = ledger.claim(
+    claimed = ledger.claim(
         ws, "discord", [{"to": "01011111111"}, {"to": "01022222222"}]
     )
 
-    assert [w["to"] for w in won] == ["01022222222"]
-    assert [a["to"] for a in already] == ["01011111111"]
-    assert missing == []
+    assert [w["to"] for w in claimed.won] == ["01022222222"]
+    assert [a["to"] for a in claimed.done] == ["01011111111"]
+    assert claimed.missing == []
 
 
 def test_사람이_손으로_적은_표시도_존중한다():
@@ -123,30 +123,30 @@ def test_사람이_손으로_적은_표시도_존중한다():
     ws = _ws([_person("홍길동", "01011111111")], header=HEADER + ["discord"])
     ws.rows[1].append("수기 발송")
 
-    won, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    assert won == [] and len(already) == 1
+    assert claimed.won == [] and len(claimed.done) == 1
 
 
 def test_명단에_없으면_보내지_않고_알린다():
     # 조용히 빼면 안 간 줄 모르고, 그냥 보내면 기록할 곳이 없다.
     ws = _ws([_person("홍길동", "01011111111")])
 
-    won, _, _, missing = ledger.claim(
+    claimed = ledger.claim(
         ws, "discord", [{"to": "01011111111"}, {"to": "01099999999"}]
     )
 
-    assert [w["to"] for w in won] == ["01011111111"]
-    assert [m["to"] for m in missing] == ["01099999999"]
+    assert [w["to"] for w in claimed.won] == ["01011111111"]
+    assert [m["to"] for m in claimed.missing] == ["01099999999"]
 
 
 def test_명단_표기가_달라도_대조된다():
     # 우리는 01011111111 로 쓰고 명단에는 사람이 010-1111-1111 로 적는다.
     ws = _ws([_person("홍길동", "010-1111-1111")])
 
-    won, _, _, missing = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    assert len(won) == 1 and missing == []
+    assert len(claimed.won) == 1 and claimed.missing == []
 
 
 def test_보내기_전에_칸을_선점한다():
@@ -160,12 +160,12 @@ def test_보내기_전에_칸을_선점한다():
 
 def test_선점을_풀면_다시_대상이_된다():
     ws = _ws([_person("홍길동", "01011111111")])
-    won, _, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    ledger.mark(ws, "discord", [w["to"] for w in won], "")
+    ledger.mark(ws, "discord", [w["to"] for w in claimed.won], "")
 
-    won2, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
-    assert len(won2) == 1 and already == []
+    again = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    assert len(again.won) == 1 and again.done == []
 
 
 def test_폼_재응답으로_같은_번호가_두_줄이면_두_번_보내지_않는다():
@@ -175,9 +175,9 @@ def test_폼_재응답으로_같은_번호가_두_줄이면_두_번_보내지_�
     ws.rows[1].append("2026-08-01 10:00")
     ws.rows.append(_person("홍길동", "010-1111-1111"))  # 같은 사람 재응답
 
-    won, already, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01011111111"}])
 
-    assert won == [] and len(already) == 1
+    assert claimed.won == [] and len(claimed.done) == 1
 
 
 def test_중복_줄에는_선점도_전부_쓴다():
@@ -197,9 +197,9 @@ def test_한_명도_대조되지_않으면_열을_만들지_않는다():
     # 빈 열만 남기면, 인자를 고쳐 다시 돌릴 때마다 열이 하나씩 늘어난다.
     ws = _ws([_person("홍길동", "01011111111")])
 
-    won, _, _, missing = ledger.claim(ws, "discord", [{"to": "01099999999"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01099999999"}])
 
-    assert won == [] and len(missing) == 1
+    assert claimed.won == [] and len(claimed.missing) == 1
     assert ws.rows[0] == HEADER
 
 
@@ -221,13 +221,13 @@ def test_발송중은_끝난_것과_갈라_돌려준다():
     ws.rows[1].append(f"{ledger.SENDING} 2026-08-11 20:14")
     ws.rows[2].append("2026-08-11 20:14")
 
-    won, done, blocked, _ = ledger.claim(
+    claimed = ledger.claim(
         ws, "discord", [{"to": "01011111111"}, {"to": "01022222222"}]
     )
 
-    assert won == []
-    assert [b["to"] for b in blocked] == ["01011111111"]
-    assert [d["to"] for d in done] == ["01022222222"]
+    assert claimed.won == []
+    assert [b["to"] for b in claimed.blocked] == ["01011111111"]
+    assert [d["to"] for d in claimed.done] == ["01022222222"]
 
 
 def test_같은_번호를_두_번_넘기면_거절한다():
@@ -248,12 +248,12 @@ def test_선점_뒤에_행이_지워져도_남의_칸에_쓰지_않는다():
             _person("다", "01033333333"),
         ]
     )
-    won, _, _, _ = ledger.claim(
+    claimed = ledger.claim(
         ws, "discord", [{"to": "01022222222"}, {"to": "01033333333"}]
     )
     del ws.rows[1]  # '가' 응답이 지워져 아래가 한 칸씩 올라온다
 
-    ledger.mark(ws, "discord", [w["to"] for w in won], "2026-08-11 20:14")
+    ledger.mark(ws, "discord", [w["to"] for w in claimed.won], "2026-08-11 20:14")
 
     at = _column(ws, "discord")
     marked = {row[2]: row[at] for row in ws.rows[1:]}
@@ -267,11 +267,11 @@ def test_선점_뒤에_열이_생겨도_번호_열을_덮지_않는다():
     # 폼에 문항이 추가되면 열이 삽입되어 캠페인 열이 오른쪽으로 밀린다.
     # 선점 때의 열 번호를 그대로 쓰면 그 자리에 있던 열을 덮는다.
     ws = _ws([_person("홍길동", "01011111111")])
-    won, _, _, _ = ledger.claim(ws, "discord", [{"to": "01011111111"}])
+    claimed = ledger.claim(ws, "discord", [{"to": "01011111111"}])
     for row in ws.rows:  # 새 문항이 맨 앞에 끼어든 상황
         row.insert(0, "새 문항")
 
-    ledger.mark(ws, "discord", [w["to"] for w in won], "2026-08-11 20:14")
+    ledger.mark(ws, "discord", [w["to"] for w in claimed.won], "2026-08-11 20:14")
 
     assert ws.rows[0] == ["새 문항"] + HEADER + ["discord"]
     assert ws.rows[1][3] == "01011111111"
@@ -387,11 +387,11 @@ def test_사람이_쓰던_문자발송_열을_그대로_쓴다():
         ]
     )
 
-    won, already, _, missing = ledger.claim(
+    claimed = ledger.claim(
         ws, "문자발송", [{"to": "01062454553"}, {"to": "01022731905"}]
     )
 
     assert len(ws.rows[0]) == len(FORM_HEADER)
-    assert [item["to"] for item in already] == ["01062454553"]
-    assert [item["to"] for item in won] == ["01022731905"]
-    assert missing == []
+    assert [item["to"] for item in claimed.done] == ["01062454553"]
+    assert [item["to"] for item in claimed.won] == ["01022731905"]
+    assert claimed.missing == []

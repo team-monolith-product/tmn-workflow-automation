@@ -35,7 +35,9 @@
 
 import datetime
 import re
-from typing import Any
+from typing import Any, NamedTuple
+
+from gspread.utils import rowcol_to_a1
 
 from api import google_sheets
 from service.sms import KST
@@ -88,16 +90,6 @@ def parse_spreadsheet_ref(value: str) -> tuple[str, int | None]:
 
     gid = _GID_IN_URL.search(value)
     return sheet_id, int(gid.group(1)) if gid else None
-
-
-def _column_letter(index: int) -> str:
-    """0-based 열 번호를 A1 표기로 바꿉니다."""
-    letters = ""
-    index += 1
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(ord("A") + remainder) + letters
-    return letters
 
 
 def digits(phone: str) -> str:
@@ -184,67 +176,96 @@ def _parse_roster(
     return header, at, by_phone
 
 
-def _find_column(header: list[str], phone_at: int, campaign: str) -> int | None:
-    """캠페인 열을 찾습니다. 없으면 None. 시트를 건드리지 않습니다.
+class Claim(NamedTuple):
+    """claim 의 결과. 넷을 합치면 넘긴 수신자 전체가 됩니다."""
 
-    Args:
-        header: _parse_roster 가 돌려준 헤더
-        phone_at: 번호 열 번호
-        campaign: 발송 건 식별자 (strip 된 값)
+    won: list[dict[str, Any]]  # 자리를 잡았다. 이제 보낸다
+    done: list[dict[str, Any]]  # 그 열에 이미 값이 있다
+    blocked: list[dict[str, Any]]  # '발송중' — 접수 여부를 모른다
+    missing: list[dict[str, Any]]  # 명단에 없다
 
-    Returns:
-        int | None: 0-based 열 번호. 아직 없으면 None
 
-    Raises:
-        RosterLayoutError: 번호 열을 캠페인 열로 쓰려 할 때
+class _Roster:
+    """시트를 한 번 읽어 둔 스냅샷. 캠페인 열이 어디인지까지 압니다.
+
+    claim 과 mark 가 같은 준비를 각자 하면 campaign.strip() 같은 불변식이
+    두 벌이 됩니다. 한쪽만 빠뜨리면 mark 가 claim 이 만든 열을 못 찾아 맨 뒤에
+    열을 하나 더 만들고, 선점이 영영 안 풀립니다.
     """
-    for index, cell in enumerate(header):
-        if cell.strip() == campaign:
-            if index == phone_at:
-                raise RosterLayoutError(
-                    f"'{campaign}' 은 명단의 번호 열입니다. 여기에 발송 기록을 "
-                    "쓰면 번호가 지워집니다. 다른 campaign 이름을 쓰세요."
-                )
-            return index
-    return None
+
+    def __init__(self, ws, campaign: str):
+        self.ws = ws
+        self.campaign = campaign.strip()
+        self.values = ws.get_all_values()
+        self.header, phone_at, self.by_phone = _parse_roster(self.values)
+        self.at = self._find_column(phone_at)
+
+    def _find_column(self, phone_at: int) -> int | None:
+        """캠페인 열을 찾습니다. 없으면 None. 시트를 건드리지 않습니다.
+
+        Args:
+            phone_at: 번호 열 번호
+
+        Returns:
+            int | None: 0-based 열 번호. 아직 없으면 None
+
+        Raises:
+            RosterLayoutError: 번호 열을 캠페인 열로 쓰려 할 때
+        """
+        for index, cell in enumerate(self.header):
+            if cell.strip() == self.campaign:
+                if index == phone_at:
+                    raise RosterLayoutError(
+                        f"'{self.campaign}' 은 명단의 번호 열입니다. 여기에 발송 "
+                        "기록을 쓰면 번호가 지워집니다. 다른 campaign 을 쓰세요."
+                    )
+                return index
+        return None
+
+    def cell(self, row: int) -> str:
+        """1-based 행 번호로 캠페인 열의 값을 읽습니다. 열이 없으면 빈 값."""
+        if self.at is None:
+            return ""
+        line = self.values[row - 1]
+        return line[self.at].strip() if self.at < len(line) else ""
+
+    def rows_for(self, phones: list[str]) -> list[int]:
+        """그 번호들이 있는 행을 전부 모읍니다. 한 사람이 여러 줄일 수 있습니다."""
+        return [
+            row for phone in map(digits, phones) for row in self.by_phone.get(phone, [])
+        ]
+
+    def write(self, rows: list[int], value: str) -> None:
+        """그 열의 여러 행에 같은 값을 씁니다. 열이 없으면 그때 만듭니다.
+
+        쓸 것이 없으면 열도 만들지 않습니다. 조회가 열을 만들면, 번호 열을 잘못
+        잡아 한 명도 대조되지 않은 실행이 남의 시트에 빈 열만 남깁니다.
+
+        맨 뒤에 붙입니다. 중간에 끼우면 사람이 만든 수식과 조건부 서식이 밀립니다.
+
+        Args:
+            rows: 대상 행 번호 (1-based)
+            value: 적을 값. 빈 문자열이면 지운다
+        """
+        if not rows:
+            return
+        if self.at is None:
+            self.at = len(self.header)
+            self.ws.update(
+                [[self.campaign]],
+                rowcol_to_a1(1, self.at + 1),
+                value_input_option="RAW",
+            )
+        self.ws.batch_update(
+            [
+                {"range": rowcol_to_a1(row, self.at + 1), "values": [[value]]}
+                for row in rows
+            ],
+            value_input_option="RAW",
+        )
 
 
-def _write_column(
-    ws, header: list[str], campaign: str, at: int | None, rows: list[int], value: str
-) -> None:
-    """그 열의 여러 행에 같은 값을 씁니다. 열이 없으면 그때 만듭니다.
-
-    쓸 것이 없으면 열도 만들지 않습니다. 조회가 열을 만들면, 번호 열을 잘못
-    잡아 한 명도 대조되지 않은 실행이 남의 시트에 빈 열만 남깁니다.
-
-    맨 뒤에 붙입니다. 중간에 끼우면 사람이 만든 수식과 조건부 서식이 밀립니다.
-
-    Args:
-        ws: 명단 워크시트
-        header: _parse_roster 가 돌려준 헤더
-        campaign: 발송 건 식별자 (strip 된 값)
-        at: 이미 있는 캠페인 열 번호. None 이면 새로 만든다
-        rows: 대상 행 번호
-        value: 적을 값. 빈 문자열이면 지운다
-    """
-    if not rows:
-        return
-    if at is None:
-        at = len(header)
-        ws.update([[campaign]], f"{_column_letter(at)}1", value_input_option="RAW")
-    letter = _column_letter(at)
-    ws.batch_update(
-        [{"range": f"{letter}{row}", "values": [[value]]} for row in rows],
-        value_input_option="RAW",
-    )
-
-
-def claim(ws, campaign: str, entries: list[dict[str, Any]]) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-]:
+def claim(ws, campaign: str, entries: list[dict[str, Any]]) -> Claim:
     """보낼 사람의 자리를 선점합니다.
 
     명단에 있고 그 캠페인 열이 빈 사람만 대상입니다. 벤더를 부르기 전에 칸을
@@ -254,44 +275,31 @@ def claim(ws, campaign: str, entries: list[dict[str, Any]]) -> tuple[
     시트는 한 번만 읽습니다. 헤더·번호·캠페인 열 값을 따로 읽으면 그 사이
     행이 지워졌을 때 서로 다른 스냅샷을 대조하게 됩니다.
 
-    campaign 의 앞뒤 공백을 떼는 것은 취향이 아닙니다. 시트 셀은 strip 해서
-    비교하므로, 공백이 붙은 campaign 은 자기가 만든 열조차 못 찾아 매번 새
-    열을 만들고 그때마다 전원에게 다시 보냅니다.
-
     Args:
         ws: 명단 워크시트
         campaign: 발송 건 식별자
         entries: to·name·var1~var8 을 담은 수신자 목록 (번호는 정규화된 값)
 
     Returns:
-        tuple: (보낼 사람, 이미 끝난 사람, 발송중으로 막힌 사람, 명단에 없는 사람).
-            '발송중' 은 접수 여부를 모르는 상태라 끝난 것과 갈라 돌려준다 —
-            사람이 뿌리오 웹에서 확인하고 그 칸을 지워야 풀린다
+        Claim: 보낼 사람·끝난 사람·막힌 사람·명단에 없는 사람
 
     Raises:
         ValueError: entries 에 같은 번호가 두 번 있을 때
         RosterLayoutError: 번호 열이 없거나, campaign 이 번호 열 제목일 때
     """
-    campaign = campaign.strip()
     phones = [digits(entry["to"]) for entry in entries]
     if len(set(phones)) != len(phones):
         raise ValueError("같은 번호가 두 번 들어 있습니다. 접어서 넘기세요.")
 
-    values = ws.get_all_values()
-    header, phone_at, by_phone = _parse_roster(values)
-    at = _find_column(header, phone_at, campaign)
-
+    roster = _Roster(ws, campaign)
     won, done, blocked, missing, rows = [], [], [], [], []
     for entry, phone in zip(entries, phones):
-        found = by_phone.get(phone)
-        marks = (
-            [_cell(values, row, at) for row in found]
-            if found and at is not None
-            else []
-        )
+        found = roster.by_phone.get(phone)
         if found is None:
             missing.append(entry)
-        elif any(mark.startswith(SENDING) for mark in marks):
+            continue
+        marks = [roster.cell(row) for row in found]
+        if any(mark.startswith(SENDING) for mark in marks):
             blocked.append(entry)
         elif any(marks):
             done.append(entry)
@@ -300,14 +308,8 @@ def claim(ws, campaign: str, entries: list[dict[str, Any]]) -> tuple[
             rows.extend(found)
 
     stamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    _write_column(ws, header, campaign, at, rows, f"{SENDING} {stamp}")
-    return won, done, blocked, missing
-
-
-def _cell(values: list[list[str]], row: int, at: int) -> str:
-    """1-based 행 번호와 0-based 열 번호로 셀 값을 읽습니다."""
-    line = values[row - 1]
-    return line[at].strip() if at < len(line) else ""
+    roster.write(rows, f"{SENDING} {stamp}")
+    return Claim(won, done, blocked, missing)
 
 
 def mark(ws, campaign: str, phones: list[str], value: str) -> None:
@@ -325,9 +327,5 @@ def mark(ws, campaign: str, phones: list[str], value: str) -> None:
     """
     if not phones:
         return
-    campaign = campaign.strip()
-    values = ws.get_all_values()
-    header, phone_at, by_phone = _parse_roster(values)
-    at = _find_column(header, phone_at, campaign)
-    rows = [row for phone in map(digits, phones) for row in by_phone.get(phone, [])]
-    _write_column(ws, header, campaign, at, rows, value)
+    roster = _Roster(ws, campaign)
+    roster.write(roster.rows_for(phones), value)

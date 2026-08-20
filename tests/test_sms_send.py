@@ -58,7 +58,14 @@ def _campaign(ws, name: str = "discord") -> int:
     return ws.rows[0].index(name)
 
 
-def _run(monkeypatch, response=None, boom=None, **extra):
+def _run(
+    monkeypatch, response=None, boom=None, *, rows=ROWS, campaign="discord", **extra
+):
+    """벤더를 목킹하고 send_campaign 을 부른다.
+
+    content 를 주면 즉석 문안, 안 주면 저장된 문안을 쓴다. 이걸 못 받으면
+    즉석 문안이 필요한 테스트마다 목킹과 호출을 통째로 다시 쓰게 된다.
+    """
     captured = {}
 
     def fake_send(payload):
@@ -68,13 +75,12 @@ def _run(monkeypatch, response=None, boom=None, **extra):
         return response
 
     monkeypatch.setattr(transport, "send", fake_send)
+    if "content" not in extra:
+        extra["template_name"] = "discord"
     result = sms_send.send_campaign(
         spreadsheet_id="S1",
-        campaign="discord",
-        template_name="discord",
-        rows=ROWS,
-        requested_by="a@team-mono.com",
-        entrypoint="slack",
+        campaign=campaign,
+        rows=rows,
         **extra,
     )
     return result, captured
@@ -137,19 +143,11 @@ def test_전원_중복이면_벤더를_부르지_않는다(ws, monkeypatch):
 
 def test_명단에_없는_번호는_보내지_않고_알린다(ws, monkeypatch):
     # 조용히 빼면 안 간 줄 모르고, 그냥 보내면 기록할 곳이 없다.
-    captured = {}
-    monkeypatch.setattr(
-        transport,
-        "send",
-        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
-    )
-    result = sms_send.send_campaign(
-        spreadsheet_id="S1",
-        campaign="discord",
+    result, _ = _run(
+        monkeypatch,
+        {"code": "1000", "messageKey": "K"},
         rows=[{"to": "010-1111-1111"}, {"to": "010-9999-9999"}],
         content="[*이름*]님",
-        requested_by="a@team-mono.com",
-        entrypoint="slack",
     )
 
     assert result["sent"] == 1
@@ -208,63 +206,43 @@ def test_벤더_옵션은_그대로_통과한다(ws, monkeypatch):
 
 def test_LMS면_제목을_붙인다(ws, monkeypatch):
     long_body = "가" * 100  # EUC-KR 200byte — SMS 90byte 한도를 넘는다
-    monkeypatch.setattr(
-        transport, "send", lambda payload: {"code": "1000", "messageKey": "K"}
+    result, payload = _run(
+        monkeypatch, {"code": "1000", "messageKey": "K"}, content=long_body
     )
-    result = sms_send.send_campaign(
-        spreadsheet_id="S1",
-        campaign="discord",
-        rows=ROWS,
-        content=long_body,
-        requested_by="a@team-mono.com",
-        entrypoint="slack",
-    )
+
     assert result["message_type"] == "LMS"
+    assert payload["subject"] == "discord"
 
 
 def test_즉석_문안도_보낼_수_있다(ws, monkeypatch):
     # 저장된 문안 파일 없이 이번에만 쓰는 본문. 이 경로가 사라지면
     # 급한 공지를 파일부터 만들어야 보낼 수 있게 된다.
-    captured = {}
-    monkeypatch.setattr(
-        transport,
-        "send",
-        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
-    )
-    result = sms_send.send_campaign(
-        spreadsheet_id="S1",
+    result, payload = _run(
+        monkeypatch,
+        {"code": "1000", "messageKey": "K"},
         campaign="adhoc",
-        rows=ROWS,
         content="[*이름*]선생님, 오늘 일정이 변경되었습니다.",
-        requested_by="a@team-mono.com",
-        entrypoint="slack",
     )
+
     assert result["sent"] == 2
-    assert captured["content"].startswith("[*이름*]선생님")
+    assert payload["content"].startswith("[*이름*]선생님")
 
 
 def test_같은_번호가_두_번_들어와도_한_번만_보낸다(ws, monkeypatch):
     # 접지 않으면 claim 이 한 번호에 두 행을 만들고, 승자 행의 주인이 사라져
     # 그 번호는 이 캠페인에서 영영 발송되지 않는다.
-    captured = {}
-    monkeypatch.setattr(
-        transport,
-        "send",
-        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
-    )
-    result = sms_send.send_campaign(
-        spreadsheet_id="S1",
-        campaign="discord",
+    result, payload = _run(
+        monkeypatch,
+        {"code": "1000", "messageKey": "K"},
         rows=[
             {"to": "010-1111-1111", "name": "가"},
             {"to": "01011111111", "name": "가(표기만 다름)"},
         ],
         content="[*이름*]님",
-        requested_by="a@team-mono.com",
-        entrypoint="slack",
     )
+
     assert result["sent"] == 1
-    assert [t["to"] for t in captured["targets"]] == ["01011111111"]
+    assert [t["to"] for t in payload["targets"]] == ["01011111111"]
 
 
 def test_예약이_3분보다_가까우면_시트를_건드리기_전에_막는다(ws, monkeypatch):
@@ -279,24 +257,16 @@ def test_예약이_3분보다_가까우면_시트를_건드리기_전에_막는�
 
 
 def test_예약이면_sendTime이_실린다(ws, monkeypatch):
-    captured = {}
-    monkeypatch.setattr(
-        transport,
-        "send",
-        lambda payload: captured.update(payload) or {"code": "1000", "messageKey": "K"},
-    )
     at = _kst_now() + datetime.timedelta(hours=1)
-    sms_send.send_campaign(
-        spreadsheet_id="S1",
-        campaign="discord",
-        rows=ROWS,
+    _, payload = _run(
+        monkeypatch,
+        {"code": "1000", "messageKey": "K"},
         content="[*이름*]님",
-        requested_by="a@team-mono.com",
-        entrypoint="script",
         send_at=at,
     )
+
     # 뿌리오 sendTime 은 yyyy-MM-ddTHH:mm:ss 다.
-    assert captured["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
+    assert payload["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def test_예약_판정은_컨테이너_시계가_UTC여도_KST로_한다(monkeypatch):
@@ -335,8 +305,6 @@ def test_check가_막는_것과_send가_막는_것이_같다(ws, monkeypatch):
             campaign="x",
             rows=bad,
             template_name="discord",
-            requested_by="a@team-mono.com",
-            entrypoint="slack",
         )
 
 
@@ -377,8 +345,6 @@ def test_수신자가_없으면_시트를_건드리지_않는다(ws, monkeypatch
             campaign="discord",
             rows=[],
             content="본문",
-            requested_by="a@team-mono.com",
-            entrypoint="slack",
         )
 
     assert ws.rows[0] == ROSTER_HEADER
