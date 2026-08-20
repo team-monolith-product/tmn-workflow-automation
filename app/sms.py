@@ -49,9 +49,13 @@ def _value_table(targets: list[dict]) -> str:
             *([target["name"] or "-"] if named else []),
             *(target["changeWord"][key] or "-" for key in change),
         ]
-        # 값에 개행이 있으면 한 행이 두 줄로 쪼개져 딱 "한 칸 밀림" 처럼 보이고,
-        # 백틱이 있으면 코드펜스가 거기서 닫혀 표가 무너진다.
-        text = "  ".join(cells).replace("\n", " ").replace("`", "'")
+        # 값에 줄 나눔이 있으면 한 행이 두 줄로 쪼개져 딱 "한 칸 밀림" 처럼
+        # 보이고, 백틱이 있으면 코드펜스가 거기서 닫혀 표가 무너진다.
+        # \r 도 줄을 나눈다 — \n 만 막으면 \r\n 값에서 그대로 재현된다.
+        text = "  ".join(cells)
+        for char in "\r\n":
+            text = text.replace(char, " ")
+        text = text.replace("`", "'")
         return text if len(text) <= MAX_WIDTH else text[: MAX_WIDTH - 1] + "…"
 
     lines = ["  ".join(head)]

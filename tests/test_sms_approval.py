@@ -144,13 +144,15 @@ async def test_값의_개행과_백틱이_표를_깨지_않는다(client):
     await _draft(
         client,
         targets=[
-            {"to": "010-1111-1111", "name": "가\n나"},
+            {"to": "010-1111-1111", "name": "가\r\n나"},
             {"to": "010-2222-2222", "name": "```"},
         ],
     )
 
     table = client.posted[-1]["blocks"][1]["text"]["text"]
-    assert "01011111111  가 나" in table
+    # \r 도 줄을 나눈다. \n 만 막으면 \r\n 값에서 그대로 쪼개진다.
+    assert "\r" not in table
+    assert "01011111111  가  나" in table
     assert "```" not in table.replace("```", "", 2)
 
 
