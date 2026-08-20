@@ -43,19 +43,16 @@ def main() -> None:
             **{key: getattr(args, key) for key in VAR_KEYS},
         }
     ]
-    summary = sms_send.preview(rows, args.content)
-    if summary["problems"]:
+    plan = sms_send.preview(rows, args.content)
+    if plan.problems:
         print("보내기 전에 고칠 것:")
-        for problem in summary["problems"]:
+        for problem in plan.problems:
             print(f"  - {problem}")
         raise SystemExit(1)
 
-    print(
-        f"{summary['message_type']} · 최대 {summary['max_bytes']}byte"
-        f" · 대상 {summary['targets']}명"
-    )
+    print(f"{plan.message_type} · 최대 {plan.max_bytes}byte · 대상 {len(plan.rows)}명")
     print("-" * 60)
-    print(summary["sample"])
+    print(plan.sample)
     print("-" * 60)
 
     if args.dry_run:

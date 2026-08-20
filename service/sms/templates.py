@@ -44,7 +44,7 @@ def normalize_phone(raw: str) -> str:
         str: 숫자만 남은 번호
 
     Raises:
-        ValueError: 숫자만 남겼을 때 10~11자리가 아니면
+        ValueError: 0 으로 시작하는 10~11자리가 아니면
     """
     digits = re.sub(r"[^0-9]", "", raw)
     # 자릿수만 보면 모델이 낸 1011111111(JSON 수는 선행 0 을 못 쓴다)이
@@ -52,6 +52,11 @@ def normalize_phone(raw: str) -> str:
     if not (10 <= len(digits) <= 11 and digits.startswith("0")):
         raise ValueError(f"수신번호 형식 오류: {raw}")
     return digits
+
+
+def _tag_key(tag: str) -> str:
+    """치환 태그 이름을 수신자 dict 의 키로 바꿉니다."""
+    return "name" if tag == "이름" else f"var{tag}"
 
 
 def render(template: str, row: dict[str, Any]) -> str:
@@ -67,58 +72,31 @@ def render(template: str, row: dict[str, Any]) -> str:
     Returns:
         str: 치환이 끝난 본문
     """
-
-    def replace(match: re.Match) -> str:
-        tag = match.group(1)
-        key = "name" if tag == "이름" else f"var{tag}"
-        return str(row.get(key) or "")
-
-    return _TAG.sub(replace, template)
+    return _TAG.sub(lambda m: str(row.get(_tag_key(m.group(1))) or ""), template)
 
 
-def decide_message_type(template: str, rows: list[dict[str, Any]]) -> str:
-    """발송 전체에 적용할 메시지 타입을 정합니다.
+def build_targets(template: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """벤더 targets 배열을 만듭니다.
 
-    벤더는 이 값을 자동으로 올려주지 않고, 이 값을 기준으로 요금을 차감합니다.
-    치환 결과가 가장 긴 수신자를 기준으로 잡아야 한 명만 실패하는 일이 없습니다.
+    문안이 쓰는 태그는 값이 없어도 빈 문자열로 싣습니다. 키를 빼면 벤더가
+    치환할 것을 못 찾아 그 사람만 `[*이름*]선생님` 을 받는데, 미리보기는
+    첫 사람만 보여주므로 승인자가 그것을 못 봅니다.
 
     Args:
         template: 치환 태그가 남아 있는 원문
-        rows: 발송 대상 전체
-
-    Returns:
-        str: "SMS" 또는 "LMS"
-
-    Raises:
-        ValueError: 가장 긴 본문이 LMS 한도를 넘을 때
-    """
-    # 벤더로 나가는 것은 치환 전 원문이다. 치환값이 태그보다 짧으면 치환 후만
-    # 재서 SMS 로 판정해 놓고 90byte 넘는 원문을 보내게 된다.
-    longest = max(
-        euckr_len(template),
-        max((euckr_len(render(template, row)) for row in rows), default=0),
-    )
-    if longest > LMS_MAX_BYTES:
-        raise ValueError(f"치환 후 {longest}byte — LMS 한도 {LMS_MAX_BYTES} 초과")
-    return "SMS" if longest <= SMS_MAX_BYTES else "LMS"
-
-
-def build_targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """벤더 targets 배열을 만듭니다.
-
-    Args:
         rows: to 가 normalize_phone 을 거친 수신자 목록
 
     Returns:
         list[dict[str, Any]]: 뿌리오 targets 형식
     """
+    used = {match.group(1) for match in _TAG.finditer(template)}
+    change_keys = sorted(_tag_key(tag) for tag in used - {"이름"})
     targets = []
     for row in rows:
         target: dict[str, Any] = {"to": row["to"]}
-        if row.get("name"):
-            target["name"] = str(row["name"])
-        change_word = {key: str(row[key]) for key in VAR_KEYS if row.get(key)}
-        if change_word:
-            target["changeWord"] = change_word
+        if "이름" in used:
+            target["name"] = str(row.get("name") or "")
+        if change_keys:
+            target["changeWord"] = {key: str(row.get(key) or "") for key in change_keys}
         targets.append(target)
     return targets

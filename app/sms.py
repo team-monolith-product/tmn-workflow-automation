@@ -11,7 +11,6 @@
 
 import asyncio
 import uuid
-from typing import Any
 
 from cachetools import TTLCache
 from langchain_core.tools import tool
@@ -28,17 +27,17 @@ CANCEL = "sms_cancel"
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
 
-def _blocks(draft_id: str, summary: dict[str, Any]) -> list[dict]:
+def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
     """승인 카드를 만듭니다."""
-    head = f"{summary['targets']}명 · {summary['message_type']}"
-    if summary["folded"]:
-        head += f" · 중복 {summary['folded']}건 접음"
+    head = f"{len(plan.rows)}명 · {plan.message_type}"
+    if plan.folded:
+        head += f" · 중복 {plan.folded}건 접음"
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*문자 발송 확인* — {head}\n```{summary['sample']}```",
+                "text": f"*문자 발송 확인* — {head}\n```{plan.sample}```",
             },
         },
         {
@@ -92,19 +91,19 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        summary = sms_send.preview(targets, content)
-        if summary["problems"]:
-            return "보내기 전에 고칠 것: " + " / ".join(summary["problems"])
+        plan = sms_send.preview(targets, content)
+        if plan.problems:
+            return "보내기 전에 고칠 것: " + " / ".join(plan.problems)
 
         draft_id = uuid.uuid4().hex[:12]
         _DRAFTS[draft_id] = {"rows": targets, "content": content}
         await client.chat_postMessage(
             channel=channel,
             thread_ts=thread_ts,
-            text=f"문자 발송 확인 — {summary['targets']}명",
-            blocks=_blocks(draft_id, summary),
+            text=f"문자 발송 확인 — {len(plan.rows)}명",
+            blocks=_blocks(draft_id, plan),
         )
-        return f"{summary['targets']}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
+        return f"{len(plan.rows)}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
 
     return [draft_sms]
 
