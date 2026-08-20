@@ -121,11 +121,10 @@ def register_sms_handlers(app):
         await ack()
         # 꺼내면서 지운다. 두 번 눌러도 벤더를 두 번 부르지 않는다.
         draft = _DRAFTS.pop(body["actions"][0]["value"], None)
+        if draft is None:
+            return
         channel = body["container"]["channel_id"]
         ts = body["container"]["message_ts"]
-        if draft is None:
-            await _replace(client, channel, ts, "이미 처리된 초안입니다.")
-            return
 
         try:
             result = await asyncio.to_thread(
@@ -157,18 +156,17 @@ def register_sms_handlers(app):
     @app.action(CANCEL)
     async def cancel(ack, body, client):
         await ack()
-        # 이미 발송이 시작된 초안을 "취소했습니다" 로 덮으면, 누른 사람은
-        # 막았다고 믿는데 문자는 나가는 중이다.
+        # 이미 처리된 초안이면 결과 카드를 덮지 않는다. 발송이 시작됐는데
+        # "취소했습니다" 로 덮으면 누른 사람은 막았다고 믿고, 발송이 끝난
+        # 뒤라면 이 PR 의 유일한 기록인 messageKey 가 지워진다.
         draft = _DRAFTS.pop(body["actions"][0]["value"], None)
+        if draft is None:
+            return
         await _replace(
             client,
             body["container"]["channel_id"],
             body["container"]["message_ts"],
-            (
-                f"<@{body['user']['id']}> 님이 취소했습니다."
-                if draft
-                else "이미 처리된 초안입니다."
-            ),
+            f"<@{body['user']['id']}> 님이 취소했습니다.",
         )
 
 

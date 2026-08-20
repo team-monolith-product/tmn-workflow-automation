@@ -152,19 +152,22 @@ async def test_취소하면_안_나간다(client, handlers, monkeypatch):
     await _click(handlers, sms.APPROVE, approve, client)
 
     assert "취소" in client.updated[0]["text"]
+    assert len(client.updated) == 1
 
 
-async def test_발송_중인_초안을_취소로_덮지_않는다(client, handlers, monkeypatch):
-    # pop 결과를 안 보면, 이미 나가는 중인데 카드가 "취소했습니다" 로 바뀌어
-    # 누른 사람이 막았다고 믿는다.
+async def test_처리된_초안은_결과_카드를_건드리지_않는다(client, handlers, monkeypatch):
+    # 이 PR 에는 이력 DB 가 없어 결과 카드가 messageKey 의 유일한 기록이다.
+    # 남아 있는 버튼을 다시 눌렀다고 그것을 덮으면 기록이 사라진다.
     monkeypatch.setattr(sms_send, "send", lambda **kw: {"sent": 2, "message_key": "K"})
     await _draft(client)
     approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
     await _click(handlers, sms.APPROVE, approve, client)
 
     await _click(handlers, sms.CANCEL, cancel, client)
+    await _click(handlers, sms.APPROVE, approve, client)
 
-    assert "취소" not in client.updated[1]["text"]
+    assert len(client.updated) == 1
+    assert "messageKey" in client.updated[0]["text"]
 
 
 async def test_번호가_틀리면_초안을_안_올린다(client):

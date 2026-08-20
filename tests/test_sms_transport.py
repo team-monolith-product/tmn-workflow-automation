@@ -5,6 +5,7 @@
 실계정에서만 100% 거절된다.
 """
 
+import base64
 import io
 import json
 import urllib.error
@@ -35,6 +36,36 @@ def posted(monkeypatch):
     monkeypatch.setattr(transport, "_post", fake_post)
     monkeypatch.setattr(transport, "issue_token", lambda: "TOKEN")
     return sent
+
+
+class _FakeResponse(io.BytesIO):
+    """urlopen 반환값은 컨텍스트 매니저다."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_토큰은_Basic_발송은_Bearer로_나간다(env, monkeypatch):
+    # _post 를 목킹하는 다른 테스트들은 URL 도 Authorization 도 안 본다.
+    # "Bearer" 뒤 공백 하나가 빠져도 전부 초록이고 실계정에서만 401 이 난다.
+    seen = []
+
+    def fake_urlopen(request, timeout=None):
+        seen.append((request.full_url, request.get_header("Authorization")))
+        return _FakeResponse(b'{"token":"T","code":"1000","messageKey":"K"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    transport.send({"content": "안녕"})
+
+    basic = base64.b64encode(b"acct:key").decode()
+    assert seen == [
+        ("https://message.ppurio.com/v1/token", "Basic " + basic),
+        ("https://message.ppurio.com/v1/message", "Bearer T"),
+    ]
 
 
 def test_계정과_발신번호를_채워_보낸다(env, posted):
