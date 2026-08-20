@@ -8,9 +8,7 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 
-# 발송 이력을 시트에 적으려면 쓰기가 필요하다. 서비스 계정은 사업 폴더에
-# 이미 편집자로 공유되어 있어 권한 자체는 있었고, 스코프가 좁혀 두고 있었다.
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
 def _get_client() -> gspread.Client:
@@ -19,20 +17,6 @@ def _get_client() -> gspread.Client:
     info = json.loads(sa_json)
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
-
-
-def open_spreadsheet(spreadsheet_id: str) -> gspread.Spreadsheet:
-    """스프레드시트를 연다.
-
-    어느 탭을 쓸지 고르는 것은 호출하는 기능의 결정이라 여기서 하지 않는다.
-
-    Args:
-        spreadsheet_id: 스프레드시트 ID
-
-    Returns:
-        gspread.Spreadsheet: 스프레드시트
-    """
-    return _get_client().open_by_key(spreadsheet_id)
 
 
 def get_worksheet_values(
