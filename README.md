@@ -78,3 +78,51 @@ curl -X POST http://localhost:8000/webhook \
 본 애플리케이션은 `jce-service-helm/workflow-automation-slack` Helm Chart를 통해 배포됩니다.
 - Slack Bot과 FastAPI 서버는 동일한 Docker 이미지를 사용하며, 서로 다른 CMD로 실행됩니다.
 - ArgoCD를 통해 자동 배포됩니다.
+
+## 문자 발송 (뿌리오)
+
+- `PPURIO_ACCOUNT`: **ppurio.com 로그인 아이디**. 연동 페이지가 인증키만 발급하는 것은 계정이 이미 본인이기 때문이고, Basic 인증은 `Base64(계정:인증키)` 로 만듭니다
+- `PPURIO_API_KEY`: 연동 관리 페이지에서 발급받는 API 인증키. 웹 로그인 비밀번호와 다른 값입니다
+- `PPURIO_SENDER`: 계정에 사전등록된 발신번호. **하이픈 없는 숫자만** 넣으세요 — 값을 정규화하지 않고 그대로 벤더의 `from` 에 싣습니다
+- 호출 IP 를 뿌리오에 사전 등록해야 합니다(미등록 시 `3003 invalid ip`). 운영 파드는 NAT 고정 EIP `3.37.41.32` 로 나갑니다
+
+발송 기록은 `sms_send` 테이블에 남습니다. 한 사람에게 한 번 보낸 것이 한 행이고,
+중복 차단은 부분 UNIQUE 인덱스가 합니다.
+
+```
+campaign  phone        status  content        sent_at
+discord   01011111111  발송    [*이름*]선생…  2026-08-11 20:14
+discord   01022222222  발송중  [*이름*]선생…
+(NULL)    01011111111  발송    안녕하세요…    2026-08-12 09:30   ← 개인 CS
+```
+
+`campaign` 이 있으면 같은 사람에게 두 번 가지 않습니다. **개인 CS 는 `--cs` 로
+보내며 `campaign` 이 NULL 이라 중복 차단을 받지 않습니다** — 같은 사람에게
+여러 번 보내는 게 정상이기 때문입니다.
+
+상태는 셋입니다. `발송중` 은 접수 여부를 모르는 상태(타임아웃·5xx)라 재시도를
+막습니다. 뿌리오 웹에서 확인하고 사람이 풀어야 열립니다. `실패` 는 벤더가
+거절한 것이 확실해 재시도가 바로 열립니다.
+
+```bash
+# 문안·타입·길이만 확인 (발송하지 않음)
+python scripts/send_sms.py --campaign discord \
+    --content "[*이름*]선생님, 안내드립니다" --to 010-… --name 홍길동 --dry-run
+
+# 명단 파일로 (헤더: to,name,var1..var8)
+python scripts/send_sms.py --campaign discord --content "..." --csv roster.csv
+
+# 개인 CS — 중복 차단 없음
+python scripts/send_sms.py --cs --content "..." --to 010-… --name 홍길동
+
+# 그 번호에게 뭘 보냈는지
+python scripts/send_sms.py --history 010-…
+```
+
+문안은 `--content` 로 바로 넣습니다. 치환은 뿌리오 태그를 그대로 씁니다 —
+이름은 `[*이름*]`, 나머지는 `[*1*]`~`[*8*]`. 같은 문안을 반복해서 쓰게 되면
+그때 `templates/sms/<이름>.txt` 를 만들어 `--template` 으로 부릅니다.
+
+조회는 슬랙에서 봇에게 묻거나 Redash 로 봅니다. 시트에 기록을 남기지 않는
+이유는 구글 시트에 조건부 쓰기가 없어 중복 차단을 원자적으로 못 하기
+때문입니다 — 진입점이 늘면 겹치는 순간 같은 사람에게 두 번 나갑니다.
