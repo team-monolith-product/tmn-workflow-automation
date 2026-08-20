@@ -69,12 +69,16 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
     head = f"{len(plan.rows)}명 · {plan.message_type}"
     if plan.folded:
         head += f" · 중복 {plan.folded}건 접음"
+    # 문안에 백틱이 있으면 펜스가 거기서 닫혀 나머지가 mrkdwn 으로 렌더된다.
+    # 그러면 [*이름*] 이 굵은 글씨가 되어, 실명이 박힌 사고와 화면상 구분이
+    # 안 된다. 개행은 문안에서 의미가 있으므로 건드리지 않는다.
+    body = plan.template.replace("`", "'")
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*문자 발송 확인* — {head}\n```{plan.template}```",
+                "text": f"*문자 발송 확인* — {head}\n```{body}```",
             },
         },
         {

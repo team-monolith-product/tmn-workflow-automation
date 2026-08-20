@@ -128,6 +128,16 @@ async def test_카드에_번호와_치환값이_짝지어_실린다(client):
     assert "01022222222  나" in card
 
 
+async def test_문안의_백틱이_카드를_깨지_않는다(client):
+    # 펜스가 거기서 닫히면 나머지가 mrkdwn 으로 렌더돼 [*이름*] 이 굵은
+    # 글씨가 된다. 실명이 박힌 사고와 화면상 구분이 안 된다.
+    await _draft(client, content="```[*이름*]선생님```")
+
+    card = client.posted[-1]["blocks"][0]["text"]["text"]
+    assert "[*이름*]선생님" in card
+    assert card.count("```") == 2
+
+
 async def test_값의_개행과_백틱이_표를_깨지_않는다(client):
     # 개행은 한 행을 두 줄로 쪼개 딱 "한 칸 밀림" 처럼 보이고, 백틱은
     # 코드펜스를 닫아버린다. 둘 다 모델이 만든 값에서 나올 수 있다.
