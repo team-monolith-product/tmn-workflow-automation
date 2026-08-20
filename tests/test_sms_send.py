@@ -57,7 +57,7 @@ def test_보내기_전에_자리를_잡는다(store, monkeypatch):
 
     assert result["sent"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
-    assert store.status_of("01011111111") == ["발송"]
+    assert store.stages("01011111111") == ["발송"]
 
 
 def test_이미_보낸_번호는_대상에서_빠진다(store, monkeypatch):
@@ -85,14 +85,14 @@ def test_CS는_같은_사람에게_여러_번_간다(store, monkeypatch):
     )
 
     assert result["sent"] == 1
-    assert store.status_of("01011111111") == ["발송", "발송"]
+    assert store.stages("01011111111") == ["발송", "발송"]
 
 
 def test_벤더가_거절하면_실패로_남겨_재시도를_연다(store, monkeypatch):
     with pytest.raises(transport.PpurioError):
         _run(monkeypatch, boom=transport.PpurioError(400, "bad request"))
 
-    assert store.status_of("01011111111") == ["실패"]
+    assert store.stages("01011111111") == ["실패"]
     result, _ = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
     assert result["sent"] == 2
 
@@ -111,7 +111,7 @@ def test_접수_여부를_모르면_발송중으로_남겨_재시도를_막는�
     with pytest.raises(type(boom)):
         _run(monkeypatch, boom=boom)
 
-    assert store.status_of("01011111111") == ["발송중"]
+    assert store.stages("01011111111") == ["모름"]
     result, _ = _run(monkeypatch, {"code": "1000"})
     assert result["sent"] == 0
 
@@ -120,7 +120,7 @@ def test_접수코드가_1000이_아니면_실패로_본다(store, monkeypatch):
     with pytest.raises(transport.PpurioError):
         _run(monkeypatch, {"code": "2000", "description": "invalid"})
 
-    assert store.status_of("01011111111") == ["실패"]
+    assert store.stages("01011111111") == ["실패"]
 
 
 def test_같은_번호가_두_번_들어와도_한_번만_보낸다(store, monkeypatch):
@@ -170,11 +170,14 @@ def test_벤더_옵션은_그대로_통과한다(store, monkeypatch):
     assert payload["sendTime"] == at.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def test_예약이면_나갈_시각을_기록한다(store, monkeypatch):
+def test_예약이면_나갈_시각을_따로_기록한다(store, monkeypatch):
+    # 접수 시각(sent_at)과 나갈 시각(scheduled_for)은 다르다. 하나로 뭉치면
+    # 아직 안 나간 문자가 "그때 발송됨"으로 읽힌다.
     at = _kst_now() + datetime.timedelta(hours=3)
     _run(monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=at)
 
-    assert store.rows[0]["sent_at"] == at
+    assert store.rows[0]["scheduled_for"] == at
+    assert store.rows[0]["sent_at"] is not None
 
 
 def test_오프셋을_붙여도_벤더와_기록이_같은_시각을_본다(store, monkeypatch):
@@ -183,7 +186,7 @@ def test_오프셋을_붙여도_벤더와_기록이_같은_시각을_본다(stor
 
     kst = aware.astimezone(KST).replace(tzinfo=None)
     assert payload["sendTime"] == kst.strftime("%Y-%m-%dT%H:%M:%S")
-    assert store.rows[0]["sent_at"] == kst
+    assert store.rows[0]["scheduled_for"] == kst
 
 
 def test_예약이_3분보다_가까우면_DB를_건드리기_전에_막는다(store, monkeypatch):
@@ -221,11 +224,13 @@ def test_요청자와_채널이_기록된다(store, monkeypatch):
     assert store.rows[0]["channel_id"] == "C123"
 
 
-def test_보낸_문안이_남는다(store, monkeypatch):
-    # "그때 뭐라고 보냈더라" 에 답하려면 원문이 있어야 한다.
-    _run(monkeypatch, {"code": "1000"}, content="[*이름*]선생님, 안내드립니다")
+def test_보낸_문안과_치환값이_남는다(store, monkeypatch):
+    # 원문만 남기면 나중에 [*이름*] 자리가 빈 채로 보인다. 그 사람이 실제로
+    # 받은 문자를 되살리려면 치환값도 있어야 한다.
+    _run(monkeypatch, {"code": "1000"}, content="[*이름*]선생님, [*1*] 안내")
 
-    assert store.rows[0]["content"] == "[*이름*]선생님, 안내드립니다"
+    assert store.rows[0]["content"] == "[*이름*]선생님, [*1*] 안내"
+    assert store.rows[0]["variables"] == {"name": "가", "var1": "1기", "var2": "x"}
 
 
 def test_문제를_한_번에_모아_돌려준다():

@@ -2,53 +2,57 @@
 발송 기록입니다. 한 사람에게 한 번 보낸 것이 sms_send 한 행입니다.
 
 중복 차단은 DB 가 합니다. INSERT ... ON CONFLICT DO NOTHING 이 원자적이라
-동시에 두 실행이 같은 사람을 넣으려 하면 한쪽만 행을 받습니다. 시트로 하던
-때처럼 "읽고 → 비었나 보고 → 쓴다" 사이가 열려 있지 않습니다.
+동시에 두 실행이 같은 사람을 넣으려 하면 한쪽만 행을 받습니다.
 
-상태는 셋입니다.
+상태는 시각으로 남깁니다. status 한 컬럼이면 도달 확인이 붙을 때 '발송'을
+'도달'로 덮어써야 하고 언제 보냈는지가 사라집니다.
 
-    발송중  접수 여부를 모른다(타임아웃·5xx). 재시도가 막힌다
-    발송    벤더가 접수했다
-    실패    벤더가 거절한 것이 확실하다. 재시도가 열린다
+    sent_at·failed_at 둘 다 NULL   접수 여부를 모른다. 재시도가 막힌다
+    sent_at                        벤더가 접수했다
+    failed_at                      벤더가 거절했다. 재시도가 열린다
+    confirmed_at                   도달을 확인했다
 
-campaign 이 NULL 이면 개인 CS 라 중복 차단을 받지 않습니다 — 같은 사람에게
-여러 번 보내는 것이 정상이기 때문입니다.
+campaign 이 NULL 이면 개인 CS 라 중복 차단을 받지 않습니다.
 """
 
+import json
 import re
 from typing import Any
 
 from service.knowledge.db import connect
 
 CLAIM = """
-INSERT INTO sms_send (campaign, phone, status, content, channel_id, requested_by)
-SELECT %(campaign)s, phone, '발송중', %(content)s, %(channel_id)s, %(requested_by)s
-FROM unnest(%(phones)s::text[]) AS phone
+INSERT INTO sms_send
+    (campaign, phone, content, variables, channel_id, requested_by)
+SELECT %(campaign)s, t.phone, %(content)s, t.variables,
+       %(channel_id)s, %(requested_by)s
+FROM unnest(%(phones)s::text[], %(variables)s::jsonb[]) AS t(phone, variables)
 ON CONFLICT DO NOTHING
 RETURNING id, phone
 """
 
-MARK = """
+SENT = """
 UPDATE sms_send
-SET status = %(status)s,
-    message_key = COALESCE(%(message_key)s, message_key),
-    sent_at = %(sent_at)s
+SET sent_at = now(), scheduled_for = %(scheduled_for)s, message_key = %(message_key)s
 WHERE id = ANY(%(ids)s)
 """
 
+FAILED = "UPDATE sms_send SET failed_at = now() WHERE id = ANY(%(ids)s)"
+
 HISTORY = """
-SELECT campaign, status, content, sent_at, created_at, requested_by
+SELECT campaign, content, variables, claimed_at, sent_at, scheduled_for,
+       failed_at, confirmed_at, requested_by
 FROM sms_send
 WHERE phone = %(phone)s
-ORDER BY created_at DESC
+ORDER BY claimed_at DESC
 LIMIT %(limit)s
 """
 
 PENDING = """
-SELECT phone, created_at
+SELECT phone, claimed_at
 FROM sms_send
-WHERE campaign = %(campaign)s AND status = '발송중'
-ORDER BY created_at
+WHERE campaign = %(campaign)s AND sent_at IS NULL AND failed_at IS NULL
+ORDER BY claimed_at
 """
 
 
@@ -66,7 +70,7 @@ def digits(phone: str) -> str:
 
 def claim(
     campaign: str | None,
-    phones: list[str],
+    entries: list[dict[str, Any]],
     *,
     content: str,
     channel_id: str | None = None,
@@ -74,12 +78,15 @@ def claim(
 ) -> dict[str, int]:
     """보낼 사람의 자리를 잡습니다. 이미 잡힌 사람은 안 돌려줍니다.
 
-    벤더를 부르기 전에 '발송중'으로 넣습니다. 넣지 않고 보내면 그 사이 다른
-    실행이 같은 사람을 대상으로 보고 또 보냅니다.
+    벤더를 부르기 전에 넣습니다. 넣지 않고 보내면 그 사이 다른 실행이 같은
+    사람을 대상으로 보고 또 보냅니다.
+
+    치환값을 함께 남깁니다. 원문만 남기면 나중에 "이 사람이 받은 문자"를
+    되살릴 때 [*이름*] 자리가 빈 채로 보입니다.
 
     Args:
         campaign: 발송 건 식별자. None 이면 개인 CS 라 중복 차단을 안 받는다
-        phones: 수신번호 (표기 무관)
+        entries: to·name·var1~var8 을 담은 수신자 목록
         content: 치환 전 원문
         channel_id: 어느 채널에서 시켰나
         requested_by: 누가 시켰나
@@ -87,12 +94,19 @@ def claim(
     Returns:
         dict[str, int]: 자리를 잡은 {번호: 행 id}. 이미 보낸 사람은 빠진다
     """
+    phones, variables = [], []
+    for entry in entries:
+        phones.append(digits(entry["to"]))
+        values = {key: value for key, value in entry.items() if key != "to" and value}
+        variables.append(json.dumps(values, ensure_ascii=False))
+
     with connect() as conn:
         rows = conn.execute(
             CLAIM,
             {
                 "campaign": campaign,
-                "phones": [digits(phone) for phone in phones],
+                "phones": phones,
+                "variables": variables,
                 "content": content,
                 "channel_id": channel_id,
                 "requested_by": requested_by,
@@ -101,33 +115,35 @@ def claim(
     return {row["phone"]: row["id"] for row in rows}
 
 
-def mark(
-    ids: list[int],
-    status: str,
-    *,
-    message_key: str | None = None,
-    sent_at: Any = None,
+def mark_sent(
+    ids: list[int], *, message_key: str | None = None, scheduled_for: Any = None
 ) -> None:
-    """잡아둔 행의 상태를 바꿉니다.
+    """벤더가 접수한 것으로 표시합니다.
 
     Args:
         ids: claim 이 돌려준 행 id
-        status: 발송 · 실패
         message_key: 벤더 접수번호
-        sent_at: 나갈 시각. 예약이면 예약 시각이다
+        scheduled_for: 예약이면 나갈 시각. 즉시 발송이면 None
     """
     if not ids:
         return
     with connect() as conn:
         conn.execute(
-            MARK,
-            {
-                "ids": ids,
-                "status": status,
-                "message_key": message_key,
-                "sent_at": sent_at,
-            },
+            SENT,
+            {"ids": ids, "message_key": message_key, "scheduled_for": scheduled_for},
         )
+
+
+def mark_failed(ids: list[int]) -> None:
+    """벤더가 거절한 것으로 표시합니다. 재시도가 열립니다.
+
+    Args:
+        ids: claim 이 돌려준 행 id
+    """
+    if not ids:
+        return
+    with connect() as conn:
+        conn.execute(FAILED, {"ids": ids})
 
 
 def history(phone: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -140,7 +156,7 @@ def history(phone: str, limit: int = 20) -> list[dict[str, Any]]:
         limit: 최대 건수
 
     Returns:
-        list[dict[str, Any]]: campaign·status·content·sent_at·requested_by
+        list[dict[str, Any]]: campaign·content·variables 와 각 단계의 시각
     """
     with connect(read_only=True) as conn:
         return conn.execute(
@@ -149,16 +165,16 @@ def history(phone: str, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def pending(campaign: str) -> list[dict[str, Any]]:
-    """그 캠페인에서 '발송중'으로 막혀 있는 사람을 돌려줍니다.
+    """그 캠페인에서 접수 여부를 모르는 채 막혀 있는 사람을 돌려줍니다.
 
-    타임아웃으로 굳은 건들입니다. 뿌리오 웹에서 확인한 뒤 사람이 풀어야
+    타임아웃·5xx 로 굳은 건들입니다. 뿌리오 웹에서 확인한 뒤 사람이 풀어야
     재시도가 열립니다.
 
     Args:
         campaign: 발송 건 식별자
 
     Returns:
-        list[dict[str, Any]]: phone·created_at
+        list[dict[str, Any]]: phone·claimed_at
     """
     with connect(read_only=True) as conn:
         return conn.execute(PENDING, {"campaign": campaign}).fetchall()

@@ -22,8 +22,8 @@ DDL = (
 )
 
 INSERT = """
-INSERT INTO sms_send (campaign, phone, status, content)
-SELECT %(campaign)s, phone, %(status)s, 'x'
+INSERT INTO sms_send (campaign, phone, content)
+SELECT %(campaign)s, phone, '본문'
 FROM unnest(%(phones)s::text[]) AS phone
 ON CONFLICT DO NOTHING
 RETURNING phone
@@ -44,13 +44,21 @@ def conn():
     connection.close()
 
 
-def _claim(conn, campaign, phones, status="발송"):
+def _claim(conn, campaign, phones):
     return [
         row[0]
         for row in conn.execute(
-            INSERT, {"campaign": campaign, "phones": phones, "status": status}
+            INSERT, {"campaign": campaign, "phones": phones}
         ).fetchall()
     ]
+
+
+def _sent(conn, phone):
+    conn.execute("UPDATE sms_send SET sent_at = now() WHERE phone = %s", (phone,))
+
+
+def _failed(conn, phone):
+    conn.execute("UPDATE sms_send SET failed_at = now() WHERE phone = %s", (phone,))
 
 
 def test_같은_캠페인은_한_번만_들어간다(conn):
@@ -64,26 +72,55 @@ def test_다른_캠페인이면_같은_번호도_들어간다(conn):
 
 
 def test_CS는_같은_번호가_여러_번_들어간다(conn):
-    # campaign 이 NULL 이면 부분 인덱스가 걸리지 않는다. 컬럼 모델에서 CS 를
-    # 예외로 빼야 했던 이유가 여기서 사라진다.
+    # campaign 이 NULL 이면 부분 인덱스가 걸리지 않는다.
     assert _claim(conn, None, ["010"]) == ["010"]
     assert _claim(conn, None, ["010"]) == ["010"]
 
 
-def test_실패한_건은_재시도가_열린다(conn):
+def test_거절당한_건은_재시도가_열린다(conn):
     _claim(conn, "discord", ["010"])
-    conn.execute("UPDATE sms_send SET status = '실패' WHERE phone = '010'")
+    _failed(conn, "010")
 
     assert _claim(conn, "discord", ["010"]) == ["010"]
 
 
-def test_발송중은_재시도를_막는다(conn):
-    # 타임아웃으로 굳은 건. 사람이 뿌리오 웹에서 확인해야 풀린다.
-    _claim(conn, "discord", ["010"], status="발송중")
+def test_보낸_건은_재시도가_막힌다(conn):
+    _claim(conn, "discord", ["010"])
+    _sent(conn, "010")
 
     assert _claim(conn, "discord", ["010"]) == []
 
 
-def test_모르는_상태는_거절한다(conn):
+def test_접수_여부를_모르면_재시도가_막힌다(conn):
+    # 타임아웃으로 굳은 건. 사람이 뿌리오 웹에서 확인해야 풀린다.
+    _claim(conn, "discord", ["010"])
+
+    assert _claim(conn, "discord", ["010"]) == []
+
+
+def test_접수와_거절이_동시에_참일_수_없다(conn):
+    _claim(conn, "discord", ["010"])
+    _sent(conn, "010")
+
     with pytest.raises(psycopg.errors.CheckViolation):
-        _claim(conn, "discord", ["010"], status="도달")
+        _failed(conn, "010")
+
+
+def test_보내지_않은_것은_도달할_수_없다(conn):
+    _claim(conn, "discord", ["010"])
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("UPDATE sms_send SET confirmed_at = now() WHERE phone = '010'")
+
+
+def test_보낸_건은_도달을_찍을_수_있다(conn):
+    # 도달 확인(#191)이 붙을 자리. sent_at 을 덮지 않고 옆에 쌓인다.
+    _claim(conn, "discord", ["010"])
+    _sent(conn, "010")
+    conn.execute("UPDATE sms_send SET confirmed_at = now() WHERE phone = '010'")
+
+    row = conn.execute(
+        "SELECT sent_at IS NOT NULL AS sent, confirmed_at IS NOT NULL AS ok "
+        "FROM sms_send WHERE phone = '010'"
+    ).fetchone()
+    assert row == (True, True)

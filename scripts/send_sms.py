@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 
 from service.sms import log
 from service.sms import send as sms_send
+from service.sms import templates
 from service.sms.templates import VAR_KEYS
 
 
@@ -91,10 +92,17 @@ def show_history(phone: str) -> None:
         print(f"{phone} 에게 보낸 기록이 없습니다.")
         return
     for row in rows:
-        when = row["sent_at"] or row["created_at"]
-        head = row["campaign"] or "CS"
-        print(f"{when:%Y-%m-%d %H:%M}  [{row['status']}] {head}")
-        print(f"    {row['content'].splitlines()[0][:60]}")
+        if row["failed_at"]:
+            stage, when = "실패", row["failed_at"]
+        elif row["confirmed_at"]:
+            stage, when = "도달", row["confirmed_at"]
+        elif row["sent_at"]:
+            stage, when = "발송", row["scheduled_for"] or row["sent_at"]
+        else:
+            stage, when = "모름", row["claimed_at"]
+        print(f"{when:%Y-%m-%d %H:%M}  [{stage}] {row['campaign'] or 'CS'}")
+        body = templates.render(row["content"], row["variables"])
+        print(f"    {body.splitlines()[0][:60]}")
 
 
 def main() -> None:
@@ -192,7 +200,7 @@ def main() -> None:
         blocked = log.pending(args.campaign) if args.campaign else []
         if blocked:
             print(
-                f"그중 '발송중'으로 막힌 {len(blocked)}건이 있습니다: "
+                f"그중 접수 여부를 모르는 {len(blocked)}건이 있습니다: "
                 + ", ".join(row["phone"] for row in blocked)
                 + "\n뿌리오 웹에서 접수 여부를 확인하세요."
             )

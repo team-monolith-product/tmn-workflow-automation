@@ -1,9 +1,9 @@
 """
 발송 게이트입니다. 멱등성만 담당하고 벤더는 모릅니다.
 
-    ① sms_send 에 '발송중'으로 자리를 잡는다 (DB 가 중복을 막는다)
+    ① sms_send 에 자리를 잡는다 (DB 가 중복을 막는다)
     ② 벤더 호출 (캠페인 전체가 요청 1회)
-    ③ 그 행을 '발송'으로 바꾼다
+    ③ 그 행에 sent_at 을 찍는다
 
 보내고 기록하면 ②와 ③ 사이가 경합 구간이 되어 같은 사람에게 두 번 갑니다.
 ②의 실패가 "안 나간 것이 확실"인지 "모르는지"는 transport.PpurioError 가
@@ -127,9 +127,9 @@ def send_campaign(
 
     Raises:
         ValueError: check 가 걸러내는 것에 걸렸을 때. DB 를 건드리기 전에 터진다
-        transport.PpurioError: 벤더가 거절했을 때 ('실패'로 남겨 재시도를 연다)
-        Exception: 타임아웃·5xx 처럼 접수 여부를 모를 때. '발송중'으로 남아
-            재시도가 막히고 사람이 뿌리오 웹에서 확인한다
+        transport.PpurioError: 벤더가 거절했을 때 (failed_at 을 찍어 재시도를 연다)
+        Exception: 타임아웃·5xx 처럼 접수 여부를 모를 때. sent_at·failed_at 이
+            둘 다 빈 채로 남아 재시도가 막히고 사람이 뿌리오 웹에서 확인한다
     """
     plan = _plan(rows, template_name, content, send_at)
     if plan.problems:
@@ -139,7 +139,7 @@ def send_campaign(
 
     claimed = log.claim(
         campaign,
-        [entry["to"] for entry in plan.rows],
+        plan.rows,
         content=plan.template,
         channel_id=channel_id,
         requested_by=requested_by,
@@ -168,14 +168,13 @@ def send_campaign(
             result = transport.send(payload)
             _require_accepted(result)
         except transport.PpurioError:
-            log.mark(ids, "실패")
+            log.mark_failed(ids)
             raise
 
-        log.mark(
+        log.mark_sent(
             ids,
-            "발송",
             message_key=result.get("messageKey"),
-            sent_at=plan.send_at or datetime.datetime.now(KST),
+            scheduled_for=plan.send_at,
         )
         code, message_key = str(result["code"]), result.get("messageKey")
 

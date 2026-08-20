@@ -28,8 +28,8 @@ class PpurioError(RuntimeError):
     호출부가 선점을 풀고 재시도를 열어도 됩니다.
 
     접수 여부를 모르는 경우는 이 예외가 아닙니다 — 타임아웃과 5xx 는 원래
-    예외 그대로 올라갑니다. 그러면 선점이 '발송중' 인 채 남아 재시도가 막히고
-    사람이 뿌리오 웹에서 확인합니다.
+    예외 그대로 올라갑니다. 그러면 기록에 sent_at·failed_at 이 둘 다 빈 채로
+    남아 재시도가 막히고, 사람이 뿌리오 웹에서 확인합니다.
 
     status 0 은 요청이 나가지 않았다는 뜻입니다.
     """
@@ -44,9 +44,8 @@ def _env(name: str) -> str:
     """뿌리오 인증 설정을 환경변수에서 읽습니다.
 
     없으면 PpurioError 로 바꿔 던집니다. KeyError 로 새어 나가면 호출부의
-    `except PpurioError` 를 우회해, 명단의 캠페인 열이 '발송중' 인 채 굳습니다.
-    값이 있는 칸은 발송 대상에서 빠지므로, 환경변수를 채워 다시 돌려도
-    "모두 이미 발송된 상태"라며 한 통도 안 나갑니다.
+    `except PpurioError` 를 우회해 기록이 "접수 여부 모름" 인 채 굳고,
+    환경변수를 채워 다시 돌려도 한 통도 안 나갑니다.
 
     Args:
         name: PPURIO_ACCOUNT · PPURIO_API_KEY · PPURIO_SENDER
@@ -109,9 +108,8 @@ def issue_token() -> str:
     "토큰 단계에서 터졌으면 /v1/message 는 만들어지지도 않았다"가 종류와 무관하게
     참이기 때문입니다. 프록시가 200 에 HTML 을 실어 주면 JSONDecodeError,
     EUC-KR 로 주면 UnicodeDecodeError 가 나는데, 열거로 잡으면 그것들이 새어
-    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 명단의 캠페인 열이
-    '발송중' 인 채 굳고, 값이 있는 칸은 발송 대상에서 빠지므로 그 campaign 이
-    영구히 잠깁니다.
+    나가 호출부의 except PpurioError 를 비켜갑니다. 그러면 기록이 "접수 여부
+    모름" 인 채 굳어 그 campaign 이 영구히 잠깁니다.
 
     조용히 삼키지 않습니다. 사유를 담아 타입만 바꿔 다시 던집니다.
 
@@ -150,8 +148,8 @@ def send(payload: dict) -> dict:
         PpurioError: HTTP 실패
     """
     # from 은 필수다(발신번호 사전등록제). 없으면 벤더가 4xx 로 거절하고,
-    # 그때는 이미 선점한 뒤라 전 행이 다시 비워진다. payload 가 이기도록
-    # 뒤에 펼쳐 둔다.
+    # 그때는 이미 자리를 잡은 뒤라 전 건이 failed 로 찍힌다. payload 가
+    # 이기도록 뒤에 펼쳐 둔다.
     body = {
         "account": _env("PPURIO_ACCOUNT"),
         "from": _env("PPURIO_SENDER"),
