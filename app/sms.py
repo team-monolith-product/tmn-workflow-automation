@@ -4,12 +4,15 @@
     ① 사람이 "이 번호들한테 이렇게 보내줘" 라고 말한다
     ② 에이전트가 draft_sms 로 초안 카드를 올린다 (아직 안 나간다)
     ③ [보내기] 를 누르면 그때 나간다 — 예약이면 그때 벤더에 예약이 걸린다
+       고칠 데가 있으면 [수정] 으로 어디를 어떻게 고칠지 적어 낸다.
+       취소하고 처음부터 다시 말할 필요가 없다
 
 도구를 부르는 것만으로는 나가지 않습니다. 실제 사람에게 나가는 것이라
 모델이 대화를 잘못 읽었을 때 되돌릴 방법이 없습니다.
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime
 
@@ -22,6 +25,10 @@ from service.sms import transport
 
 APPROVE = "sms_approve"
 CANCEL = "sms_cancel"
+REVISE = "sms_revise"
+REVISE_VIEW = "sms_revise_view"
+FEEDBACK_BLOCK = "sms_feedback"
+FEEDBACK_INPUT = "sms_feedback_input"
 
 # 슬랙 버튼 value 는 2000자 제한이라 수신자 목록을 통째로 못 싣는다.
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
@@ -126,6 +133,12 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
                 },
                 {
                     "type": "button",
+                    "action_id": REVISE,
+                    "text": {"type": "plain_text", "text": "수정"},
+                    "value": draft_id,
+                },
+                {
+                    "type": "button",
                     "action_id": CANCEL,
                     "text": {"type": "plain_text", "text": "취소"},
                     "value": draft_id,
@@ -196,11 +209,61 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
     return [draft_sms]
 
 
-def register_sms_handlers(app):
-    """승인·취소 버튼 핸들러를 등록합니다.
+def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> dict:
+    """수정 요청 모달입니다. 고칠 문안을 옆에 두고 피드백을 받습니다.
+
+    문안을 직접 고치게 하지 않고 피드백만 받습니다. 치환 태그가 섞인 원문을
+    손으로 고치면 태그가 깨지기 쉽고, 깨진 태그는 실명 자리에 그대로 나갑니다.
+    고쳐 쓰는 것은 초안을 쓴 에이전트에게 맡깁니다.
+    """
+    return {
+        "type": "modal",
+        "callback_id": REVISE_VIEW,
+        "private_metadata": json.dumps(
+            {"draft_id": draft_id, "channel": channel, "ts": ts}
+        ),
+        "title": {"type": "plain_text", "text": "문자 수정 요청"},
+        "submit": {"type": "plain_text", "text": "다시 쓰기"},
+        "close": {"type": "plain_text", "text": "닫기"},
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        (f"⏰ {_when(plan.send_time)} 예약\n" if plan.send_time else "")
+                        + f"```{plan.template.replace('`', chr(39))}```"
+                    ),
+                },
+            },
+            {
+                "type": "input",
+                "block_id": FEEDBACK_BLOCK,
+                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": FEEDBACK_INPUT,
+                    "multiline": True,
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "예) 마지막 문의처 줄 빼고, 신청 마감일을 8월 30일로",
+                    },
+                },
+            },
+        ],
+    }
+
+
+def register_sms_handlers(app, revise=None):
+    """승인·수정·취소 버튼 핸들러를 등록합니다.
 
     Args:
         app: slack_bolt AsyncApp
+        revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
+            `async (channel, thread_ts, user, text) -> None` 입니다.
+            없으면 [수정] 은 피드백을 스레드에 남기기만 합니다 —
+            에이전트 진입점을 아는 것은 app.py 뿐이라 여기서 import 하면
+            general → sms → general 로 순환합니다.
     """
 
     @app.action(APPROVE)
@@ -252,6 +315,60 @@ def register_sms_handlers(app):
             ts,
             f"<@{body['user']['id']}> 님이 {done} — {result['sent']}명"
             f" (messageKey `{result['message_key']}`)",
+        )
+
+    @app.action(REVISE)
+    async def open_revise(ack, body, client):
+        await ack()
+        draft_id = body["actions"][0]["value"]
+        draft = _DRAFTS.get(draft_id)
+        # 여기서는 꺼내지 않는다. 모달을 열어 놓고 닫아 버릴 수 있고,
+        # 그때 초안이 사라지면 멀쩡한 카드의 [보내기] 가 죽는다.
+        if draft is None:
+            return
+        # 예약 초안이면 예약도 함께 넘긴다. 안 넘기면 모달이 예약을 모른 채
+        # 문안만 보여줘, 언제 나가는 건지 모르고 피드백을 적게 된다.
+        plan = sms_send.preview(
+            draft["rows"], draft["content"], draft.get("send_at", "")
+        )
+        await client.views_open(
+            trigger_id=body["trigger_id"],
+            view=_revise_view(
+                draft_id,
+                body["container"]["channel_id"],
+                body["container"]["message_ts"],
+                plan,
+            ),
+        )
+
+    @app.view(REVISE_VIEW)
+    async def submit_revise(ack, body, client):
+        await ack()
+        meta = json.loads(body["view"]["private_metadata"])
+        feedback = body["view"]["state"]["values"][FEEDBACK_BLOCK][FEEDBACK_INPUT][
+            "value"
+        ]
+        # 초안을 여기서 버린다. 이 카드의 [보내기] 는 이제 옛 문안이라
+        # 눌리면 안 된다. 새 문안은 에이전트가 새 카드로 올린다.
+        if _DRAFTS.pop(meta["draft_id"], None) is None:
+            return
+        user = body["user"]["id"]
+        quoted = "\n".join(f"&gt; {line}" for line in feedback.splitlines())
+        await _replace(
+            client,
+            meta["channel"],
+            meta["ts"],
+            f"<@{user}> 님이 수정을 요청했습니다.\n{quoted}",
+        )
+        if revise is None:
+            return
+        # 스레드 타임스탬프는 카드가 달린 스레드다. 카드는 항상 스레드 안에 올린다.
+        thread = await client.conversations_replies(
+            channel=meta["channel"], ts=meta["ts"], limit=1
+        )
+        thread_ts = thread["messages"][0].get("thread_ts", meta["ts"])
+        await revise(
+            channel=meta["channel"], thread_ts=thread_ts, user=user, text=feedback
         )
 
     @app.action(CANCEL)
