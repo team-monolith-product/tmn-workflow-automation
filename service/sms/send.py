@@ -138,7 +138,7 @@ def send(
         send_at: 예약 시각(한국 시간). 빈 값이면 즉시 발송
 
     Returns:
-        dict[str, Any]: sent·message_key·message_type·send_time
+        dict[str, Any]: sent·message_key·message_type·send_time·content·targets
 
     Raises:
         ValueError: preview 가 걸러내는 것에 걸렸을 때. 예약 시각이 이미
@@ -176,4 +176,6 @@ def send(
         "message_key": result.get("messageKey"),
         "message_type": plan.message_type,
         "send_time": plan.send_time,
+        "content": plan.template,
+        "targets": plan.targets,
     }

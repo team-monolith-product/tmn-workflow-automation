@@ -24,7 +24,7 @@ def _run(monkeypatch, response=None, boom=None, **extra):
         return response
 
     monkeypatch.setattr(transport, "send", fake_send)
-    result = sms_send.send(rows=ROWS, content=CONTENT, **extra)
+    result = sms_send.send(rows=ROWS, content=f"\n{CONTENT}\n", **extra)
     return result, captured
 
 
@@ -43,6 +43,7 @@ def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 2
+    assert result["message_key"] == "K1"
     assert payload["targetCount"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
@@ -71,9 +72,14 @@ def test_치환값이_벤더로_넘어간다(monkeypatch):
 
 
 def test_벤더로_나가는_것은_치환_전_원문이다(monkeypatch):
-    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+    # 이력이 남기는 result["content"] 가 벤더로 나간 값과 같아야 한다. 갈리면
+    # 앞뒤 공백 하나로 같은 문안이 DB 에서 둘로 쪼개진다.
+    result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
-    assert payload["content"] == CONTENT
+    assert payload["content"] == result["content"] == CONTENT
+    # 이력이 남기는 targets 도 벤더로 나간 값이어야 한다. plan.rows 로 새면
+    # change_word 가 전 행 NULL 이 되고, 기수·치환값은 재구성할 수 없다.
+    assert payload["targets"] == result["targets"]
 
 
 def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):

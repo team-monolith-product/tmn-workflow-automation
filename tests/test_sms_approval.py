@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from service.sms import history
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -57,6 +58,36 @@ class FakeApp:
             return func
 
         return register
+
+
+def _ok(**extra):
+    """뿌리오가 접수한 응답. send() 가 실제로 돌려주는 모양이다."""
+    return {
+        "sent": 2,
+        "message_key": "K1",
+        "message_type": "SMS",
+        "send_time": None,
+        "content": "[*이름*]선생님",
+        "targets": [
+            {"to": "01011111111", "name": "가"},
+            {"to": "01022222222", "name": "나"},
+        ],
+        **extra,
+    }
+
+
+@pytest.fixture(autouse=True)
+def recorded(monkeypatch, client):
+    """이력 저장을 잡아둔다. 안 막으면 테스트가 실제 DB 에 붙는다.
+
+    남긴 시점에 카드가 이미 갱신됐는지 같이 담는다. 순서가 반대면 DB 가
+    터졌을 때 이미 나간 발송을 카드가 실패로 그린다.
+    """
+    calls = []
+    monkeypatch.setattr(
+        history, "record", lambda **kw: calls.append((kw, len(client.updated)))
+    )
+    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -234,7 +265,7 @@ async def test_보내기를_누르면_그때_나간다(client, handlers, monkeyp
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: sent.update(kw) or {"sent": 2, "message_key": "K1"},
+        lambda **kw: sent.update(kw) or _ok(),
     )
     await _draft(client)
 
@@ -249,7 +280,7 @@ async def test_두_번_누르면_한_번만_나간다(client, handlers, monkeypa
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: calls.append(kw) or {"sent": 2, "message_key": "K"},
+        lambda **kw: calls.append(kw) or _ok(),
     )
     await _draft(client)
     body = _press(client, sms.APPROVE)
@@ -273,9 +304,9 @@ async def test_취소하면_안_나간다(client, handlers, monkeypatch):
 
 
 async def test_처리된_초안은_결과_카드를_건드리지_않는다(client, handlers, monkeypatch):
-    # 이 PR 에는 이력 DB 가 없어 결과 카드가 messageKey 의 유일한 기록이다.
-    # 남아 있는 버튼을 다시 눌렀다고 그것을 덮으면 기록이 사라진다.
-    monkeypatch.setattr(sms_send, "send", lambda **kw: {"sent": 2, "message_key": "K"})
+    # 남아 있는 버튼을 다시 눌렀다고 결과 카드를 덮으면, 누가 언제 보냈는지가
+    # 스레드에서 사라진다.
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
     await _draft(client)
     approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
     await _click(handlers, sms.APPROVE, approve, client)
@@ -284,7 +315,7 @@ async def test_처리된_초안은_결과_카드를_건드리지_않는다(clien
     await _click(handlers, sms.APPROVE, approve, client)
 
     assert len(client.updated) == 1
-    assert "messageKey" in client.updated[0]["text"]
+    assert "messageKey `K1`" in client.updated[0]["text"]
 
 
 async def test_번호가_틀리면_초안을_안_올린다(client):
@@ -353,6 +384,57 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
     assert "이름30" in card
 
 
+async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, recorded):
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
+    await _draft(client, content="\n[*이름*]선생님\n")
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert len(recorded) == 1
+    kwargs, updates_before = recorded[0]
+    assert kwargs["channel_id"] == "C1"
+    assert kwargs["thread_ts"] == "111.000"
+    # 도구가 받은 날것이 아니라 벤더로 나간 문안을 남긴다.
+    assert kwargs["content"] == "[*이름*]선생님"
+    assert kwargs["approved_by"] == "U1"
+    # 카드를 먼저 고치고 남긴다.
+    assert updates_before == 1
+    # 정규화된 번호가 남아야 한다. draft["rows"] 로 새면 '010-1111-1111' 이
+    # 들어가고, "이 번호로 뭐 보냈나" 가 조용히 0행을 낸다.
+    assert [t["to"] for t in kwargs["targets"]] == ["01011111111", "01022222222"]
+    # 접수 키가 NULL 이어도 정상으로 보이게 문서에 적어 둔 탓에, 이 사슬이
+    # 끊기면 카드도 DB 도 조용히 비어 버린다.
+    assert (kwargs["message_key"], kwargs["message_type"]) == ("K1", "SMS")
+    assert kwargs["send_time"] is None
+
+
+async def test_예약이면_예약_시각을_남긴다(client, handlers, monkeypatch, recorded):
+    # 이게 안 남으면 다음 주에 나갈 문자가 오늘 나간 것처럼 보인다.
+    monkeypatch.setattr(
+        sms_send, "send", lambda **kw: _ok(send_time="2026-08-22T09:00:00")
+    )
+    await _draft(client)
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert recorded[0][0]["send_time"] == "2026-08-22T09:00:00"
+
+
+async def test_안_나갔으면_이력을_남기지_않는다(
+    client, handlers, monkeypatch, recorded
+):
+    def boom(**kwargs):
+        raise transport.PpurioError(400, "invalid sender")
+
+    monkeypatch.setattr(sms_send, "send", boom)
+    await _draft(client)
+
+    with pytest.raises(transport.PpurioError):
+        await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert recorded == []
+
+
 async def test_예약이면_카드가_시각과_예약하기를_보여준다(client):
     # "보내기" 라고 쓰여 있으면 지금 나가는 줄 알고 누른다.
     await _draft(client, send_at=_later(60))
@@ -375,8 +457,7 @@ async def test_예약을_승인하면_시각이_함께_나간다(client, handler
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: sent.update(kw)
-        or {"sent": 2, "message_key": "K1", "send_time": "2026-08-22T09:00:00"},
+        lambda **kw: sent.update(kw) or _ok(send_time="2026-08-22T09:00:00"),
     )
     await _draft(client, send_at=_later(60))
 

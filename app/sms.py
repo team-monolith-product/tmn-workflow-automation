@@ -20,6 +20,7 @@ from cachetools import TTLCache
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
+from service.sms import history
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -191,6 +192,7 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
             "rows": targets,
             "content": content,
             "send_at": send_at,
+            "thread_ts": thread_ts,
         }
         await client.chat_postMessage(
             channel=channel,
@@ -334,7 +336,21 @@ def register_sms_handlers(app, revise=None):
             channel,
             ts,
             f"<@{body['user']['id']}> 님이 {done} — {result['sent']}명"
-            f" (messageKey `{result['message_key']}`)",
+            f" (messageKey `{result['message_key'] or '없음'}`)",
+        )
+
+        # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
+        # 발송을 카드가 실패로 그린다.
+        await asyncio.to_thread(
+            history.record,
+            channel_id=channel,
+            thread_ts=draft["thread_ts"],
+            content=result["content"],
+            message_type=result["message_type"],
+            message_key=result["message_key"],
+            send_time=result["send_time"],
+            approved_by=body["user"]["id"],
+            targets=result["targets"],
         )
 
     @app.action(REVISE)
@@ -395,8 +411,7 @@ def register_sms_handlers(app, revise=None):
     async def cancel(ack, body, client):
         await ack()
         # 이미 처리된 초안이면 결과 카드를 덮지 않는다. 발송이 시작됐는데
-        # "취소했습니다" 로 덮으면 누른 사람은 막았다고 믿고, 발송이 끝난
-        # 뒤라면 이 PR 의 유일한 기록인 messageKey 가 지워진다.
+        # "취소했습니다" 로 덮으면 누른 사람은 막았다고 믿는다.
         draft = _DRAFTS.pop(body["actions"][0]["value"], None)
         if draft is None:
             return
