@@ -2,6 +2,7 @@
 
 import pytest
 
+from service.sms import history
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -40,6 +41,25 @@ class FakeApp:
             return func
 
         return register
+
+
+def _ok(sent=2, **extra):
+    """뿌리오가 접수한 응답. send() 가 실제로 돌려주는 모양이다."""
+    return {
+        "sent": sent,
+        "message_key": "K1",
+        "message_type": "SMS",
+        "targets": [{"to": "01011111111", "name": "가"}],
+        **extra,
+    }
+
+
+@pytest.fixture(autouse=True)
+def recorded(monkeypatch):
+    """이력 저장을 잡아둔다. 안 막으면 테스트가 실제 DB 에 붙는다."""
+    calls = []
+    monkeypatch.setattr(history, "record", lambda **kw: calls.append(kw) or 1)
+    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -171,7 +191,7 @@ async def test_보내기를_누르면_그때_나간다(client, handlers, monkeyp
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: sent.update(kw) or {"sent": 2, "message_key": "K1"},
+        lambda **kw: sent.update(kw) or _ok(),
     )
     await _draft(client)
 
@@ -186,7 +206,7 @@ async def test_두_번_누르면_한_번만_나간다(client, handlers, monkeypa
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: calls.append(kw) or {"sent": 2, "message_key": "K"},
+        lambda **kw: calls.append(kw) or _ok(),
     )
     await _draft(client)
     body = _press(client, sms.APPROVE)
@@ -212,7 +232,7 @@ async def test_취소하면_안_나간다(client, handlers, monkeypatch):
 async def test_처리된_초안은_결과_카드를_건드리지_않는다(client, handlers, monkeypatch):
     # 이 PR 에는 이력 DB 가 없어 결과 카드가 messageKey 의 유일한 기록이다.
     # 남아 있는 버튼을 다시 눌렀다고 그것을 덮으면 기록이 사라진다.
-    monkeypatch.setattr(sms_send, "send", lambda **kw: {"sent": 2, "message_key": "K"})
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
     await _draft(client)
     approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
     await _click(handlers, sms.APPROVE, approve, client)
@@ -288,3 +308,31 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
     card = _card(client)
     assert "명 접음" in card
     assert "이름30" in card
+
+
+async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, recorded):
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
+    await _draft(client, content="[*이름*]선생님")
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert len(recorded) == 1
+    assert recorded[0]["channel_id"] == "C1"
+    assert recorded[0]["thread_ts"] == "111.000"
+    assert recorded[0]["content"] == "[*이름*]선생님"
+    assert recorded[0]["approved_by"] == "U1"
+
+
+async def test_안_나갔으면_이력을_남기지_않는다(
+    client, handlers, monkeypatch, recorded
+):
+    def boom(**kwargs):
+        raise transport.PpurioError(400, "invalid sender")
+
+    monkeypatch.setattr(sms_send, "send", boom)
+    await _draft(client)
+
+    with pytest.raises(transport.PpurioError):
+        await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert recorded == []

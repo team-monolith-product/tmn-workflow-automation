@@ -16,6 +16,7 @@ from cachetools import TTLCache
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
+from service.sms import history
 from service.sms import send as sms_send
 from service.sms import transport
 
@@ -148,7 +149,12 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
             return "보내기 전에 고칠 것: " + " / ".join(plan.problems)
 
         draft_id = uuid.uuid4().hex[:12]
-        _DRAFTS[draft_id] = {"rows": targets, "content": content}
+        _DRAFTS[draft_id] = {
+            "rows": targets,
+            "content": content,
+            "channel": channel,
+            "thread_ts": thread_ts,
+        }
         await client.chat_postMessage(
             channel=channel,
             thread_ts=thread_ts,
@@ -202,6 +208,20 @@ def register_sms_handlers(app):
             ts,
             f"<@{body['user']['id']}> 님이 보냈습니다 — {result['sent']}명"
             f" (messageKey `{result['message_key']}`)",
+        )
+
+        # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
+        # 발송을 카드가 실패로 그린다. 여기서 터지면 기록만 없고, 카드에 남은
+        # messageKey 로 사람이 뿌리오 웹에서 확인할 수 있다.
+        await asyncio.to_thread(
+            history.record,
+            channel_id=channel,
+            thread_ts=draft["thread_ts"],
+            content=draft["content"],
+            message_type=result["message_type"],
+            message_key=result["message_key"],
+            approved_by=body["user"]["id"],
+            targets=result["targets"],
         )
 
     @app.action(CANCEL)

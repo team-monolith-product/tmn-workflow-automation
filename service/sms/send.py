@@ -87,7 +87,7 @@ def send(
         subject: LMS 제목. SMS 로 판정되면 쓰이지 않는다
 
     Returns:
-        dict[str, Any]: sent·message_key·message_type
+        dict[str, Any]: sent·message_key·message_type·targets
 
     Raises:
         ValueError: preview 가 걸러내는 것에 걸렸을 때
@@ -114,4 +114,5 @@ def send(
         "sent": len(plan.rows),
         "message_key": result.get("messageKey"),
         "message_type": plan.message_type,
+        "targets": plan.targets,
     }
