@@ -473,3 +473,35 @@ async def test_예약_초안을_수정할_때도_예약이_보인다(client, han
     await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
 
     assert "KST" in str(client.views[-1]["blocks"])
+
+
+async def test_수정_모달은_받는_사람도_보여준다(client, handlers_with_revise):
+    # 명단에서 한 명 빼는 것도 피드백으로 되는데, 문안만 떠 있으면 고칠 수
+    # 있는 줄 모르고 취소한 뒤 처음부터 다시 말하게 된다.
+    await _draft(client)
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    modal = str(client.views[-1]["blocks"])
+    # 존재 여부만 보면 짝이 뒤바뀌어도 통과한다. 지목하려면 짝이 맞아야 한다.
+    assert "01011111111  가" in modal
+    assert "01022222222  나" in modal
+
+
+async def test_수정_모달이_슬랙_한도를_넘지_않는다(client, handlers_with_revise):
+    # 넘으면 슬랙이 거절해 모달이 아예 안 열린다 — [수정] 이 죽은 버튼이 된다.
+    targets = [
+        {
+            "to": f"010-1111-{i:04d}",
+            "name": f"이름{i}",
+            "var1": "https://x/" + "a" * 300,
+        }
+        for i in range(1, 31)
+    ]
+    await _draft(client, targets=targets, content="[*이름*] [*1*]")
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    for block in client.views[-1]["blocks"]:
+        if block["type"] == "section":
+            assert len(block["text"]["text"]) <= 3000
