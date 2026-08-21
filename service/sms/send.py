@@ -5,6 +5,7 @@
 벤더가 치환합니다.
 """
 
+import uuid
 from typing import Any, NamedTuple
 
 from service.sms import templates, transport
@@ -100,6 +101,12 @@ def send(
     payload = {
         "messageType": plan.message_type,
         "content": plan.template,
+        # duplicateFlag·refKey 는 벤더 필수 필드입니다. 하나라도 빠지면
+        # 400 code 2000 으로 요청이 통째로 거절됩니다 — 8/21 실측이고,
+        # 슬랙 카드는 멀쩡히 나와서 보낸 줄 알았습니다.
+        # 중복 번호는 preview 가 이미 접으므로 duplicateFlag 값은 결과를 바꾸지 않습니다.
+        "duplicateFlag": "Y",
+        "refKey": uuid.uuid4().hex,
         "targetCount": len(plan.rows),
         "targets": plan.targets,
     }
