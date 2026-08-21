@@ -45,10 +45,12 @@ SCHEMA_GUIDE = """
   raw_text가 스레드 원문이고 평균 1,148자다. distilled_text는 아직 전부 비어 있다.
 - query_log(actor, tool, query, filters, latency_ms, created_at): 이 도구의 실행 기록.
 - sms_send(id, channel_id, thread_ts, content, message_type, message_key,
-  approved_by, sent_at): 문자 발송 한 건. content는 치환 전 원문이라 [*이름*] 같은
+  approved_by, sent_at, scheduled_at): 문자 발송 한 건. content는 치환 전 원문이라 [*이름*] 같은
   태그가 그대로 들어 있다. message_key는 벤더가 빠뜨리면 NULL이라 건수를 셀 때
   count(*)를 쓴다. 같은 thread_ts의 발송이 한 캠페인이다. sent_at은 뿌리오가
-  접수한 시각이지 도달한 시각이 아니다.
+  접수한 시각이지 도달한 시각이 아니다. 예약 발송이면 scheduled_at에 실제로
+  나가는 시각이 있고, 즉시 발송이면 NULL이다 — "언제 나갔나"는
+  coalesce(scheduled_at, sent_at)로 본다.
 - sms_recipient(id, send_id, phone, name, change_word jsonb): 발송 한 건의 수신자.
   phone은 하이픈 없는 숫자다. name은 문안이 [*이름*]을 쓰는데 값이 없으면 빈
   문자열, 문안이 아예 안 쓰면 NULL이라 둘 다 봐야 한다.

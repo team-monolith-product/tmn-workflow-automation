@@ -1,5 +1,7 @@
 """승인 흐름 테스트 — 누르기 전에는 안 나가야 한다."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from service.sms import history
@@ -20,6 +22,7 @@ class FakeClient:
     def __init__(self):
         self.posted = []
         self.updated = []
+        self.views = []
 
     async def chat_postMessage(self, **kwargs):
         self.posted.append(kwargs)
@@ -28,16 +31,30 @@ class FakeClient:
     async def chat_update(self, **kwargs):
         self.updated.append(kwargs)
 
+    async def views_open(self, **kwargs):
+        self.views.append(kwargs["view"])
+
+    async def conversations_replies(self, **kwargs):
+        return {"messages": [{"thread_ts": "111.000"}]}
+
 
 class FakeApp:
     """@app.action 으로 등록된 핸들러를 붙잡아 둔다."""
 
     def __init__(self):
         self.actions = {}
+        self.views = {}
 
     def action(self, action_id):
         def register(func):
             self.actions[action_id] = func
+            return func
+
+        return register
+
+    def view(self, callback_id):
+        def register(func):
+            self.views[callback_id] = func
             return func
 
         return register
@@ -49,6 +66,7 @@ def _ok(**extra):
         "sent": 2,
         "message_key": "K1",
         "message_type": "SMS",
+        "send_time": None,
         "content": "[*이름*]선생님",
         "targets": [
             {"to": "01011111111", "name": "가"},
@@ -88,12 +106,37 @@ def client():
 def handlers():
     app = FakeApp()
     sms.register_sms_handlers(app)
-    return app.actions
+    return {**app.actions, **app.views}
 
 
-async def _draft(client, targets=ROWS, content="[*이름*]님"):
+@pytest.fixture
+def revised():
+    """[수정] 피드백이 에이전트로 되돌아간 기록."""
+    return []
+
+
+@pytest.fixture
+def handlers_with_revise(revised):
+    app = FakeApp()
+
+    async def revise(**kwargs):
+        revised.append(kwargs)
+
+    sms.register_sms_handlers(app, revise=revise)
+    return {**app.actions, **app.views}
+
+
+def _later(minutes: int) -> str:
+    """지금부터 N 분 뒤(한국 시간). 고정 문자열은 날이 지나면 과거가 된다."""
+    when = datetime.now(tz=sms_send.KST) + timedelta(minutes=minutes)
+    return when.strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _draft(client, targets=ROWS, content="[*이름*]님", send_at=""):
     tool = sms.get_sms_tools(client, "C1", "111.000")[0]
-    return await tool.ainvoke({"content": content, "targets": targets})
+    return await tool.ainvoke(
+        {"content": content, "targets": targets, "send_at": send_at}
+    )
 
 
 def _press(client, action_id):
@@ -112,11 +155,32 @@ def _press(client, action_id):
         "actions": [{"value": button["value"]}],
         "user": {"id": "U1"},
         "container": {"channel_id": "C1", "message_ts": "111.222"},
+        "trigger_id": "T1",
     }
 
 
 async def _ack():
     return None
+
+
+def _submit(client, feedback: str) -> dict:
+    """열린 모달에 피드백을 적어 낸다.
+
+    private_metadata 를 손으로 만들지 않고 모달에 실린 값을 그대로 쓴다.
+    엉뚱한 값을 싣고 있어도 통과하면, 운영에서는 카드가 안 바뀐다.
+    """
+    view = client.views[-1]
+    return {
+        "view": {
+            "private_metadata": view["private_metadata"],
+            "state": {
+                "values": {
+                    sms.FEEDBACK_BLOCK: {sms.FEEDBACK_INPUT: {"value": feedback}}
+                }
+            },
+        },
+        "user": {"id": "U1"},
+    }
 
 
 async def _click(handlers, action_id, body, client):
@@ -341,6 +405,19 @@ async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, reco
     # 접수 키가 NULL 이어도 정상으로 보이게 문서에 적어 둔 탓에, 이 사슬이
     # 끊기면 카드도 DB 도 조용히 비어 버린다.
     assert (kwargs["message_key"], kwargs["message_type"]) == ("K1", "SMS")
+    assert kwargs["send_time"] is None
+
+
+async def test_예약이면_예약_시각을_남긴다(client, handlers, monkeypatch, recorded):
+    # 이게 안 남으면 다음 주에 나갈 문자가 오늘 나간 것처럼 보인다.
+    monkeypatch.setattr(
+        sms_send, "send", lambda **kw: _ok(send_time="2026-08-22T09:00:00")
+    )
+    await _draft(client)
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert recorded[0][0]["send_time"] == "2026-08-22T09:00:00"
 
 
 async def test_안_나갔으면_이력을_남기지_않는다(
@@ -356,3 +433,156 @@ async def test_안_나갔으면_이력을_남기지_않는다(
         await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
     assert recorded == []
+
+
+async def test_예약이면_카드가_시각과_예약하기를_보여준다(client):
+    # "보내기" 라고 쓰여 있으면 지금 나가는 줄 알고 누른다.
+    await _draft(client, send_at=_later(60))
+
+    card = _card(client)
+    assert "예약" in card
+    assert "예약하기" in card
+    # 시간대가 없으면 어느 나라 9시인지 물어보게 된다.
+    assert "KST" in card
+
+
+async def test_예약이_없으면_보내기다(client):
+    await _draft(client)
+
+    assert "예약하기" not in _card(client)
+
+
+async def test_예약을_승인하면_시각이_함께_나간다(client, handlers, monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        sms_send,
+        "send",
+        lambda **kw: sent.update(kw) or _ok(send_time="2026-08-22T09:00:00"),
+    )
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert sent["send_at"]
+    assert "예약" in client.updated[0]["text"]
+
+
+async def test_예약_시각이_지나면_안_나갔다고_말한다(client, handlers, monkeypatch):
+    # 초안을 올린 뒤 승인까지 시간이 흐른다. 여기서 "접수 여부를 모릅니다" 로
+    # 새면, 안 나간 것을 나갔을 수도 있다고 읽어 아무도 다시 보내지 않는다.
+    def expired(**kwargs):
+        raise ValueError("예약은 지금부터 3분 뒤부터 됩니다")
+
+    monkeypatch.setattr(sms_send, "send", expired)
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert "안 나갔습니다" in client.updated[-1]["text"]
+
+
+async def test_수정을_눌러도_초안은_살아_있다(client, handlers_with_revise):
+    # 모달을 열어 놓고 닫아 버릴 수 있다. 그때 초안이 사라지면 멀쩡한
+    # 카드의 [보내기] 가 "이미 처리된 초안" 만 뱉는 죽은 버튼이 된다.
+    await _draft(client)
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert len(client.views) == 1
+    assert len(sms._DRAFTS) == 1
+
+
+async def test_수정_모달은_고칠_문안을_보여준다(client, handlers_with_revise):
+    # 무엇을 고치는지 안 보이면 피드백이 엉뚱한 초안에 붙는다.
+    await _draft(client, content="[*이름*]선생님, 마감은 8월 22일입니다")
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert "마감은 8월 22일입니다" in str(client.views[-1]["blocks"])
+
+
+async def test_수정을_내면_피드백이_에이전트로_간다(
+    client, handlers_with_revise, revised
+):
+    await _draft(client)
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    await handlers_with_revise[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "마감일을 8월 30일로"), client=client
+    )
+
+    assert revised[0]["text"] == "마감일을 8월 30일로"
+    # 스레드를 벗어나면 에이전트가 앞의 대화를 못 읽어 처음부터 다시 묻는다.
+    assert revised[0]["thread_ts"] == "111.000"
+    assert "마감일을 8월 30일로" in client.updated[-1]["text"]
+
+
+async def test_수정을_낸_뒤에는_옛_문안이_안_나간다(
+    client, handlers_with_revise, monkeypatch
+):
+    # 새 초안이 따로 올라오므로, 옛 카드의 [보내기] 가 살아 있으면
+    # 고쳐 달라고 해놓고 고치기 전 문안이 나간다.
+    monkeypatch.setattr(sms_send, "send", lambda **kw: pytest.fail("옛 문안이 나갔다"))
+    await _draft(client)
+    approve_body = _press(client, sms.APPROVE)
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+    await handlers_with_revise[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "다시 써주세요"), client=client
+    )
+
+    await _click(handlers_with_revise, sms.APPROVE, approve_body, client)
+
+
+async def test_수정_콜백이_없어도_카드는_정리된다(client, handlers):
+    # revise 를 주입하지 않은 곳(테스트·다른 봇)에서도 버튼이 죽지 않아야 한다.
+    await _draft(client)
+    await _click(handlers, sms.REVISE, _press(client, sms.REVISE), client)
+
+    await handlers[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "고쳐주세요"), client=client
+    )
+
+    assert "고쳐주세요" in client.updated[-1]["text"]
+    assert not sms._DRAFTS
+
+
+async def test_예약_초안을_수정할_때도_예약이_보인다(client, handlers_with_revise):
+    # 언제 나가는 건지 모르고 피드백을 적으면, 마감 문구를 고치면서
+    # 발송 시각과 어긋난 안내를 쓰게 된다.
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert "KST" in str(client.views[-1]["blocks"])
+
+
+async def test_수정_모달은_받는_사람도_보여준다(client, handlers_with_revise):
+    # 명단에서 한 명 빼는 것도 피드백으로 되는데, 문안만 떠 있으면 고칠 수
+    # 있는 줄 모르고 취소한 뒤 처음부터 다시 말하게 된다.
+    await _draft(client)
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    modal = str(client.views[-1]["blocks"])
+    # 존재 여부만 보면 짝이 뒤바뀌어도 통과한다. 지목하려면 짝이 맞아야 한다.
+    assert "01011111111  가" in modal
+    assert "01022222222  나" in modal
+
+
+async def test_수정_모달이_슬랙_한도를_넘지_않는다(client, handlers_with_revise):
+    # 넘으면 슬랙이 거절해 모달이 아예 안 열린다 — [수정] 이 죽은 버튼이 된다.
+    targets = [
+        {
+            "to": f"010-1111-{i:04d}",
+            "name": f"이름{i}",
+            "var1": "https://x/" + "a" * 300,
+        }
+        for i in range(1, 31)
+    ]
+    await _draft(client, targets=targets, content="[*이름*] [*1*]")
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    for block in client.views[-1]["blocks"]:
+        if block["type"] == "section":
+            assert len(block["text"]["text"]) <= 3000

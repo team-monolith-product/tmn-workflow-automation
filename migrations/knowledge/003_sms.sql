@@ -30,7 +30,11 @@ CREATE TABLE sms_send (
     -- 그때 이력이 통째로 안 남아 문안과 수신자까지 같이 잃는다.
     message_key   text,
     approved_by   text        NOT NULL,
-    sent_at       timestamptz NOT NULL DEFAULT now()
+    -- 뿌리오가 접수한 시각. 예약 발송이면 실제로 나가는 것은 나중이다.
+    sent_at       timestamptz NOT NULL DEFAULT now(),
+    -- 예약 시각. 즉시 발송이면 NULL. 이게 없으면 다음 주에 나갈 문자가
+    -- 오늘 나간 것처럼 보인다.
+    scheduled_at  timestamptz
 );
 
 CREATE INDEX sms_send_channel_sent ON sms_send (channel_id, sent_at DESC);

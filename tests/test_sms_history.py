@@ -63,6 +63,7 @@ def _record(**extra):
             "content": "[*이름*]선생님",
             "message_type": "SMS",
             "message_key": "K1",
+            "send_time": None,
             "approved_by": "U1",
             "targets": [{"to": "01011111111", "name": "홍길동"}],
             **extra,
@@ -116,3 +117,18 @@ def test_수신자를_같이_남긴다(cursor):
     assert [row["send_id"] for row in rows] == [77, 77]
     assert json.loads(rows[0]["change_word"]) == {"var1": "1기"}
     assert rows[1]["change_word"] is None
+
+
+def test_예약_시각을_남긴다(cursor):
+    # 벤더 형식은 시간대가 없는 KST 문자열이라, 그대로 넣으면 서버 시간대로
+    # 읽혀 9시간이 밀린다.
+    _record(send_time="2026-08-22T09:00:00")
+
+    when = _params(cursor, "INSERT INTO sms_send")["scheduled_at"]
+    assert when.isoformat() == "2026-08-22T09:00:00+09:00"
+
+
+def test_즉시_발송이면_예약_시각이_없다(cursor):
+    _record()
+
+    assert _params(cursor, "INSERT INTO sms_send")["scheduled_at"] is None

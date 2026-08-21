@@ -6,16 +6,19 @@
 """
 
 import json
+from datetime import datetime
 from typing import Any
 
 from service.knowledge.db import connect
+from service.sms.send import KST, SEND_TIME_FORMAT
 
 INSERT_SEND = """
 INSERT INTO sms_send (
-    channel_id, thread_ts, content, message_type, message_key, approved_by
+    channel_id, thread_ts, content, message_type, message_key, approved_by,
+    scheduled_at
 ) VALUES (
     %(channel_id)s, %(thread_ts)s, %(content)s,
-    %(message_type)s, %(message_key)s, %(approved_by)s
+    %(message_type)s, %(message_key)s, %(approved_by)s, %(scheduled_at)s
 ) RETURNING id
 """
 
@@ -32,6 +35,7 @@ def record(
     content: str,
     message_type: str,
     message_key: str | None,
+    send_time: str | None,
     approved_by: str,
     targets: list[dict[str, Any]],
 ) -> None:
@@ -43,6 +47,7 @@ def record(
         content: 벤더로 나간 문안. send() 가 돌려준 값을 그대로 넘긴다
         message_type: SMS 또는 LMS
         message_key: 뿌리오 접수 키. 벤더가 빠뜨리면 없을 수 있다
+        send_time: 예약 시각(벤더 형식 KST). 즉시 발송이면 없다
         approved_by: [보내기] 를 누른 사람의 Slack 사용자 ID
         targets: 벤더로 나간 targets 배열
     """
@@ -56,6 +61,11 @@ def record(
                 "message_type": message_type,
                 "message_key": message_key,
                 "approved_by": approved_by,
+                "scheduled_at": (
+                    datetime.strptime(send_time, SEND_TIME_FORMAT).replace(tzinfo=KST)
+                    if send_time
+                    else None
+                ),
             },
         )
         send_id = cur.fetchone()["id"]

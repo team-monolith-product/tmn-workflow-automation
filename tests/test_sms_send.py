@@ -1,5 +1,7 @@
 """발송 계층 테스트."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from service.sms import send as sms_send
@@ -44,6 +46,22 @@ def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
     assert result["message_key"] == "K1"
     assert payload["targetCount"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
+
+
+def test_벤더_필수_필드가_빠지지_않는다(monkeypatch):
+    # duplicateFlag·refKey 가 빠져 400 code 2000 으로 전건이 거절된 적이 있습니다(8/21).
+    # 카드는 정상으로 보여 발송된 줄 알았습니다 — 실패가 눈에 띄지 않는 종류입니다.
+    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    for field in (
+        "messageType",
+        "content",
+        "duplicateFlag",
+        "refKey",
+        "targetCount",
+        "targets",
+    ):
+        assert field in payload, f"벤더 필수 필드가 빠졌다: {field}"
 
 
 def test_치환값이_벤더로_넘어간다(monkeypatch):
@@ -189,3 +207,66 @@ def test_보낼_수_없으면_send가_터진다(monkeypatch):
 
     with pytest.raises(ValueError, match="형식 오류"):
         sms_send.send(rows=[{"to": "010-123"}], content=CONTENT)
+
+
+def _later(minutes: int) -> str:
+    """지금부터 N 분 뒤(한국 시간). 고정 문자열을 쓰면 날이 지나며 테스트가 썩는다."""
+    when = datetime.now(tz=sms_send.KST) + timedelta(minutes=minutes)
+    return when.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_예약_시각이_벤더로_넘어간다(monkeypatch):
+    _, payload = _run(
+        monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=_later(60)
+    )
+
+    assert "sendTime" in payload
+    # 벤더 형식이 아니면 조용히 즉시 발송되거나 거절된다.
+    datetime.strptime(payload["sendTime"], sms_send.SEND_TIME_FORMAT)
+
+
+def test_예약이_없으면_sendTime_을_싣지_않는다(monkeypatch):
+    # 빈 값을 실으면 벤더가 형식 오류로 전건을 거절한다.
+    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    assert "sendTime" not in payload
+
+
+def test_지난_시각은_보내기_전에_걸린다():
+    plan = sms_send.preview(ROWS, CONTENT, send_at=_later(-10))
+
+    assert plan.problems
+    assert plan.send_time is None
+
+
+def test_너무_촉박한_예약은_걸린다():
+    # 벤더가 3분 미만을 거절한다. 여기서 안 걸면 승인 순간에야 실패한다.
+    plan = sms_send.preview(ROWS, CONTENT, send_at=_later(1))
+
+    assert plan.problems
+
+
+def test_읽을_수_없는_시각은_걸린다():
+    plan = sms_send.preview(ROWS, CONTENT, send_at="내일 아침")
+
+    assert plan.problems
+
+
+def test_시간대가_없으면_한국_시간으로_읽는다():
+    # 서버가 UTC 로 돌면 naive 시각이 9시간 밀려, "오늘 오후" 예약이 내일 새벽이 된다.
+    when = datetime.now(tz=sms_send.KST) + timedelta(hours=5)
+    naive = when.strftime("%Y-%m-%d %H:%M:%S")
+
+    send_time, problem = sms_send.parse_send_at(naive)
+
+    assert problem is None
+    assert send_time == when.strftime(sms_send.SEND_TIME_FORMAT)
+
+
+def test_예약해도_수신자와_문안은_그대로다(monkeypatch):
+    _, payload = _run(
+        monkeypatch, {"code": "1000", "messageKey": "K"}, send_at=_later(60)
+    )
+
+    assert payload["targetCount"] == 2
+    assert payload["content"] == CONTENT
