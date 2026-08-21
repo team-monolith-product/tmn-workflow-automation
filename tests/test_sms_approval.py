@@ -240,8 +240,8 @@ async def test_취소하면_안_나간다(client, handlers, monkeypatch):
 
 
 async def test_처리된_초안은_결과_카드를_건드리지_않는다(client, handlers, monkeypatch):
-    # 이 PR 에는 이력 DB 가 없어 결과 카드가 messageKey 의 유일한 기록이다.
-    # 남아 있는 버튼을 다시 눌렀다고 그것을 덮으면 기록이 사라진다.
+    # 남아 있는 버튼을 다시 눌렀다고 결과 카드를 덮으면, 누가 언제 보냈는지가
+    # 스레드에서 사라진다.
     monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
     await _draft(client)
     approve, cancel = _press(client, sms.APPROVE), _press(client, sms.CANCEL)
@@ -335,6 +335,9 @@ async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, reco
     assert kwargs["approved_by"] == "U1"
     # 카드를 먼저 고치고 남긴다.
     assert updates_before == 1
+    # 정규화된 번호가 남아야 한다. draft["rows"] 로 새면 '010-1111-1111' 이
+    # 들어가고, "이 번호로 뭐 보냈나" 가 조용히 0행을 낸다.
+    assert [t["to"] for t in kwargs["targets"]] == ["01011111111", "01022222222"]
 
 
 async def test_안_나갔으면_이력을_남기지_않는다(

@@ -226,8 +226,7 @@ def register_sms_handlers(app):
     async def cancel(ack, body, client):
         await ack()
         # 이미 처리된 초안이면 결과 카드를 덮지 않는다. 발송이 시작됐는데
-        # "취소했습니다" 로 덮으면 누른 사람은 막았다고 믿고, 발송이 끝난
-        # 뒤라면 이 PR 의 유일한 기록인 messageKey 가 지워진다.
+        # "취소했습니다" 로 덮으면 누른 사람은 막았다고 믿는다.
         draft = _DRAFTS.pop(body["actions"][0]["value"], None)
         if draft is None:
             return

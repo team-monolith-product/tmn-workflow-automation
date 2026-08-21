@@ -58,6 +58,9 @@ def test_벤더로_나가는_것은_치환_전_원문이다(monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
     assert payload["content"] == result["content"] == CONTENT
+    # 이력이 남기는 targets 도 벤더로 나간 값이어야 한다. plan.rows 로 새면
+    # change_word 가 전 행 NULL 이 되고, 기수·치환값은 재구성할 수 없다.
+    assert payload["targets"] == result["targets"]
 
 
 def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):
