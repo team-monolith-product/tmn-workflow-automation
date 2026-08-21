@@ -307,6 +307,8 @@ async def test_예약이면_카드가_시각과_예약하기를_보여준다(cli
     card = _card(client)
     assert "예약" in card
     assert "예약하기" in card
+    # 시간대가 없으면 어느 나라 9시인지 물어보게 된다.
+    assert "KST" in card
 
 
 async def test_예약이_없으면_보내기다(client):

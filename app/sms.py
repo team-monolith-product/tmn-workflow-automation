@@ -70,12 +70,16 @@ def _value_table(targets: list[dict]) -> str:
 
 
 def _when(send_time: str | None) -> str:
-    """예약 시각을 사람이 읽는 꼴로. 즉시 발송이면 빈 문자열입니다."""
+    """예약 시각을 사람이 읽는 꼴로. 즉시 발송이면 빈 문자열입니다.
+
+    시간대를 붙여 씁니다. 해외에 있거나 노트북 시계가 딴 데 맞춰져 있으면
+    "09:00" 이 어느 나라 9시인지 물어보게 됩니다.
+    """
     if not send_time:
         return ""
     when = datetime.strptime(send_time, sms_send.SEND_TIME_FORMAT)
     days = "월화수목금토일"[when.weekday()]
-    return f"{when.month}/{when.day}({days}) {when:%H:%M}"
+    return f"{when.month}/{when.day}({days}) {when:%H:%M} KST"
 
 
 def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
