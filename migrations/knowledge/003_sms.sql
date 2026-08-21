@@ -6,7 +6,7 @@
 --
 -- 접수(sent_at)와 도달은 다르다. code 1000은 뿌리오가 받았다는 뜻이고, 실제 도달
 -- 여부는 웹 발송결과 페이지에만 있다. 그것을 긁어오는 작업이 오면 그때 컬럼을
--- 더한다 — 지금 비워둘 자리를 미리 만들지 않는다.
+-- 더한다 -- 지금 비워둘 자리를 미리 만들지 않는다.
 
 -- 사업 하나가 채널 여러 개를 쓴다(본채널 + _cs). 채널 이름으로는 묶을 수 없다 --
 -- 실측 12개 중 구분자가 '-' 와 '_' 로 갈리고 사업명이 없는 것도 있다.
@@ -18,22 +18,22 @@ CREATE TABLE sms_channel (
 CREATE TABLE sms_send (
     id            bigserial PRIMARY KEY,
     channel_id    text        NOT NULL,
+    -- 같은 스레드의 발송이 한 캠페인이다. 누락자 재발송은 같은 스레드에서 하므로
+    -- 캠페인을 따로 식별할 컬럼이 필요 없다.
     thread_ts     text        NOT NULL,
-    -- 캠페인 식별자. 최초 발송 스레드를 가리킨다. 첫 발송은 자기 자신이다.
-    -- 사람이 붙인 라벨을 식별자로 쓰면 오타가 캠페인을 조용히 둘로 쪼갠다.
-    root_ts       text        NOT NULL,
-    -- 벤더로 나간 치환 전 원문. 재발송할 때 이 값을 그대로 쓰면 문안이 같다는
-    -- 것이 보장된다. 치환 후 문장을 남기면 다시 템플릿으로 되돌려야 하고,
-    -- 그 과정에서 담당자 이름까지 태그로 바뀌는 사고가 난다.
+    -- 벤더로 나간 문안. 치환 전 원문이라 [*이름*] 태그가 그대로 있다. 치환 후
+    -- 문장을 남기면 재사용할 때 다시 템플릿으로 되돌려야 하고, 그 과정에서
+    -- 담당자 이름까지 태그로 바뀌는 사고가 난다.
     content       text        NOT NULL,
     message_type  text        NOT NULL,
-    message_key   text        NOT NULL,
+    -- 벤더가 code 1000 을 주면서 messageKey 를 빠뜨릴 수 있다. NOT NULL 이면
+    -- 그때 이력이 통째로 안 남아 문안과 수신자까지 같이 잃는다.
+    message_key   text,
     approved_by   text        NOT NULL,
     sent_at       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX sms_send_channel_sent ON sms_send (channel_id, sent_at DESC);
-CREATE INDEX sms_send_root ON sms_send (root_ts);
 
 CREATE TABLE sms_recipient (
     id           bigserial PRIMARY KEY,

@@ -152,7 +152,6 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         _DRAFTS[draft_id] = {
             "rows": targets,
             "content": content,
-            "channel": channel,
             "thread_ts": thread_ts,
         }
         await client.chat_postMessage(
@@ -217,7 +216,7 @@ def register_sms_handlers(app):
             history.record,
             channel_id=channel,
             thread_ts=draft["thread_ts"],
-            content=draft["content"],
+            content=result["content"],
             message_type=result["message_type"],
             message_key=result["message_key"],
             approved_by=body["user"]["id"],

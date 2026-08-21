@@ -43,22 +43,32 @@ class FakeApp:
         return register
 
 
-def _ok(sent=2, **extra):
+def _ok(**extra):
     """뿌리오가 접수한 응답. send() 가 실제로 돌려주는 모양이다."""
     return {
-        "sent": sent,
+        "sent": 2,
         "message_key": "K1",
         "message_type": "SMS",
-        "targets": [{"to": "01011111111", "name": "가"}],
+        "content": "[*이름*]선생님",
+        "targets": [
+            {"to": "01011111111", "name": "가"},
+            {"to": "01022222222", "name": "나"},
+        ],
         **extra,
     }
 
 
 @pytest.fixture(autouse=True)
-def recorded(monkeypatch):
-    """이력 저장을 잡아둔다. 안 막으면 테스트가 실제 DB 에 붙는다."""
+def recorded(monkeypatch, client):
+    """이력 저장을 잡아둔다. 안 막으면 테스트가 실제 DB 에 붙는다.
+
+    남긴 시점에 카드가 이미 갱신됐는지 같이 담는다. 순서가 반대면 DB 가
+    터졌을 때 이미 나간 발송을 카드가 실패로 그린다.
+    """
     calls = []
-    monkeypatch.setattr(history, "record", lambda **kw: calls.append(kw) or 1)
+    monkeypatch.setattr(
+        history, "record", lambda **kw: calls.append((kw, len(client.updated)))
+    )
     return calls
 
 
@@ -312,15 +322,19 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
 
 async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, recorded):
     monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
-    await _draft(client, content="[*이름*]선생님")
+    await _draft(client, content="\n[*이름*]선생님\n")
 
     await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
     assert len(recorded) == 1
-    assert recorded[0]["channel_id"] == "C1"
-    assert recorded[0]["thread_ts"] == "111.000"
-    assert recorded[0]["content"] == "[*이름*]선생님"
-    assert recorded[0]["approved_by"] == "U1"
+    kwargs, updates_before = recorded[0]
+    assert kwargs["channel_id"] == "C1"
+    assert kwargs["thread_ts"] == "111.000"
+    # 도구가 받은 날것이 아니라 벤더로 나간 문안을 남긴다.
+    assert kwargs["content"] == "[*이름*]선생님"
+    assert kwargs["approved_by"] == "U1"
+    # 카드를 먼저 고치고 남긴다.
+    assert updates_before == 1
 
 
 async def test_안_나갔으면_이력을_남기지_않는다(
