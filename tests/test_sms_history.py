@@ -112,6 +112,7 @@ def test_수신자를_같이_남긴다(cursor):
         params for sql, params in cursor.calls if "INSERT INTO sms_recipient" in sql
     ]
     assert [row["phone"] for row in rows] == ["01011111111", "01022222222"]
+    assert [row["name"] for row in rows] == ["가", "나"]
     assert [row["send_id"] for row in rows] == [77, 77]
     assert json.loads(rows[0]["change_word"]) == {"var1": "1기"}
     assert rows[1]["change_word"] is None

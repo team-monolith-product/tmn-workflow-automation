@@ -251,7 +251,7 @@ async def test_처리된_초안은_결과_카드를_건드리지_않는다(clien
     await _click(handlers, sms.APPROVE, approve, client)
 
     assert len(client.updated) == 1
-    assert "messageKey" in client.updated[0]["text"]
+    assert "messageKey `K1`" in client.updated[0]["text"]
 
 
 async def test_번호가_틀리면_초안을_안_올린다(client):
@@ -338,6 +338,9 @@ async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, reco
     # 정규화된 번호가 남아야 한다. draft["rows"] 로 새면 '010-1111-1111' 이
     # 들어가고, "이 번호로 뭐 보냈나" 가 조용히 0행을 낸다.
     assert [t["to"] for t in kwargs["targets"]] == ["01011111111", "01022222222"]
+    # 접수 키가 NULL 이어도 정상으로 보이게 문서에 적어 둔 탓에, 이 사슬이
+    # 끊기면 카드도 DB 도 조용히 비어 버린다.
+    assert (kwargs["message_key"], kwargs["message_type"]) == ("K1", "SMS")
 
 
 async def test_안_나갔으면_이력을_남기지_않는다(

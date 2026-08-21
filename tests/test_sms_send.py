@@ -41,6 +41,7 @@ def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
     assert result["sent"] == 2
+    assert result["message_key"] == "K1"
     assert payload["targetCount"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
