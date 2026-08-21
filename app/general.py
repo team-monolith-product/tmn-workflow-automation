@@ -129,6 +129,38 @@ async def _build_tools(
     )
 
 
+def get_sms_revise(app):
+    """문자 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
+
+    카드의 [수정] 은 모달로 피드백만 받습니다. 그 피드백을 스레드의 다음
+    질문처럼 다시 태워야 에이전트가 앞의 대화(수신자·문안·의도)를 그대로 두고
+    문안만 고쳐 새 초안을 올립니다.
+
+    app/sms.py 가 아니라 여기서 만듭니다. 저쪽에서 이 모듈을 부르면
+    general → sms → general 로 순환합니다.
+
+    Args:
+        app: slack_bolt AsyncApp
+
+    Returns:
+        `async (channel, thread_ts, user, text) -> None` 콜백
+    """
+
+    async def revise(channel: str, thread_ts: str, user: str, text: str) -> None:
+        async def say(payload, thread_ts=thread_ts):
+            await app.client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=payload.get("text", "문자 초안을 다시 썼습니다"),
+                **{k: v for k, v in payload.items() if k != "text"},
+            )
+
+        tools = await _build_tools(app.client, user, channel, thread_ts)
+        await answer(thread_ts, channel, user, text, say, app.client, tools)
+
+    return revise
+
+
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
 SLACK_DAILY_SCRUM_CANVAS_ID = "F05S8Q78CGZ"
 SLACK_BUG_REPORT_CHANNEL_ID = "C07A5HVG6UR"
