@@ -45,6 +45,16 @@ def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
 
+def test_벤더_필수_필드가_빠지지_않는다(monkeypatch):
+    # duplicateFlag·refKey 가 빠져 400 code 2000 으로 전건이 거절된 적이 있습니다(8/21).
+    # 카드는 정상으로 보여 발송된 줄 알았습니다 — 실패가 눈에 띄지 않는 종류입니다.
+    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    for field in ("messageType", "content", "duplicateFlag", "refKey",
+                  "targetCount", "targets"):
+        assert field in payload, f"벤더 필수 필드가 빠졌다: {field}"
+
+
 def test_치환값이_벤더로_넘어간다(monkeypatch):
     _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
