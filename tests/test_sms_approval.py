@@ -19,6 +19,7 @@ class FakeClient:
     def __init__(self):
         self.posted = []
         self.updated = []
+        self.views = []
 
     async def chat_postMessage(self, **kwargs):
         self.posted.append(kwargs)
@@ -27,16 +28,30 @@ class FakeClient:
     async def chat_update(self, **kwargs):
         self.updated.append(kwargs)
 
+    async def views_open(self, **kwargs):
+        self.views.append(kwargs["view"])
+
+    async def conversations_replies(self, **kwargs):
+        return {"messages": [{"thread_ts": "111.000"}]}
+
 
 class FakeApp:
     """@app.action 으로 등록된 핸들러를 붙잡아 둔다."""
 
     def __init__(self):
         self.actions = {}
+        self.views = {}
 
     def action(self, action_id):
         def register(func):
             self.actions[action_id] = func
+            return func
+
+        return register
+
+    def view(self, callback_id):
+        def register(func):
+            self.views[callback_id] = func
             return func
 
         return register
@@ -58,7 +73,24 @@ def client():
 def handlers():
     app = FakeApp()
     sms.register_sms_handlers(app)
-    return app.actions
+    return {**app.actions, **app.views}
+
+
+@pytest.fixture
+def revised():
+    """[수정] 피드백이 에이전트로 되돌아간 기록."""
+    return []
+
+
+@pytest.fixture
+def handlers_with_revise(revised):
+    app = FakeApp()
+
+    async def revise(**kwargs):
+        revised.append(kwargs)
+
+    sms.register_sms_handlers(app, revise=revise)
+    return {**app.actions, **app.views}
 
 
 async def _draft(client, targets=ROWS, content="[*이름*]님"):
@@ -82,11 +114,32 @@ def _press(client, action_id):
         "actions": [{"value": button["value"]}],
         "user": {"id": "U1"},
         "container": {"channel_id": "C1", "message_ts": "111.222"},
+        "trigger_id": "T1",
     }
 
 
 async def _ack():
     return None
+
+
+def _submit(client, feedback: str) -> dict:
+    """열린 모달에 피드백을 적어 낸다.
+
+    private_metadata 를 손으로 만들지 않고 모달에 실린 값을 그대로 쓴다.
+    엉뚱한 값을 싣고 있어도 통과하면, 운영에서는 카드가 안 바뀐다.
+    """
+    view = client.views[-1]
+    return {
+        "view": {
+            "private_metadata": view["private_metadata"],
+            "state": {
+                "values": {
+                    sms.FEEDBACK_BLOCK: {sms.FEEDBACK_INPUT: {"value": feedback}}
+                }
+            },
+        },
+        "user": {"id": "U1"},
+    }
 
 
 async def _click(handlers, action_id, body, client):
@@ -288,3 +341,68 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
     card = _card(client)
     assert "명 접음" in card
     assert "이름30" in card
+
+
+async def test_수정을_눌러도_초안은_살아_있다(client, handlers_with_revise):
+    # 모달을 열어 놓고 닫아 버릴 수 있다. 그때 초안이 사라지면 멀쩡한
+    # 카드의 [보내기] 가 "이미 처리된 초안" 만 뱉는 죽은 버튼이 된다.
+    await _draft(client)
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert len(client.views) == 1
+    assert len(sms._DRAFTS) == 1
+
+
+async def test_수정_모달은_고칠_문안을_보여준다(client, handlers_with_revise):
+    # 무엇을 고치는지 안 보이면 피드백이 엉뚱한 초안에 붙는다.
+    await _draft(client, content="[*이름*]선생님, 마감은 8월 22일입니다")
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert "마감은 8월 22일입니다" in str(client.views[-1]["blocks"])
+
+
+async def test_수정을_내면_피드백이_에이전트로_간다(
+    client, handlers_with_revise, revised
+):
+    await _draft(client)
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    await handlers_with_revise[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "마감일을 8월 30일로"), client=client
+    )
+
+    assert revised[0]["text"] == "마감일을 8월 30일로"
+    # 스레드를 벗어나면 에이전트가 앞의 대화를 못 읽어 처음부터 다시 묻는다.
+    assert revised[0]["thread_ts"] == "111.000"
+    assert "마감일을 8월 30일로" in client.updated[-1]["text"]
+
+
+async def test_수정을_낸_뒤에는_옛_문안이_안_나간다(
+    client, handlers_with_revise, monkeypatch
+):
+    # 새 초안이 따로 올라오므로, 옛 카드의 [보내기] 가 살아 있으면
+    # 고쳐 달라고 해놓고 고치기 전 문안이 나간다.
+    monkeypatch.setattr(sms_send, "send", lambda **kw: pytest.fail("옛 문안이 나갔다"))
+    await _draft(client)
+    approve_body = _press(client, sms.APPROVE)
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+    await handlers_with_revise[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "다시 써주세요"), client=client
+    )
+
+    await _click(handlers_with_revise, sms.APPROVE, approve_body, client)
+
+
+async def test_수정_콜백이_없어도_카드는_정리된다(client, handlers):
+    # revise 를 주입하지 않은 곳(테스트·다른 봇)에서도 버튼이 죽지 않아야 한다.
+    await _draft(client)
+    await _click(handlers, sms.REVISE, _press(client, sms.REVISE), client)
+
+    await handlers[sms.REVISE_VIEW](
+        ack=_ack, body=_submit(client, "고쳐주세요"), client=client
+    )
+
+    assert "고쳐주세요" in client.updated[-1]["text"]
+    assert not sms._DRAFTS
