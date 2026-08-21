@@ -22,7 +22,7 @@ def _run(monkeypatch, response=None, boom=None, **extra):
         return response
 
     monkeypatch.setattr(transport, "send", fake_send)
-    result = sms_send.send(rows=ROWS, content=CONTENT, **extra)
+    result = sms_send.send(rows=ROWS, content=f"\n{CONTENT}\n", **extra)
     return result, captured
 
 
@@ -53,9 +53,11 @@ def test_치환값이_벤더로_넘어간다(monkeypatch):
 
 
 def test_벤더로_나가는_것은_치환_전_원문이다(monkeypatch):
-    _, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+    # 이력이 남기는 result["content"] 가 벤더로 나간 값과 같아야 한다. 갈리면
+    # 앞뒤 공백 하나로 같은 문안이 DB 에서 둘로 쪼개진다.
+    result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
-    assert payload["content"] == CONTENT
+    assert payload["content"] == result["content"] == CONTENT
 
 
 def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):

@@ -206,12 +206,11 @@ def register_sms_handlers(app):
             channel,
             ts,
             f"<@{body['user']['id']}> 님이 보냈습니다 — {result['sent']}명"
-            f" (messageKey `{result['message_key']}`)",
+            f" (messageKey `{result['message_key'] or '없음'}`)",
         )
 
         # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
-        # 발송을 카드가 실패로 그린다. 여기서 터지면 기록만 없고, 카드에 남은
-        # messageKey 로 사람이 뿌리오 웹에서 확인할 수 있다.
+        # 발송을 카드가 실패로 그린다.
         await asyncio.to_thread(
             history.record,
             channel_id=channel,
