@@ -16,6 +16,7 @@ from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
 from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
+from app.sms import register_sms_handlers
 from scheduler import start_scheduler
 
 # 환경 변수 로드
@@ -56,6 +57,8 @@ register_general_handlers(app)
 # 리스너가 아니라 미들웨어다. 대표 봇에 이미 message 리스너가 있어서
 # 리스너를 추가하면 Bolt 디스패치가 둘 중 하나에서 멈춘다.
 register_knowledge_middleware(app)
+# 발송 승인 버튼. 초안은 도구가 올리고, 실제 발송은 이 핸들러가 한다.
+register_sms_handlers(app)
 register_contents_handlers(app_contents)
 register_data_handlers(app_data)
 register_justin_handlers(app_justin)
