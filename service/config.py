@@ -138,6 +138,19 @@ class EducationBidCrawlerConfig:
     batch_size: int = 20
 
 
+# --- 지식베이스 ---
+
+
+@dataclass(frozen=True)
+class KnowledgeDistillConfig:
+    """지식베이스 스레드 정제 설정"""
+
+    # 한 회차에 정제할 스레드 수. 백필한 물량이 전부 정제 대기라 워커를 띄우는
+    # 순간 한꺼번에 대상이 된다. 흘려보내는 속도를 여기서 정한다.
+    max_per_run: int = 50
+    concurrency: int = 4
+
+
 # --- 스케줄 작업 ---
 
 
@@ -165,6 +178,9 @@ class AppConfig:
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
     education_bid_crawler: EducationBidCrawlerConfig | None = None
+    knowledge_distill: KnowledgeDistillConfig = field(
+        default_factory=KnowledgeDistillConfig
+    )
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
 
 
@@ -293,6 +309,13 @@ def _parse_config(raw: dict) -> AppConfig:
             batch_size=ebc_raw.get("batch_size", 20),
         )
 
+    # Knowledge distill
+    kd_raw = raw.get("knowledge_distill", {})
+    knowledge_distill = KnowledgeDistillConfig(
+        max_per_run=kd_raw.get("max_per_run", 50),
+        concurrency=kd_raw.get("concurrency", 4),
+    )
+
     # Scheduled jobs
     scheduled_jobs = [
         ScheduledJobConfig(
@@ -312,6 +335,7 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum=scrum,
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
+        knowledge_distill=knowledge_distill,
         scheduled_jobs=scheduled_jobs,
     )
 
