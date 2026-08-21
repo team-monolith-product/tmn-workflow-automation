@@ -1,5 +1,7 @@
 """승인 흐름 테스트 — 누르기 전에는 안 나가야 한다."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from service.sms import send as sms_send
@@ -93,9 +95,17 @@ def handlers_with_revise(revised):
     return {**app.actions, **app.views}
 
 
-async def _draft(client, targets=ROWS, content="[*이름*]님"):
+def _later(minutes: int) -> str:
+    """지금부터 N 분 뒤(한국 시간). 고정 문자열은 날이 지나면 과거가 된다."""
+    when = datetime.now(tz=sms_send.KST) + timedelta(minutes=minutes)
+    return when.strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _draft(client, targets=ROWS, content="[*이름*]님", send_at=""):
     tool = sms.get_sms_tools(client, "C1", "111.000")[0]
-    return await tool.ainvoke({"content": content, "targets": targets})
+    return await tool.ainvoke(
+        {"content": content, "targets": targets, "send_at": send_at}
+    )
 
 
 def _press(client, action_id):
@@ -343,6 +353,53 @@ async def test_치환값이_길어도_슬랙_한도를_넘지_않는다(client):
     assert "이름30" in card
 
 
+async def test_예약이면_카드가_시각과_예약하기를_보여준다(client):
+    # "보내기" 라고 쓰여 있으면 지금 나가는 줄 알고 누른다.
+    await _draft(client, send_at=_later(60))
+
+    card = _card(client)
+    assert "예약" in card
+    assert "예약하기" in card
+    # 시간대가 없으면 어느 나라 9시인지 물어보게 된다.
+    assert "KST" in card
+
+
+async def test_예약이_없으면_보내기다(client):
+    await _draft(client)
+
+    assert "예약하기" not in _card(client)
+
+
+async def test_예약을_승인하면_시각이_함께_나간다(client, handlers, monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        sms_send,
+        "send",
+        lambda **kw: sent.update(kw)
+        or {"sent": 2, "message_key": "K1", "send_time": "2026-08-22T09:00:00"},
+    )
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert sent["send_at"]
+    assert "예약" in client.updated[0]["text"]
+
+
+async def test_예약_시각이_지나면_안_나갔다고_말한다(client, handlers, monkeypatch):
+    # 초안을 올린 뒤 승인까지 시간이 흐른다. 여기서 "접수 여부를 모릅니다" 로
+    # 새면, 안 나간 것을 나갔을 수도 있다고 읽어 아무도 다시 보내지 않는다.
+    def expired(**kwargs):
+        raise ValueError("예약은 지금부터 3분 뒤부터 됩니다")
+
+    monkeypatch.setattr(sms_send, "send", expired)
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert "안 나갔습니다" in client.updated[-1]["text"]
+
+
 async def test_수정을_눌러도_초안은_살아_있다(client, handlers_with_revise):
     # 모달을 열어 놓고 닫아 버릴 수 있다. 그때 초안이 사라지면 멀쩡한
     # 카드의 [보내기] 가 "이미 처리된 초안" 만 뱉는 죽은 버튼이 된다.
@@ -406,3 +463,13 @@ async def test_수정_콜백이_없어도_카드는_정리된다(client, handler
 
     assert "고쳐주세요" in client.updated[-1]["text"]
     assert not sms._DRAFTS
+
+
+async def test_예약_초안을_수정할_때도_예약이_보인다(client, handlers_with_revise):
+    # 언제 나가는 건지 모르고 피드백을 적으면, 마감 문구를 고치면서
+    # 발송 시각과 어긋난 안내를 쓰게 된다.
+    await _draft(client, send_at=_later(60))
+
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    assert "KST" in str(client.views[-1]["blocks"])

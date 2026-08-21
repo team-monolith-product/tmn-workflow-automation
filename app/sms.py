@@ -3,7 +3,7 @@
 
     ① 사람이 "이 번호들한테 이렇게 보내줘" 라고 말한다
     ② 에이전트가 draft_sms 로 초안 카드를 올린다 (아직 안 나간다)
-    ③ [보내기] 를 누르면 그때 나간다
+    ③ [보내기] 를 누르면 그때 나간다 — 예약이면 그때 벤더에 예약이 걸린다
        고칠 데가 있으면 [수정] 으로 어디를 어떻게 고칠지 적어 낸다.
        취소하고 처음부터 다시 말할 필요가 없다
 
@@ -14,6 +14,7 @@
 import asyncio
 import json
 import uuid
+from datetime import datetime
 
 from cachetools import TTLCache
 from langchain_core.tools import tool
@@ -75,11 +76,28 @@ def _value_table(targets: list[dict]) -> str:
     )
 
 
+def _when(send_time: str | None) -> str:
+    """예약 시각을 사람이 읽는 꼴로. 즉시 발송이면 빈 문자열입니다.
+
+    시간대를 붙여 씁니다. 해외에 있거나 노트북 시계가 딴 데 맞춰져 있으면
+    "09:00" 이 어느 나라 9시인지 물어보게 됩니다.
+    """
+    if not send_time:
+        return ""
+    when = datetime.strptime(send_time, sms_send.SEND_TIME_FORMAT)
+    days = "월화수목금토일"[when.weekday()]
+    return f"{when.month}/{when.day}({days}) {when:%H:%M} KST"
+
+
 def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
     """승인 카드를 만듭니다. 치환 후 문장이 아니라 태그가 살아 있는 원문입니다."""
     head = f"{len(plan.rows)}명 · {plan.message_type}"
     if plan.folded:
         head += f" · 중복 {plan.folded}건 접음"
+    # 예약은 헤더 맨 앞에 둡니다. 뒤에 붙이면 중복 접음 문구에 묻혀,
+    # 지금 나갈 문자로 읽고 눌러 버립니다.
+    if plan.send_time:
+        head = f"⏰ {_when(plan.send_time)} 예약 · " + head
     # 문안에 백틱이 있으면 펜스가 거기서 닫혀 나머지가 mrkdwn 으로 렌더된다.
     # 그러면 [*이름*] 이 굵은 글씨가 되어, 실명이 박힌 사고와 화면상 구분이
     # 안 된다. 개행은 문안에서 의미가 있으므로 건드리지 않는다.
@@ -106,7 +124,11 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
                     "type": "button",
                     "action_id": APPROVE,
                     "style": "primary",
-                    "text": {"type": "plain_text", "text": "보내기"},
+                    # 예약인데 "보내기" 라고 쓰면 지금 나가는 줄 알고 누릅니다.
+                    "text": {
+                        "type": "plain_text",
+                        "text": "예약하기" if plan.send_time else "보내기",
+                    },
                     "value": draft_id,
                 },
                 {
@@ -141,7 +163,7 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
     """
 
     @tool
-    async def draft_sms(content: str, targets: list[dict]) -> str:
+    async def draft_sms(content: str, targets: list[dict], send_at: str = "") -> str:
         """
         문자 발송 초안을 스레드에 올립니다. 이 도구는 문자를 보내지 않습니다.
         사람이 카드의 [보내기] 를 눌러야 그때 나갑니다.
@@ -153,21 +175,35 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         치환값을 줍니다.
         예: [{"to": "010-1111-1111", "name": "홍길동", "var1": "1기"}]
 
+        send_at 은 예약 시각입니다. 비우면 승인 즉시 나갑니다.
+        "내일 아침 9시" 처럼 말하면 한국 시간 기준으로 날짜를 계산해
+        "2026-08-22 09:00" 꼴로 넘깁니다. 지금부터 3분 뒤부터 지정할 수 있습니다.
+
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        plan = sms_send.preview(targets, content)
+        plan = sms_send.preview(targets, content, send_at)
         if plan.problems:
             return "보내기 전에 고칠 것: " + " / ".join(plan.problems)
 
         draft_id = uuid.uuid4().hex[:12]
-        _DRAFTS[draft_id] = {"rows": targets, "content": content}
+        _DRAFTS[draft_id] = {
+            "rows": targets,
+            "content": content,
+            "send_at": send_at,
+        }
         await client.chat_postMessage(
             channel=channel,
             thread_ts=thread_ts,
             text=f"문자 발송 확인 — {len(plan.rows)}명",
             blocks=_blocks(draft_id, plan),
         )
+        if plan.send_time:
+            return (
+                f"{len(plan.rows)}명 대상 초안을 올렸습니다."
+                f" {_when(plan.send_time)} 발송으로 예약하려면"
+                " [예약하기] 를 눌러주세요."
+            )
         return f"{len(plan.rows)}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
 
     return [draft_sms]
@@ -194,7 +230,10 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"```{plan.template.replace('`', chr(39))}```",
+                    "text": (
+                        (f"⏰ {_when(plan.send_time)} 예약\n" if plan.send_time else "")
+                        + f"```{plan.template.replace('`', chr(39))}```"
+                    ),
                 },
             },
             {
@@ -239,8 +278,17 @@ def register_sms_handlers(app, revise=None):
 
         try:
             result = await asyncio.to_thread(
-                sms_send.send, rows=draft["rows"], content=draft["content"]
+                sms_send.send,
+                rows=draft["rows"],
+                content=draft["content"],
+                send_at=draft.get("send_at", ""),
             )
+        except ValueError as error:
+            # 승인까지 기다리는 사이에 예약 시각이 지나간 경우가 여기로 온다.
+            # 아래 "접수 여부를 모릅니다" 로 새면, 안 나간 것을 나갔을 수도 있다고
+            # 읽어 아무도 다시 보내지 않는다.
+            await _replace(client, channel, ts, f"안 나갔습니다 — {error}")
+            return
         except transport.PpurioError as error:
             await _replace(client, channel, ts, f"안 나갔습니다 — {error}")
             raise
@@ -256,11 +304,16 @@ def register_sms_handlers(app, revise=None):
             )
             raise
 
+        done = (
+            f"{_when(result['send_time'])} 발송으로 예약했습니다"
+            if result.get("send_time")
+            else "보냈습니다"
+        )
         await _replace(
             client,
             channel,
             ts,
-            f"<@{body['user']['id']}> 님이 보냈습니다 — {result['sent']}명"
+            f"<@{body['user']['id']}> 님이 {done} — {result['sent']}명"
             f" (messageKey `{result['message_key']}`)",
         )
 
@@ -273,7 +326,11 @@ def register_sms_handlers(app, revise=None):
         # 그때 초안이 사라지면 멀쩡한 카드의 [보내기] 가 죽는다.
         if draft is None:
             return
-        plan = sms_send.preview(draft["rows"], draft["content"])
+        # 예약 초안이면 예약도 함께 넘긴다. 안 넘기면 모달이 예약을 모른 채
+        # 문안만 보여줘, 언제 나가는 건지 모르고 피드백을 적게 된다.
+        plan = sms_send.preview(
+            draft["rows"], draft["content"], draft.get("send_at", "")
+        )
         await client.views_open(
             trigger_id=body["trigger_id"],
             view=_revise_view(
