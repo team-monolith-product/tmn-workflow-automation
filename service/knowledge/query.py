@@ -44,20 +44,21 @@ SCHEMA_GUIDE = """
   distilled_text, metadata jsonb, indexed_at): 슬랙 스레드 하나가 한 행.
   raw_text가 스레드 원문이고 평균 1,148자다. distilled_text는 아직 전부 비어 있다.
 - query_log(actor, tool, query, filters, latency_ms, created_at): 이 도구의 실행 기록.
-- sms_send(id, channel_id, thread_ts, content, message_type, message_key,
-  approved_by, sent_at, scheduled_at): 문자 발송 한 건. content는 치환 전 원문이라 [*이름*] 같은
-  태그가 그대로 들어 있다. message_key는 벤더가 빠뜨리면 NULL이라 건수를 셀 때
-  count(*)를 쓴다. 같은 thread_ts의 발송이 한 캠페인이다. sent_at은 뿌리오가
-  접수한 시각이지 도달한 시각이 아니다. 예약 발송이면 scheduled_at에 실제로
-  나가는 시각이 있고, 즉시 발송이면 NULL이다 — "언제 나갔나"는
-  coalesce(scheduled_at, sent_at)로 본다.
-- sms_recipient(id, send_id, phone, name, change_word jsonb): 발송 한 건의 수신자.
+- sms_log(id, ref_key, message_key, channel_id, project, thread_ts, sender,
+  content, message_type, approved_by, sent_at, scheduled_at, phone, name,
+  change_word jsonb): 문자 발송 이력. **한 행이 "발송 × 받는 사람"이다** — 148명에게
+  보낸 문자는 148행이고 content가 148번 반복된다. 그래서 발송 건수는 count(*)가
+  아니라 count(distinct ref_key)로 센다.
+  같은 ref_key가 한 번의 발송이다. message_key로 묶으면 안 된다 — 벤더가 빠뜨리면
+  NULL이고 NULL끼리 뭉쳐 서로 다른 발송이 한 건으로 보인다.
+  content는 치환 전 원문이라 [*이름*] 같은 태그가 그대로 들어 있다.
+  sent_at은 뿌리오가 접수한 시각이지 도달한 시각이 아니다. 예약 발송이면
+  scheduled_at에 실제로 나가는 시각이 있고 즉시 발송이면 NULL이다 —
+  "언제 나갔나"는 coalesce(scheduled_at, sent_at)으로 본다.
   phone은 하이픈 없는 숫자다. name은 문안이 [*이름*]을 쓰는데 값이 없으면 빈
   문자열, 문안이 아예 안 쓰면 NULL이라 둘 다 봐야 한다.
-- sms_channel(channel_id, project): 채널이 어느 사업인지. 사업 하나가 본채널과
-  _cs 채널을 같이 쓰므로, 사업 단위로 묶으려면 이 표를 조인한다.
-  다만 슬랙 [보내기] 승인으로 나간 발송만 sms_send에 있고 sms_channel은 일부
-  채널만 매핑돼 있다. 사업 단위 집계는 LEFT JOIN 하고 project IS NULL을 따로 센다.
+  project는 발송 시점에 박은 사업명이고, 매핑에 없는 채널이면 NULL이다.
+  sender는 발신번호다. 슬랙 [보내기] 승인으로 나간 발송만 여기 있다.
 
 규약:
 - 어휘를 찾을 때는 lower(raw_text) LIKE lower('%키워드%')로 쓴다. GIN(pg_bigm)

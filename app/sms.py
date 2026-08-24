@@ -343,8 +343,10 @@ def register_sms_handlers(app, revise=None):
         # 발송을 카드가 실패로 그린다.
         await asyncio.to_thread(
             history.record,
+            ref_key=result["ref_key"],
             channel_id=channel,
             thread_ts=draft["thread_ts"],
+            sender=result["sender"],
             content=result["content"],
             message_type=result["message_type"],
             message_key=result["message_key"],

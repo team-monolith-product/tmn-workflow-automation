@@ -24,6 +24,8 @@ def _run(monkeypatch, response=None, boom=None, **extra):
         return response
 
     monkeypatch.setattr(transport, "send", fake_send)
+    # 발신번호도 벤더 계층에서 온다. 목킹하지 않으면 환경변수를 찾는다.
+    monkeypatch.setattr(transport, "sender", lambda: "01077647538")
     result = sms_send.send(rows=ROWS, content=f"\n{CONTENT}\n", **extra)
     return result, captured
 
@@ -37,6 +39,7 @@ def _accept(monkeypatch, captured=None):
         return {"code": "1000", "messageKey": "K"}
 
     monkeypatch.setattr(transport, "send", fake_send)
+    monkeypatch.setattr(transport, "sender", lambda: "01077647538")
 
 
 def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
@@ -270,3 +273,18 @@ def test_예약해도_수신자와_문안은_그대로다(monkeypatch):
 
     assert payload["targetCount"] == 2
     assert payload["content"] == CONTENT
+
+
+def test_한_번의_발송은_ref_key_하나다(monkeypatch):
+    # 이력에서 발송 건수를 count(distinct ref_key) 로 센다. 벤더로 나가는 값과
+    # 돌려주는 값이 다르면 뿌리오 쪽 기록과 우리 기록을 맞춰볼 수 없다.
+    result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    assert result["ref_key"] == payload["refKey"]
+
+
+def test_실제로_나간_발신번호를_돌려준다(monkeypatch):
+    # 호출부가 발신번호를 정하게 하면 실제로 나간 번호와 다른 값을 기록할 수 있다.
+    result, _ = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
+
+    assert result["sender"] == "01077647538"

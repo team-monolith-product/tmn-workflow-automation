@@ -64,6 +64,8 @@ def _ok(**extra):
     """뿌리오가 접수한 응답. send() 가 실제로 돌려주는 모양이다."""
     return {
         "sent": 2,
+        "ref_key": "R1",
+        "sender": "01077647538",
         "message_key": "K1",
         "message_type": "SMS",
         "send_time": None,

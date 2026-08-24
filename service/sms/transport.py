@@ -49,6 +49,22 @@ def _env(name: str) -> str:
         raise PpurioError(0, f"환경변수 {name} 가 없습니다") from error
 
 
+def sender() -> str:
+    """발신번호를 돌려줍니다.
+
+    이력에 남기려면 밖에서도 알아야 합니다. 호출부가 발신번호를 정하게 하면
+    send() 가 실제로 나간 번호와 다른 값을 기록할 수 있으므로, 여기 한 곳에서만
+    읽습니다.
+
+    Returns:
+        str: PPURIO_SENDER
+
+    Raises:
+        PpurioError: 환경변수가 없을 때
+    """
+    return _env("PPURIO_SENDER")
+
+
 def _post(path: str, body: dict, headers: dict) -> dict:
     """뿌리오에 POST 합니다.
 

@@ -12,26 +12,33 @@ from typing import Any
 from service.knowledge.db import connect
 from service.sms.send import KST, SEND_TIME_FORMAT
 
-INSERT_SEND = """
-INSERT INTO sms_send (
-    channel_id, thread_ts, content, message_type, message_key, approved_by,
-    scheduled_at
-) VALUES (
-    %(channel_id)s, %(thread_ts)s, %(content)s,
-    %(message_type)s, %(message_key)s, %(approved_by)s, %(scheduled_at)s
-) RETURNING id
-"""
+# 채널이 어느 사업인지. 매핑 표를 따로 두면 조인이 생기고, 조인은 에이전트가
+# SQL 을 짤 때 틀릴 자리가 된다. 십여 개짜리 상수라 여기 둔다.
+# 매핑이 늘면 UPDATE sms_log SET project=... WHERE channel_id=... 로 소급한다.
+PROJECT = {
+    "C0AP8CG1Y6N": "26기업연계정보교원연수",
+    "C0BRF9XJ40N": "26기업연계정보교원연수",
+}
 
-INSERT_RECIPIENT = """
-INSERT INTO sms_recipient (send_id, phone, name, change_word)
-VALUES (%(send_id)s, %(phone)s, %(name)s, %(change_word)s)
+INSERT = """
+INSERT INTO sms_log (
+    ref_key, message_key, channel_id, project, thread_ts, sender,
+    content, message_type, approved_by, scheduled_at,
+    phone, name, change_word
+) VALUES (
+    %(ref_key)s, %(message_key)s, %(channel_id)s, %(project)s, %(thread_ts)s,
+    %(sender)s, %(content)s, %(message_type)s, %(approved_by)s, %(scheduled_at)s,
+    %(phone)s, %(name)s, %(change_word)s
+)
 """
 
 
 def record(
     *,
+    ref_key: str,
     channel_id: str,
     thread_ts: str,
+    sender: str,
     content: str,
     message_type: str,
     message_key: str | None,
@@ -39,11 +46,13 @@ def record(
     approved_by: str,
     targets: list[dict[str, Any]],
 ) -> None:
-    """발송 한 건과 수신자를 남깁니다.
+    """발송 한 건을 받는 사람마다 한 행으로 남깁니다.
 
     Args:
+        ref_key: 발송을 가리키는 우리 쪽 키. 같은 값이 한 번의 발송이다
         channel_id: 발송을 승인한 채널
-        thread_ts: 카드가 올라간 스레드. 같은 스레드의 발송이 한 캠페인이다
+        thread_ts: 카드가 올라간 스레드
+        sender: 발신번호
         content: 벤더로 나간 문안. send() 가 돌려준 값을 그대로 넘긴다
         message_type: SMS 또는 LMS
         message_key: 뿌리오 접수 키. 벤더가 빠뜨리면 없을 수 있다
@@ -51,29 +60,28 @@ def record(
         approved_by: [보내기] 를 누른 사람의 Slack 사용자 ID
         targets: 벤더로 나간 targets 배열
     """
+    shared = {
+        "ref_key": ref_key,
+        "message_key": message_key,
+        "channel_id": channel_id,
+        "project": PROJECT.get(channel_id),
+        "thread_ts": thread_ts,
+        "sender": sender,
+        "content": content,
+        "message_type": message_type,
+        "approved_by": approved_by,
+        "scheduled_at": (
+            datetime.strptime(send_time, SEND_TIME_FORMAT).replace(tzinfo=KST)
+            if send_time
+            else None
+        ),
+    }
     with connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            INSERT_SEND,
-            {
-                "channel_id": channel_id,
-                "thread_ts": thread_ts,
-                "content": content,
-                "message_type": message_type,
-                "message_key": message_key,
-                "approved_by": approved_by,
-                "scheduled_at": (
-                    datetime.strptime(send_time, SEND_TIME_FORMAT).replace(tzinfo=KST)
-                    if send_time
-                    else None
-                ),
-            },
-        )
-        send_id = cur.fetchone()["id"]
         cur.executemany(
-            INSERT_RECIPIENT,
+            INSERT,
             [
                 {
-                    "send_id": send_id,
+                    **shared,
                     "phone": target["to"],
                     "name": target.get("name"),
                     "change_word": (

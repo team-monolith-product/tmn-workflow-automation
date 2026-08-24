@@ -138,7 +138,8 @@ def send(
         send_at: 예약 시각(한국 시간). 빈 값이면 즉시 발송
 
     Returns:
-        dict[str, Any]: sent·message_key·message_type·send_time·content·targets
+        dict[str, Any]: sent·ref_key·message_key·message_type·send_time
+            ·sender·content·targets
 
     Raises:
         ValueError: preview 가 걸러내는 것에 걸렸을 때. 예약 시각이 이미
@@ -150,6 +151,9 @@ def send(
     if plan.problems:
         raise ValueError(" / ".join(plan.problems))
 
+    # 이력에서 한 번의 발송을 묶는 키다. 벤더가 돌려주는 messageKey 는 빠질 수
+    # 있어 그 자리에 쓸 수 없다 -- 우리가 만드는 값이라 늘 있다.
+    ref_key = uuid.uuid4().hex
     payload = {
         "messageType": plan.message_type,
         "content": plan.template,
@@ -158,7 +162,7 @@ def send(
         # 슬랙 카드는 멀쩡히 나와서 보낸 줄 알았습니다.
         # 중복 번호는 preview 가 이미 접으므로 duplicateFlag 값은 결과를 바꾸지 않습니다.
         "duplicateFlag": "Y",
-        "refKey": uuid.uuid4().hex,
+        "refKey": ref_key,
         "targetCount": len(plan.rows),
         "targets": plan.targets,
     }
@@ -173,6 +177,8 @@ def send(
 
     return {
         "sent": len(plan.rows),
+        "ref_key": ref_key,
+        "sender": transport.sender(),
         "message_key": result.get("messageKey"),
         "message_type": plan.message_type,
         "send_time": plan.send_time,
