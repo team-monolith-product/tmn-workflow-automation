@@ -21,7 +21,7 @@ def _get_client() -> gspread.Client:
 
 def get_worksheet_values(
     spreadsheet_id: str,
-    worksheet_id: int,
+    worksheet_id: int | None = None,
     value_render_option: str = "FORMATTED_VALUE",
 ) -> list[list]:
     """
@@ -29,11 +29,30 @@ def get_worksheet_values(
 
     Args:
         spreadsheet_id: 스프레드시트 ID
-        worksheet_id: 워크시트(탭) ID
+        worksheet_id: 워크시트(탭) ID. 생략하면 첫 번째 탭.
+            시트 링크에 #gid= 가 없으면 탭을 알 수 없다.
         value_render_option: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA"
             (https://developers.google.com/sheets/api/reference/rest/v4/ValueRenderOption)
     """
     gc = _get_client()
     sh = gc.open_by_key(spreadsheet_id)
-    ws = sh.get_worksheet_by_id(worksheet_id)
+    ws = (
+        sh.get_worksheet(0)
+        if worksheet_id is None
+        else sh.get_worksheet_by_id(worksheet_id)
+    )
     return ws.get_all_values(value_render_option=value_render_option)
+
+
+def get_worksheet_titles(spreadsheet_id: str) -> list[dict]:
+    """스프레드시트의 탭 목록을 반환한다.
+
+    Args:
+        spreadsheet_id: 스프레드시트 ID
+
+    Returns:
+        list[dict]: id·title
+    """
+    gc = _get_client()
+    sh = gc.open_by_key(spreadsheet_id)
+    return [{"id": ws.id, "title": ws.title} for ws in sh.worksheets()]
