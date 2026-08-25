@@ -275,6 +275,21 @@ scheduled_jobs:
       minute: 20            # 9시대 분산 배치된 타 작업과 겹치지 않게
     # 주말·공휴일 포함 매일 실행. 새 공고 없으면 Slack 전송은 자동 생략됨.
 
+  - name: distill_knowledge_items
+    module: scripts.distill_knowledge_items
+    function: main
+    cron:
+      minute: "*/10"
+    # 대기 물량이 없으면 조회 한 번으로 끝나므로 상시 돌려도 된다.
+
+# 지식베이스 스레드 정제
+# - 회차당 max_per_run 건, 10분 간격이므로 시간당 상한이 곧 max_per_run * 6 이다.
+# - Export 백필분 약 1.4만 건이 전부 대기 상태라 아래 값으로 이틀쯤 걸린다.
+#   초기 결과를 보고 프롬프트를 고칠 여지를 남기려고 한 번에 태우지 않는다.
+knowledge_distill:
+  max_per_run: 50
+  concurrency: 4
+
 # 나라장터(G2B) 교육 외주 입찰공고 수집·평가
 # - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급, 클러스터 시크릿)
 # - 역량·자격·소스는 knowledge/edu_bid/*.yaml, 트랙별 전략·점수정책은 tracks/<key>.yaml 에서 관리
