@@ -13,7 +13,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
-from .tools.chart_tools import get_chart_tools
+from .tools.chart_tools import get_execute_python_with_chart_tool
 from .sms import get_sms_tools
 from .event_dedup import is_duplicate_event
 from .common import (
@@ -131,7 +131,11 @@ async def _build_tools(
         + get_sms_tools(client, channel, thread_ts)
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
         # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
-        + get_chart_tools(thread_ts=thread_ts, slack_client=client, channel=channel)
+        + [
+            get_execute_python_with_chart_tool(
+                thread_ts=thread_ts, slack_client=client, channel=channel
+            )
+        ]
     )
 
 

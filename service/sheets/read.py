@@ -11,50 +11,10 @@
 표가 한 칸씩 밀리고, 밀린 표는 엉뚱한 사람 번호로 문자를 보내게 합니다.
 """
 
-import re
-from typing import Any, NamedTuple
+from typing import Any
 
-from api.google_sheets import get_worksheet_headers, get_worksheet_values  # noqa: F401
-from api.google_sheets import list_spreadsheet_files
-
-# https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid}
-_ID = re.compile(r"/spreadsheets/d/([A-Za-z0-9-_]+)")
-_GID = re.compile(r"[#&?]gid=([0-9]+)")
-# 링크가 아니라 ID 만 붙여넣는 경우. 구글 시트 ID 는 43~44자이고 대소문자가 섞인다.
-# 길이만 보면 "2026_customer_satisfaction_survey" 같은 영문 시트 **이름**이 ID 로
-# 오인돼 검색을 건너뛰고, 사람은 "공유를 확인하십시오" 대신 구글 404 를 본다.
-_BARE_ID = re.compile(r"^[A-Za-z0-9_-]{40,}$")
-
-
-class Sheet(NamedTuple):
-    """읽을 시트를 가리키는 값."""
-
-    spreadsheet_id: str
-    worksheet_id: int | None  # None 이면 첫 번째 탭
-
-
-def parse_target(text: str) -> Sheet:
-    """시트 링크나 ID 에서 스프레드시트와 탭을 뽑습니다.
-
-    Args:
-        text: 시트 URL 또는 스프레드시트 ID
-
-    Returns:
-        Sheet: worksheet_id 는 링크에 gid 가 없으면 None
-
-    Raises:
-        ValueError: 시트 링크로 읽을 수 없을 때
-    """
-    target = (text or "").strip()
-    if not target:
-        raise ValueError("시트 링크가 비어 있습니다.")
-    if _BARE_ID.match(target):
-        return Sheet(target, None)
-    found = _ID.search(target)
-    if not found:
-        raise ValueError(f"시트 링크에서 ID 를 찾을 수 없습니다: {text}")
-    gid = _GID.search(target)
-    return Sheet(found.group(1), int(gid.group(1)) if gid else None)
+from api.google_sheets import get_worksheet_values
+from service.sheets import locate
 
 
 def _clean(cell: Any) -> str:
@@ -87,16 +47,19 @@ def unique_header(header: list[str]) -> list[str]:
     Returns:
         list[str]: 같은 길이, 중복 없음. 이름 없는 열은 위치로, 겹친 이름은 번호로
     """
-    seen: dict[str, int] = {}
+    # 만들어낸 이름도 등록해야 합니다. 시트에 "성함" 과 "성함_2" 가 **둘 다**
+    # 있으면, 두 번째 "성함" 이 "성함_2" 가 되어 진짜 "성함_2" 와 부딪힙니다.
+    # 유일하게 만드는 함수가 유일성을 깨는 셈이라 겹치는 동안 번호를 올립니다.
+    taken: set[str] = set()
     out = []
     for index, name in enumerate(header):
         base = name or f"열{index + 1}"
-        if base in seen:
-            seen[base] += 1
-            base = f"{base}_{seen[base]}"
-        else:
-            seen[base] = 1
-        out.append(base)
+        unique, number = base, 1
+        while unique in taken:
+            number += 1
+            unique = f"{base}_{number}"
+        taken.add(unique)
+        out.append(unique)
     return out
 
 
@@ -105,7 +68,7 @@ def _filled(values: list[list[Any]], index: int) -> int:
     return sum(1 for row in values[1:] if index < len(row) and _clean(row[index]))
 
 
-def _column_of(values: list[list[Any]], header: list[str], want: str) -> int | None:
+def _column_of(values: list[list[Any]], raw_header: list[str], want: str) -> int | None:
     """이름으로 열 하나를 고릅니다. 같은 이름이 여럿이면 값이 든 열을 고릅니다.
 
     **폼 응답 시트는 같은 머리행이 두 벌 있는 일이 흔합니다.** 폼에서 문항을
@@ -115,33 +78,39 @@ def _column_of(values: list[list[Any]], header: list[str], want: str) -> int | N
 
     Args:
         values: 시트 전체 값
-        header: 정리된 머리행
+        raw_header: **유일화하지 않은** 머리행. 유일화한 이름을 넣으면 "성함" 과
+            "성함_2" 가 서로 다른 이름이 되어 아래 유령 열 판정이 죽는다
         want: 찾는 열 이름
 
     Returns:
         int | None: 열 번호. 못 찾으면 None
+
+    Raises:
+        AmbiguousColumn: 이름이 서로 다른 열이 여럿 걸렸을 때
     """
     if not want:
         return None
-    exact = [i for i, head in enumerate(header) if head == want]
-    if exact:
-        if len(exact) == 1:
-            return exact[0]
-        # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 값이 든 쪽이 진짜다.
-        # 같으면 앞엣것(원래 순서를 흔들지 않는다).
-        return max(exact, key=lambda i: (_filled(values, i), -i))
-
-    loose = [i for i, head in enumerate(header) if want in head]
-    if not loose:
+    # 시트 머리행이 "휴대전화 번호" 처럼 길어서 사람은 "전화" 로 부릅니다.
+    # 정확히 같은 것을 먼저 보고, 없을 때만 이름을 포함하는 열로 넓힙니다.
+    hits = [i for i, head in enumerate(raw_header) if head == want]
+    if not hits:
+        hits = [i for i, head in enumerate(raw_header) if want in head]
+    if not hits:
         return None
-    if len(loose) > 1:
+    if len(hits) == 1:
+        return hits[0]
+    if len({raw_header[i] for i in hits}) > 1:
         # 이름이 서로 다른 열이 걸렸다. 시트가 모호하면 고르지 않는데(locate)
         # 열이라고 다를 이유가 없다 -- 잘못 고르면 엉뚱한 사람 번호로 문자가 나간다.
         raise AmbiguousColumn(
-            f"'{want}' 로 여러 열이 걸립니다: {', '.join(header[i] for i in loose)}"
+            f"'{want}' 로 여러 열이 걸립니다:"
+            f" {', '.join(sorted({raw_header[i] for i in hits}))}"
             " / 어느 열인지 정확히 적어 주십시오."
         )
-    return loose[0]
+    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 값이 든 쪽이 진짜다.
+    # 같으면 앞엣것(원래 순서를 흔들지 않는다). 이름이 같으므로 사람에게
+    # 되물어도 답이 없다 -- "휴대전화 번호 와 휴대전화 번호 중 무엇입니까".
+    return max(hits, key=lambda i: (_filled(values, i), -i))
 
 
 def pick(
@@ -149,81 +118,73 @@ def pick(
 ) -> tuple[list[str], list[list[str]]]:
     """머리행을 기준으로 열을 고르고, 빈 행을 버립니다.
 
-    열 이름은 정확히 같은 것을 먼저 찾고, 없으면 이름을 포함하는 열을 씁니다.
-    시트 머리행이 "휴대전화 번호" 처럼 길어서, 사람은 "전화" 로 부릅니다.
+    **열을 고르면 부른 이름 그대로 돌려줍니다.** read_sheet(columns=["성함"]) 을
+    부른 코드는 그다음 줄에서 row["성함"] 을 씁니다. 유령 열이 있는 시트라고
+    "성함_2" 를 돌려주면 그 줄이 KeyError 로 터지는데, 부른 쪽에는 시트에 유령
+    열이 있는지 알 방법이 없습니다.
 
     Args:
         values: 시트 전체 값. 첫 행이 머리행이다
         columns: 고를 열 이름. 비우면 전부
 
     Returns:
-        tuple: (머리행, 행 목록)
+        tuple: (머리행, 행 목록). 머리행은 중복이 없다
 
     Raises:
         ValueError: 시트가 비었거나 찾는 열이 없을 때
+        AmbiguousColumn: 부른 이름 둘이 같은 열을 가리킬 때
     """
     # gspread 는 빈 시트에 [] 가 아니라 [[]] 을 준다(pad_values 기본값). 둘 다 막는다.
     if not values or not any(values[0]):
         raise ValueError("시트가 비어 있습니다.")
-    # 열은 **원본 이름**으로 찾고, 돌려줄 때만 유일한 이름을 씁니다. 유일화한
-    # 이름으로 찾으면 "성함" 이 "성함_2" 와 다른 이름이 되어, 중복 중 값이 든 쪽을
-    # 고르는 판정(_column_of)이 통째로 무력해집니다.
+    # 열은 **원본 이름**으로 찾습니다. 유일화한 이름으로 찾으면 "성함" 이 "성함_2" 와
+    # 다른 이름이 되어, 중복 중 값이 든 쪽을 고르는 판정(_column_of)이 무력해집니다.
     raw_header = [_clean(cell) for cell in values[0]]
-    header = unique_header(raw_header)
     if not columns:
-        keep = list(range(len(header)))
-    else:
-        keep = []
-        missing = []
-        for name in columns:
-            hit = _column_of(values, raw_header, _clean(name))
-            if hit is None:
-                missing.append(name)
-            else:
-                keep.append(hit)
-        if missing:
-            raise ValueError(
-                f"이런 열이 없습니다: {', '.join(missing)}"
-                f" / 시트의 열: {', '.join(head for head in raw_header if head)}"
-            )
+        # 전부 달라고 했으니 시트에 있는 이름을 그대로 쓰되, 겹치는 것만 번호를 답니다.
+        return unique_header(raw_header), _rows(values, range(len(raw_header)))
 
+    keep: list[int] = []
+    header: list[str] = []
+    missing: list[str] = []
+    taken: dict[int, str] = {}
+    for name in columns:
+        want = _clean(name)
+        hit = _column_of(values, raw_header, want)
+        if hit is None:
+            missing.append(name)
+            continue
+        if hit in taken:
+            if taken[hit] == want:
+                # 같은 이름을 두 번 적었다. 카탈로그의 머리행 목록을 그대로 넘기면
+                # 유령 열 때문에 이렇게 된다. 접는다.
+                continue
+            # 이름이 다른데 같은 열이면 사람이 의도한 바가 아니다. 그냥 두면
+            # 머리행에 같은 이름이 두 번 들어가 행을 dict 로 접을 때 하나가 사라진다.
+            raise AmbiguousColumn(
+                f"'{taken[hit]}' 와 '{want}' 이 같은 열({raw_header[hit]})을"
+                " 가리킵니다 / 열마다 다른 이름을 하나씩 적어 주십시오."
+            )
+        taken[hit] = want
+        keep.append(hit)
+        header.append(want)
+    if missing:
+        raise ValueError(
+            f"이런 열이 없습니다: {', '.join(missing)}"
+            f" / 시트의 열: {', '.join(head for head in raw_header if head)}"
+        )
+    return header, _rows(values, keep)
+
+
+def _rows(values: list[list[Any]], keep) -> list[list[str]]:
+    """고른 열만 남기고, 빈 행을 버립니다."""
     rows = []
     for row in values[1:]:
         picked = [_clean(row[i]) if i < len(row) else "" for i in keep]
         # 시트 아래쪽은 빈 행이 수백 줄 이어진다. 그것까지 세면 "297명" 이 된다.
         if any(picked):
             rows.append(picked)
-    return [header[i] for i in keep], rows
-
-
-def _worksheet_id(spreadsheet_id: str, tab: str | int) -> int:
-    """탭 지정을 gid 로 바꿉니다. 숫자면 gid, 아니면 탭 이름으로 봅니다.
-
-    카탈로그가 gid 와 탭 이름을 나란히 보여주므로 사람도 에이전트도 이름을 넣습니다.
-    int(tab) 만 하면 "설문지 응답 시트1" 에 대해 파이썬 내부 메시지가 나가고,
-    그걸로는 무엇을 고쳐야 하는지 알 수 없습니다.
-
-    Args:
-        spreadsheet_id: 스프레드시트 ID
-        tab: gid 또는 탭 이름
-
-    Returns:
-        int: 워크시트 gid
-
-    Raises:
-        ValueError: 그런 이름의 탭이 없을 때. 시트의 탭 목록을 함께 알려준다
-    """
-    text = str(tab).strip()
-    if text.lstrip("-").isdigit():
-        return int(text)
-    tabs = get_worksheet_headers(spreadsheet_id)
-    for entry in tabs:
-        if entry["title"] == text:
-            return entry["id"]
-    raise ValueError(
-        f"'{text}' 라는 탭이 없습니다."
-        f" 이 시트의 탭: {', '.join(entry['title'] for entry in tabs)}"
-    )
+    return rows
 
 
 def read_sheet(
@@ -255,22 +216,18 @@ def read_sheet(
     Raises:
         ValueError: 시트를 하나로 좁히지 못했거나, 찾는 열·탭이 없을 때
     """
-    # 순환 import 를 피하려고 여기서 부릅니다 -- locate 가 read 를 씁니다.
-    from service.sheets import locate
-
-    found = locate.locate(sheet, list_spreadsheet_files)
+    found = locate.locate(sheet)
     if found.sheet is None:
         raise ValueError(locate.render_candidates(found.candidates))
 
-    worksheet_id = found.sheet.worksheet_id
-    if tab is not None:
-        worksheet_id = _worksheet_id(found.sheet.spreadsheet_id, tab)
-
-    values = get_worksheet_values(found.sheet.spreadsheet_id, worksheet_id)
+    values = get_worksheet_values(
+        found.sheet.spreadsheet_id,
+        found.sheet.worksheet_id if tab is None else tab,
+    )
     if isinstance(columns, str):
         want = [name for name in columns.split(",") if name.strip()]
     else:
         want = list(columns or [])
     header, rows = pick(values, want)
-    # 머리행이 유일해야 여기서 열이 지워지지 않습니다. unique_header 가 보장합니다.
+    # pick 이 돌려주는 머리행에는 중복이 없습니다. 그래야 여기서 열이 안 지워집니다.
     return [dict(zip(header, row)) for row in rows]

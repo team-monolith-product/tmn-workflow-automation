@@ -1,5 +1,5 @@
 """
-"어느 시트냐" 를 정합니다.
+"어느 시트, 어느 탭이냐" 를 정합니다.
 
 사람은 URL 을 외우지 않습니다. "부산 만족도 시트" 라고 부릅니다. 그래서 링크가
 오면 그대로 쓰고, 링크가 아니면 이름으로 찾습니다.
@@ -8,13 +8,16 @@
 "…의 복사본", 기수별 사본, 정리용 사본. 하나를 골라 읽어 버리면 엉뚱한 명단으로
 문자를 보내고, 문장이 자연스러워서 아무도 못 잡습니다.
 
-이름 필터는 여기 있습니다. api 는 목록을 그대로 주고, "이름 조각으로 찾는다" 는
-사람 습관에 대한 정책이라 이쪽이 주인입니다.
+링크 해석·이름 필터·탭 이름 해석이 다 여기 있습니다. api 는 목록을 그대로 주고,
+"사람이 부르는 말로 시트를 지목한다" 는 정책이라 이쪽이 주인입니다.
 """
 
-from typing import Callable, NamedTuple, TypedDict
+import re
+import threading
+import time
+from typing import NamedTuple, TypedDict
 
-from service.sheets.read import Sheet, parse_target
+from api.google_sheets import list_spreadsheet_files
 
 
 class SheetFile(TypedDict, total=False):
@@ -24,6 +27,46 @@ class SheetFile(TypedDict, total=False):
     name: str
     modifiedTime: str
     webViewLink: str
+
+
+# https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid}
+_ID = re.compile(r"/spreadsheets/d/([A-Za-z0-9-_]+)")
+_GID = re.compile(r"[#&?]gid=([0-9]+)")
+# 링크가 아니라 ID 만 붙여넣는 경우. 구글 시트 ID 는 43~44자이고 대소문자가 섞인다.
+# 길이만 보면 "2026_customer_satisfaction_survey" 같은 영문 시트 **이름**이 ID 로
+# 오인돼 검색을 건너뛰고, 사람은 "공유를 확인하십시오" 대신 구글 404 를 본다.
+_BARE_ID = re.compile(r"^[A-Za-z0-9_-]{40,}$")
+
+
+class Sheet(NamedTuple):
+    """읽을 시트를 가리키는 값."""
+
+    spreadsheet_id: str
+    worksheet_id: int | None  # None 이면 첫 번째 탭
+
+
+def parse_target(text: str) -> Sheet:
+    """시트 링크나 ID 에서 스프레드시트와 탭을 뽑습니다.
+
+    Args:
+        text: 시트 URL 또는 스프레드시트 ID
+
+    Returns:
+        Sheet: worksheet_id 는 링크에 gid 가 없으면 None
+
+    Raises:
+        ValueError: 시트 링크로 읽을 수 없을 때
+    """
+    target = (text or "").strip()
+    if not target:
+        raise ValueError("시트 링크가 비어 있습니다.")
+    if _BARE_ID.match(target):
+        return Sheet(target, None)
+    found = _ID.search(target)
+    if not found:
+        raise ValueError(f"시트 링크에서 ID 를 찾을 수 없습니다: {text}")
+    gid = _GID.search(target)
+    return Sheet(found.group(1), int(gid.group(1)) if gid else None)
 
 
 class Found(NamedTuple):
@@ -47,12 +90,27 @@ def match_name(files: list[SheetFile], want: str) -> list[SheetFile]:
     return [item for item in files if needle in item.get("name", "").lower()]
 
 
-def locate(target: str, list_files: Callable[[], list[SheetFile]]) -> Found:
+# 드라이브 전량 목록은 94개에 1.1초다(8/21 실측). 에이전트가 시트 두셋을 이름으로
+# 대조하면 그때마다 다시 나간다. 새 시트가 1분 늦게 보이는 것은 감수한다.
+_TTL = 60.0
+_cache: tuple[float, list[SheetFile]] | None = None
+_cache_lock = threading.Lock()
+
+
+def _files() -> list[SheetFile]:
+    """볼 수 있는 스프레드시트 목록. 짧게 캐시합니다."""
+    global _cache
+    with _cache_lock:
+        if _cache is None or time.monotonic() - _cache[0] > _TTL:
+            _cache = (time.monotonic(), list_spreadsheet_files())
+        return _cache[1]
+
+
+def locate(target: str) -> Found:
     """링크면 그대로, 아니면 이름으로 찾습니다.
 
     Args:
         target: 시트 URL·ID 또는 이름 조각
-        list_files: 볼 수 있는 스프레드시트를 전부 돌려주는 함수
 
     Returns:
         Found: 하나로 좁혀지면 sheet, 아니면 candidates
@@ -68,7 +126,7 @@ def locate(target: str, list_files: Callable[[], list[SheetFile]]) -> Found:
     except ValueError:
         pass
 
-    hits = match_name(list_files(), text)
+    hits = match_name(_files(), text)
     if not hits:
         raise ValueError(
             f"'{text}' 로 찾은 시트가 없습니다."

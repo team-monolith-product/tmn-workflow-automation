@@ -22,7 +22,9 @@ from service.sheets.read import read_sheet
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
 
-# pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다
+# pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
+# 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
+# 이 워커 하나를 나눠 쓰므로, 서로 몇 초씩 막히기 시작하면 시트 전용 풀로 가른다.
 _code_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chart-exec")
 
 
@@ -107,7 +109,6 @@ def _run_code(
 
 
 def get_execute_python_with_chart_tool(
-    say: Callable[[dict[str, Any], str], Any] | None = None,
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
@@ -116,7 +117,6 @@ def get_execute_python_with_chart_tool(
     파이썬 코드를 실행하고 matplotlib 차트를 슬랙으로 전송하는 도구를 반환합니다.
 
     Args:
-        say: Slack 메시지 전송 함수
         thread_ts: Slack 스레드 타임스탬프
         slack_client: Slack WebClient 인스턴스
         channel: Slack 채널 ID
@@ -246,23 +246,3 @@ def get_execute_python_with_chart_tool(
         return result_message
 
     return execute_python_with_chart
-
-
-def get_chart_tools(
-    say: Callable[[dict[str, Any], str], Any] | None = None,
-    thread_ts: str | None = None,
-    slack_client: Any | None = None,
-    channel: str | None = None,
-) -> list:
-    """코드 실행 도구를 목록으로 반환합니다.
-
-    다른 도구 그룹이 전부 get_*_tools() 로 리스트를 돌려주므로 조립부를 맞춥니다.
-
-    Returns:
-        list: [코드 실행 도구]
-    """
-    return [
-        get_execute_python_with_chart_tool(
-            say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
-        )
-    ]

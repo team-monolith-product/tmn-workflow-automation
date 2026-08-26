@@ -2,7 +2,7 @@
 
 import pytest
 
-from service.sheets import read
+from service.sheets import locate, read
 
 VALUES = [
     ["타임스탬프", "휴대전화 번호", "소속 학교명", "성함", "출석(1일차 기준)"],
@@ -12,7 +12,7 @@ VALUES = [
 
 
 def test_링크에서_시트와_탭을_뽑는다():
-    sheet = read.parse_target(
+    sheet = locate.parse_target(
         "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit#gid=1234"
     )
 
@@ -23,7 +23,7 @@ def test_링크에서_시트와_탭을_뽑는다():
 def test_gid가_없으면_첫_탭이다():
     # None 과 0 을 뭉개면 안 된다. gid=0 은 "첫 탭" 이 아니라 "id 가 0 인 탭" 이고,
     # 시트를 지웠다 만들면 첫 탭의 gid 가 0 이 아니다.
-    sheet = read.parse_target(
+    sheet = locate.parse_target(
         "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit"
     )
 
@@ -32,7 +32,7 @@ def test_gid가_없으면_첫_탭이다():
 
 def test_쿼리_문자열_gid도_읽는다():
     # 슬랙이 링크를 다시 쓰면서 #gid 가 ?gid 로 바뀌어 온다.
-    sheet = read.parse_target(
+    sheet = locate.parse_target(
         "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit?gid=77#gid=77"
     )
 
@@ -40,7 +40,7 @@ def test_쿼리_문자열_gid도_읽는다():
 
 
 def test_ID만_줘도_된다():
-    sheet = read.parse_target("1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zkukUPHri1x0")
+    sheet = locate.parse_target("1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zkukUPHri1x0")
 
     assert sheet.spreadsheet_id == "1hW3Yg8x99gfiLdcOffdBENZ8vWJT9X1zkukUPHri1x0"
     assert sheet.worksheet_id is None
@@ -48,14 +48,14 @@ def test_ID만_줘도_된다():
 
 def test_시트_링크가_아니면_거절한다():
     with pytest.raises(ValueError, match="ID 를 찾을 수 없습니다"):
-        read.parse_target("https://team-mono.com/hello")
+        locate.parse_target("https://team-mono.com/hello")
 
 
 def test_영문_시트_이름은_ID로_보지_않는다():
     # 길이만 보면 "2026_customer_satisfaction_survey" 같은 이름이 ID 로 오인돼
     # Drive 검색을 건너뛰고, 사람은 "공유를 확인하십시오" 대신 구글 404 를 본다.
     with pytest.raises(ValueError):
-        read.parse_target("2026_customer_satisfaction_survey")
+        locate.parse_target("2026_customer_satisfaction_survey")
 
 
 def test_열을_골라_읽는다():
@@ -68,9 +68,11 @@ def test_열을_골라_읽는다():
 
 def test_열_이름을_포함으로_찾는다():
     # 머리행은 "휴대전화 번호" 인데 사람은 "전화" 라고 부른다.
-    header, _ = read.pick(VALUES, ["전화"])
+    header, rows = read.pick(VALUES, ["전화"])
 
-    assert header == ["휴대전화 번호"]
+    # 부른 이름 그대로 돌려준다. 부른 쪽은 그다음 줄에서 row["전화"] 를 쓴다.
+    assert header == ["전화"]
+    assert rows[0] == ["010-1111-1111"]
 
 
 def test_부분일치가_여럿이면_고르지_않는다():
@@ -167,7 +169,9 @@ def test_같은_머리행이_두_벌이면_값이_든_열을_고른다():
 
     header, rows = read.pick(values, ["성함", "연락처"])
 
-    assert header == ["성함_2", "연락처_2"]
+    # 값은 뒤엣것에서 오지만 **이름은 부른 그대로**다. 시트에 유령 열이 있다는
+    # 사정을 부른 쪽에 떠넘기면 그쪽 row["성함"] 이 KeyError 로 터진다.
+    assert header == ["성함", "연락처"]
     assert [row[0] for row in rows] == ["이진선", "김지수"]
 
 
@@ -179,3 +183,45 @@ def test_양쪽_다_비면_앞_열을_고른다():
 
     assert header == ["성함"]
     assert rows == []
+
+
+def test_같은_열을_두_이름으로_부르면_거절한다():
+    # "전화" 와 "휴대전화 번호" 가 한 열을 가리킨다. 그대로 두면 돌려주는
+    # 머리행에 같은 이름이 두 번 들어가고, 행을 dict 로 접을 때 하나가 사라진다.
+    with pytest.raises(read.AmbiguousColumn, match="같은 열"):
+        read.pick(VALUES, ["전화", "휴대전화 번호"])
+
+
+def test_같은_이름을_두_번_부르면_접는다():
+    # 카탈로그의 columns 는 시트 머리행 그대로라 유령 열이 있으면 이름이 두 번
+    # 들어 있다. 그것을 그대로 넘기는 일이 실제로 생긴다.
+    values = [
+        ["성함", "연락처", "성함", "연락처"],
+        ["", "", "이진선", "01086008593"],
+    ]
+
+    header, rows = read.pick(values, ["성함", "연락처", "성함", "연락처"])
+
+    assert header == ["성함", "연락처"]
+    assert rows[0] == ["이진선", "01086008593"]
+
+
+def test_유령_열은_부분일치로도_값이_든_쪽을_고른다():
+    # 이름이 서로 **같은** 중복이라 사람에게 되물어도 답이 없다.
+    values = [
+        ["휴대전화 번호", "휴대전화 번호"],
+        ["", "010-2222-2222"],
+    ]
+
+    header, rows = read.pick(values, ["전화"])
+
+    assert header == ["전화"]
+    assert rows[0] == ["010-2222-2222"]
+
+
+def test_유일화한_이름이_시트에_이미_있어도_안_겹친다():
+    # "성함_2" 라는 열이 진짜로 있으면, 두 번째 "성함" 에 붙인 번호와 부딪힌다.
+    # 유일하게 만드는 함수가 유일성을 깨면 열이 조용히 사라진다.
+    out = read.unique_header(["성함", "성함_2", "성함"])
+
+    assert len(set(out)) == 3
