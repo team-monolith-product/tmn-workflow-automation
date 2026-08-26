@@ -224,4 +224,27 @@ def test_유일화한_이름이_시트에_이미_있어도_안_겹친다():
     # 유일하게 만드는 함수가 유일성을 깨면 열이 조용히 사라진다.
     out = read.unique_header(["성함", "성함_2", "성함"])
 
-    assert len(set(out)) == 3
+    # docstring 이 "겹친 이름은 번호로" 를 약속한다. 유일하기만 하면 되는 게 아니다.
+    assert out == ["성함", "성함_2", "성함_3"]
+
+
+def test_전량으로_받은_이름을_그대로_다시_부를_수_있다():
+    # 에이전트는 전량으로 한 번 읽어 키를 보고, 열을 좁혀 다시 부른다. 그때
+    # 손에 든 이름이 "성함_2"·"열2" 인데 원본 머리행에는 없는 이름이라,
+    # 방금 자기가 받은 키가 "그런 열 없습니다" 로 거절되던 자리다.
+    values = [["성함", "", "성함"], ["가", "x", "나"]]
+
+    header, _ = read.pick(values, [])
+    assert header == ["성함", "열2", "성함_2"]
+
+    for name, expected in zip(header, ["가", "x", "나"]):
+        got, rows = read.pick(values, [name])
+        assert got == [name] and rows[0] == [expected]
+
+
+def test_없는_열_안내에_유일화한_이름을_보여준다():
+    # "시트의 열: 성함, 성함" 으로는 무엇을 적어야 하는지 알 수가 없다.
+    values = [["성함", "성함"], ["가", "나"]]
+
+    with pytest.raises(ValueError, match="성함_2"):
+        read.pick(values, ["없는열"])

@@ -45,6 +45,26 @@ def build_raw_text(name: str, tabs: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def modified_at(file: dict[str, Any]) -> datetime:
+    """Drive 의 modifiedTime 을 datetime 으로. 없으면 터집니다.
+
+    **여기 한 곳에서만 계산합니다.** 이 값이 source_updated_at 으로 저장되고,
+    다음 동기화가 "안 바뀌었나" 를 판정할 때 그 저장값과 비교됩니다. 계산이 두
+    군데로 갈라져 한쪽만 바뀌면 비교가 **항상 거짓**이 되어 30분마다 전량을
+    다시 읽습니다 -- 예외도 안 나고 로그도 평소와 같습니다.
+
+    files.list 의 fields 에 modifiedTime 을 명시했으므로 없을 수 없습니다.
+    기본값을 두면 모든 시트가 "안 바뀜" 이 되어 카탈로그가 조용히 안 갱신됩니다.
+
+    Args:
+        file: Drive files.list 항목
+
+    Returns:
+        datetime: UTC aware
+    """
+    return datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
+
+
 def build_row(
     data_source_id: int, file: dict[str, Any], tabs: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -59,7 +79,7 @@ def build_row(
         dict[str, Any]: UPSERT_ITEM 바인딩 파라미터
     """
     raw_text = build_raw_text(file["name"], tabs)
-    modified = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
+    modified = modified_at(file)
 
     return {
         "data_source_id": data_source_id,

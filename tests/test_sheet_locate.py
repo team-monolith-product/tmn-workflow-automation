@@ -186,3 +186,21 @@ def test_후보가_여럿이면_읽기도_막힌다(monkeypatch):
 
     with pytest.raises(ValueError, match="복사본"):
         read.read_sheet("부산 2기 만족도")
+
+
+def test_시트가_아닌_구글_링크는_공유_탓으로_돌리지_않는다(monkeypatch):
+    # 구글 **문서** 링크를 붙여넣으면 "공유를 확인하십시오" 가 나가고, 사람은
+    # 멀쩡한 공유 설정을 뒤진다. 진짜 원인은 그게 시트가 아니라는 것이다.
+    _files(monkeypatch, FILES)
+
+    with pytest.raises(ValueError, match="시트 링크가 아닙니다"):
+        locate.locate("https://docs.google.com/document/d/1abcdefg/edit")
+
+
+def test_스킴_없이_붙여넣은_시트_링크도_읽는다(monkeypatch):
+    # 슬랙에서 복사하면 https:// 가 빠지는 일이 있다.
+    _files(monkeypatch, FILES)
+
+    found = locate.locate("docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit#gid=7")
+
+    assert found.sheet == locate.Sheet("1hW3Yg8x99gfiLd", 7)

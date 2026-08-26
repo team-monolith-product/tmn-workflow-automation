@@ -21,16 +21,6 @@ ON CONFLICT (source, external_id) DO UPDATE SET
 RETURNING id
 """
 
-READ_CURSOR = """
-SELECT id, cursor FROM data_source
-WHERE source = %(source)s AND external_id = %(external_id)s
-"""
-
-SAVE_CURSOR = """
-UPDATE data_source SET cursor = %(cursor)s, last_synced_at = now()
-WHERE id = %(id)s
-"""
-
 DISABLE_SOURCE = """
 UPDATE data_source SET enabled = false
 WHERE source = %(source)s AND external_id = %(external_id)s
@@ -107,38 +97,3 @@ def disable_source(
         DISABLE_SOURCE, {"source": source, "external_id": external_id}
     ).fetchone()
     return row["id"] if row else None
-
-
-def read_cursor(conn: psycopg.Connection, source: str, external_id: str) -> str | None:
-    """증분 동기화 커서를 읽습니다.
-
-    커서 형식은 소스가 정합니다 -- Drive 는 RFC3339 시각, 슬랙은 ts 문자열처럼.
-    여기서는 문자열로만 다룹니다.
-
-    Args:
-        conn: 커넥션
-        source: "slack" · "notion" · "drive_sheet"
-        external_id: 소스 안에서 대상을 가리키는 ID
-
-    Returns:
-        str | None: 커서. 등록된 적 없거나 아직 안 돈 경우 None
-    """
-    row = conn.execute(
-        READ_CURSOR, {"source": source, "external_id": external_id}
-    ).fetchone()
-    return row["cursor"] if row else None
-
-
-def save_cursor(conn: psycopg.Connection, source_id: int, cursor: str) -> None:
-    """커서를 전진시키고 동기화 시각을 찍습니다.
-
-    **부분 실패가 있었다면 부르지 마십시오.** 커서가 지나간 구간은 다시 훑지
-    않으므로, 실패한 대상이 그 구간에 있으면 다음에 그것이 수정될 때까지
-    영영 안 잡힙니다.
-
-    Args:
-        conn: 커넥션
-        source_id: data_source.id
-        cursor: 저장할 커서
-    """
-    conn.execute(SAVE_CURSOR, {"id": source_id, "cursor": cursor})

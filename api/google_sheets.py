@@ -84,14 +84,33 @@ def list_spreadsheet_files() -> list[dict]:
         params["pageToken"] = token
 
 
-def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet:
-    """탭 이름이나 gid 로 탭 하나를 고른다. **이름을 먼저 본다.**
+# Sheets 읽기 쿼터는 **사용자당 분당 60회**고, 서비스 계정 하나가 곧 한 명이다.
+# 시트를 한 번 훑는 데 이만큼 든다 -- 여럿을 도는 쪽(sync_sheet_catalog)이 이 값으로
+# 스스로를 눌러야 한다. 여기서 재우지 않는 이유는, 그러면 사람이 부른 read_sheet 가
+# 동기화 뒤에 줄을 서기 때문이다.
+READS_PER_SHEET = 2
 
-    "2025", "1학기" 처럼 숫자로만 된 탭 이름이 흔하다. 숫자를 gid 로 먼저 보면
-    그런 탭은 영영 못 열고, 사람은 gid 를 적은 적이 없으므로 무엇이 잘못됐는지
-    알 수 없는 오류만 본다.
+
+def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet:
+    """탭 이름이나 gid 로 탭 하나를 고른다. 문자열이면 **이름을 먼저 본다.**
+
+    이 판단이 service 가 아니라 여기 있는 이유는 살아 있는 탭 목록이 있어야
+    풀리기 때문이다. 위로 올리면 왕복이 한 번 더 들거나 gspread 객체가 밖으로
+    샌다. "이 API 를 부르려면 무엇을 넘겨야 하나" 를 푸는 어댑터의 일이다.
+
+    Args:
+        sheet: 열린 스프레드시트
+        want: int 면 gid 가 확실하다(링크에서 뽑은 값). str 이면 사람이 준 것이라
+            이름일 수도 gid 일 수도 있어 이름을 먼저 본다 -- "2025", "1학기" 처럼
+            숫자로만 된 탭 이름이 흔한데, 숫자를 gid 로 먼저 보면 그런 탭은 영영
+            못 열고 사람은 gid 를 적은 적이 없어 원인을 알 수 없다
     """
-    text = str(want).strip()
+    # int 는 링크의 #gid= 에서 왔으므로 모호하지 않다. 이것까지 이름으로 먼저
+    # 풀면, gid 2025 를 가리키는 링크가 "2025" 라는 **탭**을 열어 버린다.
+    if isinstance(want, int):
+        return sheet.get_worksheet_by_id(want)
+
+    text = want.strip()
     tabs = sheet.worksheets()
     for worksheet in tabs:
         if worksheet.title == text:
@@ -127,15 +146,19 @@ def get_worksheet_values(
 
 
 def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
-    """탭마다 머리행(1행)만 읽는다.
+    """탭마다 머리행(1행)만 읽는다. 시트 하나에 **READS_PER_SHEET 회**가 든다.
 
     탭 수만큼 values.get 을 부르면 시트 하나에 1+N 회가 든다. 94개 시트에
     탭 평균 셋이면 30분마다 370회고, Sheets 읽기 쿼터는 사용자당 분당 60회다.
-    batch 로 묶어 시트당 2회로 줄인다.
+    batch 로 묶는다.
+
+    **Spreadsheet 객체를 안 만든다.** gspread 의 open_by_key 는 생성자에서
+    fetch_sheet_metadata 를 부르고 worksheets() 가 같은 것을 또 부른다. 즉
+    같은 GET 이 두 번 나가 시트당 3회가 된다(8/26 실측). 메타데이터를 한 번만
+    받아 직접 읽으면 2회다.
 
     예외를 삼키지 않는다. 머리행을 못 읽은 탭을 빈 값으로 적재하면 카탈로그가
-    "이 탭에는 열이 없다"를 최신 정보인 척 들고 있게 되고, 커서가 이미 지나가서
-    그 시트가 다시 수정될 때까지 복구되지 않는다.
+    "이 탭에는 열이 없다"를 최신 정보인 척 들고 있게 됩니다.
 
     Args:
         spreadsheet_id: 스프레드시트 ID
@@ -143,26 +166,28 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     Returns:
         list[dict]: id·title·header
     """
-    sheet = _get_client().open_by_key(spreadsheet_id)
-    worksheets = sheet.worksheets()
-    if not worksheets:
+    http = _get_client().http_client
+    metadata = http.fetch_sheet_metadata(spreadsheet_id)
+    tabs = [entry["properties"] for entry in metadata.get("sheets", [])]
+    if not tabs:
         return []
 
     # A1 표기에서 탭 이름 안의 작은따옴표는 두 번 겹쳐 써야 한다. 직접 f-string 으로
     # 감싸면 "김'철수 명단" 같은 탭에서 range 가 깨져 400 이 나고, 그 시트는 사람이
     # 탭 이름을 고치기 전까지 영영 카탈로그에 못 들어간다.
-    result = sheet.values_batch_get(
-        [absolute_range_name(ws.title, "1:1") for ws in worksheets],
+    result = http.values_batch_get(
+        spreadsheet_id,
+        [absolute_range_name(tab["title"], "1:1") for tab in tabs],
         params={"majorDimension": "ROWS"},
     )
     ranges = result.get("valueRanges", [])
     return [
         {
-            "id": ws.id,
-            "title": ws.title,
+            "id": tab["sheetId"],
+            "title": tab["title"],
             # 빈 탭은 values 키 자체가 없다.
             "header": (value_range.get("values") or [[]])[0],
         }
         # strict -- 응답이 요청보다 짧으면 뒤쪽 탭이 조용히 사라지는 대신 터진다.
-        for ws, value_range in zip(worksheets, ranges, strict=True)
+        for tab, value_range in zip(tabs, ranges, strict=True)
     ]

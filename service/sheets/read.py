@@ -2,7 +2,8 @@
 구글 시트를 에이전트가 읽을 모양으로 다듬습니다.
 
 시트는 사람이 보라고 만든 것이라 그대로 넘기면 못 씁니다. 신청 응답 시트가
-297행 × 25열이라, 필요한 **열만 골라** 받습니다.
+297행 × 25열이라, 필요한 **열만 골라 돌려줍니다**. 받는 양이 주는 것은 아닙니다 --
+구글은 언제나 표 전체를 주고, 고르는 일은 여기 메모리에서 일어납니다.
 
 여기서 자르지는 않습니다. 결과는 execute_python 안의 메모리로 가지 컨텍스트로
 가지 않으므로 상한을 둘 이유가 없고, 두면 잘린 표로 통계를 내게 됩니다.
@@ -11,7 +12,7 @@
 표가 한 칸씩 밀리고, 밀린 표는 엉뚱한 사람 번호로 문자를 보내게 합니다.
 """
 
-from typing import Any
+from typing import Any, Iterable
 
 from api.google_sheets import get_worksheet_values
 from service.sheets import locate
@@ -68,7 +69,9 @@ def _filled(values: list[list[Any]], index: int) -> int:
     return sum(1 for row in values[1:] if index < len(row) and _clean(row[index]))
 
 
-def _column_of(values: list[list[Any]], raw_header: list[str], want: str) -> int | None:
+def _column_of(
+    values: list[list[Any]], raw_header: list[str], unique: list[str], want: str
+) -> int | None:
     """이름으로 열 하나를 고릅니다. 같은 이름이 여럿이면 값이 든 열을 고릅니다.
 
     **폼 응답 시트는 같은 머리행이 두 벌 있는 일이 흔합니다.** 폼에서 문항을
@@ -78,8 +81,10 @@ def _column_of(values: list[list[Any]], raw_header: list[str], want: str) -> int
 
     Args:
         values: 시트 전체 값
-        raw_header: **유일화하지 않은** 머리행. 유일화한 이름을 넣으면 "성함" 과
+        raw_header: **유일화하지 않은** 머리행. 유일화한 이름으로만 찾으면 "성함" 과
             "성함_2" 가 서로 다른 이름이 되어 아래 유령 열 판정이 죽는다
+        unique: 유일화한 머리행. 열을 안 고르고 읽었을 때 돌려준 이름이 이것이라,
+            그것을 그대로 다시 넘기는 경로가 있다
         want: 찾는 열 이름
 
     Returns:
@@ -93,6 +98,11 @@ def _column_of(values: list[list[Any]], raw_header: list[str], want: str) -> int
     # 시트 머리행이 "휴대전화 번호" 처럼 길어서 사람은 "전화" 로 부릅니다.
     # 정확히 같은 것을 먼저 보고, 없을 때만 이름을 포함하는 열로 넓힙니다.
     hits = [i for i, head in enumerate(raw_header) if head == want]
+    if not hits:
+        # 전량으로 한 번 읽어 키를 본 뒤 열을 좁혀 다시 부르는 것이 에이전트가
+        # 밟는 길입니다. 그때 손에 든 이름이 "성함_2"·"열2" 라서, 원본 머리행만
+        # 뒤지면 방금 자기가 받은 이름이 "그런 열 없습니다" 로 거절됩니다.
+        hits = [i for i, head in enumerate(unique) if head == want]
     if not hits:
         hits = [i for i, head in enumerate(raw_header) if want in head]
     if not hits:
@@ -140,9 +150,10 @@ def pick(
     # 열은 **원본 이름**으로 찾습니다. 유일화한 이름으로 찾으면 "성함" 이 "성함_2" 와
     # 다른 이름이 되어, 중복 중 값이 든 쪽을 고르는 판정(_column_of)이 무력해집니다.
     raw_header = [_clean(cell) for cell in values[0]]
+    unique = unique_header(raw_header)
     if not columns:
         # 전부 달라고 했으니 시트에 있는 이름을 그대로 쓰되, 겹치는 것만 번호를 답니다.
-        return unique_header(raw_header), _rows(values, range(len(raw_header)))
+        return unique, _rows(values, range(len(raw_header)))
 
     keep: list[int] = []
     header: list[str] = []
@@ -150,7 +161,7 @@ def pick(
     taken: dict[int, str] = {}
     for name in columns:
         want = _clean(name)
-        hit = _column_of(values, raw_header, want)
+        hit = _column_of(values, raw_header, unique, want)
         if hit is None:
             missing.append(name)
             continue
@@ -169,14 +180,16 @@ def pick(
         keep.append(hit)
         header.append(want)
     if missing:
+        # 유일화한 이름을 보여줍니다. 원본을 보여주면 "시트의 열: 성함, 성함" 이
+        # 나가는데, 그것으로는 무엇을 적어야 하는지 알 수가 없습니다.
         raise ValueError(
             f"이런 열이 없습니다: {', '.join(missing)}"
-            f" / 시트의 열: {', '.join(head for head in raw_header if head)}"
+            f" / 시트의 열: {', '.join(unique)}"
         )
     return header, _rows(values, keep)
 
 
-def _rows(values: list[list[Any]], keep) -> list[list[str]]:
+def _rows(values: list[list[Any]], keep: Iterable[int]) -> list[list[str]]:
     """고른 열만 남기고, 빈 행을 버립니다."""
     rows = []
     for row in values[1:]:
