@@ -171,7 +171,7 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
 
 def get_draft_sms_tool(
     client: AsyncWebClient, channel: str, thread_ts: str
-) -> BaseTool:
+) -> StructuredTool:
     """문자 발송 초안 도구를 반환합니다.
 
     채널을 도구 인자가 아니라 클로저로 받습니다.
