@@ -9,7 +9,7 @@
 표가 한 칸씩 밀리고, 밀린 표는 엉뚱한 사람 번호로 문자를 보내게 합니다.
 """
 
-from typing import Any, Iterable
+from typing import Any
 
 from api.google_sheets import get_worksheet_values
 from service.sheets import locate
@@ -64,12 +64,13 @@ def unique_header(header: list[str]) -> list[str]:
 def _column_of(
     values: list[list[Any]], raw_header: list[str], unique: list[str], want: str
 ) -> list[int] | None:
-    """이름으로 열 하나를 고릅니다. 같은 이름이 여럿이면 값이 든 열을 고릅니다.
+    """이름으로 논리 열 하나를 찾습니다. 같은 이름이 여럿이면 한 묶음으로 봅니다.
 
     **폼 응답 시트는 같은 머리행이 두 벌 있는 일이 흔합니다.** 폼에서 문항을
     지웠다 다시 만들면 옛 열이 그대로 남고 새 응답은 뒤에 붙은 열에 쌓입니다.
-    앞엣것을 집으면 값이 전부 비어 "명단 0명" 이 되고, 아무에게도 문자가
-    나가지 않습니다 -- 실패가 조용해서 더 위험합니다(8/21 실측).
+    앞엣것만 읽으면 값이 전부 비어 "명단 0명" 이 되고, 아무에게도 문자가
+    나가지 않습니다 -- 실패가 조용해서 더 위험합니다(8/21 실측). 그래서 어느
+    쪽이 진짜인지 고르지 않고, 묶어서 함께 읽습니다.
 
     Args:
         values: 시트 전체 값
@@ -233,7 +234,7 @@ def pick(
     return header, _rows(values, keep)
 
 
-def _rows(values: list[list[Any]], keep: Iterable[list[int]]) -> list[list[str]]:
+def _rows(values: list[list[Any]], keep: list[list[int]]) -> list[list[str]]:
     """묶음마다 한 칸씩 뽑고, **통째로 빈 행만** 버립니다.
 
     고른 칸이 비었다고 버리면 같은 탭인데 어느 열을 골랐느냐로 행 수가 갈립니다.
@@ -244,7 +245,6 @@ def _rows(values: list[list[Any]], keep: Iterable[list[int]]) -> list[list[str]]
     빈 이름을 거르는 것은 부르는 쪽의 일입니다. 여기서 대신 해 주면 몇 명이
     걸러졌는지가 안 보입니다.
     """
-    keep = list(keep)
     return [
         [_merge(row, group) for group in keep]
         for row in values[1:]
