@@ -108,13 +108,13 @@ def _run_code(
         plt.close("all")
 
 
-def get_execute_python_with_chart_tool(
+def get_execute_python_tool(
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
 ):
     """
-    파이썬 코드를 실행하고 matplotlib 차트를 슬랙으로 전송하는 도구를 반환합니다.
+    파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
 
     Args:
         thread_ts: Slack 스레드 타임스탬프
@@ -122,21 +122,22 @@ def get_execute_python_with_chart_tool(
         channel: Slack 채널 ID
 
     Returns:
-        execute_python_with_chart tool
+        execute_python tool
     """
 
     @tool
-    async def execute_python_with_chart(
+    async def execute_python(
         code: Annotated[
             str,
-            "실행할 파이썬 코드. matplotlib으로 차트를 그리는 코드를 포함할 수 있음",
+            "실행할 파이썬 코드. read_sheet · execute_athena_query · pd · plt 를 쓸 수 있음",
         ],
     ) -> str:
         """
-        파이썬 코드를 실행하고 matplotlib 차트를 슬랙으로 전송합니다.
+        파이썬 코드를 실행합니다. 표를 다루는 일은 전부 이 도구로 하십시오.
 
-        이 도구는 데이터 시각화가 필요할 때 사용합니다.
-        코드 내에서 matplotlib을 사용하여 차트를 그리면 자동으로 슬랙에 이미지로 전송됩니다.
+        구글 시트와 Athena 를 읽어 pandas 로 집계·대조·명단 추출을 하고, 차트를
+        그리면 슬랙에 자동으로 올라갑니다. 두 명단을 맞춰 보거나 인원을 세는 일을
+        눈으로 하지 마십시오 -- 수십 행만 넘어가도 틀리고, 틀린 것이 티가 안 납니다.
 
         **사용 가능한 라이브러리 및 함수**:
         코드 컨텍스트 내에서 다음을 사용할 수 있습니다:
@@ -253,4 +254,4 @@ def get_execute_python_with_chart_tool(
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
 
-    return execute_python_with_chart
+    return execute_python

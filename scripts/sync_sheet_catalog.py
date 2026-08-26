@@ -6,7 +6,7 @@
 
 셀 값은 넣지 않습니다. 응답이 계속 쌓이는 시트라 값을 적재하면 곧 낡고,
 낡은 숫자를 진실로 믿는 것이 값을 모르는 것보다 나쁩니다. 실제 값은
-execute_python_with_chart 안에서 실시간으로 읽습니다.
+execute_python 안에서 실시간으로 읽습니다.
 
 **시트마다 지난번 modifiedTime 과 대조해 바뀐 것만 읽습니다.** 그 값은 이미
 item.source_updated_at 에 들어 있습니다. Drive 목록은 어차피 매번 전량으로 오니
