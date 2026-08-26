@@ -9,9 +9,10 @@ from api import google_sheets
 
 
 class FakeTab:
-    def __init__(self, tab_id, title):
+    def __init__(self, tab_id, title, hidden=False):
         self.id = tab_id
         self.title = title
+        self.isSheetHidden = hidden
 
 
 class FakeSheet:
@@ -57,10 +58,11 @@ def test_없는_탭이면_탭_목록을_알려준다():
 
 
 def test_gspread_저수준_표면이_그대로다():
-    """requirements 가 gspread 를 무핀으로 두므로, 재빌드가 버전을 올릴 수 있다.
+    """requirements 의 gspread 핀(~=6.2)이 지키는 것을 여기서도 확인한다.
 
     이 셋이 바뀌면 30분마다 도는 잡만 조용히 죽는다 -- 나머지 테스트는 전부
-    fake 로 이 표면을 대체하므로 CI 는 초록이다.
+    fake 로 이 표면을 대체하므로 CI 는 초록이다. 핀 범위 안에서 마이너가
+    올라가도 걸리도록 남겨 둔다.
     """
     http = gspread.http_client.HTTPClient
 
@@ -105,3 +107,24 @@ def test_숨긴_탭은_카탈로그에_안_싣는다(monkeypatch):
     tabs = google_sheets.get_worksheet_headers("X")
 
     assert [tab["title"] for tab in tabs] == ["명단"]
+
+
+def test_안내문에_숨긴_탭_이름을_넣지_않는다():
+    # 오타 한 번에 감춰 둔 탭 이름이 딸려 나가면 안 된다. 묻지도 않았는데
+    # 봇이 먼저 알려 주는 셈이다.
+    sheet = FakeSheet([FakeTab(0, "명단"), FakeTab(9, "예산(대외비)", hidden=True)])
+
+    with pytest.raises(ValueError) as caught:
+        google_sheets._worksheet(sheet, "없는탭")
+
+    assert "명단" in str(caught.value)
+    assert "대외비" not in str(caught.value)
+
+
+def test_숨긴_탭도_직접_지목하면_열린다():
+    # 막는 것은 발견이지 읽기가 아니다. gid 를 박아 둔 스크립트가 있고,
+    # 링크를 직접 준 것은 의도적 접근이다.
+    sheet = FakeSheet([FakeTab(0, "명단"), FakeTab(9, "예산(대외비)", hidden=True)])
+
+    assert google_sheets._worksheet(sheet, 9).title == "예산(대외비)"
+    assert google_sheets._worksheet(sheet, "예산(대외비)").id == 9

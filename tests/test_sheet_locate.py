@@ -223,3 +223,22 @@ def test_웹에_게시_링크는_ID를_e로_뽑지_않는다(monkeypatch):
 
     with pytest.raises(ValueError, match="웹에 게시"):
         locate.locate("https://docs.google.com/spreadsheets/d/e/2PACX-1vTabc/pubhtml")
+
+
+def test_계정이_여럿일_때의_링크도_읽는다(monkeypatch):
+    # 구글은 계정이 여럿이면 주소창에 /spreadsheets/u/0/d/... 를 내놓는다.
+    # 이것을 못 읽으면 멀쩡한 시트 링크가 "시트 링크가 아닙니다" 로 거절된다.
+    _files(monkeypatch, FILES)
+
+    found = locate.locate(
+        "https://docs.google.com/spreadsheets/u/0/d/1hW3Yg8x99gfiLd/edit#gid=7"
+    )
+
+    assert found.sheet == locate.Sheet("1hW3Yg8x99gfiLd", 7)
+
+
+def test_계정이_여럿일_때의_게시_링크도_알아본다(monkeypatch):
+    _files(monkeypatch, FILES)
+
+    with pytest.raises(ValueError, match="웹에 게시"):
+        locate.locate("https://docs.google.com/spreadsheets/u/1/d/e/2PACX-1vT/pubhtml")

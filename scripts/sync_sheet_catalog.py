@@ -56,7 +56,7 @@ DRY_RUN_SHEETS = 10
 # data_source 한 행이 "서비스 계정이 보는 스프레드시트 전부" 를 가리킵니다.
 SOURCE_KEY = "all"
 
-# 지난번에 적재한 시트와 그때의 수정 시각. 이것이 커서를 대신합니다.
+# 지난번에 적재한 시트와 그때의 수정 시각. 무엇을 다시 읽을지 이것으로 정합니다.
 READ_KNOWN = """
 SELECT external_id, source_updated_at FROM item WHERE data_source_id = %(source_id)s
 """
@@ -124,8 +124,7 @@ def main(dry_run: bool = False, full: bool = False) -> None:
 
     if dry_run:
         # DB 를 건드리지 않는다. 구글 쪽만 확인하는 용도라 DB 가 없는 곳에서도 돈다.
-        # 커서가 없으니 전량이 대상인데, 적재도 안 하는 확인용이 가장 비싼 실행이
-        # 되면 안 된다 -- 아래에서 앞부분만 자른다.
+        # 지난 값을 못 읽으니 전량이 대상이라, 아래에서 앞부분만 자른다.
         source_id, known = 0, {}
     else:
         with connect() as conn:
@@ -142,13 +141,17 @@ def main(dry_run: bool = False, full: bool = False) -> None:
             )
 
     files = list_spreadsheet_files()
-    total = len(files)
-    if dry_run:
-        files = files[:DRY_RUN_SHEETS]
-    collected, failed, skipped = collect(files, known)
+    # 자른 목록은 이름을 나눕니다. 아래 DELETE_MISSING 의 alive 가 files 를 읽으므로,
+    # 여기서 덮어쓰면 되돌릴 수 없는 연산이 잘린 목록을 보게 됩니다.
+    sample = files[:DRY_RUN_SHEETS] if dry_run else files
+    collected, failed, skipped = collect(sample, known)
     print(
-        f"목록 {total}개 · 훑음 {len(collected)}"
-        + (f" (dry-run 이라 최근 {len(files)}개만)" if dry_run else "")
+        f"목록 {len(files)}개 · 훑음 {len(collected)}"
+        + (
+            f" (dry-run 이라 최근 {len(sample)}개만)"
+            if dry_run and len(sample) < len(files)
+            else ""
+        )
         + (f" · 그대로 {skipped}" if skipped else "")
         + (f" · 실패 {len(failed)}" if failed else "")
     )

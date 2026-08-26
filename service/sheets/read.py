@@ -5,9 +5,6 @@
 297행 × 25열이라, 필요한 **열만 골라 돌려줍니다**. 받는 양이 주는 것은 아닙니다 --
 구글은 언제나 표 전체를 주고, 고르는 일은 여기 메모리에서 일어납니다.
 
-여기서 자르지는 않습니다. 결과는 execute_python 안의 메모리로 가지 컨텍스트로
-가지 않으므로 상한을 둘 이유가 없고, 두면 잘린 표로 통계를 내게 됩니다.
-
 셀 값은 사람이 손으로 넣은 것이라 믿지 않습니다. 탭과 줄 나눔이 섞여 있으면
 표가 한 칸씩 밀리고, 밀린 표는 엉뚱한 사람 번호로 문자를 보내게 합니다.
 """
@@ -111,14 +108,16 @@ def _column_of(
         return None
 
     hit = _narrow(values, raw_header, hits, want)
-    if alias is not None and alias != hit and _filled(values, alias):
+    if alias is not None and alias not in hits:
         # 시트에 진짜 "성함_2" 열이 있는데, 두 번째 "성함" 을 유일화한 이름도
-        # "성함_2" 인 경우. 둘 다 값이 있으면 어느 쪽을 부른 것인지 알 수 없다 --
-        # 조용히 하나를 고르면 전량으로 읽었을 때와 **다른 열**이 나간다.
+        # "성함_2" 인 경우. 조용히 고르면 전량으로 읽었을 때와 **다른 열**이 나간다.
+        #
+        # alias 가 hits 안에 있으면 충돌이 아닙니다 -- 같은 이름 후보 중 하나를
+        # 가리키는 것이라 바로 위 _narrow 가 이미 판정했습니다.
         raise AmbiguousColumn(
-            f"'{want}' 가 시트 머리행에도 있고, 열을 안 고르고 읽었을 때"
-            f" {alias + 1}번 열에 붙는 이름이기도 합니다."
-            " 어느 쪽인지 알 수 없으니 열 이름을 시트에서 고쳐 주십시오."
+            f"'{want}' 가 시트 머리행에도 있고({hit + 1}번 열), 열을 안 고르고"
+            f" 읽었을 때 {alias + 1}번 열에 붙는 이름이기도 합니다."
+            f" 머리행 쪽을 부르려면 '{unique[hit]}' 로 적어 주십시오."
         )
     return hit
 
@@ -137,24 +136,44 @@ def _narrow(
             f" {', '.join(sorted({raw_header[i] for i in hits}))}"
             " / 어느 열인지 정확히 적어 주십시오."
         )
-    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 유령은 비어 있으므로
-    # 값이 든 쪽이 진짜다. 이름이 같아 사람에게 되물어도 답이 없다.
+    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 이름이 같아 사람에게
+    # 되물어도 답이 없으니 여기서 갈라야 한다.
     filled = [i for i in hits if _filled(values, i)]
-    if len(filled) > 1:
-        # 값이 든 열이 둘이면 유령이 아니라 서로 다른 열이다. 조용히 고르면
-        # 절반의 사람이 명단에서 빠진다.
+    if len(filled) <= 1:
+        return filled[0] if filled else hits[0]
+
+    # **유령 열이 비어 있다고 단정하면 안 된다.** 폼에서 문항을 지우기 전에 들어온
+    # 응답은 옛 열에 그대로 남는다. 대신 두 열은 행 방향으로 갈린다 -- 옛 응답은
+    # 옛 열에만, 새 응답은 새 열에만 있어 **같은 행에서 둘 다 차는 일이 없다.**
+    # 한 행에서라도 둘 다 차 있으면 유령이 아니라 서로 다른 열이다.
+    if any(sum(1 for i in filled if _cell(row, i)) > 1 for row in values[1:]):
         raise AmbiguousColumn(
-            f"'{want}' 라는 열이 {len(hits)}개인데 그중 {len(filled)}개에 값이"
-            " 있습니다. 폼 유령 열이 아니라 서로 다른 열이라 고를 수 없습니다"
-            " / 시트에서 열 이름을 구분해 주십시오."
+            f"'{want}' 라는 열이 {', '.join(str(i + 1) for i in filled)}번에 있고"
+            " 한 행에 둘 이상 값이 차 있습니다. 폼 유령 열이 아니라 서로 다른"
+            " 열이라 고를 수 없습니다. 뒤엣것은 유일화한 이름(예: 이름_2)으로"
+            " 부를 수 있고, 앞엣것이 필요하면 columns 없이 전량으로 읽으십시오."
         )
-    return filled[0] if filled else hits[0]
+    # 갈렸으니 한 열이 폼 수정으로 쪼개진 것이다. 마지막에 값이 찬 쪽이 살아 있다.
+    return max(filled, key=lambda i: _last_filled_row(values, i))
+
+
+def _cell(row: list[Any], index: int) -> str:
+    """짧은 행을 넘어가도 터지지 않게 셀 하나를 꺼냅니다."""
+    return _clean(row[index]) if index < len(row) else ""
+
+
+def _last_filled_row(values: list[list[Any]], index: int) -> int:
+    """그 열에 값이 마지막으로 찬 행 번호. 없으면 0."""
+    for number in range(len(values) - 1, 0, -1):
+        if _cell(values[number], index):
+            return number
+    return 0
 
 
 def pick(
     values: list[list[Any]], columns: list[str]
 ) -> tuple[list[str], list[list[str]]]:
-    """머리행을 기준으로 열을 고르고, 빈 행을 버립니다.
+    """머리행을 기준으로 열을 고르고, 통째로 빈 행을 버립니다.
 
     **열을 고르면 부른 이름 그대로 돌려줍니다.** read_sheet(columns=["성함"]) 을
     부른 코드는 그다음 줄에서 row["성함"] 을 씁니다. 유령 열이 있는 시트라고
@@ -218,14 +237,22 @@ def pick(
 
 
 def _rows(values: list[list[Any]], keep: Iterable[int]) -> list[list[str]]:
-    """고른 열만 남기고, 빈 행을 버립니다."""
-    rows = []
-    for row in values[1:]:
-        picked = [_clean(row[i]) if i < len(row) else "" for i in keep]
-        # 시트 아래쪽은 빈 행이 수백 줄 이어진다. 그것까지 세면 "297명" 이 된다.
-        if any(picked):
-            rows.append(picked)
-    return rows
+    """고른 열만 남기고, **통째로 빈 행만** 버립니다.
+
+    고른 칸이 비었다고 버리면 같은 탭인데 어느 열을 골랐느냐로 행 수가 갈립니다.
+    실측(8/26)에 297행짜리 시트가 성함만 고르면 197행, 발송여부를 끼면 297행이
+    나왔습니다 -- 뒤쪽 100행에 누가 발송여부 한 칸을 끌어내려서입니다. 그러면
+    두 번 나눠 읽어 짝지을 때 다른 사람끼리 붙습니다.
+
+    빈 이름을 거르는 것은 부르는 쪽의 일입니다. 여기서 대신 해 주면 몇 명이
+    걸러졌는지가 안 보입니다.
+    """
+    keep = list(keep)
+    return [
+        [_cell(row, i) for i in keep]
+        for row in values[1:]
+        if any(_clean(cell) for cell in row)
+    ]
 
 
 def read_sheet(

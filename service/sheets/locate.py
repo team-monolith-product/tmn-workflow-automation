@@ -31,10 +31,12 @@ class SheetFile(TypedDict, total=False):
 
 
 # https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid}
+# u/0/ 는 계정이 여럿일 때 구글이 주소창에 내놓는 라우트다. 이것을 빼먹으면
+# 멀쩡한 시트 링크가 "시트 링크가 아닙니다" 로 거절된다(실측).
 # /d/e/2PACX-... 는 "웹에 게시" 링크다. e 는 ID 가 아니라 경로라서, 이 패턴이
 # 없으면 spreadsheet_id 로 "e" 를 뽑아 구글 404 를 보게 된다.
-_ID = re.compile(r"/spreadsheets/d/(?!e/)([A-Za-z0-9-_]+)")
-_PUBLISHED = re.compile(r"/spreadsheets/d/e/")
+_ID = re.compile(r"/spreadsheets/(?:u/\d+/)?d/(?!e/)([A-Za-z0-9-_]+)")
+_PUBLISHED = re.compile(r"/spreadsheets/(?:u/\d+/)?d/e/")
 _GID = re.compile(r"[#&?]gid=([0-9]+)")
 # 링크로 볼 만한 것. 시트 **이름**에 "http 요청 로그" 처럼 그 글자가 들어갈 수
 # 있으므로, 스킴이나 호스트로 시작하고 공백이 없을 때만 링크로 본다.

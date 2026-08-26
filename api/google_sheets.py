@@ -19,6 +19,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 
+# 구글이 답을 안 할 때 코드 실행 워커를 무기한 붙잡지 않게. gspread 기본은 None 이다.
+TIMEOUT_SECONDS = 30
+
 _client: gspread.Client | None = None
 _client_lock = threading.Lock()
 
@@ -33,6 +36,10 @@ def _get_client() -> gspread.Client:
     재시도는 붙이지 않는다. 429 는 여기서 예외가 아니라 평상시라, 물러서서
     기다리면 코드 실행 워커(하나뿐이다)를 붙잡아 봇 넷이 같이 선다.
     쿼터는 부르는 쪽이 READS_PER_MINUTE 로 스스로를 눌러 지킨다.
+
+    **타임아웃은 반드시 건다.** gspread 는 기본이 None 이고 requests 에서 None 은
+    무한 대기다. 재시도를 뺀 이유가 워커를 붙잡지 않으려는 것인데, 구글이 답을
+    안 하면 타임아웃 없는 요청 하나가 똑같이 그 워커를 무기한 붙잡는다.
     """
     global _client
     with _client_lock:
@@ -40,6 +47,7 @@ def _get_client() -> gspread.Client:
             info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
             credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
             _client = gspread.authorize(credentials)
+            _client.set_timeout(TIMEOUT_SECONDS)
         return _client
 
 
@@ -52,7 +60,7 @@ def list_spreadsheet_files() -> list[dict]:
     gspread 의 list_spreadsheet_files 를 쓰지 않는 이유는 그 쿼리에 trashed=false 가
     없어서다. Drive files.list 는 기본으로 휴지통 파일을 포함하므로, 사본을 지워
     정리해도 계속 후보에 섞이고 ID 로는 읽히기까지 한다. 대신 gspread 의 HTTP
-    클라이언트를 그대로 쓰므로 인증·재시도·공유 드라이브 플래그는 같이 따라온다.
+    클라이언트를 그대로 쓰므로 인증과 타임아웃은 같이 따라온다.
 
     **공유 드라이브 플래그가 필수다.** 실측(8/21)에서 보이는 시트 94개가 전부 공유
     드라이브 소속이었고, 그 플래그 없이 부르면 0개가 나온다.
@@ -86,7 +94,9 @@ def list_spreadsheet_files() -> list[dict]:
 # 여기서 재우지 않는 이유는, 그러면 사람이 부른 read_sheet 가 동기화 뒤에 줄을
 # 서기 때문이다.
 READS_PER_MINUTE = 60
-READS_PER_SHEET = 2  # get_worksheet_headers 한 번에 드는 호출 수
+# get_worksheet_headers 한 번에 드는 호출 수. get_worksheet_values 는 세 번
+# 드는데(gspread 객체를 쓴다), 그쪽은 단발이라 여럿을 도는 쪽만 이 값을 본다.
+READS_PER_SHEET = 2
 
 
 def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet:
@@ -105,6 +115,10 @@ def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet
     """
     text = str(want).strip()
     tabs = sheet.worksheets()
+    # 안내문에 숨긴 탭 이름을 넣지 않는다. 사람이 묻지도 않았는데 감춰 둔 탭
+    # 이름이 오타 한 번에 딸려 나간다. 고르는 것 자체는 막지 않는다 -- gid 를
+    # 박아 둔 스크립트가 있고, 링크를 직접 준 것은 의도적 접근이다.
+    shown = [worksheet for worksheet in tabs if not worksheet.isSheetHidden]
     # int 는 링크의 #gid= 에서 왔으므로 모호하지 않다. 이것까지 이름으로 먼저
     # 풀면, gid 2025 를 가리키는 링크가 "2025" 라는 **탭**을 열어 버린다.
     if isinstance(want, int):
@@ -124,7 +138,7 @@ def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet
     # 사람에게는 "그럼 어느 탭이 있나" 가 필요하다.
     raise ValueError(
         f"'{text}' 라는 탭이 없습니다."
-        f" 이 시트의 탭: {', '.join(worksheet.title for worksheet in tabs)}"
+        f" 이 시트의 탭: {', '.join(worksheet.title for worksheet in shown)}"
     )
 
 
@@ -171,9 +185,10 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     """
     http = _get_client().http_client
     metadata = http.fetch_sheet_metadata(spreadsheet_id)
-    # 숨긴 탭은 뺀다. 사람이 시트에서 감춰 둔 것을 카탈로그에 실으면 그 열 이름이
-    # query_knowledge 검색 결과로 나가고, 봇을 부를 수 있는 사람 누구나 gid 로 셀까지
-    # 읽는다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.
+    # 숨긴 탭은 뺀다. 사람이 감춰 둔 탭의 열 이름이 query_knowledge 검색 결과로
+    # 나가면 안 된다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.
+    # **막는 것은 발견이지 읽기가 아니다** -- 링크나 gid 를 직접 준 사람에게는
+    # _worksheet 이 그대로 열어 준다. 그건 의도적 접근이라 그대로 둔다.
     tabs = [
         entry["properties"]
         for entry in metadata.get("sheets", [])
