@@ -50,7 +50,7 @@ SCHEMA_GUIDE = """
   하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
   않다 -- 응답이 계속 쌓여 곧 낡기 때문이다.
 - 그래서 여기서 답할 수 있는 것은 "그런 시트가 어디 있나"까지다. 행수·집계·명단은
-  **execute_python_with_chart 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
+  **execute_python 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
 - metadata->'tabs' 에 탭별 gid 와 columns 가 있다. 시트를 찾은 뒤
   external_id(=스프레드시트 ID)와 탭 이름(또는 gid)을 그 코드에 넘긴다.
 - 예: 출석 열이 있는 시트 찾기
