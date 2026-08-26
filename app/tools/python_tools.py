@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+from app.sms import POSTED_MARK
 from service.sheets.read import read_sheet
 
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
@@ -29,9 +30,10 @@ STDOUT_LIMIT = 4_000
 # 잡고, 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
 DRAFT_CARDS_PER_RUN = 5
 
-# 카드가 실제로 올라갔는지는 draft_sms 의 답으로 안다. 거절과 형식 오류는
-# 슬랙을 건드리지 않으므로 예산을 쓰지 않는다.
-POSTED_MARK = "초안을 올렸습니다"
+# 카드를 안 올리는 답(중복 거절·형식 오류)은 카드 예산을 안 쓴다. 그것만
+# 두면 상한이 영영 안 걸리므로 호출 총량도 함께 센다. preview 가 동기라
+# 루프 위에서 도는데, 봇 넷과 스케줄러가 그 루프 하나를 나눠 쓴다.
+DRAFT_CALLS_PER_RUN = 50
 
 DRAFT_SMS_GUIDE = """
 
@@ -238,9 +240,10 @@ def get_execute_python_tool(
                 # 상한에 걸려도 예외로 끊지 않는다 -- 이미 올라간 카드는
                 # 그대로인데 코드만 죽으면 모델은 실패로 읽는다.
                 nonlocal posted
-                if posted >= DRAFT_CARDS_PER_RUN:
+                if posted >= DRAFT_CARDS_PER_RUN or len(answers) >= DRAFT_CALLS_PER_RUN:
                     refusal = (
-                        f"카드를 {DRAFT_CARDS_PER_RUN}장 올려 더 올리지 않았습니다."
+                        f"카드 {DRAFT_CARDS_PER_RUN}장 · 호출 {DRAFT_CALLS_PER_RUN}번이"
+                        " 상한이라 더 올리지 않았습니다."
                         " 명단을 나누지 말고 한 번에 넘기십시오."
                     )
                     answers.append(refusal)

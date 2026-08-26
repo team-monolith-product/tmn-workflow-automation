@@ -655,25 +655,6 @@ async def test_반복_응답이_집계_결과를_밀어내지_않는다(client):
     assert 결과.count("이미 이 스레드에") == 1
 
 
-async def test_한_실행이_초안을_무한히_올리지_못한다(client):
-    # 행마다 부르면 슬랙 채널 한도(초당 1건)가 워커 하나를 몇 분씩 잡고,
-    # 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
-    도구 = _code_tool(client)
-
-    결과 = await 도구.ainvoke(
-        {
-            "code": (
-                "for i in range(20):\n"
-                "    draft_sms(content='[*이름*]님',"
-                " targets=[{'to': f'010-1111-{i:04d}', 'name': '가'}])\n"
-            )
-        }
-    )
-
-    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
-    assert "더 올리지 않았습니다" in 결과
-
-
 async def test_카드가_여러_장이면_모델도_여러_장으로_본다(client):
     # 받는 사람이 달라도 인원이 같으면 draft_sms 의 답이 글자 하나 다르지
     # 않다. 그냥 접으면 카드 다섯 장이 한 줄이 되고, 모델은 "그 카드" 라고
@@ -734,3 +715,42 @@ async def test_카드_상한에_걸려도_코드는_계속_돈다(client):
     assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
     assert "끝까지왔다" in 결과
     assert "더 올리지 않았습니다" in 결과
+
+
+async def test_예약_초안도_카드_예산을_쓴다(client):
+    # 예약 갈래는 문구가 따로다. 그 문구에서 POSTED_MARK 가 빠지면 카드는
+    # 올라가는데 예산을 안 써서 상한이 영영 안 걸린다.
+    tool = _code_tool(client)
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                f"for i in range(8):\n"
+                f"    draft_sms(content='[*이름*]님',"
+                f" targets=[{{'to': f'010-3333-{{i:04d}}', 'name': '가'}}],"
+                f" send_at='{_later(30)}')\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
+    assert "더 올리지 않았습니다" in result
+
+
+async def test_카드를_안_올리는_호출도_무한히_반복할_수_없다(client):
+    # 거절과 형식 오류는 카드 예산을 안 쓴다. 그것만 보면 상한이 영영 안
+    # 걸린다. preview 가 동기라 루프 위에서 도는데 봇 넷이 그 루프를 나눠 쓴다.
+    tool = _code_tool(client)
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                "for i in range(60):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 0
+    assert "상한이라 더 올리지 않았습니다" in result

@@ -17,7 +17,7 @@ import json
 from datetime import datetime
 
 from cachetools import TTLCache
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import StructuredTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import send as sms_send
@@ -33,6 +33,10 @@ FEEDBACK_INPUT = "sms_feedback_input"
 # 슬랙 버튼 value 는 2000자 제한이라 수신자 목록을 통째로 못 싣는다.
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
+
+# 카드가 실제로 올라갔을 때만 답에 들어가는 말. 샌드박스가 이것으로
+# 카드 수를 세어 상한을 건다(app/tools/python_tools.py).
+POSTED_MARK = "초안을 올렸습니다"
 
 # 줄 수와 줄 폭. 22줄 × 121자면 슬랙 section text 3000자에 든다.
 MAX_ROWS = 20
@@ -178,7 +182,7 @@ def get_draft_sms_tool(
         thread_ts: 스레드 타임스탬프
 
     Returns:
-        BaseTool: 초안 도구
+        StructuredTool: 초안 도구
     """
 
     @tool
@@ -232,11 +236,11 @@ def get_draft_sms_tool(
             raise
         if plan.send_time:
             return (
-                f"{len(plan.rows)}명 대상 초안을 올렸습니다."
+                f"{len(plan.rows)}명 대상 {POSTED_MARK}."
                 f" {_when(plan.send_time)} 발송으로 예약하려면"
                 " [예약하기] 를 눌러주세요."
             )
-        return f"{len(plan.rows)}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
+        return f"{len(plan.rows)}명 대상 {POSTED_MARK}. [보내기] 를 눌러주세요."
 
     return draft_sms
 
