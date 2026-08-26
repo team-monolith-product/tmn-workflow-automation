@@ -132,8 +132,7 @@ async def _build_tools(
         + get_knowledge_query_tools(client, user_id)
         + [draft_sms]
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
-        # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다. draft_sms 는
-        # 명단이 컨텍스트를 거치면 상한에 걸려 잘리므로 코드 쪽에도 열어 준다.
+        # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
         + [
             get_execute_python_tool(
                 thread_ts=thread_ts,

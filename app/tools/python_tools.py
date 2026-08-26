@@ -25,19 +25,12 @@ STDOUT_LIMIT = 4_000
 
 DRAFT_SMS_GUIDE = """
 
-**문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서 부를 수
-있습니다. targets 는 `to`(번호)가 필수이고 `name`·`var1`~`var8` 로 치환값을 주는
-dict 목록입니다. 문안의 치환 태그는 이름이 `[*이름*]`, 나머지가 `[*1*]`~`[*8*]` 입니다.
+**문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서도 부를 수
+있습니다. 인자는 draft_sms 도구 설명과 같습니다. 명단은 print 로 옮겨 적지 말고
+통째로 한 번에 넘기십시오 -- 나눠 부르면 카드가 여러 장이 되고 사람이 한 장을
+빠뜨립니다.
 
-명단은 print 로 옮겨 적지 말고 통째로 한 번에 넘기십시오. 나눠 부르면 카드가
-여러 장이 되고 사람이 한 장을 빠뜨립니다.
-
-```python
-대상 = [{"to": t, "name": n} for t, n in 미신청자]
-print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))
-```
-
-카드는 초안이고 사람이 [보내기] 를 눌러야 나갑니다."""
+    print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))"""
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
@@ -162,10 +155,8 @@ def get_execute_python_tool(
 
         **사용 가능한 라이브러리 및 함수**:
         코드 컨텍스트 내에서 다음을 사용할 수 있습니다:
-        - `pd` (pandas): 데이터 분석 및 조작을 위한 pandas 라이브러리
-        - `plt` (matplotlib.pyplot): 차트 시각화를 위한 matplotlib
-        - `execute_athena_query(query: str, database: str)`: Athena SQL을 실행하고 결과를 반환합니다.
-          결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
+        - `pd` (pandas), `plt` (matplotlib.pyplot)
+        - `execute_athena_query(query: str, database: str)`: Athena SQL 을 실행합니다.
         - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
           반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
           tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 첫 번째 탭입니다.
@@ -190,7 +181,6 @@ def get_execute_python_tool(
         **주의사항**:
         - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
         - plt.show()도 호출하지 마세요.
-        - 차트를 그린 후 plt.figure()나 plt.gcf()로 현재 figure에 접근할 수 있습니다.
 
         **Athena 결과 해체**:
         ```python
@@ -201,15 +191,12 @@ def get_execute_python_tool(
         df = pd.DataFrame(data, columns=headers)
         ```
 
-        Args:
-            code: 실행할 파이썬 코드
-
-        Returns:
-            str: 실행 결과 (STDOUT 출력 + 성공/실패 메시지)
         """
         loop = asyncio.get_running_loop()
 
-        def to_sync(coroutine_function: Callable[..., Awaitable[Any]]) -> Callable:
+        def to_sync(
+            coroutine_function: Callable[..., Awaitable[Any]],
+        ) -> Callable[..., Any]:
             """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다.
 
             실행기 워커가 이 결과를 기다리는 동안 코루틴은 메인 루프에서 돕니다.

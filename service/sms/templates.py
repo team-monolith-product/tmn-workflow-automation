@@ -60,11 +60,7 @@ def _tag_key(tag: str) -> str:
 
 
 def _text(value: Any) -> str:
-    """치환값을 문자열로 바꿉니다. 빈 칸은 빈 문자열입니다.
-
-    pandas 로 두 명단을 merge 하면 짝이 없는 칸이 NaN 으로 옵니다. NaN 은
-    참이라 `or ""` 로는 안 걸러지고, 그대로 두면 "nan 안내입니다" 가 나갑니다.
-    NaN 은 자기 자신과 같지 않은 유일한 값이라 그것으로 봅니다.
+    """치환값을 벤더가 받는 문자열로 바꿉니다. 없으면 빈 칸입니다.
 
     Args:
         value: 시트나 DataFrame 에서 온 값
@@ -72,8 +68,13 @@ def _text(value: Any) -> str:
     Returns:
         str: 빈 칸이면 빈 문자열
     """
+    # NaN 은 참이라 `or ""` 로는 안 걸러진다. 자기 자신과 같지 않은 유일한 값이다.
     if value is None or value != value:
         return ""
+    # 두 명단을 merge 하면 짝이 없는 칸 때문에 정수 열이 float 로 올라간다.
+    # 그대로 두면 "3.0기 안내입니다" 가 나간다.
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
     return str(value)
 
 
