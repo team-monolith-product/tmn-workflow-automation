@@ -122,9 +122,11 @@ async def _build_tools(
     # 경우(ProgrammingError)는 그대로 터뜨려 마이그레이션 누락을 드러낸다.
     try:
         task_list = await asyncio.to_thread(find_channel_task_list, channel)
+        task_list_available = True
     except psycopg.OperationalError as error:
         print(f"작업 리스트 조회 실패, 노션으로 진행합니다: {error}")
         task_list = None
+        task_list_available = False
 
     if task_list:
         create_tools = get_task_list_write_tools(
@@ -143,7 +145,10 @@ async def _build_tools(
         ]
         if project_ds_id:
             create_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
-        create_tools += get_enable_task_list_tools(client, channel)
+        # 조회가 실패한 동안에는 등록 도구를 주지 않는다. 이미 등록된 채널을
+        # 미등록으로 보고 켜면 아무도 안 읽는 리스트가 하나 더 만들어진다.
+        if task_list_available:
+            create_tools += get_enable_task_list_tools(client, channel)
 
     notion_tools = [
         get_update_notion_task_deadline_tool(),

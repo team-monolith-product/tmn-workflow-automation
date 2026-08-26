@@ -366,6 +366,8 @@ async def test_db_outage_falls_back_to_notion():
 
     assert "get_create_notion_task_tool" in names
     assert "add_channel_tasks" not in names
+    # 등록된 채널을 미등록으로 보고 켜면 아무도 안 읽는 리스트가 하나 더 생긴다
+    assert "enable_channel_task_list" not in names
 
 
 async def test_missing_table_is_not_swallowed():

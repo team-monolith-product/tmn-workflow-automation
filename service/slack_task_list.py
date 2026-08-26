@@ -16,7 +16,7 @@ channel_task_list 표가 SOT입니다. 채널이 작업을 리스트로 관리�
 """
 
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 from slack_sdk.web.async_client import AsyncWebClient
@@ -30,32 +30,6 @@ ITEM_PAGE_SIZE = 100
 
 # 커서가 끝나지 않을 때 호출이 무한히 이어지지 않도록 둔 상한
 MAX_ITEM_PAGES = 20
-
-TASK_LIST_COLUMNS = (
-    "list_id",
-    "list_url",
-    "name_column_id",
-    "completed_column_id",
-    "assignee_column_id",
-    "due_date_column_id",
-)
-
-SELECT_TASK_LIST = f"""
-SELECT {", ".join(TASK_LIST_COLUMNS)}
-FROM channel_task_list
-WHERE channel_id = %(channel_id)s
-"""
-
-INSERT_TASK_LIST = f"""
-INSERT INTO channel_task_list (channel_id, {", ".join(TASK_LIST_COLUMNS)})
-VALUES (%(channel_id)s, {", ".join(f"%({name})s" for name in TASK_LIST_COLUMNS)})
-"""
-
-DELETE_TASK_LIST = """
-DELETE FROM channel_task_list
-WHERE channel_id = %(channel_id)s
-RETURNING list_url
-"""
 
 
 def _read_cell(item: dict, column_id: str, value_key: str):
@@ -73,7 +47,7 @@ def _read_cell(item: dict, column_id: str, value_key: str):
         셀 값. 그 열이 없으면 None
     """
     for field in item.get("fields", []):
-        if field["column_id"] == column_id:
+        if field.get("column_id") == column_id:
             return field.get(value_key)
     return None
 
@@ -189,6 +163,28 @@ class ChannelTaskList:
             }
             for row_id in row_ids
         ]
+
+
+# 표의 열 이름은 dataclass 필드에서 딴다. 손으로 나열하면 필드를 추가했을 때
+# psycopg 가 남는 키를 무시해 INSERT 가 조용히 그 열을 빠뜨린다.
+TASK_LIST_COLUMNS = tuple(field.name for field in fields(ChannelTaskList))
+
+SELECT_TASK_LIST = f"""
+SELECT {", ".join(TASK_LIST_COLUMNS)}
+FROM channel_task_list
+WHERE channel_id = %(channel_id)s
+"""
+
+INSERT_TASK_LIST = f"""
+INSERT INTO channel_task_list (channel_id, {", ".join(TASK_LIST_COLUMNS)})
+VALUES (%(channel_id)s, {", ".join(f"%({name})s" for name in TASK_LIST_COLUMNS)})
+"""
+
+DELETE_TASK_LIST = """
+DELETE FROM channel_task_list
+WHERE channel_id = %(channel_id)s
+RETURNING list_url
+"""
 
 
 def validate_task_list_channel(info: dict[str, Any]) -> str | None:
