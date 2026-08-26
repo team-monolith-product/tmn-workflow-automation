@@ -104,6 +104,13 @@ def _later(minutes: int) -> str:
     return when.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _code_tool(client):
+    """코드가 draft_sms 를 부를 수 있는 실행 도구. 진짜 코루틴을 물린다."""
+    return get_execute_python_tool(
+        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
+    )
+
+
 async def _draft(client, targets=ROWS, content="[*이름*]님", send_at=""):
     tool = sms.get_draft_sms_tool(client, "C1", "111.000")
     return await tool.ainvoke(
@@ -560,9 +567,7 @@ async def test_카드를_못_올리면_초안이_남지_않는다(client):
 async def test_코드가_부른_초안이_카드로_올라간다(client):
     # general.py 가 .coroutine 을 샌드박스에 넘긴다. 그 이음매를 진짜
     # 객체로 걷는다 -- 속성이 사라지거나 to_sync 가 깨지면 여기서 죽는다.
-    도구 = get_execute_python_tool(
-        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
-    )
+    도구 = _code_tool(client)
 
     결과 = await 도구.ainvoke(
         {
@@ -593,9 +598,7 @@ async def test_초안_결과는_print_하지_않아도_돌아온다(client):
     # draft_sms 는 실패를 문자열로 돌려준다. 코드가 반환을 안 받으면 그것이
     # 통째로 사라지고 도구는 "성공" 만 답한다. 카드는 0장인데 모델은 올라간
     # 줄 알고 사람에게 그렇게 말한다.
-    도구 = get_execute_python_tool(
-        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
-    )
+    도구 = _code_tool(client)
 
     결과 = await 도구.ainvoke(
         {
@@ -634,9 +637,7 @@ async def test_같은_턴에_두_번_실려도_카드는_한_장이다(client):
 async def test_반복_응답이_집계_결과를_밀어내지_않는다(client):
     # 거절 응답은 글자 하나 다르지 않다. 접지 않으면 상한을 채워 모델이
     # 방금 계산한 것을 통째로 밀어낸다.
-    도구 = get_execute_python_tool(
-        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
-    )
+    도구 = _code_tool(client)
 
     결과 = await 도구.ainvoke(
         {
@@ -657,9 +658,7 @@ async def test_반복_응답이_집계_결과를_밀어내지_않는다(client):
 async def test_한_실행이_초안을_무한히_올리지_못한다(client):
     # 행마다 부르면 슬랙 채널 한도(초당 1건)가 워커 하나를 몇 분씩 잡고,
     # 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
-    도구 = get_execute_python_tool(
-        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
-    )
+    도구 = _code_tool(client)
 
     결과 = await 도구.ainvoke(
         {
@@ -671,5 +670,67 @@ async def test_한_실행이_초안을_무한히_올리지_못한다(client):
         }
     )
 
-    assert len(client.posted) == python_tools.DRAFTS_PER_RUN
-    assert "한 실행에 초안은" in 결과
+    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
+    assert "더 올리지 않았습니다" in 결과
+
+
+async def test_카드가_여러_장이면_모델도_여러_장으로_본다(client):
+    # 받는 사람이 달라도 인원이 같으면 draft_sms 의 답이 글자 하나 다르지
+    # 않다. 그냥 접으면 카드 다섯 장이 한 줄이 되고, 모델은 "그 카드" 라고
+    # 단수로 안내한다. 사람은 한 장만 누르고 나머지는 안 나간다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for i in range(3):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': f'010-1111-{i:04d}', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 3
+    assert "(×3)" in 결과
+
+
+async def test_거절된_호출은_카드_예산을_쓰지_않는다(client):
+    # 번호가 깨진 호출은 슬랙을 건드리지 않는다. 그것이 예산을 먹으면
+    # 카드 0장인 채로 멀쩡한 명단이 거절된다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for _ in range(6):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])\n"
+                "draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '010-1111-2222', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 1
+    assert "초안을 올렸습니다" in 결과
+
+
+async def test_카드_상한에_걸려도_코드는_계속_돈다(client):
+    # 예외로 끊으면 이미 올라간 카드는 그대로인데 도구는 "실행 실패" 만
+    # 답한다. 모델은 카드가 없는 줄 알고, 사람 눈에 보이는 것과 어긋난다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for i in range(8):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': f'010-2222-{i:04d}', 'name': '가'}])\n"
+                "print('끝까지왔다')\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
+    assert "끝까지왔다" in 결과
+    assert "더 올리지 않았습니다" in 결과

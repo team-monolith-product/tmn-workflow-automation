@@ -6,6 +6,7 @@ import asyncio
 import functools
 import io
 import traceback
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
@@ -23,9 +24,14 @@ from service.sheets.read import read_sheet
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
 
-# 한 실행이 올릴 수 있는 초안 수. 정상 사용은 한 번이고, 나머지는 고쳐
-# 부르는 몫이다. 행마다 부르면 슬랙 한도에 걸려 워커를 몇 분씩 잡는다.
-DRAFTS_PER_RUN = 5
+# 한 실행이 올릴 수 있는 카드 수. 정상 사용은 한 번이고, 나머지는 고쳐
+# 부르는 몫이다. 행마다 부르면 슬랙 한도(초당 1건)에 걸려 워커를 몇 분씩
+# 잡고, 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
+DRAFT_CARDS_PER_RUN = 5
+
+# 카드가 실제로 올라갔는지는 draft_sms 의 답으로 안다. 거절과 형식 오류는
+# 슬랙을 건드리지 않으므로 예산을 쓰지 않는다.
+POSTED_MARK = "초안을 올렸습니다"
 
 DRAFT_SMS_GUIDE = """
 
@@ -224,16 +230,25 @@ def get_execute_python_tool(
         if draft_sms:
             call = _to_sync(draft_sms, loop)
 
+            posted = 0
+
             def draft(*args, **kwargs) -> str:
                 # 반환을 안 받고 부르면 "고칠 것" 도 "이미 올라가 있습니다" 도
                 # 통째로 사라진다. 카드가 0장인데 도구는 성공이라고 답한다.
-                if len(answers) >= DRAFTS_PER_RUN:
-                    raise RuntimeError(
-                        f"한 실행에 초안은 {DRAFTS_PER_RUN}번까지 부를 수 있습니다."
+                # 상한에 걸려도 예외로 끊지 않는다 -- 이미 올라간 카드는
+                # 그대로인데 코드만 죽으면 모델은 실패로 읽는다.
+                nonlocal posted
+                if posted >= DRAFT_CARDS_PER_RUN:
+                    refusal = (
+                        f"카드를 {DRAFT_CARDS_PER_RUN}장 올려 더 올리지 않았습니다."
                         " 명단을 나누지 말고 한 번에 넘기십시오."
                     )
+                    answers.append(refusal)
+                    return refusal
                 answer = call(*args, **kwargs)
                 answers.append(answer)
+                if POSTED_MARK in answer:
+                    posted += 1
                 return answer
 
             injected["draft_sms"] = draft
@@ -250,10 +265,21 @@ def get_execute_python_tool(
             )
         # 초안 결과는 코드가 print 하지 않아도 돌려준다. 상한은 따로 건다 --
         # 예산을 나눠 쓰면 거절 응답 수십 줄이 집계 결과를 통째로 밀어낸다.
-        # 같은 문장 반복은 접는다. 정보량이 0 이면서 자리만 먹는다.
+        # 같은 문장은 접되 몇 번인지 남긴다. 받는 사람이 다른 카드도 인원만
+        # 같으면 답이 같아서, 그냥 접으면 다섯 장을 한 장으로 읽는다.
         if answers:
-            모은답 = "\n".join(dict.fromkeys(answers))[:STDOUT_LIMIT]
-            stdout_output = (stdout_output + "\n" + 모은답).strip()
+            counted = Counter(answers)
+            draft_answers = "\n".join(
+                f"{answer} (×{times})" if times > 1 else answer
+                for answer, times in counted.items()
+            )
+            if len(draft_answers) > STDOUT_LIMIT:
+                draft_answers = (
+                    draft_answers[:STDOUT_LIMIT]
+                    + f"\n… 초안 응답 {len(draft_answers)}자 중"
+                    f" {STDOUT_LIMIT}자에서 잘렸습니다."
+                )
+            stdout_output = (stdout_output + "\n" + draft_answers).strip()
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"

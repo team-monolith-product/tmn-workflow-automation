@@ -215,7 +215,11 @@ def get_draft_sms_tool(
         # 검사와 저장 사이에 await 가 있으면 한 턴에 실린 두 호출이 둘 다
         # 빠져나간다. ToolNode 가 tool call 을 gather 로 돌리기 때문이다.
         # 자리를 먼저 잡고, 카드가 못 올라가면 되돌린다.
-        _DRAFTS[draft_id] = None
+        _DRAFTS[draft_id] = {
+            "rows": targets,
+            "content": content,
+            "send_at": send_at,
+        }
         try:
             await client.chat_postMessage(
                 channel=channel,
@@ -226,11 +230,6 @@ def get_draft_sms_tool(
         except BaseException:
             _DRAFTS.pop(draft_id, None)
             raise
-        _DRAFTS[draft_id] = {
-            "rows": targets,
-            "content": content,
-            "send_at": send_at,
-        }
         if plan.send_time:
             return (
                 f"{len(plan.rows)}명 대상 초안을 올렸습니다."
