@@ -17,6 +17,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+from api.google_sheets import get_worksheet_values, search_spreadsheets
+from service.sheets.frame import build_read_sheet
+
+# 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
+STDOUT_LIMIT = 4_000
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다
 _code_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chart-exec")
@@ -60,7 +65,7 @@ setup_korean_font()
 
 
 def _run_code(
-    code: str, execute_athena_query: Callable[..., dict]
+    code: str, injected: dict[str, Callable[..., Any]]
 ) -> tuple[str, io.BytesIO | None, str | None]:
     """
     LLM이 만든 코드를 실행하고 결과를 반환합니다.
@@ -69,14 +74,14 @@ def _run_code(
 
     Args:
         code: 실행할 파이썬 코드
-        execute_athena_query: 코드에 주입할 Athena 조회 함수
+        injected: 코드에 주입할 함수들. 이름이 그대로 코드 안의 이름이 된다
 
     Returns:
         tuple: (STDOUT 출력, 차트 PNG 버퍼 또는 None, 실패 시 스택트레이스)
     """
     captured_output = io.StringIO()
     exec_globals = {
-        "execute_athena_query": execute_athena_query,
+        **injected,
         "plt": plt,
         "matplotlib": matplotlib,
         "pd": pd,
@@ -140,6 +145,17 @@ def get_execute_python_with_chart_tool(
         - `plt` (matplotlib.pyplot): 차트 시각화를 위한 matplotlib
         - `execute_athena_query(query: str, database: str)`: Athena SQL을 실행하고 결과를 반환합니다.
           결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
+        - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
+          반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
+          **여기서는 전량을 읽고 자르지 않습니다** — 수백 행 통계는 이 도구로 내십시오.
+          이름으로 여러 시트가 걸리면 후보를 담은 ValueError 가 납니다. 그때는
+          임의로 고르지 말고 사람에게 어느 것인지 물어보십시오.
+
+        **통계를 낼 때 주의**:
+        - print 로 **집계 결과만** 내보내십시오. DataFrame 전체를 print 하면
+          답을 쓸 자리가 남지 않습니다.
+        - 전화번호는 시트마다 하이픈 유무가 다릅니다. 대조·중복 제거 전에
+          숫자만 남기십시오: `df["전화"].str.replace(r"\\D", "", regex=True)`
 
         **주의사항**:
         - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
@@ -188,9 +204,22 @@ def get_execute_python_with_chart_tool(
                 athena.execute_and_wait(query, database, max_wait_seconds), loop
             ).result()
 
+        injected = {
+            "execute_athena_query": execute_athena_query,
+            # gspread 는 동기라 실행 스레드에서 그대로 부른다. 루프를 왕복시키면
+            # 이벤트 루프를 붙잡는 시간만 길어진다.
+            "read_sheet": build_read_sheet(search_spreadsheets, get_worksheet_values),
+        }
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
-            _code_executor, functools.partial(_run_code, code, execute_athena_query)
+            _code_executor, functools.partial(_run_code, code, injected)
         )
+        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
+        if len(stdout_output) > STDOUT_LIMIT:
+            stdout_output = (
+                stdout_output[:STDOUT_LIMIT]
+                + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
+                " 표 전체가 아니라 집계 결과만 print 하십시오."
+            )
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"

@@ -65,6 +65,40 @@ def _clean(cell: Any) -> str:
     return text.strip()
 
 
+def _filled(values: list[list[Any]], index: int) -> int:
+    """그 열에 값이 든 행이 몇 개인지 셉니다."""
+    return sum(1 for row in values[1:] if index < len(row) and _clean(row[index]))
+
+
+def _column_of(values: list[list[Any]], header: list[str], want: str) -> int | None:
+    """이름으로 열 하나를 고릅니다. 같은 이름이 여럿이면 값이 든 열을 고릅니다.
+
+    **폼 응답 시트는 같은 머리행이 두 벌 있는 일이 흔합니다.** 폼에서 문항을
+    지웠다 다시 만들면 옛 열이 그대로 남고 새 응답은 뒤에 붙은 열에 쌓입니다.
+    앞엣것을 집으면 값이 전부 비어 "명단 0명" 이 되고, 아무에게도 문자가
+    나가지 않습니다 -- 실패가 조용해서 더 위험합니다(8/21 실측).
+
+    Args:
+        values: 시트 전체 값
+        header: 정리된 머리행
+        want: 찾는 열 이름
+
+    Returns:
+        int | None: 열 번호. 못 찾으면 None
+    """
+    if not want:
+        return None
+    hits = [i for i, head in enumerate(header) if head == want]
+    if not hits:
+        hits = [i for i, head in enumerate(header) if want in head]
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0]
+    # 값이 든 행이 가장 많은 열. 같으면 앞엣것(원래 순서를 흔들지 않는다).
+    return max(hits, key=lambda i: (_filled(values, i), -i))
+
+
 def pick(
     values: list[list[Any]], columns: list[str]
 ) -> tuple[list[str], list[list[str]]]:
@@ -92,15 +126,11 @@ def pick(
         keep = []
         missing = []
         for name in columns:
-            want = _clean(name)
-            if want in header:
-                keep.append(header.index(want))
-                continue
-            loose = [i for i, head in enumerate(header) if want and want in head]
-            if loose:
-                keep.append(loose[0])
-            else:
+            hit = _column_of(values, header, _clean(name))
+            if hit is None:
                 missing.append(name)
+            else:
+                keep.append(hit)
         if missing:
             raise ValueError(
                 f"이런 열이 없습니다: {', '.join(missing)}"
