@@ -30,7 +30,7 @@ DRAFT_SMS_GUIDE = """
 통째로 한 번에 넘기십시오 -- 나눠 부르면 카드가 여러 장이 되고 사람이 한 장을
 빠뜨립니다.
 
-    print(draft_sms(content="[*이름*] 선생님, ...", targets=대상.to_dict("records")))"""
+    draft_sms(content="[*이름*] 선생님, ...", targets=대상.to_dict("records"))"""
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
@@ -232,16 +232,18 @@ def get_execute_python_tool(
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
-        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
-        if len(stdout_output) > STDOUT_LIMIT:
+        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다. 초안
+        # 결과는 잘리면 안 되므로 자리를 먼저 떼어 두고 나머지를 자른다.
+        answered = "\n".join(answers)[:STDOUT_LIMIT]
+        room = STDOUT_LIMIT - len(answered)
+        if len(stdout_output) > room:
             stdout_output = (
-                stdout_output[:STDOUT_LIMIT]
-                + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
+                stdout_output[:room]
+                + f"\n… {len(stdout_output)}자 중 {room}자에서 잘렸습니다."
                 " 표 전체가 아니라 집계 결과만 print 하십시오."
             )
-
-        if answers:
-            stdout_output = (stdout_output + "\n" + "\n".join(answers)).strip()
+        if answered:
+            stdout_output = (stdout_output + "\n" + answered).strip()
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"

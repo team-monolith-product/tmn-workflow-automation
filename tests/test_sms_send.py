@@ -2,9 +2,8 @@
 
 from datetime import datetime, timedelta
 
-import pytest
-
 import pandas as pd
+import pytest
 
 from service.sms import send as sms_send
 from service.sms import templates
@@ -287,8 +286,13 @@ def test_merge_가_만든_빈_칸과_실수가_그대로_나가지_않는다():
     assert plan.problems == []
     assert plan.targets[0]["changeWord"]["var1"] == "3"
     assert plan.targets[1]["changeWord"]["var1"] == ""
-    assert "3.0" not in templates.render(plan.template, plan.rows[0])
-    assert "nan" not in templates.render(plan.template, plan.rows[1])
+    assert (
+        templates.render(plan.template, plan.rows[0])
+        == "김철수 선생님, 3기 안내입니다."
+    )
+    assert (
+        templates.render(plan.template, plan.rows[1]) == "이영희 선생님, 기 안내입니다."
+    )
 
 
 def test_판다스_결측과_큰_수를_문자로_만들지_않는다():
@@ -306,3 +310,20 @@ def test_판다스_결측과_큰_수를_문자로_만들지_않는다():
     assert plan.problems == []
     assert plan.targets[0]["changeWord"]["var1"] == ""
     assert "e+19" in plan.targets[1]["changeWord"]["var1"]
+
+
+def test_넘파이_정수가_빈_칸이_되지_않는다():
+    # to_dict("records") 만 파이썬 정수로 박싱해 준다. df.loc·iloc·max·sum·
+    # 산술은 전부 np.int64 라, 그 경로만 보면 나머지를 놓친다. 이 도구의
+    # 용도가 집계인데 집계 결과가 치환값으로 들어오는 자리다.
+    df = pd.DataFrame(
+        [{"to": "010-1111-2222", "기수": 3}, {"to": "010-3333-4444", "기수": 5}]
+    )
+
+    plan = sms_send.preview(
+        [{"to": "010-1111-2222", "name": "가", "var1": df["기수"].max()}],
+        "[*이름*] 남은 자리 [*1*]석",
+    )
+
+    assert plan.targets[0]["changeWord"]["var1"] == "5"
+    assert templates.render(plan.template, plan.rows[0]) == "가 남은 자리 5석"
