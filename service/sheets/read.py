@@ -11,7 +11,7 @@
 
 from typing import Any
 
-from api.google_sheets import CATALOG_ACCOUNT, get_worksheet_values
+from api.google_sheets import OPERATING_ACCOUNT, get_worksheet_values
 from service.sheets import locate
 
 
@@ -304,7 +304,7 @@ def read_sheet(
     values = get_worksheet_values(
         found.sheet.spreadsheet_id,
         found.sheet.worksheet_id if tab is None else tab,
-        account=CATALOG_ACCOUNT,
+        account=OPERATING_ACCOUNT,
     )
     if isinstance(columns, str):
         want = [name for name in columns.split(",") if name.strip()]

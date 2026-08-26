@@ -28,9 +28,9 @@ TIMEOUT_SECONDS = 30
 # DEFAULT 는 원래 쓰던 계정이다. discord_post_completion_notice 가 읽는 학교
 # 일정 시트가 여기 공유되어 있다.
 DEFAULT_ACCOUNT = "GOOGLE_SERVICE_ACCOUNT_JSON"
-# CATALOG 는 사업용 계정이다. 카탈로그에 실리고 봇이 read_sheet 로 읽는 시트가
-# 이 계정에 공유된 것들이다. Drive API 도 이쪽 프로젝트에만 켜져 있다.
-CATALOG_ACCOUNT = "GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON"
+# OPERATING 은 사업 운영 시트용 계정이다. 카탈로그에 실리고 봇이 read_sheet 로
+# 읽는 시트가 이 계정에 공유된 것들이다. Drive API 도 이쪽 프로젝트에만 켜져 있다.
+OPERATING_ACCOUNT = "OPERATING_SHEET_SERVICE_ACCOUNT_JSON"
 
 _clients: dict[str, gspread.Client] = {}
 _client_lock = threading.Lock()
@@ -52,7 +52,7 @@ def _get_client(account: str = DEFAULT_ACCOUNT) -> gspread.Client:
     안 하면 타임아웃 없는 요청 하나가 똑같이 그 워커를 무기한 붙잡는다.
 
     Args:
-        account: 자격증명이 든 환경변수 이름. DEFAULT_ACCOUNT 또는 CATALOG_ACCOUNT
+        account: 자격증명이 든 환경변수 이름. DEFAULT_ACCOUNT 또는 OPERATING_ACCOUNT
 
     Raises:
         KeyError: 그 환경변수가 없을 때. 폴백하지 않는다 -- 조용히 다른 계정으로
@@ -85,7 +85,7 @@ def list_spreadsheet_files() -> list[dict]:
     Returns:
         list[dict]: id·name·modifiedTime·webViewLink. 최근 수정 순
     """
-    client = _get_client(CATALOG_ACCOUNT)
+    client = _get_client(OPERATING_ACCOUNT)
     params = {
         "q": f"mimeType='{SPREADSHEET_MIME}' and trashed=false",
         "pageSize": 1000,
@@ -182,7 +182,7 @@ def get_worksheet_values(
             (https://developers.google.com/sheets/api/reference/rest/v4/ValueRenderOption)
         account: 어느 서비스 계정으로 읽을지. 기본은 원래 쓰던 계정이라 기존
             호출부(discord_post_completion_notice)는 그대로 돈다. 봇이 읽는
-            시트는 read_sheet 가 CATALOG_ACCOUNT 를 명시해 넘긴다
+            시트는 read_sheet 가 OPERATING_ACCOUNT 를 명시해 넘긴다
     """
     sheet = _get_client(account).open_by_key(spreadsheet_id)
     tab = sheet.get_worksheet(0) if worksheet is None else _worksheet(sheet, worksheet)
@@ -210,7 +210,7 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     Returns:
         list[dict]: id·title·header
     """
-    http = _get_client(CATALOG_ACCOUNT).http_client
+    http = _get_client(OPERATING_ACCOUNT).http_client
     metadata = http.fetch_sheet_metadata(spreadsheet_id)
     # 숨긴 탭은 뺀다. 사람이 감춰 둔 탭의 열 이름이 query_knowledge 검색 결과로
     # 나가면 안 된다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.

@@ -50,13 +50,13 @@ def made(monkeypatch):
 
 def test_계정마다_클라이언트가_따로다(monkeypatch, made):
     monkeypatch.setenv(google_sheets.DEFAULT_ACCOUNT, _fake_key("디스코드용"))
-    monkeypatch.setenv(google_sheets.CATALOG_ACCOUNT, _fake_key("사업용"))
+    monkeypatch.setenv(google_sheets.OPERATING_ACCOUNT, _fake_key("운영시트용"))
 
     기본 = google_sheets._get_client()
-    카탈로그 = google_sheets._get_client(google_sheets.CATALOG_ACCOUNT)
+    카탈로그 = google_sheets._get_client(google_sheets.OPERATING_ACCOUNT)
 
     assert 기본.project == "디스코드용"
-    assert 카탈로그.project == "사업용"
+    assert 카탈로그.project == "운영시트용"
     assert 기본 is not 카탈로그
 
 
@@ -87,13 +87,13 @@ def test_기본값은_원래_쓰던_계정이다():
 def test_환경변수가_없으면_폴백하지_않고_터진다(monkeypatch, made):
     # 조용히 다른 계정으로 돌면 "왜 그 시트가 안 보이지" 를 며칠 뒤에 겪는다.
     monkeypatch.setenv(google_sheets.DEFAULT_ACCOUNT, _fake_key("디스코드용"))
-    monkeypatch.delenv(google_sheets.CATALOG_ACCOUNT, raising=False)
+    monkeypatch.delenv(google_sheets.OPERATING_ACCOUNT, raising=False)
 
-    with pytest.raises(KeyError, match="GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON"):
-        google_sheets._get_client(google_sheets.CATALOG_ACCOUNT)
+    with pytest.raises(KeyError, match="OPERATING_SHEET_SERVICE_ACCOUNT_JSON"):
+        google_sheets._get_client(google_sheets.OPERATING_ACCOUNT)
 
 
-def test_카탈로그_경로는_사업용_계정을_쓴다(monkeypatch):
+def test_카탈로그_경로는_운영시트_계정을_쓴다(monkeypatch):
     # list_spreadsheet_files·get_worksheet_headers 는 계정이 고정이다.
     쓴계정 = []
 
@@ -115,4 +115,4 @@ def test_카탈로그_경로는_사업용_계정을_쓴다(monkeypatch):
 
     google_sheets.get_worksheet_headers("X")
 
-    assert 쓴계정 == [google_sheets.CATALOG_ACCOUNT]
+    assert 쓴계정 == [google_sheets.OPERATING_ACCOUNT]
