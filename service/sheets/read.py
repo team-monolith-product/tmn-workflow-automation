@@ -134,15 +134,21 @@ def _group(
         )
 
     # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 폼에서 문항을 지웠다 다시
-    # 만들면 옛 응답은 옛 열에, 새 응답은 새 열에 쌓여 **같은 행에서 둘 다 차는
-    # 일이 없다.** 한 행에서라도 둘 다 차 있으면 유령이 아니라 서로 다른 열이다.
-    if any(sum(1 for i in hits if _cell(row, i)) > 1 for row in values[1:]):
-        raise AmbiguousColumn(
-            f"'{want}' 라는 열이 {', '.join(str(i + 1) for i in hits)}번에 있고"
-            " 한 행에 둘 이상 값이 차 있습니다. 폼 유령 열이 아니라 서로 다른"
-            " 열이라 고를 수 없습니다. 뒤엣것은 유일화한 이름(예: 이름_2)으로"
-            " 부를 수 있고, 앞엣것이 필요하면 columns 없이 전량으로 읽으십시오."
-        )
+    # 만들면 옛 응답은 옛 열에, 새 응답은 새 열에 쌓여 한 행에는 보통 한쪽만 찬다.
+    #
+    # 한 행에 **서로 다른 값**이 차 있을 때만 거절한다. 같은 값이 두 열에 있는
+    # 것은 괜찮다 -- 폼 응답 수정 링크로 옛 응답을 고치면 폼은 지금 연결된 새 열만
+    # 다시 쓰고 옛 열의 값은 그대로 두므로, 그 한 행 때문에 그 열 이름이 영영
+    # 막히면 안 된다. 값이 같으니 합쳐도 잃는 것이 없다.
+    for row in values[1:]:
+        filled = {cell for index in hits if (cell := _cell(row, index))}
+        if len(filled) > 1:
+            raise AmbiguousColumn(
+                f"'{want}' 라는 열이 {', '.join(str(i + 1) for i in hits)}번에 있고"
+                " 한 행에 서로 다른 값이 차 있습니다. 폼 유령 열이 아니라 서로 다른"
+                " 열이라 고를 수 없습니다. 뒤엣것은 유일화한 이름(예: 이름_2)으로"
+                " 부를 수 있고, 앞엣것이 필요하면 columns 없이 전량으로 읽으십시오."
+            )
 
     # 행마다 한쪽만 차 있으니 **고르지 않고 합칩니다.** 어느 쪽이 살아 있는지를
     # 순서로 추측하면(뒤엣것·마지막에 찬 것) 이름순으로 정렬해 둔 시트에서
@@ -208,20 +214,24 @@ def pick(
         if group is None:
             missing.append(name)
             continue
-        # 묶음은 원본 이름이 같은 열끼리라, 첫 번째 열이 그 묶음의 신원입니다.
-        first = group[0]
-        if first in taken:
-            if taken[first] == want:
+        # **묶음의 모든 열**을 기억합니다. 첫 열만 보면 "성함"(합친 묶음 [1,2])과
+        # "성함_2"(그중 [2])가 서로 다른 신원이 되어 둘 다 통과하고, 같은 사람이
+        # 두 열에 앉은 표가 나갑니다 -- 그걸로 집계하면 인원이 부풀어 오릅니다.
+        clash = next((index for index in group if index in taken), None)
+        if clash is not None:
+            if taken[clash] == want:
                 # 같은 이름을 두 번 적었다. 카탈로그의 머리행 목록을 그대로 넘기면
-                # 유령 열 때문에 이렇게 된다. 접는다.
+                # 유령 열 때문에 이렇게 된다(그 목록은 **원본** 머리행이라 언제나
+                # 같은 이름이 겹친다). 접는다.
                 continue
-            # 이름이 다른데 같은 열이면 사람이 의도한 바가 아니다. 그냥 두면
-            # 머리행에 같은 이름이 두 번 들어가 행을 dict 로 접을 때 하나가 사라진다.
+            # 이름이 다른데 열이 겹치면 사람이 의도한 바가 아니다. 그냥 두면
+            # 같은 값이 두 열에 실린다.
             raise AmbiguousColumn(
-                f"'{taken[first]}' 와 '{want}' 이 같은 열({raw_header[first]})을"
+                f"'{taken[clash]}' 와 '{want}' 이 겹치는 열({raw_header[clash]})을"
                 " 가리킵니다 / 열마다 다른 이름을 하나씩 적어 주십시오."
             )
-        taken[first] = want
+        for index in group:
+            taken[index] = want
         keep.append(group)
         header.append(want)
     if missing:

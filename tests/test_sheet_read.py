@@ -181,7 +181,7 @@ def test_양쪽_다_비면_빈_값이_나온다():
 def test_같은_열을_두_이름으로_부르면_거절한다():
     # "전화" 와 "휴대전화 번호" 가 한 열을 가리킨다. 그대로 두면 돌려주는
     # 머리행에 같은 이름이 두 번 들어가고, 행을 dict 로 접을 때 하나가 사라진다.
-    with pytest.raises(read.AmbiguousColumn, match="같은 열"):
+    with pytest.raises(read.AmbiguousColumn, match="겹치는 열"):
         read.pick(VALUES, ["전화", "휴대전화 번호"])
 
 
@@ -323,3 +323,33 @@ def test_행은_통째로_빌_때만_버린다():
 
     _, rows = read.pick(values, ["성함"])
     assert [row[0] for row in rows] == ["가", ""]
+
+
+def test_합친_이름과_유일화_이름을_같이_부르면_거절한다():
+    # "성함"(합친 묶음)과 "성함_2"(그중 뒤엣것)는 겹친다. 묶음의 첫 열만 기억하면
+    # 둘 다 통과해 같은 사람이 두 열에 앉고, 그걸로 집계하면 인원이 부풀어 오른다.
+    values = [
+        ["타임스탬프", "성함", "성함"],
+        ["8/1", "옛응답", ""],
+        ["8/2", "", "이진선"],
+    ]
+
+    with pytest.raises(read.AmbiguousColumn, match="겹치는 열"):
+        read.pick(values, ["성함", "성함_2"])
+
+
+def test_폼_응답을_고쳐_한_행이_겹쳐도_막지_않는다():
+    # 폼 응답 수정 링크로 옛 응답을 고치면 폼은 지금 연결된 새 열만 다시 쓰고
+    # 옛 열의 값은 그대로 둔다. 그 한 행 때문에 그 열 이름이 영영 막히면 안 된다.
+    # 값이 같으니 합쳐도 잃는 것이 없다.
+    values = [
+        ["타임스탬프", "성함", "성함"],
+        ["8/1", "옛응답", ""],
+        ["8/2", "이진선", "이진선"],
+        ["8/3", "", "김지수"],
+    ]
+
+    header, rows = read.pick(values, ["성함"])
+
+    assert header == ["성함"]
+    assert [row[0] for row in rows] == ["옛응답", "이진선", "김지수"]

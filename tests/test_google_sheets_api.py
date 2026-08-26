@@ -128,3 +128,12 @@ def test_숨긴_탭도_직접_지목하면_열린다():
 
     assert google_sheets._worksheet(sheet, 9).title == "예산(대외비)"
     assert google_sheets._worksheet(sheet, "예산(대외비)").id == 9
+
+
+def test_탭이_전부_숨김이면_문장이_끊기지_않는다():
+    # "이 시트의 탭: " 에서 끊기면 사람은 자기 링크가 잘못됐는지 시트가 빈 것인지
+    # 알 수 없다.
+    sheet = FakeSheet([FakeTab(9, "대외비", hidden=True)])
+
+    with pytest.raises(ValueError, match="전부 숨김"):
+        google_sheets._worksheet(sheet, "없는탭")

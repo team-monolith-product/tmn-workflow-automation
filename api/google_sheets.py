@@ -136,6 +136,12 @@ def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet
     # gspread 의 get_worksheet_by_id 를 안 쓰는 이유는 이 안내 때문이다. 그쪽은
     # "id … not found" 만 던지는데, 지워진 탭을 가리키는 옛 링크가 흔해서
     # 사람에게는 "그럼 어느 탭이 있나" 가 필요하다.
+    if not shown:
+        # 안 그러면 "이 시트의 탭: " 에서 문장이 끊겨, 사람은 자기 링크가 잘못됐는지
+        # 시트가 빈 것인지 알 수 없다.
+        raise ValueError(
+            f"'{text}' 라는 탭이 없습니다. 이 시트는 탭이 전부 숨김입니다."
+        )
     raise ValueError(
         f"'{text}' 라는 탭이 없습니다."
         f" 이 시트의 탭: {', '.join(worksheet.title for worksheet in shown)}"
