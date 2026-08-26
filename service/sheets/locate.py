@@ -31,8 +31,14 @@ class SheetFile(TypedDict, total=False):
 
 
 # https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid}
-_ID = re.compile(r"/spreadsheets/d/([A-Za-z0-9-_]+)")
+# /d/e/2PACX-... 는 "웹에 게시" 링크다. e 는 ID 가 아니라 경로라서, 이 패턴이
+# 없으면 spreadsheet_id 로 "e" 를 뽑아 구글 404 를 보게 된다.
+_ID = re.compile(r"/spreadsheets/d/(?!e/)([A-Za-z0-9-_]+)")
+_PUBLISHED = re.compile(r"/spreadsheets/d/e/")
 _GID = re.compile(r"[#&?]gid=([0-9]+)")
+# 링크로 볼 만한 것. 시트 **이름**에 "http 요청 로그" 처럼 그 글자가 들어갈 수
+# 있으므로, 스킴이나 호스트로 시작하고 공백이 없을 때만 링크로 본다.
+_LOOKS_LIKE_URL = re.compile(r"^(https?://|docs\.google\.com/)\S+$")
 # 링크가 아니라 ID 만 붙여넣는 경우. 구글 시트 ID 는 43~44자이고 대소문자가 섞인다.
 # 길이만 보면 "2026_customer_satisfaction_survey" 같은 영문 시트 **이름**이 ID 로
 # 오인돼 검색을 건너뛰고, 사람은 "공유를 확인하십시오" 대신 구글 404 를 본다.
@@ -124,10 +130,15 @@ def locate(target: str) -> Found:
         raise ValueError("어느 시트인지 알려주세요. 링크나 시트 이름이 필요합니다.")
     if _BARE_ID.match(text) or _ID.search(text):
         return Found(parse_target(text), [])
-    if text.startswith("http") or "docs.google.com" in text:
+    if _LOOKS_LIKE_URL.match(text):
         # 링크는 줬는데 시트 링크가 아닙니다. 구글 **문서**·프레젠테이션 링크가
         # 흔한데, 이것을 이름 검색으로 흘리면 "공유를 확인하십시오" 가 나가고
         # 사람은 공유 설정을 뒤집니다. 진짜 원인은 그게 시트가 아니라는 것입니다.
+        if _PUBLISHED.search(text):
+            raise ValueError(
+                "'웹에 게시' 링크는 읽을 수 없습니다. 시트를 열고 주소창의"
+                f" /spreadsheets/d/... 링크를 주십시오: {text}"
+            )
         raise ValueError(
             "시트 링크가 아닙니다. 구글 문서나 프레젠테이션 링크일 수 있습니다:"
             f" {text}"

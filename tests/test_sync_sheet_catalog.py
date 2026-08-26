@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from api import google_sheets
 from scripts import sync_sheet_catalog as sync
 from service.sheets import catalog
 
@@ -31,7 +32,9 @@ TABS = [{"id": 0, "title": "응답 시트1", "header": ["성함", "전화"]}]
 
 
 def _drive(monkeypatch, files, broken=()):
-    monkeypatch.setattr(sync, "PACE_SECONDS", 0)
+    """구글 쪽을 갈아끼우고, 잠든 시간을 기록만 하고 실제로는 안 잔다."""
+    napped: list[float] = []
+    monkeypatch.setattr(sync.time, "sleep", napped.append)
     monkeypatch.setattr(sync, "list_spreadsheet_files", lambda: files)
 
     def headers(spreadsheet_id):
@@ -40,6 +43,7 @@ def _drive(monkeypatch, files, broken=()):
         return TABS
 
     monkeypatch.setattr(sync, "get_worksheet_headers", headers)
+    return napped
 
 
 class FakeConn:
@@ -52,14 +56,19 @@ class FakeConn:
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params or {}))
-        if sql is sync.READ_KNOWN:
+        if "SELECT" in sql:
             return iter(self.known)
         return self
 
     def deleted(self):
-        """삭제 쿼리가 돌았으면 그 alive 목록, 아니면 None."""
+        """삭제 쿼리가 돌았으면 그 alive 목록, 아니면 None.
+
+        내용으로 알아봅니다. `is sync.DELETE_MISSING` 으로 보면, SQL 을 손봤을 때
+        "삭제가 안 돌았다" 와 "이 하네스가 못 알아봤다" 가 구별되지 않습니다 --
+        되돌릴 수 없는 유일한 연산을 지키는 단언이 조용히 초록이 됩니다.
+        """
         for sql, params in self.calls:
-            if sql is sync.DELETE_MISSING:
+            if "DELETE" in sql:
                 return params["alive"]
         return None
 
@@ -162,3 +171,33 @@ def test_목록이_비면_지우지_않는다(monkeypatch):
     sync.main()
 
     assert conn.deleted() is None
+
+
+def test_읽기_사이에_쉰다(monkeypatch):
+    # 8/26 에 실제로 사고를 낸 경로다. 안 쉬면 94개 전량이 분당 100회를 써서
+    # 429 를 맞고, 같은 쿼터를 쓰는 사람 쪽 read_sheet 까지 같이 막힌다.
+    napped = _drive(monkeypatch, FILES)
+
+    sync.collect(FILES, {})
+
+    # 첫 읽기 전에는 안 쉰다. 시트 둘이면 그 사이 한 번.
+    assert napped == [sync.PACE_SECONDS]
+
+
+def test_건너뛴_시트는_쉬지_않는다(monkeypatch):
+    # 안 바뀐 시트는 읽기를 안 쓰므로 쿼터도 안 쓴다. 그것까지 세어 쉬면
+    # 아무것도 안 바뀐 실행이 6분씩 걸린다.
+    napped = _drive(monkeypatch, FILES)
+    known = {file["id"]: catalog.modified_at(file) for file in FILES}
+
+    sync.collect(FILES, known)
+
+    assert napped == []
+
+
+def test_페이스가_쿼터_절반을_넘지_않는다():
+    # 식을 되풀이하지 않고 성질만 본다. 누가 PACE_SECONDS 를 "정리" 해도
+    # 쿼터를 넘기면 여기서 걸린다.
+    per_minute = google_sheets.READS_PER_SHEET / sync.PACE_SECONDS * 60
+
+    assert per_minute <= google_sheets.READS_PER_MINUTE / 2

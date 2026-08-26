@@ -30,12 +30,9 @@ def _get_client() -> gspread.Client:
     재사용되지 않는다. 카탈로그 동기화는 한 번에 수십 개 시트를 훑으므로 그만큼
     쿼터를 태운다.
 
-    **BackOffHTTPClient 는 쓰지 않는다.** 429 재시도가 탐나서 한 번 넣었다가
-    뺐다. 그 클래스의 재시도 조건이 `wait <= _MAX_BACKOFF` 인데 wait 자체가
-    `min(2**n, _MAX_BACKOFF)` 라 **항상 참**이다. 즉 횟수 상한이 없고, 재귀라
-    스택도 쌓인다. 쿼터가 막힌 동안 이 프로세스의 코드 실행 워커(하나뿐이다)를
-    무기한 붙잡아 봇 넷이 같이 선다. gspread 자신도 "not production ready" 라고
-    적어 두었다. 호출 수는 batch 로 줄인다(get_worksheet_headers).
+    재시도는 붙이지 않는다. 429 는 여기서 예외가 아니라 평상시라, 물러서서
+    기다리면 코드 실행 워커(하나뿐이다)를 붙잡아 봇 넷이 같이 선다.
+    쿼터는 부르는 쪽이 READS_PER_MINUTE 로 스스로를 눌러 지킨다.
     """
     global _client
     with _client_lock:
@@ -84,11 +81,12 @@ def list_spreadsheet_files() -> list[dict]:
         params["pageToken"] = token
 
 
-# Sheets 읽기 쿼터는 **사용자당 분당 60회**고, 서비스 계정 하나가 곧 한 명이다.
-# 시트를 한 번 훑는 데 이만큼 든다 -- 여럿을 도는 쪽(sync_sheet_catalog)이 이 값으로
-# 스스로를 눌러야 한다. 여기서 재우지 않는 이유는, 그러면 사람이 부른 read_sheet 가
-# 동기화 뒤에 줄을 서기 때문이다.
-READS_PER_SHEET = 2
+# Sheets 읽기 쿼터. 서비스 계정 하나가 곧 한 명이라 이 프로세스 전체가 이 값을
+# 나눠 쓴다. 여럿을 도는 쪽(sync_sheet_catalog)이 이 둘로 스스로를 눌러야 한다.
+# 여기서 재우지 않는 이유는, 그러면 사람이 부른 read_sheet 가 동기화 뒤에 줄을
+# 서기 때문이다.
+READS_PER_MINUTE = 60
+READS_PER_SHEET = 2  # get_worksheet_headers 한 번에 드는 호출 수
 
 
 def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet:
@@ -105,20 +103,25 @@ def _worksheet(sheet: gspread.Spreadsheet, want: str | int) -> gspread.Worksheet
             숫자로만 된 탭 이름이 흔한데, 숫자를 gid 로 먼저 보면 그런 탭은 영영
             못 열고 사람은 gid 를 적은 적이 없어 원인을 알 수 없다
     """
+    text = str(want).strip()
+    tabs = sheet.worksheets()
     # int 는 링크의 #gid= 에서 왔으므로 모호하지 않다. 이것까지 이름으로 먼저
     # 풀면, gid 2025 를 가리키는 링크가 "2025" 라는 **탭**을 열어 버린다.
     if isinstance(want, int):
-        return sheet.get_worksheet_by_id(want)
-
-    text = want.strip()
-    tabs = sheet.worksheets()
-    for worksheet in tabs:
-        if worksheet.title == text:
-            return worksheet
-    if text.lstrip("-").isdigit():
         for worksheet in tabs:
-            if worksheet.id == int(text):
+            if worksheet.id == want:
                 return worksheet
+    else:
+        for worksheet in tabs:
+            if worksheet.title == text:
+                return worksheet
+        if text.lstrip("-").isdigit():
+            for worksheet in tabs:
+                if worksheet.id == int(text):
+                    return worksheet
+    # gspread 의 get_worksheet_by_id 를 안 쓰는 이유는 이 안내 때문이다. 그쪽은
+    # "id … not found" 만 던지는데, 지워진 탭을 가리키는 옛 링크가 흔해서
+    # 사람에게는 "그럼 어느 탭이 있나" 가 필요하다.
     raise ValueError(
         f"'{text}' 라는 탭이 없습니다."
         f" 이 시트의 탭: {', '.join(worksheet.title for worksheet in tabs)}"
@@ -168,7 +171,14 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     """
     http = _get_client().http_client
     metadata = http.fetch_sheet_metadata(spreadsheet_id)
-    tabs = [entry["properties"] for entry in metadata.get("sheets", [])]
+    # 숨긴 탭은 뺀다. 사람이 시트에서 감춰 둔 것을 카탈로그에 실으면 그 열 이름이
+    # query_knowledge 검색 결과로 나가고, 봇을 부를 수 있는 사람 누구나 gid 로 셀까지
+    # 읽는다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.
+    tabs = [
+        entry["properties"]
+        for entry in metadata.get("sheets", [])
+        if not entry["properties"].get("hidden")
+    ]
     if not tabs:
         return []
 

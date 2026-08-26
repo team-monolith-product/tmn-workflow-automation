@@ -204,3 +204,22 @@ def test_스킴_없이_붙여넣은_시트_링크도_읽는다(monkeypatch):
     found = locate.locate("docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit#gid=7")
 
     assert found.sheet == locate.Sheet("1hW3Yg8x99gfiLd", 7)
+
+
+def test_이름에_링크_글자가_들어가도_검색한다(monkeypatch):
+    # "http 요청 로그" 같은 시트 이름이 링크로 오인돼 검색이 막히던 자리다.
+    _files(
+        monkeypatch,
+        [{"id": "Z", "name": "http 요청 로그", "modifiedTime": "2026-08-01T00:00:00Z"}],
+    )
+
+    assert locate.locate("http 요청 로그").sheet.spreadsheet_id == "Z"
+
+
+def test_웹에_게시_링크는_ID를_e로_뽑지_않는다(monkeypatch):
+    # /d/e/2PACX-… 의 e 는 ID 가 아니라 경로다. 그대로 열면 구글 404 가 나고
+    # 사람은 또 공유 설정을 뒤진다.
+    _files(monkeypatch, FILES)
+
+    with pytest.raises(ValueError, match="웹에 게시"):
+        locate.locate("https://docs.google.com/spreadsheets/d/e/2PACX-1vTabc/pubhtml")

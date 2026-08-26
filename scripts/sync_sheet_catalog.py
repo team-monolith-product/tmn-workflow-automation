@@ -8,10 +8,9 @@
 낡은 숫자를 진실로 믿는 것이 값을 모르는 것보다 나쁩니다. 실제 값은
 execute_python_with_chart 안에서 실시간으로 읽습니다.
 
-**전역 커서를 두지 않습니다.** Drive 목록은 어차피 매번 전량으로 오고,
-아낄 수 있는 것은 시트마다 드는 머리행 읽기뿐입니다. 그 판단에 필요한 값은
-이미 시트별로 있습니다 -- 지난번에 적재한 modifiedTime 이 item.source_updated_at
-에 들어 있어서, 그것과 같은 파일만 건너뛰면 됩니다.
+**시트마다 지난번 modifiedTime 과 대조해 바뀐 것만 읽습니다.** 그 값은 이미
+item.source_updated_at 에 들어 있습니다. Drive 목록은 어차피 매번 전량으로 오니
+아낄 수 있는 것은 시트마다 드는 머리행 읽기뿐입니다.
 
 시트별로 보는 덕에 **실패한 시트는 저절로 재시도됩니다.** 저장된 값이 갱신되지
 않았으니 다음 실행에도 후보로 올라옵니다. 못 고치는 시트가 하나 있어도 나머지는
@@ -34,6 +33,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from api.google_sheets import (
+    READS_PER_MINUTE,
     READS_PER_SHEET,
     get_worksheet_headers,
     list_spreadsheet_files,
@@ -43,9 +43,14 @@ from service.knowledge.ingest import upsert_item
 from service.knowledge.register import upsert_source
 from service.sheets import catalog
 
-# Sheets 읽기 쿼터는 사용자당 분당 60회고 서비스 계정 하나가 곧 한 명입니다.
-# 사람이 부르는 read_sheet 가 쓸 몫을 남겨야 하므로 절반만 씁니다.
-PACE_SECONDS = 60.0 / (30 / READS_PER_SHEET)
+# 쿼터의 절반만 씁니다. 나머지는 사람이 부르는 read_sheet 몫입니다 -- 같은 계정,
+# 같은 버킷이라 여기서 다 먹으면 봇이 시트를 못 읽습니다.
+SHEETS_PER_MINUTE = READS_PER_MINUTE / 2 / READS_PER_SHEET
+PACE_SECONDS = 60.0 / SHEETS_PER_MINUTE
+
+# dry-run 은 적재를 안 하는 확인용입니다. 전량을 훑으면 가장 비싼 실행이 되고,
+# 아끼려던 그 쿼터를 확인하느라 씁니다. 최근 수정 순 앞부분만 봅니다.
+DRY_RUN_SHEETS = 10
 
 # 카탈로그는 드라이브 전체가 대상이라 채널·페이지처럼 여럿으로 나뉘지 않습니다.
 # data_source 한 행이 "서비스 계정이 보는 스프레드시트 전부" 를 가리킵니다.
@@ -112,13 +117,15 @@ def main(dry_run: bool = False, full: bool = False) -> None:
     """카탈로그를 동기화합니다.
 
     Args:
-        dry_run: 적재하지 않고 무엇이 들어갈지만 출력. 언제나 전량이다
+        dry_run: 적재하지 않고 무엇이 들어갈지만 출력. 앞 DRY_RUN_SHEETS 개만 본다
         full: 안 바뀐 시트까지 전부 다시 읽는다
     """
     load_dotenv()
 
     if dry_run:
         # DB 를 건드리지 않는다. 구글 쪽만 확인하는 용도라 DB 가 없는 곳에서도 돈다.
+        # 커서가 없으니 전량이 대상인데, 적재도 안 하는 확인용이 가장 비싼 실행이
+        # 되면 안 된다 -- 아래에서 앞부분만 자른다.
         source_id, known = 0, {}
     else:
         with connect() as conn:
@@ -135,9 +142,13 @@ def main(dry_run: bool = False, full: bool = False) -> None:
             )
 
     files = list_spreadsheet_files()
+    total = len(files)
+    if dry_run:
+        files = files[:DRY_RUN_SHEETS]
     collected, failed, skipped = collect(files, known)
     print(
-        f"목록 {len(files)}개 · 훑음 {len(collected)}"
+        f"목록 {total}개 · 훑음 {len(collected)}"
+        + (f" (dry-run 이라 최근 {len(files)}개만)" if dry_run else "")
         + (f" · 그대로 {skipped}" if skipped else "")
         + (f" · 실패 {len(failed)}" if failed else "")
     )
@@ -146,11 +157,9 @@ def main(dry_run: bool = False, full: bool = False) -> None:
         catalog.build_row(source_id, item["file"], item["tabs"]) for item in collected
     ]
     if dry_run:
-        for row in rows[:10]:
+        for row in rows:
             print(f"\n· {row['title']}  id={row['external_id']}")
             print("  " + row["raw_text"].replace("\n", "\n  "))
-        if len(rows) > 10:
-            print(f"\n… 외 {len(rows) - 10}개")
         print("\n(dry-run — 적재하지 않음)")
         return
 

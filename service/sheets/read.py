@@ -91,22 +91,42 @@ def _column_of(
         int | None: 열 번호. 못 찾으면 None
 
     Raises:
-        AmbiguousColumn: 이름이 서로 다른 열이 여럿 걸렸을 때
+        AmbiguousColumn: 하나로 좁혀지지 않을 때
     """
     if not want:
         return None
+    # 전량으로 읽으면 유일화한 이름이 키가 되므로, 그것을 그대로 다시 넘기는
+    # 경로가 있습니다. 그 이름이 가리키는 열을 미리 잡아 둡니다.
+    alias = unique.index(want) if want in unique else None
+
     # 시트 머리행이 "휴대전화 번호" 처럼 길어서 사람은 "전화" 로 부릅니다.
     # 정확히 같은 것을 먼저 보고, 없을 때만 이름을 포함하는 열로 넓힙니다.
     hits = [i for i, head in enumerate(raw_header) if head == want]
     if not hits:
-        # 전량으로 한 번 읽어 키를 본 뒤 열을 좁혀 다시 부르는 것이 에이전트가
-        # 밟는 길입니다. 그때 손에 든 이름이 "성함_2"·"열2" 라서, 원본 머리행만
-        # 뒤지면 방금 자기가 받은 이름이 "그런 열 없습니다" 로 거절됩니다.
-        hits = [i for i, head in enumerate(unique) if head == want]
-    if not hits:
+        if alias is not None:
+            # 원본에 없는 이름이니 겹칠 것도 없습니다.
+            return alias
         hits = [i for i, head in enumerate(raw_header) if want in head]
     if not hits:
         return None
+
+    hit = _narrow(values, raw_header, hits, want)
+    if alias is not None and alias != hit and _filled(values, alias):
+        # 시트에 진짜 "성함_2" 열이 있는데, 두 번째 "성함" 을 유일화한 이름도
+        # "성함_2" 인 경우. 둘 다 값이 있으면 어느 쪽을 부른 것인지 알 수 없다 --
+        # 조용히 하나를 고르면 전량으로 읽었을 때와 **다른 열**이 나간다.
+        raise AmbiguousColumn(
+            f"'{want}' 가 시트 머리행에도 있고, 열을 안 고르고 읽었을 때"
+            f" {alias + 1}번 열에 붙는 이름이기도 합니다."
+            " 어느 쪽인지 알 수 없으니 열 이름을 시트에서 고쳐 주십시오."
+        )
+    return hit
+
+
+def _narrow(
+    values: list[list[Any]], raw_header: list[str], hits: list[int], want: str
+) -> int:
+    """걸린 열이 여럿일 때 하나로 좁힙니다. 못 좁히면 사람에게 되돌립니다."""
     if len(hits) == 1:
         return hits[0]
     if len({raw_header[i] for i in hits}) > 1:
@@ -117,10 +137,18 @@ def _column_of(
             f" {', '.join(sorted({raw_header[i] for i in hits}))}"
             " / 어느 열인지 정확히 적어 주십시오."
         )
-    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 값이 든 쪽이 진짜다.
-    # 같으면 앞엣것(원래 순서를 흔들지 않는다). 이름이 같으므로 사람에게
-    # 되물어도 답이 없다 -- "휴대전화 번호 와 휴대전화 번호 중 무엇입니까".
-    return max(hits, key=lambda i: (_filled(values, i), -i))
+    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 유령은 비어 있으므로
+    # 값이 든 쪽이 진짜다. 이름이 같아 사람에게 되물어도 답이 없다.
+    filled = [i for i in hits if _filled(values, i)]
+    if len(filled) > 1:
+        # 값이 든 열이 둘이면 유령이 아니라 서로 다른 열이다. 조용히 고르면
+        # 절반의 사람이 명단에서 빠진다.
+        raise AmbiguousColumn(
+            f"'{want}' 라는 열이 {len(hits)}개인데 그중 {len(filled)}개에 값이"
+            " 있습니다. 폼 유령 열이 아니라 서로 다른 열이라 고를 수 없습니다"
+            " / 시트에서 열 이름을 구분해 주십시오."
+        )
+    return filled[0] if filled else hits[0]
 
 
 def pick(

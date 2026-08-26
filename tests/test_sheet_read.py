@@ -230,16 +230,45 @@ def test_유일화한_이름이_시트에_이미_있어도_안_겹친다():
 
 def test_전량으로_받은_이름을_그대로_다시_부를_수_있다():
     # 에이전트는 전량으로 한 번 읽어 키를 보고, 열을 좁혀 다시 부른다. 그때
-    # 손에 든 이름이 "성함_2"·"열2" 인데 원본 머리행에는 없는 이름이라,
-    # 방금 자기가 받은 키가 "그런 열 없습니다" 로 거절되던 자리다.
-    values = [["성함", "", "성함"], ["가", "x", "나"]]
+    # 손에 든 이름이 "열2" 처럼 원본 머리행에 없는 이름이라, 방금 자기가 받은
+    # 키가 "그런 열 없습니다" 로 거절되던 자리다.
+    values = [["성함", "", "전화"], ["가", "x", "010-1"]]
 
     header, _ = read.pick(values, [])
-    assert header == ["성함", "열2", "성함_2"]
+    assert header == ["성함", "열2", "전화"]
 
-    for name, expected in zip(header, ["가", "x", "나"]):
+    for name, expected in zip(header, ["가", "x", "010-1"]):
         got, rows = read.pick(values, [name])
         assert got == [name] and rows[0] == [expected]
+
+
+def test_유령_열의_유일화한_이름도_다시_부를_수_있다():
+    # 앞 열이 비어 있으면 유령이다. 전량 읽기는 뒤엣것을 "성함_2" 로 준다.
+    values = [["성함", "성함"], ["", "이진선"], ["", "김지수"]]
+
+    header, _ = read.pick(values, [])
+    got, rows = read.pick(values, ["성함_2"])
+
+    assert header == ["성함", "성함_2"]
+    assert got == ["성함_2"] and [row[0] for row in rows] == ["이진선", "김지수"]
+
+
+def test_같은_이름_두_열에_다_값이_있으면_고르지_않는다():
+    # 유령 열은 비어 있다. 둘 다 값이 있으면 서로 다른 열이라, 조용히 하나를
+    # 고르면 절반의 사람이 명단에서 빠진다.
+    values = [["성함", "성함"], ["가", ""], ["", "나"]]
+
+    with pytest.raises(read.AmbiguousColumn, match="값이"):
+        read.pick(values, ["성함"])
+
+
+def test_유일화한_이름이_다른_열과_부딪히면_고르지_않는다():
+    # 시트에 진짜 "성함_2" 열이 있는데, 두 번째 "성함" 을 유일화한 이름도
+    # "성함_2" 다. 조용히 고르면 전량으로 읽었을 때와 다른 열이 나간다.
+    values = [["성함", "성함", "성함_2"], ["", "김철수", "010-1"]]
+
+    with pytest.raises(read.AmbiguousColumn, match="붙는 이름"):
+        read.pick(values, ["성함_2"])
 
 
 def test_없는_열_안내에_유일화한_이름을_보여준다():
