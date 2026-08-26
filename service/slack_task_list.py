@@ -88,7 +88,7 @@ class ChannelTaskList:
         Returns:
             list[dict]: 셀 목록
         """
-        fields = [
+        cells = [
             {
                 "column_id": self.name_column_id,
                 "rich_text": [
@@ -113,12 +113,12 @@ class ChannelTaskList:
         ]
 
         if assignee:
-            fields.append({"column_id": self.assignee_column_id, "user": [assignee]})
+            cells.append({"column_id": self.assignee_column_id, "user": [assignee]})
 
         if due_date:
-            fields.append({"column_id": self.due_date_column_id, "date": [due_date]})
+            cells.append({"column_id": self.due_date_column_id, "date": [due_date]})
 
-        return fields
+        return cells
 
     def title_of(self, item: dict) -> str:
         """항목의 제목을 읽습니다.
