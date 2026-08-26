@@ -180,9 +180,7 @@ def get_worksheet_values(
             시트 링크에 #gid= 가 없으면 탭을 알 수 없다.
         value_render_option: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA"
             (https://developers.google.com/sheets/api/reference/rest/v4/ValueRenderOption)
-        account: 어느 서비스 계정으로 읽을지. 기본은 원래 쓰던 계정이라 기존
-            호출부(discord_post_completion_notice)는 그대로 돈다. 봇이 읽는
-            시트는 read_sheet 가 OPERATING_ACCOUNT 를 명시해 넘긴다
+        account: 어느 서비스 계정으로 읽을지. 기본은 원래 쓰던 계정이다
     """
     sheet = _get_client(account).open_by_key(spreadsheet_id)
     tab = sheet.get_worksheet(0) if worksheet is None else _worksheet(sheet, worksheet)

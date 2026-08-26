@@ -299,8 +299,6 @@ def read_sheet(
     if found.sheet is None:
         raise ValueError(locate.render_candidates(found.candidates))
 
-    # 카탈로그에 실린 시트를 읽는 것이므로 카탈로그와 같은 계정이어야 한다.
-    # 다른 계정으로 읽으면 query_knowledge 로 찾은 시트가 "권한 없음" 으로 터진다.
     values = get_worksheet_values(
         found.sheet.spreadsheet_id,
         found.sheet.worksheet_id if tab is None else tab,
