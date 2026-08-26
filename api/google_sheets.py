@@ -22,12 +22,22 @@ SCOPES = [
 # 구글이 답을 안 할 때 코드 실행 워커를 무기한 붙잡지 않게. gspread 기본은 None 이다.
 TIMEOUT_SECONDS = 30
 
-_client: gspread.Client | None = None
+# 서비스 계정이 둘이다. 계정이 곧 **볼 수 있는 시트의 범위**라 하나로 합치면
+# 한쪽 용도의 공유 범위가 다른 쪽에 그대로 열린다.
+#
+# DEFAULT 는 원래 쓰던 계정이다. discord_post_completion_notice 가 읽는 학교
+# 일정 시트가 여기 공유되어 있다.
+DEFAULT_ACCOUNT = "GOOGLE_SERVICE_ACCOUNT_JSON"
+# OPERATING 은 사업 운영 시트용 계정이다. 카탈로그에 실리고 봇이 read_sheet 로
+# 읽는 시트가 이 계정에 공유된 것들이다. Drive API 도 이쪽 프로젝트에만 켜져 있다.
+OPERATING_ACCOUNT = "OPERATING_SHEET_SERVICE_ACCOUNT_JSON"
+
+_clients: dict[str, gspread.Client] = {}
 _client_lock = threading.Lock()
 
 
-def _get_client() -> gspread.Client:
-    """gspread 클라이언트를 만들어 재사용한다.
+def _get_client(account: str = DEFAULT_ACCOUNT) -> gspread.Client:
+    """gspread 클라이언트를 계정마다 하나씩 만들어 재사용한다.
 
     호출마다 만들면 시트 하나당 OAuth 토큰 grant 가 한 번씩 더 나가고 커넥션도
     재사용되지 않는다. 카탈로그 동기화는 한 번에 수십 개 시트를 훑으므로 그만큼
@@ -40,15 +50,22 @@ def _get_client() -> gspread.Client:
     **타임아웃은 반드시 건다.** gspread 는 기본이 None 이고 requests 에서 None 은
     무한 대기다. 재시도를 뺀 이유가 워커를 붙잡지 않으려는 것인데, 구글이 답을
     안 하면 타임아웃 없는 요청 하나가 똑같이 그 워커를 무기한 붙잡는다.
+
+    Args:
+        account: 자격증명이 든 환경변수 이름. DEFAULT_ACCOUNT 또는 OPERATING_ACCOUNT
+
+    Raises:
+        KeyError: 그 환경변수가 없을 때. 폴백하지 않는다 -- 조용히 다른 계정으로
+            돌면 "왜 그 시트가 안 보이지" 를 며칠 뒤에 겪는다
     """
-    global _client
     with _client_lock:
-        if _client is None:
-            info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+        if account not in _clients:
+            info = json.loads(os.environ[account])
             credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
-            _client = gspread.authorize(credentials)
-            _client.set_timeout(TIMEOUT_SECONDS)
-        return _client
+            client = gspread.authorize(credentials)
+            client.set_timeout(TIMEOUT_SECONDS)
+            _clients[account] = client
+        return _clients[account]
 
 
 SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
@@ -68,7 +85,7 @@ def list_spreadsheet_files() -> list[dict]:
     Returns:
         list[dict]: id·name·modifiedTime·webViewLink. 최근 수정 순
     """
-    client = _get_client()
+    client = _get_client(OPERATING_ACCOUNT)
     params = {
         "q": f"mimeType='{SPREADSHEET_MIME}' and trashed=false",
         "pageSize": 1000,
@@ -152,6 +169,7 @@ def get_worksheet_values(
     spreadsheet_id: str,
     worksheet: str | int | None = None,
     value_render_option: str = "FORMATTED_VALUE",
+    account: str = DEFAULT_ACCOUNT,
 ) -> list[list]:
     """
     워크시트의 모든 셀 값을 반환한다.
@@ -162,8 +180,9 @@ def get_worksheet_values(
             시트 링크에 #gid= 가 없으면 탭을 알 수 없다.
         value_render_option: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA"
             (https://developers.google.com/sheets/api/reference/rest/v4/ValueRenderOption)
+        account: 어느 서비스 계정으로 읽을지. 기본은 원래 쓰던 계정이다
     """
-    sheet = _get_client().open_by_key(spreadsheet_id)
+    sheet = _get_client(account).open_by_key(spreadsheet_id)
     tab = sheet.get_worksheet(0) if worksheet is None else _worksheet(sheet, worksheet)
     return tab.get_all_values(value_render_option=value_render_option)
 
@@ -189,7 +208,7 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     Returns:
         list[dict]: id·title·header
     """
-    http = _get_client().http_client
+    http = _get_client(OPERATING_ACCOUNT).http_client
     metadata = http.fetch_sheet_metadata(spreadsheet_id)
     # 숨긴 탭은 뺀다. 사람이 감춰 둔 탭의 열 이름이 query_knowledge 검색 결과로
     # 나가면 안 된다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.

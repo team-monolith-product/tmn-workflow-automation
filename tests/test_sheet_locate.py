@@ -120,7 +120,9 @@ def test_빈_값은_무엇이_필요한지_말한다(monkeypatch):
 def test_읽으면_행이_dict로_온다(monkeypatch):
     # pd.DataFrame(rows) 한 줄로 표가 되어야 한다.
     _files(monkeypatch, FILES[2:])
-    monkeypatch.setattr(read, "get_worksheet_values", lambda sid, tab=None: VALUES)
+    monkeypatch.setattr(
+        read, "get_worksheet_values", lambda sid, tab=None, **kw: VALUES
+    )
 
     rows = read.read_sheet("출석부")
 
@@ -132,14 +134,16 @@ def test_읽을_때는_자르지_않는다(monkeypatch):
     # 결과가 컨텍스트가 아니라 실행 메모리로 간다. 자르면 잘린 표로 통계를 낸다.
     big = [["성함"]] + [[f"이름{i}"] for i in range(1, 3001)]
     _files(monkeypatch, FILES[2:])
-    monkeypatch.setattr(read, "get_worksheet_values", lambda sid, tab=None: big)
+    monkeypatch.setattr(read, "get_worksheet_values", lambda sid, tab=None, **kw: big)
 
     assert len(read.read_sheet("출석부")) == 3000
 
 
 def test_읽을_때_열을_고른다(monkeypatch):
     _files(monkeypatch, FILES[2:])
-    monkeypatch.setattr(read, "get_worksheet_values", lambda sid, tab=None: VALUES)
+    monkeypatch.setattr(
+        read, "get_worksheet_values", lambda sid, tab=None, **kw: VALUES
+    )
 
     rows = read.read_sheet("출석부", columns="성함, 전화")
 
@@ -151,7 +155,7 @@ def test_읽을_때_열을_고른다(monkeypatch):
 def test_tab을_주면_그대로_넘긴다(monkeypatch):
     seen = {}
 
-    def fetch(sid, tab=None):
+    def fetch(sid, tab=None, **kw):
         seen["tab"] = tab
         return VALUES
 
@@ -168,7 +172,7 @@ def test_tab에_탭_이름을_줘도_그대로_넘긴다(monkeypatch):
     # 카탈로그가 gid 와 탭 이름을 나란히 보여주므로 이름을 넣는 쪽이 자연스럽다.
     seen = {}
 
-    def fetch(sid, tab=None):
+    def fetch(sid, tab=None, **kw):
         seen["tab"] = tab
         return VALUES
 
