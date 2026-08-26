@@ -189,3 +189,43 @@ print(f"Processed {len(data_rows)} rows")
 
         # 슬랙 업로드가 호출되었는지 확인
         mock_slack_client.files_upload_v2.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_주입한_코루틴을_코드가_부른다():
+    # 명단을 print 로 내보내 다시 받아쓰면 상한에 걸려 잘린다. 코드가 직접
+    # 부를 수 있어야 128명이 카드 한 장으로 간다.
+    받은목록 = []
+
+    async def draft_sms(content, targets, send_at=""):
+        받은목록.append((content, targets))
+        return f"{len(targets)}명 대상 초안을 올렸습니다."
+
+    tool = get_execute_python_tool(coroutines={"draft_sms": draft_sms})
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                "대상 = [{'to': f'010-0000-{i:04d}', 'name': f'교사{i}'}"
+                " for i in range(128)]\n"
+                "print(draft_sms(content='[*이름*] 선생님', targets=대상))\n"
+            )
+        }
+    )
+
+    assert "128명 대상 초안을 올렸습니다." in result
+    assert len(받은목록) == 1
+    assert len(받은목록[0][1]) == 128
+
+
+@pytest.mark.asyncio
+async def test_draft_sms_를_주입해야_설명에_나온다():
+    # 없는 함수를 알려 주면 코드가 부르고 NameError 로 끝난다.
+    async def draft_sms(content, targets, send_at=""):
+        return ""
+
+    열린도구 = get_execute_python_tool(coroutines={"draft_sms": draft_sms})
+    닫힌도구 = get_execute_python_tool()
+
+    assert "draft_sms" in 열린도구.description
+    assert "draft_sms" not in 닫힌도구.description

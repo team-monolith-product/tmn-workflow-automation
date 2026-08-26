@@ -22,6 +22,26 @@ from service.sheets.read import read_sheet
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
 
+DRAFT_SMS_GUIDE = """
+
+        **문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서
+        부를 수 있습니다. targets 는 `to`(번호)가 필수이고 `name`·`var1`~`var8` 로
+        치환값을 주는 dict 목록입니다. 문안의 치환 태그는 이름이 `[*이름*]`,
+        나머지가 `[*1*]`~`[*8*]` 입니다.
+
+        **명단을 print 해서 옮겨 적지 말고 코드가 직접 부르십시오.** 수백 명을
+        도구 인자로 다시 쓰면 중간에서 잘리고, 잘린 만큼 카드가 여러 장으로
+        갈라집니다. 갈라지면 사람이 [보내기] 를 여러 번 눌러야 하고 한 장을
+        빠뜨리면 그 사람들은 못 받습니다. 카드 사이의 중복 번호도 아무도 못 봅니다.
+
+        ```python
+        대상 = [{"to": t, "name": n} for t, n in 미신청자]
+        print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))
+        ```
+
+        한 번 부르면 카드 한 장입니다. 나눠 보낼 이유가 없으면 한 번만 부르십시오.
+        카드는 초안일 뿐이고 사람이 [보내기] 를 눌러야 실제로 나갑니다."""
+
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
 # 이 워커 하나를 나눠 쓰므로, 서로 몇 초씩 막히기 시작하면 시트 전용 풀로 가른다.
@@ -112,6 +132,7 @@ def get_execute_python_tool(
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
+    coroutines: dict[str, Any] | None = None,
 ):
     """
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
@@ -120,6 +141,9 @@ def get_execute_python_tool(
         thread_ts: Slack 스레드 타임스탬프
         slack_client: Slack WebClient 인스턴스
         channel: Slack 채널 ID
+        coroutines: 코드가 부를 수 있게 열어 줄 코루틴 함수들. 이름이 그대로
+            코드 안의 이름이 되고, 동기 진입점으로 감싸 메인 루프에서 실행한다.
+            수백 명짜리 명단을 도구 인자로 다시 받아쓰지 않으려면 이 길이 필요하다
 
     Returns:
         execute_python tool
@@ -213,11 +237,22 @@ def get_execute_python_tool(
                 athena.execute_and_wait(query, database, max_wait_seconds), loop
             ).result()
 
+        def bridge(coroutine_function):
+            """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다."""
+
+            def call(*args, **kwargs):
+                return asyncio.run_coroutine_threadsafe(
+                    coroutine_function(*args, **kwargs), loop
+                ).result()
+
+            return call
+
         # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 매 호출 만들 필요가 없다.
         # execute_athena_query 만 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
         injected = {
             "execute_athena_query": execute_athena_query,
             "read_sheet": read_sheet,
+            **{name: bridge(fn) for name, fn in (coroutines or {}).items()},
         }
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
@@ -253,5 +288,8 @@ def get_execute_python_tool(
         if stdout_output:
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
+
+    if coroutines and "draft_sms" in coroutines:
+        execute_python.description += DRAFT_SMS_GUIDE
 
     return execute_python

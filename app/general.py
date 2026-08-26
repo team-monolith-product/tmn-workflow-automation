@@ -123,17 +123,25 @@ async def _build_tools(
     if project_ds_id:
         notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
 
+    sms_tools = get_sms_tools(client, channel, thread_ts)
+    draft_sms = sms_tools[0]
+
     return (
         [search_tool, get_web_page_from_url]
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
-        + get_sms_tools(client, channel, thread_ts)
+        + sms_tools
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
         # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
+        # draft_sms 를 코드 쪽에도 열어 준다. 명단이 컨텍스트를 거치면 상한에
+        # 걸려 잘리고, 잘린 만큼 카드가 갈라진다.
         + [
             get_execute_python_tool(
-                thread_ts=thread_ts, slack_client=client, channel=channel
+                thread_ts=thread_ts,
+                slack_client=client,
+                channel=channel,
+                coroutines={"draft_sms": draft_sms.coroutine},
             )
         ]
     )
