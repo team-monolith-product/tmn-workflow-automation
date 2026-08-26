@@ -102,7 +102,7 @@ def test_숨긴_탭은_카탈로그에_안_싣는다(monkeypatch):
     class FakeClient:
         http_client = FakeHTTP()
 
-    monkeypatch.setattr(google_sheets, "_get_client", lambda: FakeClient())
+    monkeypatch.setattr(google_sheets, "_get_client", lambda account=None: FakeClient())
 
     tabs = google_sheets.get_worksheet_headers("X")
 
