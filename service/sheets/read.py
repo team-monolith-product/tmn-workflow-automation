@@ -61,14 +61,9 @@ def unique_header(header: list[str]) -> list[str]:
     return out
 
 
-def _filled(values: list[list[Any]], index: int) -> int:
-    """그 열에 값이 든 행이 몇 개인지 셉니다."""
-    return sum(1 for row in values[1:] if index < len(row) and _clean(row[index]))
-
-
 def _column_of(
     values: list[list[Any]], raw_header: list[str], unique: list[str], want: str
-) -> int | None:
+) -> list[int] | None:
     """이름으로 열 하나를 고릅니다. 같은 이름이 여럿이면 값이 든 열을 고릅니다.
 
     **폼 응답 시트는 같은 머리행이 두 벌 있는 일이 흔합니다.** 폼에서 문항을
@@ -85,10 +80,10 @@ def _column_of(
         want: 찾는 열 이름
 
     Returns:
-        int | None: 열 번호. 못 찾으면 None
+        list[int] | None: 한 열로 묶어 읽을 열 번호들. 못 찾으면 None
 
     Raises:
-        AmbiguousColumn: 하나로 좁혀지지 않을 때
+        AmbiguousColumn: 하나로 묶이지 않을 때
     """
     if not want:
         return None
@@ -102,32 +97,32 @@ def _column_of(
     if not hits:
         if alias is not None:
             # 원본에 없는 이름이니 겹칠 것도 없습니다.
-            return alias
+            return [alias]
         hits = [i for i, head in enumerate(raw_header) if want in head]
     if not hits:
         return None
 
-    hit = _narrow(values, raw_header, hits, want)
-    if alias is not None and alias not in hits:
+    group = _group(values, raw_header, hits, want)
+    if alias is not None and alias not in group:
         # 시트에 진짜 "성함_2" 열이 있는데, 두 번째 "성함" 을 유일화한 이름도
         # "성함_2" 인 경우. 조용히 고르면 전량으로 읽었을 때와 **다른 열**이 나간다.
         #
-        # alias 가 hits 안에 있으면 충돌이 아닙니다 -- 같은 이름 후보 중 하나를
-        # 가리키는 것이라 바로 위 _narrow 가 이미 판정했습니다.
+        # alias 가 group 안에 있으면 충돌이 아닙니다 -- 같은 이름 후보 중 하나를
+        # 가리키는 것이라 아래 _group 이 이미 판정했습니다.
         raise AmbiguousColumn(
-            f"'{want}' 가 시트 머리행에도 있고({hit + 1}번 열), 열을 안 고르고"
+            f"'{want}' 가 시트 머리행에도 있고({group[0] + 1}번 열), 열을 안 고르고"
             f" 읽었을 때 {alias + 1}번 열에 붙는 이름이기도 합니다."
-            f" 머리행 쪽을 부르려면 '{unique[hit]}' 로 적어 주십시오."
+            f" 머리행 쪽을 부르려면 '{unique[group[0]]}' 로 적어 주십시오."
         )
-    return hit
+    return group
 
 
-def _narrow(
+def _group(
     values: list[list[Any]], raw_header: list[str], hits: list[int], want: str
-) -> int:
-    """걸린 열이 여럿일 때 하나로 좁힙니다. 못 좁히면 사람에게 되돌립니다."""
+) -> list[int]:
+    """걸린 열을 한 열로 묶습니다. 못 묶으면 사람에게 되돌립니다."""
     if len(hits) == 1:
-        return hits[0]
+        return hits
     if len({raw_header[i] for i in hits}) > 1:
         # 이름이 서로 다른 열이 걸렸다. 시트가 모호하면 고르지 않는데(locate)
         # 열이라고 다를 이유가 없다 -- 잘못 고르면 엉뚱한 사람 번호로 문자가 나간다.
@@ -136,25 +131,23 @@ def _narrow(
             f" {', '.join(sorted({raw_header[i] for i in hits}))}"
             " / 어느 열인지 정확히 적어 주십시오."
         )
-    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 이름이 같아 사람에게
-    # 되물어도 답이 없으니 여기서 갈라야 한다.
-    filled = [i for i in hits if _filled(values, i)]
-    if len(filled) <= 1:
-        return filled[0] if filled else hits[0]
 
-    # **유령 열이 비어 있다고 단정하면 안 된다.** 폼에서 문항을 지우기 전에 들어온
-    # 응답은 옛 열에 그대로 남는다. 대신 두 열은 행 방향으로 갈린다 -- 옛 응답은
-    # 옛 열에만, 새 응답은 새 열에만 있어 **같은 행에서 둘 다 차는 일이 없다.**
-    # 한 행에서라도 둘 다 차 있으면 유령이 아니라 서로 다른 열이다.
-    if any(sum(1 for i in filled if _cell(row, i)) > 1 for row in values[1:]):
+    # 이름이 **완전히 같은** 중복은 폼 유령 열이다. 폼에서 문항을 지웠다 다시
+    # 만들면 옛 응답은 옛 열에, 새 응답은 새 열에 쌓여 **같은 행에서 둘 다 차는
+    # 일이 없다.** 한 행에서라도 둘 다 차 있으면 유령이 아니라 서로 다른 열이다.
+    if any(sum(1 for i in hits if _cell(row, i)) > 1 for row in values[1:]):
         raise AmbiguousColumn(
-            f"'{want}' 라는 열이 {', '.join(str(i + 1) for i in filled)}번에 있고"
+            f"'{want}' 라는 열이 {', '.join(str(i + 1) for i in hits)}번에 있고"
             " 한 행에 둘 이상 값이 차 있습니다. 폼 유령 열이 아니라 서로 다른"
             " 열이라 고를 수 없습니다. 뒤엣것은 유일화한 이름(예: 이름_2)으로"
             " 부를 수 있고, 앞엣것이 필요하면 columns 없이 전량으로 읽으십시오."
         )
-    # 갈렸으니 한 열이 폼 수정으로 쪼개진 것이다. 마지막에 값이 찬 쪽이 살아 있다.
-    return max(filled, key=lambda i: _last_filled_row(values, i))
+
+    # 행마다 한쪽만 차 있으니 **고르지 않고 합칩니다.** 어느 쪽이 살아 있는지를
+    # 순서로 추측하면(뒤엣것·마지막에 찬 것) 이름순으로 정렬해 둔 시트에서
+    # 죽은 열을 골라 산 사람이 빈칸이 됩니다 -- 예외도 안 나고 조용합니다.
+    # 위 검사가 겹침이 없음을 이미 증명했으므로 합쳐도 잃는 값이 없습니다.
+    return hits
 
 
 def _cell(row: list[Any], index: int) -> str:
@@ -162,12 +155,13 @@ def _cell(row: list[Any], index: int) -> str:
     return _clean(row[index]) if index < len(row) else ""
 
 
-def _last_filled_row(values: list[list[Any]], index: int) -> int:
-    """그 열에 값이 마지막으로 찬 행 번호. 없으면 0."""
-    for number in range(len(values) - 1, 0, -1):
-        if _cell(values[number], index):
-            return number
-    return 0
+def _merge(row: list[Any], group: list[int]) -> str:
+    """묶인 열에서 값이 있는 첫 칸. 유령 열은 행마다 한쪽만 차 있습니다."""
+    for index in group:
+        cell = _cell(row, index)
+        if cell:
+            return cell
+    return ""
 
 
 def pick(
@@ -200,31 +194,34 @@ def pick(
     unique = unique_header(raw_header)
     if not columns:
         # 전부 달라고 했으니 시트에 있는 이름을 그대로 쓰되, 겹치는 것만 번호를 답니다.
-        return unique, _rows(values, range(len(raw_header)))
+        # 여기서는 합치지 않습니다 -- 유일화한 이름으로 열이 하나씩 다 보입니다.
+        return unique, _rows(values, [[i] for i in range(len(raw_header))])
 
-    keep: list[int] = []
+    keep: list[list[int]] = []
     header: list[str] = []
     missing: list[str] = []
     taken: dict[int, str] = {}
     for name in columns:
         want = _clean(name)
-        hit = _column_of(values, raw_header, unique, want)
-        if hit is None:
+        group = _column_of(values, raw_header, unique, want)
+        if group is None:
             missing.append(name)
             continue
-        if hit in taken:
-            if taken[hit] == want:
+        # 묶음은 원본 이름이 같은 열끼리라, 첫 번째 열이 그 묶음의 신원입니다.
+        first = group[0]
+        if first in taken:
+            if taken[first] == want:
                 # 같은 이름을 두 번 적었다. 카탈로그의 머리행 목록을 그대로 넘기면
                 # 유령 열 때문에 이렇게 된다. 접는다.
                 continue
             # 이름이 다른데 같은 열이면 사람이 의도한 바가 아니다. 그냥 두면
             # 머리행에 같은 이름이 두 번 들어가 행을 dict 로 접을 때 하나가 사라진다.
             raise AmbiguousColumn(
-                f"'{taken[hit]}' 와 '{want}' 이 같은 열({raw_header[hit]})을"
+                f"'{taken[first]}' 와 '{want}' 이 같은 열({raw_header[first]})을"
                 " 가리킵니다 / 열마다 다른 이름을 하나씩 적어 주십시오."
             )
-        taken[hit] = want
-        keep.append(hit)
+        taken[first] = want
+        keep.append(group)
         header.append(want)
     if missing:
         # 유일화한 이름을 보여줍니다. 원본을 보여주면 "시트의 열: 성함, 성함" 이
@@ -236,8 +233,8 @@ def pick(
     return header, _rows(values, keep)
 
 
-def _rows(values: list[list[Any]], keep: Iterable[int]) -> list[list[str]]:
-    """고른 열만 남기고, **통째로 빈 행만** 버립니다.
+def _rows(values: list[list[Any]], keep: Iterable[list[int]]) -> list[list[str]]:
+    """묶음마다 한 칸씩 뽑고, **통째로 빈 행만** 버립니다.
 
     고른 칸이 비었다고 버리면 같은 탭인데 어느 열을 골랐느냐로 행 수가 갈립니다.
     실측(8/26)에 297행짜리 시트가 성함만 고르면 197행, 발송여부를 끼면 297행이
@@ -249,7 +246,7 @@ def _rows(values: list[list[Any]], keep: Iterable[int]) -> list[list[str]]:
     """
     keep = list(keep)
     return [
-        [_cell(row, i) for i in keep]
+        [_merge(row, group) for group in keep]
         for row in values[1:]
         if any(_clean(cell) for cell in row)
     ]
@@ -262,6 +259,10 @@ def read_sheet(
 
     에이전트가 쓰는 코드에 이 이름으로 주입됩니다. pd.DataFrame(rows) 한 줄이면
     표가 됩니다.
+
+    **행은 시트에 있는 그대로입니다.** 통째로 빈 행만 버리므로, 고른 열이 빈 행도
+    들어옵니다. 그래야 어느 열을 골랐든 행 수가 같고, 두 번 나눠 읽어 짝지어도
+    어긋나지 않습니다. 명단을 뽑을 때 빈 이름은 부르는 쪽에서 거르십시오.
 
     **자르지 않습니다.** 결과가 컨텍스트가 아니라 실행 프로세스의 메모리로 가므로
     상한을 둘 이유가 없고, 오히려 두면 잘린 표로 통계를 내게 됩니다.
