@@ -85,6 +85,11 @@ squads:
     notion_db: infra
     pm_slack_user_id: "U02PFUPCJNM"  # 류호선
 
+  # 유저그룹·Notion DB가 아직 없어 스크럼 껍데기 메시지만 받는다.
+  # 멘션·태스크 요약이 필요해지면 slack_usergroup_id 와 notion_db 를 채운다.
+  - handle: "게임"
+    display_name: ":video_game: 게임 스쿼드"
+
   - handle: "콘텐츠"
     display_name: ":pencil2: 콘텐츠 본부"
     slack_usergroup_id: "S08LHAA2HL3"
@@ -115,6 +120,10 @@ scrum:
     - handle: "ie"
       channel_id: "C09277NGUET"
       pr_warning: true
+
+    - handle: "게임"
+      channel_id: "C09277NGUET"
+      pr_warning: false
 
   personal_scrums:
     - name: "CTO"

@@ -57,6 +57,8 @@ async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad 
         return config.squad_overrides[user_id]
 
     for squad in config.squads:
+        if squad.slack_usergroup_id is None:
+            continue
         cache_key = f"usergroup_{squad.slack_usergroup_id}"
         if cache_key not in _cache_usergroup_members:
             try:
@@ -96,7 +98,7 @@ async def _build_tools(
     )
 
     squad = await _get_user_squad(client, user_id)
-    if squad and squad.notion_db.name != "main":
+    if squad and squad.notion_db and squad.notion_db.name != "main":
         task_ds_id = squad.notion_db.data_source_id
         title_prop = squad.notion_db.properties.title
         project_ds_id = None
