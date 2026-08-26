@@ -7,20 +7,23 @@
 
 from unittest.mock import AsyncMock, patch
 
+import psycopg
+import pytest
+from pydantic import ValidationError
+
 from app import general
 from app.task_list import TaskInput, get_task_list_write_tools
 from service.slack_task_list import (
     ChannelTaskList,
-    build_list_name,
-    columns_from_schema,
+    create_channel_task_list,
     list_all_items,
-    reject_task_list_channel,
     to_task_list,
+    validate_task_list_channel,
 )
 
 TASK_LIST = ChannelTaskList(
     list_id="F09ABCDEFGH",
-    url="https://example.slack.com/lists/T1/F09ABCDEFGH",
+    list_url="https://example.slack.com/lists/T1/F09ABCDEFGH",
     name_column_id="Col012A3BCDE4",
     completed_column_id="Col00",
     assignee_column_id="Col01",
@@ -54,31 +57,12 @@ def item(row_id: str, title: str | None = None, checkbox: list | None = None) ->
     return {"id": row_id, "fields": fields}
 
 
-# --- 스키마 매핑 ---
+# --- 생성 응답 파싱 ---
 
 
-def test_list_name_uses_channel_name():
-    """리스트 이름은 채널 이름에서 딴다"""
-    assert (
-        build_list_name("t_고객_사업운영_OO교육청") == "t_고객_사업운영_OO교육청 작업"
-    )
-
-
-def test_columns_from_schema_normalizes_primary_column():
-    """제목 열은 is_primary_column 으로 찾아 name 으로 통일한다"""
-    columns = columns_from_schema(CREATE_SCHEMA)
-
-    assert columns["name"] == "Col012A3BCDE4"
-    assert columns["todo_completed"] == "Col00"
-    assert columns["todo_assignee"] == "Col01"
-    assert columns["todo_due_date"] == "Col02"
-
-
-def test_to_task_list_maps_every_column():
-    """생성 응답의 열 매핑이 그대로 ChannelTaskList 가 된다"""
-    task_list = to_task_list(
-        TASK_LIST.list_id, TASK_LIST.url, columns_from_schema(CREATE_SCHEMA)
-    )
+def test_to_task_list_finds_primary_column():
+    """제목 열은 is_primary_column 으로 찾고 할 일 열은 키로 찾는다"""
+    task_list = to_task_list(TASK_LIST.list_id, TASK_LIST.list_url, CREATE_SCHEMA)
 
     assert task_list == TASK_LIST
 
@@ -88,10 +72,11 @@ def test_to_task_list_maps_every_column():
 
 def test_external_shared_channel_is_rejected():
     """외부와 공유된 채널은 막는다. 리스트 쓰기 권한이 외부 조직에 넘어간다"""
-    assert reject_task_list_channel({"is_ext_shared": True}) is not None
-    assert reject_task_list_channel({"is_pending_ext_shared": True}) is not None
-    assert reject_task_list_channel({"is_im": True}) is not None
-    assert reject_task_list_channel({"is_channel": True}) is None
+    assert validate_task_list_channel({"is_ext_shared": True}) is not None
+    assert validate_task_list_channel({"is_pending_ext_shared": True}) is not None
+    assert validate_task_list_channel({"is_im": True}) is not None
+    assert validate_task_list_channel({"is_mpim": True}) is not None
+    assert validate_task_list_channel({"is_channel": True}) is None
 
 
 # --- 셀 조립 ---
@@ -143,10 +128,25 @@ def test_unchecked_item_is_not_completed():
     assert TASK_LIST.is_completed(item("R")) is False
 
 
-def test_title_of_missing_cell_is_empty():
-    """제목 셀이 비어 fields 에서 빠져도 빈 문자열로 읽는다"""
-    assert TASK_LIST.title_of(item("R", title="계정 생성 ↗ 슬랙")) == "계정 생성 ↗ 슬랙"
-    assert TASK_LIST.title_of(item("R")) == ""
+def test_reading_item_without_fields_key():
+    """셀이 하나도 없는 항목은 fields 자체가 없을 수 있다"""
+    assert TASK_LIST.title_of({"id": "Rec01"}) == ""
+    assert TASK_LIST.is_completed({"id": "Rec01"}) is False
+
+
+# --- 도구 인자 계약 ---
+
+
+def test_task_input_rejects_malformed_values():
+    """슬랙이 거절할 값은 API 를 부르기 전에 걸린다"""
+    assert TaskInput(title="  작업  ").title == "작업"
+
+    with pytest.raises(ValidationError):
+        TaskInput(title="   ")
+    with pytest.raises(ValidationError):
+        TaskInput(title="작업", assignee="@홍길동")
+    with pytest.raises(ValidationError):
+        TaskInput(title="작업", due_date="다음주 화요일")
 
 
 # --- 페이징 ---
@@ -160,23 +160,53 @@ async def test_list_all_items_follows_cursor():
         {"items": [item("Rec02")], "response_metadata": {"next_cursor": ""}},
     ]
 
-    items = await list_all_items(client, TASK_LIST.list_id)
+    items, truncated = await list_all_items(client, TASK_LIST.list_id)
 
     assert [row["id"] for row in items] == ["Rec01", "Rec02"]
-    assert client.slackLists_items_list.await_count == 2
+    assert truncated is False
 
 
-async def test_list_all_items_stops_at_page_cap():
-    """커서가 끝나지 않아도 상한에서 멈춘다"""
+async def test_list_all_items_reports_truncation():
+    """커서가 끝나지 않으면 상한에서 멈추고 잘렸다고 알린다"""
     client = AsyncMock()
     client.slackLists_items_list.return_value = {
         "items": [item("Rec01")],
         "response_metadata": {"next_cursor": "endless"},
     }
 
-    await list_all_items(client, TASK_LIST.list_id)
+    _, truncated = await list_all_items(client, TASK_LIST.list_id)
 
+    assert truncated is True
     assert client.slackLists_items_list.await_count == 20
+
+
+# --- 리스트 생성 ---
+
+
+async def test_create_saves_before_sharing():
+    """공유와 북마크가 실패해도 표가 리스트를 알고 있어야 중복 생성이 없다"""
+    client = AsyncMock()
+    client.slackLists_create.return_value = {
+        "list_id": TASK_LIST.list_id,
+        "list_metadata": {"schema": CREATE_SCHEMA},
+    }
+    client.auth_test.return_value = {
+        "url": "https://example.slack.com/",
+        "team_id": "T1",
+    }
+    order: list[str] = []
+    client.slackLists_access_set.side_effect = lambda **kwargs: order.append("share")
+    client.bookmarks_add.side_effect = lambda **kwargs: order.append("bookmark")
+
+    with patch(
+        "service.slack_task_list.save_channel_task_list",
+        side_effect=lambda *args: order.append("save"),
+    ):
+        task_list = await create_channel_task_list(client, CHANNEL, "t_고객_OO교육청")
+
+    assert order == ["save", "share", "bookmark"]
+    assert task_list == TASK_LIST
+    assert client.slackLists_create.await_args.kwargs["name"] == "t_고객_OO교육청 작업"
 
 
 # --- 도구 동작 ---
@@ -188,21 +218,18 @@ def write_tools(client) -> dict:
     return {tool.name: tool for tool in tools}
 
 
-async def test_add_tasks_builds_cells_before_calling_slack():
-    """셀을 먼저 다 만들므로 형식 오류면 API 를 한 번도 부르지 않는다"""
+async def test_add_tasks_fills_assignee_from_requester():
+    """담당자를 비우면 요청한 사람이 담당자가 된다"""
     client = AsyncMock()
     tools = write_tools(client)
 
     result = await tools["add_channel_tasks"].ainvoke(
-        {
-            "tasks": [
-                {"title": "계정 생성"},
-                {"title": "자료 정리", "due_date": "2026-09-02"},
-            ]
-        }
+        {"tasks": [{"title": "계정 생성"}, {"title": "자료 정리"}]}
     )
 
     assert client.slackLists_items_create.await_count == 2
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "Col01", "user": [REQUESTER]} in fields
     assert "2개" in result
 
 
@@ -257,10 +284,26 @@ async def test_complete_rejects_blank_titles():
     assert "제목을 알려주세요" in result
 
 
-def test_task_input_requires_title():
-    """도구 인자에 스키마가 붙어 title 누락이 API 호출 전에 드러난다"""
-    assert TaskInput(title="작업").assignee is None
-    assert "title" in TaskInput.model_json_schema()["required"]
+async def test_disable_removes_bookmark():
+    """해제할 때 북마크를 걷지 않으면 다시 켤 때 북마크가 둘이 된다"""
+    client = AsyncMock()
+    client.bookmarks_list.return_value = {
+        "bookmarks": [
+            {"id": "Bk01", "link": "https://example.slack.com/other"},
+            {"id": "Bk02", "link": TASK_LIST.list_url},
+        ]
+    }
+    tools = write_tools(client)
+
+    with patch(
+        "app.task_list.delete_channel_task_list", return_value=TASK_LIST.list_url
+    ):
+        result = await tools["disable_channel_task_list"].ainvoke({})
+
+    client.bookmarks_remove.assert_awaited_once_with(
+        channel_id=CHANNEL, bookmark_id="Bk02"
+    )
+    assert TASK_LIST.list_url in result
 
 
 # --- 도구 선택 분기 ---
@@ -275,13 +318,13 @@ NOTION_FACTORIES = (
 )
 
 
-async def build_tools_with(channel: str, task_list: ChannelTaskList | None) -> set[str]:
-    """노션 도구를 이름표로 대신 세우고 _build_tools 가 고른 도구 이름을 모은다"""
-    with patch.object(general, "find_channel_task_list", return_value=task_list):
-        with patch.multiple(
-            general,
-            **{name: lambda *a, **k: "notion_tool" for name in NOTION_FACTORIES},
-        ):
+async def build_tools_with(channel: str, **task_list_patch) -> set[str]:
+    """노션 도구를 제 이름표로 대신 세우고 _build_tools 가 고른 도구를 모은다"""
+    factories = {
+        name: (lambda *args, name=name, **kwargs: name) for name in NOTION_FACTORIES
+    }
+    with patch.object(general, "find_channel_task_list", **task_list_patch):
+        with patch.multiple(general, **factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
                 tools = await general._build_tools(
                     AsyncMock(), REQUESTER, channel, "1700000000.000100"
@@ -290,29 +333,44 @@ async def build_tools_with(channel: str, task_list: ChannelTaskList | None) -> s
 
 
 async def test_registered_channel_swaps_notion_task_tools_for_list_tools():
-    """등록된 채널에서는 리스트 도구가 노션 작업 생성 도구를 대신한다"""
-    names = await build_tools_with(CHANNEL, TASK_LIST)
+    """등록된 채널에서는 작업 생성 도구만 리스트 도구로 바뀌고 조회·수정은 남는다"""
+    names = await build_tools_with(CHANNEL, return_value=TASK_LIST)
 
     assert {
         "add_channel_tasks",
         "complete_channel_tasks",
         "disable_channel_task_list",
     } <= names
+    assert "get_create_notion_task_tool" not in names
+    assert "get_create_notion_follow_up_task_tool" not in names
+    assert "get_notion_page_tool" in names
+    assert "get_update_notion_task_status_tool" in names
     assert "enable_channel_task_list" not in names
 
 
 async def test_unregistered_channel_keeps_notion_and_offers_enable():
     """등록 안 된 채널은 노션 흐름 그대로에 등록 도구만 더한다"""
-    names = await build_tools_with(CHANNEL, None)
+    names = await build_tools_with(CHANNEL, return_value=None)
 
-    assert "notion_tool" in names
+    assert "get_create_notion_task_tool" in names
+    assert "get_create_notion_follow_up_task_tool" in names
     assert "enable_channel_task_list" in names
     assert "add_channel_tasks" not in names
 
 
-async def test_dm_never_offers_task_list():
-    """DM 은 리스트를 붙일 수 없어 등록 도구도 주지 않는다"""
-    names = await build_tools_with("D0XXXX", None)
+async def test_db_outage_falls_back_to_notion():
+    """접속이 안 되면 노션으로 내려간다. 여기서 터지면 봇이 전부 무응답이 된다"""
+    names = await build_tools_with(
+        CHANNEL, side_effect=psycopg.OperationalError("connection refused")
+    )
 
-    assert "notion_tool" in names
-    assert "enable_channel_task_list" not in names
+    assert "get_create_notion_task_tool" in names
+    assert "add_channel_tasks" not in names
+
+
+async def test_missing_table_is_not_swallowed():
+    """표가 없는 것은 마이그레이션 누락이라 그대로 터뜨린다"""
+    with pytest.raises(psycopg.ProgrammingError):
+        await build_tools_with(
+            CHANNEL, side_effect=psycopg.ProgrammingError("relation does not exist")
+        )

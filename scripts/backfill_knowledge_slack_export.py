@@ -36,7 +36,7 @@ from app.knowledge import (
     IGNORED_SUBTYPES,
     SLACK_WORKSPACE_DOMAIN,
 )
-from service.knowledge.db import connect, fetch_all
+from service.db import connect, fetch_all
 from service.knowledge.ingest import build_thread_row, upsert_item
 from service.knowledge.users import load_from_export
 
