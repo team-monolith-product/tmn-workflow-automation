@@ -6,8 +6,10 @@ import asyncio
 import functools
 import io
 import traceback
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Callable, Any
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 import matplotlib
@@ -17,10 +19,30 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+from app.sms import POSTED_MARK
 from service.sheets.read import read_sheet
 
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
+
+# 한 실행이 올릴 수 있는 카드 수. 정상 사용은 한 번이고, 나머지는 고쳐
+# 부르는 몫이다. 행마다 부르면 슬랙 한도(초당 1건)에 걸려 워커를 몇 분씩
+# 잡고, 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
+DRAFT_CARDS_PER_RUN = 5
+
+# 카드를 안 올리는 답(중복 거절·형식 오류)은 카드 예산을 안 쓴다. 그것만
+# 두면 상한이 영영 안 걸리므로 호출 총량도 함께 센다. preview 가 동기라
+# 루프 위에서 도는데, 봇 넷과 스케줄러가 그 루프 하나를 나눠 쓴다.
+DRAFT_CALLS_PER_RUN = 50
+
+DRAFT_SMS_GUIDE = """
+
+**문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서도 부를 수
+있습니다. 인자는 draft_sms 도구 설명과 같습니다. 명단은 print 로 옮겨 적지 말고
+통째로 한 번에 넘기십시오 -- 나눠 부르면 카드가 여러 장이 되고 사람이 한 장을
+빠뜨립니다.
+
+    draft_sms(content="[*이름*] 선생님, ...", targets=대상.to_dict("records"))"""
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
@@ -108,10 +130,28 @@ def _run_code(
         plt.close("all")
 
 
+def _to_sync(
+    coroutine_function: Callable[..., Awaitable[Any]], loop: asyncio.AbstractEventLoop
+) -> Callable[..., Any]:
+    """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다.
+
+    `_code_executor` 를 다시 타는 코루틴을 주면 워커 하나를 호출자가 잡은 채
+    그 워커를 기다리게 되어 그대로 멈춥니다.
+    """
+
+    def call(*args, **kwargs):
+        return asyncio.run_coroutine_threadsafe(
+            coroutine_function(*args, **kwargs), loop
+        ).result()
+
+    return call
+
+
 def get_execute_python_tool(
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
+    draft_sms: Callable[..., Awaitable[str]] | None = None,
 ):
     """
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
@@ -120,6 +160,9 @@ def get_execute_python_tool(
         thread_ts: Slack 스레드 타임스탬프
         slack_client: Slack WebClient 인스턴스
         channel: Slack 채널 ID
+        draft_sms: 문자 초안 도구의 코루틴. 주면 코드가 같은 이름으로 부를 수
+            있다. 수백 명짜리 명단을 도구 인자로 다시 받아쓰면 상한에 걸려
+            잘리므로, 명단을 다루려면 이 길이 필요하다
 
     Returns:
         execute_python tool
@@ -129,7 +172,7 @@ def get_execute_python_tool(
     async def execute_python(
         code: Annotated[
             str,
-            "실행할 파이썬 코드. read_sheet · execute_athena_query · pd · plt 를 쓸 수 있음",
+            "실행할 파이썬 코드",
         ],
     ) -> str:
         """
@@ -141,10 +184,8 @@ def get_execute_python_tool(
 
         **사용 가능한 라이브러리 및 함수**:
         코드 컨텍스트 내에서 다음을 사용할 수 있습니다:
-        - `pd` (pandas): 데이터 분석 및 조작을 위한 pandas 라이브러리
-        - `plt` (matplotlib.pyplot): 차트 시각화를 위한 matplotlib
-        - `execute_athena_query(query: str, database: str)`: Athena SQL을 실행하고 결과를 반환합니다.
-          결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
+        - `pd` (pandas), `plt` (matplotlib.pyplot)
+        - `execute_athena_query(query: str, database: str)`: Athena SQL 을 실행합니다.
         - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
           반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
           tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 첫 번째 탭입니다.
@@ -172,56 +213,52 @@ def get_execute_python_tool(
           읽으면 그만큼 쿼터를 쓰므로 한 번에 끝내는 코드를 쓰는 편이 낫습니다.
         - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
         - plt.show()도 호출하지 마세요.
-        - 차트를 그린 후 plt.figure()나 plt.gcf()로 현재 figure에 접근할 수 있습니다.
 
-        **예시**:
+        **Athena 결과 해체**:
         ```python
-        # Athena에서 데이터를 가져와서 차트 그리기
-        results = execute_athena_query(
-            "SELECT date, count FROM daily_stats ORDER BY date",
-            database="analytics_db"
-        )
-
-        # 결과를 pandas DataFrame으로 변환
+        results = execute_athena_query("SELECT ...", database="analytics_db")
         rows = results["ResultSet"]["Rows"]
         headers = [col.get("VarCharValue", "") for col in rows[0]["Data"]]
-        data_rows = [[col.get("VarCharValue", "") for col in row["Data"]] for row in rows[1:]]
-
-        df = pd.DataFrame(data_rows, columns=headers)
-        df["count"] = df["count"].astype(int)
-
-        # pandas를 활용한 차트 그리기
-        plt.figure(figsize=(10, 6))
-        plt.plot(df["date"], df["count"])
-        plt.xlabel('Date')
-        plt.ylabel('Count')
-        plt.title('Daily Stats')
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        data = [[col.get("VarCharValue", "") for col in row["Data"]] for row in rows[1:]]
+        df = pd.DataFrame(data, columns=headers)
         ```
 
-        Args:
-            code: 실행할 파이썬 코드
-
-        Returns:
-            str: 실행 결과 (STDOUT 출력 + 성공/실패 메시지)
         """
         loop = asyncio.get_running_loop()
 
-        def execute_athena_query(
-            query: str, database: str, max_wait_seconds: int = 300
-        ) -> dict:
-            """코드가 호출하는 동기 진입점. 쿼리 자체는 메인 루프에서 실행됩니다."""
-            return asyncio.run_coroutine_threadsafe(
-                athena.execute_and_wait(query, database, max_wait_seconds), loop
-            ).result()
+        answers: list[str] = []
 
-        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 매 호출 만들 필요가 없다.
-        # execute_athena_query 만 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
         injected = {
-            "execute_athena_query": execute_athena_query,
+            "execute_athena_query": _to_sync(athena.execute_and_wait, loop),
             "read_sheet": read_sheet,
         }
+        if draft_sms:
+            call = _to_sync(draft_sms, loop)
+
+            posted = 0
+
+            def draft(*args, **kwargs) -> str:
+                # 반환을 안 받고 부르면 "고칠 것" 도 "이미 올라가 있습니다" 도
+                # 통째로 사라진다. 카드가 0장인데 도구는 성공이라고 답한다.
+                # 상한에 걸려도 예외로 끊지 않는다 -- 이미 올라간 카드는
+                # 그대로인데 코드만 죽으면 모델은 실패로 읽는다.
+                nonlocal posted
+                if posted >= DRAFT_CARDS_PER_RUN or len(answers) >= DRAFT_CALLS_PER_RUN:
+                    refusal = (
+                        f"카드 {DRAFT_CARDS_PER_RUN}장 · 호출 {DRAFT_CALLS_PER_RUN}번이"
+                        " 상한이라 더 올리지 않았습니다."
+                        " 명단을 나누지 말고 한 번에 넘기십시오."
+                    )
+                    answers.append(refusal)
+                    return refusal
+                answer = call(*args, **kwargs)
+                answers.append(answer)
+                if POSTED_MARK in answer:
+                    posted += 1
+                return answer
+
+            injected["draft_sms"] = draft
+
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
@@ -232,6 +269,23 @@ def get_execute_python_tool(
                 + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
                 " 표 전체가 아니라 집계 결과만 print 하십시오."
             )
+        # 초안 결과는 코드가 print 하지 않아도 돌려준다. 상한은 따로 건다 --
+        # 예산을 나눠 쓰면 거절 응답 수십 줄이 집계 결과를 통째로 밀어낸다.
+        # 같은 문장은 접되 몇 번인지 남긴다. 받는 사람이 다른 카드도 인원만
+        # 같으면 답이 같아서, 그냥 접으면 다섯 장을 한 장으로 읽는다.
+        if answers:
+            counted = Counter(answers)
+            draft_answers = "\n".join(
+                f"{answer} (×{times})" if times > 1 else answer
+                for answer, times in counted.items()
+            )
+            if len(draft_answers) > STDOUT_LIMIT:
+                draft_answers = (
+                    draft_answers[:STDOUT_LIMIT]
+                    + f"\n… 초안 응답 {len(draft_answers)}자 중"
+                    f" {STDOUT_LIMIT}자에서 잘렸습니다."
+                )
+            stdout_output = (stdout_output + "\n" + draft_answers).strip()
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"
@@ -256,5 +310,8 @@ def get_execute_python_tool(
         if stdout_output:
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
+
+    if draft_sms:
+        execute_python.description += DRAFT_SMS_GUIDE
 
     return execute_python
