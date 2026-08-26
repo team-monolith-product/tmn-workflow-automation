@@ -508,7 +508,6 @@ async def test_수정_모달이_슬랙_한도를_넘지_않는다(client, handle
             assert len(block["text"]["text"]) <= 3000
 
 
-@pytest.mark.asyncio
 async def test_같은_초안을_두_번_올리지_않는다(client):
     # 카드를 올린 뒤 코드가 터지면 도구는 "실행 실패" 만 돌려준다. 모델은
     # 아무 일도 없었던 줄 알고 통째로 다시 내고, 두 장 다 눌리면 같은
@@ -521,7 +520,6 @@ async def test_같은_초안을_두_번_올리지_않는다(client):
     assert len(client.posted) == 1
 
 
-@pytest.mark.asyncio
 async def test_치환값이_다르면_새_초안을_올린다(client):
     # 문안 틀과 번호가 같아도 기수가 다르면 다른 발송이다. 접어 버리면
     # 값이 틀린 첫 카드를 누르라고 안내하게 된다.
@@ -533,7 +531,6 @@ async def test_치환값이_다르면_새_초안을_올린다(client):
     assert len(client.posted) == 2
 
 
-@pytest.mark.asyncio
 async def test_번호_순서만_다르면_같은_초안이다(client):
     # 모델이 코드를 고칠 때 정렬이나 groupby 가 바뀌면 순서가 달라진다.
     # 그것을 다른 발송으로 보면 중복 검사를 그냥 통과한다.
@@ -545,7 +542,6 @@ async def test_번호_순서만_다르면_같은_초안이다(client):
     assert len(client.posted) == 1
 
 
-@pytest.mark.asyncio
 async def test_카드를_못_올리면_초안이_남지_않는다(client):
     # 앞서 저장하면 전송이 실패했을 때 카드는 없는데 지문만 남아, 이후
     # 재시도가 전부 "그 카드에서 보내기를 누르세요" 로 거절된다.
@@ -559,7 +555,6 @@ async def test_카드를_못_올리면_초안이_남지_않는다(client):
     assert len(sms._DRAFTS) == 0
 
 
-@pytest.mark.asyncio
 async def test_코드가_부른_초안이_카드로_올라간다(client):
     # general.py 가 .coroutine 을 샌드박스에 넘긴다. 그 이음매를 진짜
     # 객체로 걷는다 -- 속성이 사라지거나 to_sync 가 깨지면 여기서 죽는다.
@@ -580,7 +575,6 @@ async def test_코드가_부른_초안이_카드로_올라간다(client):
     assert len(client.posted) == 1
 
 
-@pytest.mark.asyncio
 async def test_다른_스레드면_새_초안을_올린다(client):
     # _DRAFTS 는 프로세스 전역이고 봇 넷이 한 프로세스를 쓴다. 채널과
     # 스레드를 안 보면 남의 스레드 초안이 내 카드를 막는다. 그때 도구가
@@ -591,3 +585,24 @@ async def test_다른_스레드면_새_초안을_올린다(client):
     await 다른곳.ainvoke({"content": "[*이름*]님", "targets": ROWS, "send_at": ""})
 
     assert len(client.posted) == 2
+
+
+async def test_초안_결과는_print_하지_않아도_돌아온다(client):
+    # draft_sms 는 실패를 문자열로 돌려준다. 코드가 반환을 안 받으면 그것이
+    # 통째로 사라지고 도구는 "성공" 만 답한다. 카드는 0장인데 모델은 올라간
+    # 줄 알고 사람에게 그렇게 말한다.
+    도구 = get_execute_python_tool(
+        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
+    )
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])"
+            )
+        }
+    )
+
+    assert len(client.posted) == 0
+    assert "보내기 전에 고칠 것" in 결과

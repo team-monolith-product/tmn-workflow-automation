@@ -60,20 +60,15 @@ def _tag_key(tag: str) -> str:
 
 
 def _text(value: Any) -> str:
-    """치환값을 벤더가 받는 문자열로 바꿉니다. 없으면 빈 칸입니다.
-
-    Args:
-        value: 시트나 DataFrame 에서 온 값
-
-    Returns:
-        str: 빈 칸이면 빈 문자열
-    """
-    # NaN 은 참이라 `or ""` 로는 안 걸러진다. 자기 자신과 같지 않은 유일한 값이다.
-    if value is None or value != value:
+    """치환값을 벤더가 받는 문자열로 바꿉니다. 없으면 빈 칸입니다."""
+    # 결측은 자기 자신과 같지 않다. 판다스의 NA 는 그 비교 결과마저 NA 라
+    # 참·거짓을 물으면 터지므로, 거짓이 아닌지로 본다.
+    if value is None or (value != value) is not False:
         return ""
     # 두 명단을 merge 하면 짝이 없는 칸 때문에 정수 열이 float 로 올라간다.
-    # 그대로 두면 "3.0기 안내입니다" 가 나간다.
-    if isinstance(value, float) and value.is_integer():
+    # 그대로 두면 "3.0기 안내입니다" 가 나간다. 2**53 을 넘으면 float 이
+    # 이미 정수를 정확히 못 담으므로 그럴듯한 오답을 만들지 않는다.
+    if isinstance(value, float) and value.is_integer() and abs(value) < 2**53:
         return str(int(value))
     return str(value)
 

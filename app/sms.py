@@ -40,32 +40,14 @@ MAX_WIDTH = 120
 
 
 def _draft_id(channel: str, thread_ts: str, plan: sms_send.Plan) -> str:
-    """초안을 식별하는 값입니다. 같은 발송이면 같은 id 라 카드가 두 장 되지 않습니다.
-
-    코드가 draft_sms 를 부른 뒤 그 아래에서 예외가 나면 도구는 "실행 실패" 만
-    돌려줍니다. 카드는 이미 올라갔는데 모델은 아무 일도 없었던 줄 알고 코드를
-    고쳐 통째로 다시 냅니다. 그러면 같은 명단 카드가 두 장이 되고, 둘 다
-    [보내기] 가 눌리면 같은 사람이 문자를 두 번 받습니다.
-
-    벤더로 나가는 targets 를 그대로 봅니다. 문안 원문만 보면 이름이나 기수만
-    고친 초안이 같은 것으로 접혀, 값이 틀린 첫 카드를 누르라고 안내하게
-    됩니다. 번호 순서는 무시합니다 -- 모델이 코드를 고칠 때 정렬이 바뀌는
-    것은 다른 발송이 아닙니다.
-
-    Args:
-        channel: 카드가 올라갈 채널
-        thread_ts: 카드가 올라갈 스레드
-        plan: preview 가 돌려준 계획
-
-    Returns:
-        str: 12자 16진수
-    """
+    """초안을 식별하는 값입니다. 같은 발송이면 같은 id 라 카드가 두 장 되지 않습니다."""
     payload = json.dumps(
         [
             channel,
             thread_ts,
             plan.template,
             plan.send_time,
+            # 순서가 바뀌는 것은 다른 발송이 아니다.
             sorted(plan.targets, key=lambda target: target["to"]),
         ],
         ensure_ascii=False,

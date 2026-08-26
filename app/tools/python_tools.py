@@ -30,7 +30,7 @@ DRAFT_SMS_GUIDE = """
 통째로 한 번에 넘기십시오 -- 나눠 부르면 카드가 여러 장이 되고 사람이 한 장을
 빠뜨립니다.
 
-    print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))"""
+    print(draft_sms(content="[*이름*] 선생님, ...", targets=대상.to_dict("records")))"""
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
@@ -118,6 +118,23 @@ def _run_code(
         plt.close("all")
 
 
+def _to_sync(
+    coroutine_function: Callable[..., Awaitable[Any]], loop: asyncio.AbstractEventLoop
+) -> Callable[..., Any]:
+    """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다.
+
+    `_code_executor` 를 다시 타는 코루틴을 주면 워커 하나를 호출자가 잡은 채
+    그 워커를 기다리게 되어 그대로 멈춥니다.
+    """
+
+    def call(*args, **kwargs):
+        return asyncio.run_coroutine_threadsafe(
+            coroutine_function(*args, **kwargs), loop
+        ).result()
+
+    return call
+
+
 def get_execute_python_tool(
     thread_ts: str | None = None,
     slack_client: Any | None = None,
@@ -143,7 +160,7 @@ def get_execute_python_tool(
     async def execute_python(
         code: Annotated[
             str,
-            "실행할 파이썬 코드. 쓸 수 있는 함수와 라이브러리는 도구 설명에 있음",
+            "실행할 파이썬 코드",
         ],
     ) -> str:
         """
@@ -194,37 +211,24 @@ def get_execute_python_tool(
         """
         loop = asyncio.get_running_loop()
 
-        def to_sync(
-            coroutine_function: Callable[..., Awaitable[Any]],
-        ) -> Callable[..., Any]:
-            """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다.
+        answers: list[str] = []
 
-            실행기 워커가 이 결과를 기다리는 동안 코루틴은 메인 루프에서 돕니다.
-            `_code_executor` 를 다시 타는 코루틴을 주면 워커 하나를 호출자가
-            잡은 채 그 워커를 기다리게 되어 그대로 멈춥니다.
-
-            Args:
-                coroutine_function: 메인 루프에서 실행할 코루틴 함수
-
-            Returns:
-                Callable: 코드 안에서 부를 동기 함수
-            """
-
-            def call(*args, **kwargs):
-                return asyncio.run_coroutine_threadsafe(
-                    coroutine_function(*args, **kwargs), loop
-                ).result()
-
-            return call
-
-        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 감싸지 않는다.
-        # 나머지는 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
         injected = {
-            "execute_athena_query": to_sync(athena.execute_and_wait),
+            "execute_athena_query": _to_sync(athena.execute_and_wait, loop),
             "read_sheet": read_sheet,
         }
         if draft_sms:
-            injected["draft_sms"] = to_sync(draft_sms)
+            call = _to_sync(draft_sms, loop)
+
+            def draft(*args, **kwargs) -> str:
+                # 반환을 안 받고 부르면 "고칠 것" 도 "이미 올라가 있습니다" 도
+                # 통째로 사라진다. 카드가 0장인데 도구는 성공이라고 답한다.
+                answer = call(*args, **kwargs)
+                answers.append(answer)
+                return answer
+
+            injected["draft_sms"] = draft
+
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
@@ -235,6 +239,9 @@ def get_execute_python_tool(
                 + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
                 " 표 전체가 아니라 집계 결과만 print 하십시오."
             )
+
+        if answers:
+            stdout_output = (stdout_output + "\n" + "\n".join(answers)).strip()
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"

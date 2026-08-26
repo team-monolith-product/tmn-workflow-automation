@@ -191,10 +191,9 @@ print(f"Processed {len(data_rows)} rows")
         mock_slack_client.files_upload_v2.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_draft_sms_를_주입해야_설명에_나온다():
+def test_draft_sms_를_주입해야_설명에_나온다():
     # 없는 함수를 알려 주면 코드가 부르고 NameError 로 끝난다.
-    열린도구 = get_execute_python_tool(draft_sms=lambda: None)
+    열린도구 = get_execute_python_tool(draft_sms=AsyncMock())
     닫힌도구 = get_execute_python_tool()
 
     assert "draft_sms" in 열린도구.description

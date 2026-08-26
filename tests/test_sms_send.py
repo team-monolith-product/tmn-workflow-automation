@@ -289,3 +289,20 @@ def test_merge_가_만든_빈_칸과_실수가_그대로_나가지_않는다():
     assert plan.targets[1]["changeWord"]["var1"] == ""
     assert "3.0" not in templates.render(plan.template, plan.rows[0])
     assert "nan" not in templates.render(plan.template, plan.rows[1])
+
+
+def test_판다스_결측과_큰_수를_문자로_만들지_않는다():
+    # iterrows 로 행을 만들면 nullable 열의 결측이 pd.NA 로 남는다. NA 는
+    # 비교 결과마저 NA 라 참·거짓을 물으면 터진다. 2**53 을 넘는 float 은
+    # 이미 정수를 정확히 못 담으므로 정수로 바꾸면 그럴듯한 오답이 된다.
+    plan = sms_send.preview(
+        [
+            {"to": "010-1111-2222", "name": "가", "var1": pd.NA},
+            {"to": "010-3333-4444", "name": "나", "var1": 1.2345678901234567e19},
+        ],
+        "[*이름*] [*1*]",
+    )
+
+    assert plan.problems == []
+    assert plan.targets[0]["changeWord"]["var1"] == ""
+    assert "e+19" in plan.targets[1]["changeWord"]["var1"]
