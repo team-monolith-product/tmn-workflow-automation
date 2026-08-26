@@ -84,7 +84,9 @@ async def _build_tools(
     후속 작업 도구는 프로젝트/구성요소 속성이 있는 메인 DB에서만 사용합니다.
 
     작업 리스트로 등록된 채널은 예외입니다. 작업이 노션이 아니라 그 채널의
-    슬랙 리스트로 가고, 노션 작업 생성 도구 대신 리스트 도구가 들어갑니다.
+    슬랙 리스트로 가므로 노션 작업 생성 도구와 후속 작업 도구가 리스트 도구로
+    바뀝니다. 후속 작업은 노션 작업에 딸리는 개념이라 함께 빠집니다.
+    노션 작업을 조회하고 고치는 도구는 그대로 둡니다.
 
     Args:
         client: 슬랙 클라이언트
@@ -114,12 +116,14 @@ async def _build_tools(
     # 작업 리스트로 등록된 채널은 작업을 노션이 아니라 그 리스트에 만든다.
     # 노션 작업 생성 도구를 같이 주면 에이전트가 둘 사이에서 흔들린다.
     # DM 은 리스트를 붙일 수 없으므로 조회하지 않는다.
-    task_list = None
-    if not channel.startswith("D"):
-        task_list = await asyncio.to_thread(find_channel_task_list, channel)
+    is_dm = channel.startswith("D")
+    task_list = (
+        None if is_dm else await asyncio.to_thread(find_channel_task_list, channel)
+    )
+
     if task_list:
         create_tools = get_task_list_write_tools(
-            client, task_list, user_id, slack_thread_url
+            client, channel, task_list, user_id, slack_thread_url
         )
     else:
         create_tools = [
@@ -134,6 +138,8 @@ async def _build_tools(
         ]
         if project_ds_id:
             create_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+        if not is_dm:
+            create_tools += get_channel_task_list_tools(client, channel)
 
     notion_tools = [
         get_update_notion_task_deadline_tool(),
@@ -147,7 +153,6 @@ async def _build_tools(
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
-        + get_channel_task_list_tools(client, channel)
         + get_sms_tools(client, channel, thread_ts)
     )
 
