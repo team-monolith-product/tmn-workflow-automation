@@ -92,7 +92,7 @@ def _run_code(
     }
 
     try:
-        exec(code, exec_globals, {})
+        exec(code, exec_globals)
 
         fig = plt.gcf()
         if not fig.get_axes():
@@ -167,6 +167,9 @@ def get_execute_python_tool(
           숫자만 남기십시오: `df["전화"].str.replace(r"\\D", "", regex=True)`
 
         **주의사항**:
+        - 호출할 때마다 빈 상태에서 시작합니다. 앞선 호출에서 만든 변수는 남지
+          않으니, 필요한 데이터는 매번 다시 읽으십시오. 다만 같은 시트를 여러 번
+          읽으면 그만큼 쿼터를 쓰므로 한 번에 끝내는 코드를 쓰는 편이 낫습니다.
         - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
         - plt.show()도 호출하지 마세요.
         - 차트를 그린 후 plt.figure()나 plt.gcf()로 현재 figure에 접근할 수 있습니다.
