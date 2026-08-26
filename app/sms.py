@@ -212,12 +212,20 @@ def get_draft_sms_tool(
                 " 다시 올리지 않았습니다. 그 카드에서 [보내기] 를 눌러주세요."
             )
 
-        await client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=f"문자 발송 확인 — {len(plan.rows)}명",
-            blocks=_blocks(draft_id, plan),
-        )
+        # 검사와 저장 사이에 await 가 있으면 한 턴에 실린 두 호출이 둘 다
+        # 빠져나간다. ToolNode 가 tool call 을 gather 로 돌리기 때문이다.
+        # 자리를 먼저 잡고, 카드가 못 올라가면 되돌린다.
+        _DRAFTS[draft_id] = None
+        try:
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"문자 발송 확인 — {len(plan.rows)}명",
+                blocks=_blocks(draft_id, plan),
+            )
+        except BaseException:
+            _DRAFTS.pop(draft_id, None)
+            raise
         _DRAFTS[draft_id] = {
             "rows": targets,
             "content": content,

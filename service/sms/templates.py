@@ -8,9 +8,9 @@
 """
 
 import re
-import pandas as pd
-
 from typing import Any
+
+import pandas as pd
 
 SMS_MAX_BYTES = 90
 LMS_MAX_BYTES = 2000
@@ -67,7 +67,7 @@ def _text(value: Any) -> str:
     # 비교가 파이썬 False 가 아니라 np.False_ 를 돌려주는 데 걸려, df.loc 나
     # sum() 이 준 멀쩡한 np.int64 까지 빈 칸이 된다. isna 는 배열에 배열을
     # 돌려주므로 참인지 물어야 한다.
-    if value is None or pd.isna(value) is True:
+    if pd.isna(value) is True:
         return ""
     # 두 명단을 merge 하면 짝이 없는 칸 때문에 정수 열이 float 로 올라간다.
     # 그대로 두면 "3.0기 안내입니다" 가 나간다. 2**53 을 넘으면 float 이

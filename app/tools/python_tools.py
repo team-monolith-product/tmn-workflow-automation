@@ -23,6 +23,10 @@ from service.sheets.read import read_sheet
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
 
+# 한 실행이 올릴 수 있는 초안 수. 정상 사용은 한 번이고, 나머지는 고쳐
+# 부르는 몫이다. 행마다 부르면 슬랙 한도에 걸려 워커를 몇 분씩 잡는다.
+DRAFTS_PER_RUN = 5
+
 DRAFT_SMS_GUIDE = """
 
 **문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서도 부를 수
@@ -223,6 +227,11 @@ def get_execute_python_tool(
             def draft(*args, **kwargs) -> str:
                 # 반환을 안 받고 부르면 "고칠 것" 도 "이미 올라가 있습니다" 도
                 # 통째로 사라진다. 카드가 0장인데 도구는 성공이라고 답한다.
+                if len(answers) >= DRAFTS_PER_RUN:
+                    raise RuntimeError(
+                        f"한 실행에 초안은 {DRAFTS_PER_RUN}번까지 부를 수 있습니다."
+                        " 명단을 나누지 말고 한 번에 넘기십시오."
+                    )
                 answer = call(*args, **kwargs)
                 answers.append(answer)
                 return answer
@@ -232,18 +241,19 @@ def get_execute_python_tool(
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
-        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다. 초안
-        # 결과는 잘리면 안 되므로 자리를 먼저 떼어 두고 나머지를 자른다.
-        answered = "\n".join(answers)[:STDOUT_LIMIT]
-        room = STDOUT_LIMIT - len(answered)
-        if len(stdout_output) > room:
+        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
+        if len(stdout_output) > STDOUT_LIMIT:
             stdout_output = (
-                stdout_output[:room]
-                + f"\n… {len(stdout_output)}자 중 {room}자에서 잘렸습니다."
+                stdout_output[:STDOUT_LIMIT]
+                + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
                 " 표 전체가 아니라 집계 결과만 print 하십시오."
             )
-        if answered:
-            stdout_output = (stdout_output + "\n" + answered).strip()
+        # 초안 결과는 코드가 print 하지 않아도 돌려준다. 상한은 따로 건다 --
+        # 예산을 나눠 쓰면 거절 응답 수십 줄이 집계 결과를 통째로 밀어낸다.
+        # 같은 문장 반복은 접는다. 정보량이 0 이면서 자리만 먹는다.
+        if answers:
+            모은답 = "\n".join(dict.fromkeys(answers))[:STDOUT_LIMIT]
+            stdout_output = (stdout_output + "\n" + 모은답).strip()
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"

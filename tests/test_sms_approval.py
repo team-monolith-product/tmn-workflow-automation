@@ -1,5 +1,6 @@
 """승인 흐름 테스트 — 누르기 전에는 안 나가야 한다."""
 
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from service.sms import send as sms_send
 from service.sms import transport
 
 from app import sms
+from app.tools import python_tools
 from app.tools.python_tools import get_execute_python_tool
 
 ROWS = [
@@ -606,3 +608,68 @@ async def test_초안_결과는_print_하지_않아도_돌아온다(client):
 
     assert len(client.posted) == 0
     assert "보내기 전에 고칠 것" in 결과
+
+
+async def test_같은_턴에_두_번_실려도_카드는_한_장이다(client):
+    # ToolNode 가 한 AI 메시지의 tool call 을 gather 로 돌린다. 검사와 저장
+    # 사이에 await 가 있으면 둘 다 빠져나가 카드가 두 장 된다.
+    보내기 = client.chat_postMessage
+
+    async def 네트워크처럼(**kwargs):
+        # FakeClient 는 await 지점이 없어 루프를 놓지 않는다. 실제 슬랙은
+        # 네트워크에서 놓으므로, 그 자리를 만들지 않으면 창이 안 열린다.
+        await asyncio.sleep(0)
+        return await 보내기(**kwargs)
+
+    client.chat_postMessage = 네트워크처럼
+    도구 = sms.get_draft_sms_tool(client, "C1", "111.000")
+    인자 = {"content": "[*이름*]님", "targets": ROWS, "send_at": ""}
+
+    답 = await asyncio.gather(도구.ainvoke(인자), 도구.ainvoke(인자))
+
+    assert len(client.posted) == 1
+    assert sum("이미 이 스레드에" in 하나 for 하나 in 답) == 1
+
+
+async def test_반복_응답이_집계_결과를_밀어내지_않는다(client):
+    # 거절 응답은 글자 하나 다르지 않다. 접지 않으면 상한을 채워 모델이
+    # 방금 계산한 것을 통째로 밀어낸다.
+    도구 = get_execute_python_tool(
+        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
+    )
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "print('중요한집계결과=42')\n"
+                "for _ in range(3):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '010-1111-2222', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert "중요한집계결과=42" in 결과
+    assert 결과.count("초안을 올렸습니다") == 1
+    assert 결과.count("이미 이 스레드에") == 1
+
+
+async def test_한_실행이_초안을_무한히_올리지_못한다(client):
+    # 행마다 부르면 슬랙 채널 한도(초당 1건)가 워커 하나를 몇 분씩 잡고,
+    # 200장을 넘기면 오래된 초안이 밀려나 그 카드의 [보내기] 가 죽는다.
+    도구 = get_execute_python_tool(
+        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
+    )
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for i in range(20):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': f'010-1111-{i:04d}', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == python_tools.DRAFTS_PER_RUN
+    assert "한 실행에 초안은" in 결과
