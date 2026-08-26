@@ -201,7 +201,7 @@ async def test_주입한_코루틴을_코드가_부른다():
         받은목록.append((content, targets))
         return f"{len(targets)}명 대상 초안을 올렸습니다."
 
-    tool = get_execute_python_tool(coroutines={"draft_sms": draft_sms})
+    tool = get_execute_python_tool(draft_sms=draft_sms)
 
     result = await tool.ainvoke(
         {
@@ -224,7 +224,7 @@ async def test_draft_sms_를_주입해야_설명에_나온다():
     async def draft_sms(content, targets, send_at=""):
         return ""
 
-    열린도구 = get_execute_python_tool(coroutines={"draft_sms": draft_sms})
+    열린도구 = get_execute_python_tool(draft_sms=draft_sms)
     닫힌도구 = get_execute_python_tool()
 
     assert "draft_sms" in 열린도구.description

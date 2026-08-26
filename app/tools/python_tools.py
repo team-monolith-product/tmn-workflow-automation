@@ -7,7 +7,8 @@ import functools
 import io
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Callable, Any
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 import matplotlib
@@ -24,23 +25,19 @@ STDOUT_LIMIT = 4_000
 
 DRAFT_SMS_GUIDE = """
 
-        **문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서
-        부를 수 있습니다. targets 는 `to`(번호)가 필수이고 `name`·`var1`~`var8` 로
-        치환값을 주는 dict 목록입니다. 문안의 치환 태그는 이름이 `[*이름*]`,
-        나머지가 `[*1*]`~`[*8*]` 입니다.
+**문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서 부를 수
+있습니다. targets 는 `to`(번호)가 필수이고 `name`·`var1`~`var8` 로 치환값을 주는
+dict 목록입니다. 문안의 치환 태그는 이름이 `[*이름*]`, 나머지가 `[*1*]`~`[*8*]` 입니다.
 
-        **명단을 print 해서 옮겨 적지 말고 코드가 직접 부르십시오.** 수백 명을
-        도구 인자로 다시 쓰면 중간에서 잘리고, 잘린 만큼 카드가 여러 장으로
-        갈라집니다. 갈라지면 사람이 [보내기] 를 여러 번 눌러야 하고 한 장을
-        빠뜨리면 그 사람들은 못 받습니다. 카드 사이의 중복 번호도 아무도 못 봅니다.
+명단은 print 로 옮겨 적지 말고 통째로 한 번에 넘기십시오. 나눠 부르면 카드가
+여러 장이 되고 사람이 한 장을 빠뜨립니다.
 
-        ```python
-        대상 = [{"to": t, "name": n} for t, n in 미신청자]
-        print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))
-        ```
+```python
+대상 = [{"to": t, "name": n} for t, n in 미신청자]
+print(draft_sms(content="[*이름*] 선생님, ...", targets=대상))
+```
 
-        한 번 부르면 카드 한 장입니다. 나눠 보낼 이유가 없으면 한 번만 부르십시오.
-        카드는 초안일 뿐이고 사람이 [보내기] 를 눌러야 실제로 나갑니다."""
+카드는 초안이고 사람이 [보내기] 를 눌러야 나갑니다."""
 
 # pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
 # 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
@@ -132,7 +129,7 @@ def get_execute_python_tool(
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
-    coroutines: dict[str, Any] | None = None,
+    draft_sms: Callable[..., Awaitable[str]] | None = None,
 ):
     """
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
@@ -141,9 +138,9 @@ def get_execute_python_tool(
         thread_ts: Slack 스레드 타임스탬프
         slack_client: Slack WebClient 인스턴스
         channel: Slack 채널 ID
-        coroutines: 코드가 부를 수 있게 열어 줄 코루틴 함수들. 이름이 그대로
-            코드 안의 이름이 되고, 동기 진입점으로 감싸 메인 루프에서 실행한다.
-            수백 명짜리 명단을 도구 인자로 다시 받아쓰지 않으려면 이 길이 필요하다
+        draft_sms: 문자 초안 도구의 코루틴. 주면 코드가 같은 이름으로 부를 수
+            있다. 수백 명짜리 명단을 도구 인자로 다시 받아쓰면 상한에 걸려
+            잘리므로, 명단을 다루려면 이 길이 필요하다
 
     Returns:
         execute_python tool
@@ -153,7 +150,7 @@ def get_execute_python_tool(
     async def execute_python(
         code: Annotated[
             str,
-            "실행할 파이썬 코드. read_sheet · execute_athena_query · pd · plt 를 쓸 수 있음",
+            "실행할 파이썬 코드. 쓸 수 있는 함수와 라이브러리는 도구 설명에 있음",
         ],
     ) -> str:
         """
@@ -195,30 +192,13 @@ def get_execute_python_tool(
         - plt.show()도 호출하지 마세요.
         - 차트를 그린 후 plt.figure()나 plt.gcf()로 현재 figure에 접근할 수 있습니다.
 
-        **예시**:
+        **Athena 결과 해체**:
         ```python
-        # Athena에서 데이터를 가져와서 차트 그리기
-        results = execute_athena_query(
-            "SELECT date, count FROM daily_stats ORDER BY date",
-            database="analytics_db"
-        )
-
-        # 결과를 pandas DataFrame으로 변환
+        results = execute_athena_query("SELECT ...", database="analytics_db")
         rows = results["ResultSet"]["Rows"]
         headers = [col.get("VarCharValue", "") for col in rows[0]["Data"]]
-        data_rows = [[col.get("VarCharValue", "") for col in row["Data"]] for row in rows[1:]]
-
-        df = pd.DataFrame(data_rows, columns=headers)
-        df["count"] = df["count"].astype(int)
-
-        # pandas를 활용한 차트 그리기
-        plt.figure(figsize=(10, 6))
-        plt.plot(df["date"], df["count"])
-        plt.xlabel('Date')
-        plt.ylabel('Count')
-        plt.title('Daily Stats')
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        data = [[col.get("VarCharValue", "") for col in row["Data"]] for row in rows[1:]]
+        df = pd.DataFrame(data, columns=headers)
         ```
 
         Args:
@@ -229,16 +209,19 @@ def get_execute_python_tool(
         """
         loop = asyncio.get_running_loop()
 
-        def execute_athena_query(
-            query: str, database: str, max_wait_seconds: int = 300
-        ) -> dict:
-            """코드가 호출하는 동기 진입점. 쿼리 자체는 메인 루프에서 실행됩니다."""
-            return asyncio.run_coroutine_threadsafe(
-                athena.execute_and_wait(query, database, max_wait_seconds), loop
-            ).result()
+        def to_sync(coroutine_function: Callable[..., Awaitable[Any]]) -> Callable:
+            """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다.
 
-        def bridge(coroutine_function):
-            """코루틴을 코드가 부를 수 있는 동기 함수로 바꿉니다."""
+            실행기 워커가 이 결과를 기다리는 동안 코루틴은 메인 루프에서 돕니다.
+            `_code_executor` 를 다시 타는 코루틴을 주면 워커 하나를 호출자가
+            잡은 채 그 워커를 기다리게 되어 그대로 멈춥니다.
+
+            Args:
+                coroutine_function: 메인 루프에서 실행할 코루틴 함수
+
+            Returns:
+                Callable: 코드 안에서 부를 동기 함수
+            """
 
             def call(*args, **kwargs):
                 return asyncio.run_coroutine_threadsafe(
@@ -247,13 +230,14 @@ def get_execute_python_tool(
 
             return call
 
-        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 매 호출 만들 필요가 없다.
-        # execute_athena_query 만 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
+        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 감싸지 않는다.
+        # 나머지는 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
         injected = {
-            "execute_athena_query": execute_athena_query,
+            "execute_athena_query": to_sync(athena.execute_and_wait),
             "read_sheet": read_sheet,
-            **{name: bridge(fn) for name, fn in (coroutines or {}).items()},
         }
+        if draft_sms:
+            injected["draft_sms"] = to_sync(draft_sms)
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
@@ -289,7 +273,7 @@ def get_execute_python_tool(
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
 
-    if coroutines and "draft_sms" in coroutines:
+    if draft_sms:
         execute_python.description += DRAFT_SMS_GUIDE
 
     return execute_python

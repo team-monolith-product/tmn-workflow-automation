@@ -13,7 +13,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
-from .sms import get_sms_tools
+from .sms import get_draft_sms_tool
 from .tools.python_tools import get_execute_python_tool
 from .event_dedup import is_duplicate_event
 from .common import (
@@ -123,25 +123,23 @@ async def _build_tools(
     if project_ds_id:
         notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
 
-    sms_tools = get_sms_tools(client, channel, thread_ts)
-    draft_sms = sms_tools[0]
+    draft_sms = get_draft_sms_tool(client, channel, thread_ts)
 
     return (
         [search_tool, get_web_page_from_url]
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
-        + sms_tools
+        + [draft_sms]
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
-        # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
-        # draft_sms 를 코드 쪽에도 열어 준다. 명단이 컨텍스트를 거치면 상한에
-        # 걸려 잘리고, 잘린 만큼 카드가 갈라진다.
+        # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다. draft_sms 는
+        # 명단이 컨텍스트를 거치면 상한에 걸려 잘리므로 코드 쪽에도 열어 준다.
         + [
             get_execute_python_tool(
                 thread_ts=thread_ts,
                 slack_client=client,
                 channel=channel,
-                coroutines={"draft_sms": draft_sms.coroutine},
+                draft_sms=draft_sms.coroutine,
             )
         ]
     )

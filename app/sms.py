@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 
 from cachetools import TTLCache
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import send as sms_send
@@ -37,6 +37,24 @@ _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 # 줄 수와 줄 폭. 22줄 × 121자면 슬랙 section text 3000자에 든다.
 MAX_ROWS = 20
 MAX_WIDTH = 120
+
+
+def _fingerprint(plan: sms_send.Plan) -> tuple:
+    """초안을 식별하는 값입니다. 같으면 같은 발송입니다.
+
+    코드가 draft_sms 를 부른 뒤 그 아래에서 예외가 나면 도구는 "실행 실패" 만
+    돌려줍니다. 카드는 이미 올라갔는데 모델은 아무 일도 없었던 줄 알고 코드를
+    고쳐 통째로 다시 냅니다. 그러면 같은 명단 카드가 두 장이 되고, 둘 다
+    [보내기] 가 눌리면 같은 사람이 문자를 두 번 받습니다. 중복 접기는 한
+    요청 안에서만 도므로 카드 사이는 아무도 보지 않습니다.
+
+    Args:
+        plan: preview 가 돌려준 계획
+
+    Returns:
+        tuple: 문안·예약시각·번호 목록
+    """
+    return (plan.template, plan.send_time, tuple(row["to"] for row in plan.rows))
 
 
 def _value_table(targets: list[dict]) -> str:
@@ -148,7 +166,9 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
     ]
 
 
-def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
+def get_draft_sms_tool(
+    client: AsyncWebClient, channel: str, thread_ts: str
+) -> BaseTool:
     """문자 발송 초안 도구를 반환합니다.
 
     채널을 도구 인자가 아니라 클로저로 받습니다.
@@ -159,7 +179,7 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         thread_ts: 스레드 타임스탬프
 
     Returns:
-        list: [초안 도구]
+        BaseTool: 초안 도구
     """
 
     @tool
@@ -186,11 +206,21 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         if plan.problems:
             return "보내기 전에 고칠 것: " + " / ".join(plan.problems)
 
+        fingerprint = _fingerprint(plan)
+        for existing in list(_DRAFTS.values()):
+            if existing["fingerprint"] == fingerprint:
+                return (
+                    f"같은 문안·명단({len(plan.rows)}명)의 초안이 이미 스레드에"
+                    " 올라가 있습니다. 다시 올리지 않았습니다."
+                    " 그 카드에서 [보내기] 를 눌러주세요."
+                )
+
         draft_id = uuid.uuid4().hex[:12]
         _DRAFTS[draft_id] = {
             "rows": targets,
             "content": content,
             "send_at": send_at,
+            "fingerprint": fingerprint,
         }
         await client.chat_postMessage(
             channel=channel,
@@ -206,7 +236,7 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
             )
         return f"{len(plan.rows)}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
 
-    return [draft_sms]
+    return draft_sms
 
 
 def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> dict:

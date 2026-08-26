@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from service.sms import send as sms_send
+from service.sms import templates
 from service.sms import transport
 
 ROWS = [
@@ -264,3 +265,19 @@ def test_예약해도_수신자와_문안은_그대로다(monkeypatch):
 
     assert payload["targetCount"] == 2
     assert payload["content"] == CONTENT
+
+
+def test_빈_칸이_nan_으로_나가지_않는다():
+    # 두 명단을 merge 하면 짝이 없는 칸이 NaN 으로 온다. NaN 은 참이라
+    # `or ""` 로는 안 걸러지고 "nan 안내입니다" 가 그대로 발송된다.
+    plan = sms_send.preview(
+        [
+            {"to": "010-1111-2222", "name": "김철수", "var1": "1기"},
+            {"to": "010-3333-4444", "name": "이영희", "var1": float("nan")},
+        ],
+        "[*이름*] 선생님, [*1*] 안내입니다.",
+    )
+
+    assert plan.problems == []
+    assert plan.targets[1]["changeWord"]["var1"] == ""
+    assert "nan" not in templates.render(plan.template, plan.rows[1])

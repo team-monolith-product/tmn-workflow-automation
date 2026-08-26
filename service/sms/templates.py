@@ -59,6 +59,24 @@ def _tag_key(tag: str) -> str:
     return "name" if tag == "이름" else f"var{tag}"
 
 
+def _text(value: Any) -> str:
+    """치환값을 문자열로 바꿉니다. 빈 칸은 빈 문자열입니다.
+
+    pandas 로 두 명단을 merge 하면 짝이 없는 칸이 NaN 으로 옵니다. NaN 은
+    참이라 `or ""` 로는 안 걸러지고, 그대로 두면 "nan 안내입니다" 가 나갑니다.
+    NaN 은 자기 자신과 같지 않은 유일한 값이라 그것으로 봅니다.
+
+    Args:
+        value: 시트나 DataFrame 에서 온 값
+
+    Returns:
+        str: 빈 칸이면 빈 문자열
+    """
+    if value is None or value != value:
+        return ""
+    return str(value)
+
+
 def render(template: str, row: dict[str, Any]) -> str:
     """치환 태그를 실제 값으로 바꿉니다.
 
@@ -72,7 +90,7 @@ def render(template: str, row: dict[str, Any]) -> str:
     Returns:
         str: 치환이 끝난 본문
     """
-    return _TAG.sub(lambda m: str(row.get(_tag_key(m.group(1))) or ""), template)
+    return _TAG.sub(lambda m: _text(row.get(_tag_key(m.group(1)))), template)
 
 
 def build_targets(template: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -95,8 +113,8 @@ def build_targets(template: str, rows: list[dict[str, Any]]) -> list[dict[str, A
     for row in rows:
         target: dict[str, Any] = {"to": row["to"]}
         if "이름" in used:
-            target["name"] = str(row.get("name") or "")
+            target["name"] = _text(row.get("name"))
         if change_keys:
-            target["changeWord"] = {key: str(row.get(key) or "") for key in change_keys}
+            target["changeWord"] = {key: _text(row.get(key)) for key in change_keys}
         targets.append(target)
     return targets

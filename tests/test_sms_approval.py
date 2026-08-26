@@ -1,6 +1,7 @@
 """승인 흐름 테스트 — 누르기 전에는 안 나가야 한다."""
 
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -102,7 +103,7 @@ def _later(minutes: int) -> str:
 
 
 async def _draft(client, targets=ROWS, content="[*이름*]님", send_at=""):
-    tool = sms.get_sms_tools(client, "C1", "111.000")[0]
+    tool = sms.get_draft_sms_tool(client, "C1", "111.000")
     return await tool.ainvoke(
         {"content": content, "targets": targets, "send_at": send_at}
     )
@@ -505,3 +506,45 @@ async def test_수정_모달이_슬랙_한도를_넘지_않는다(client, handle
     for block in client.views[-1]["blocks"]:
         if block["type"] == "section":
             assert len(block["text"]["text"]) <= 3000
+
+
+@pytest.mark.asyncio
+async def test_같은_초안을_두_번_올리지_않는다():
+    # 카드를 올린 뒤 코드가 터지면 도구는 "실행 실패" 만 돌려준다. 모델은
+    # 아무 일도 없었던 줄 알고 통째로 다시 내고, 그러면 같은 명단 카드가
+    # 두 장이 되어 같은 사람이 문자를 두 번 받는다.
+    client = AsyncMock()
+    sms._DRAFTS.clear()
+    tool = sms.get_draft_sms_tool(client, "C1", "111.000")
+    인자 = {
+        "content": "[*이름*] 선생님, 안내입니다.",
+        "targets": [{"to": "010-1111-2222", "name": "김철수"}],
+    }
+
+    첫째 = await tool.ainvoke(인자)
+    둘째 = await tool.ainvoke(인자)
+
+    assert "초안을 올렸습니다" in 첫째
+    assert "이미 스레드에" in 둘째
+    assert client.chat_postMessage.await_count == 1
+    assert len(sms._DRAFTS) == 1
+
+
+@pytest.mark.asyncio
+async def test_명단이_다르면_새_초안을_올린다():
+    client = AsyncMock()
+    sms._DRAFTS.clear()
+    tool = sms.get_draft_sms_tool(client, "C1", "111.000")
+
+    await tool.ainvoke({"content": "안내입니다.", "targets": [{"to": "010-1111-2222"}]})
+    await tool.ainvoke({"content": "안내입니다.", "targets": [{"to": "010-3333-4444"}]})
+
+    assert client.chat_postMessage.await_count == 2
+
+
+def test_초안_도구는_코루틴을_노출한다():
+    # general.py 가 이 속성을 샌드박스에 넘긴다. None 이 되면 설명은
+    # draft_sms 를 광고하는데 코드가 부르면 TypeError 로 끝난다.
+    tool = sms.get_draft_sms_tool(AsyncMock(), "C1", "111.000")
+
+    assert tool.coroutine is not None
