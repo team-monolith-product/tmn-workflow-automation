@@ -14,6 +14,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .sms import get_sms_tools
+from .task_list import get_channel_task_list_tools, get_task_list_write_tools
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -27,6 +28,7 @@ from .common import (
     get_notion_page_tool,
 )
 from service.config import load_config, Squad
+from service.slack_task_list import find_channel_task_list
 
 # 상수들
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
@@ -81,6 +83,9 @@ async def _build_tools(
     작업 생성 도구는 스쿼드별 Notion DB를 대상으로 하며,
     후속 작업 도구는 프로젝트/구성요소 속성이 있는 메인 DB에서만 사용합니다.
 
+    작업 리스트로 등록된 채널은 예외입니다. 작업이 노션이 아니라 그 채널의
+    슬랙 리스트로 가고, 노션 작업 생성 도구 대신 리스트 도구가 들어갑니다.
+
     Args:
         client: 슬랙 클라이언트
         user_id: 질문자의 Slack 사용자 ID
@@ -106,27 +111,43 @@ async def _build_tools(
         title_prop = "제목"
         project_ds_id = PROJECT_DATA_SOURCE_ID
 
+    # 작업 리스트로 등록된 채널은 작업을 노션이 아니라 그 리스트에 만든다.
+    # 노션 작업 생성 도구를 같이 주면 에이전트가 둘 사이에서 흔들린다.
+    # DM 은 리스트를 붙일 수 없으므로 조회하지 않는다.
+    task_list = None
+    if not channel.startswith("D"):
+        task_list = await asyncio.to_thread(find_channel_task_list, channel)
+    if task_list:
+        create_tools = get_task_list_write_tools(
+            client, task_list, user_id, slack_thread_url
+        )
+    else:
+        create_tools = [
+            get_create_notion_task_tool(
+                user_id,
+                slack_thread_url,
+                task_ds_id,
+                client,
+                project_ds_id,
+                title_prop,
+            )
+        ]
+        if project_ds_id:
+            create_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+
     notion_tools = [
-        get_create_notion_task_tool(
-            user_id,
-            slack_thread_url,
-            task_ds_id,
-            client,
-            project_ds_id,
-            title_prop,
-        ),
         get_update_notion_task_deadline_tool(),
         get_update_notion_task_status_tool(task_ds_id),
         get_notion_page_tool(),
     ]
-    if project_ds_id:
-        notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
 
     return (
         [search_tool, get_web_page_from_url]
+        + create_tools
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
+        + get_channel_task_list_tools(client, channel)
         + get_sms_tools(client, channel, thread_ts)
     )
 
