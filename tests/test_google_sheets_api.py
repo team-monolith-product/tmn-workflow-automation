@@ -137,3 +137,34 @@ def test_탭이_전부_숨김이면_문장이_끊기지_않는다():
 
     with pytest.raises(ValueError, match="전부 숨김"):
         google_sheets._worksheet(sheet, "없는탭")
+
+
+def test_목록_조회는_운영_계정을_쓴다(monkeypatch):
+    # 기본 계정으로 나가면 Drive API 가 안 켜진 프로젝트라 403 이 난다.
+    # 배포한 뒤에야 보이는 실패다.
+    쓴계정 = []
+
+    class FakeDrive:
+        class http_client:
+            @staticmethod
+            def request(method, url, params=None):
+                return type("R", (), {"json": staticmethod(lambda: {"files": []})})
+
+    monkeypatch.setattr(
+        google_sheets,
+        "_get_client",
+        lambda account=None: 쓴계정.append(account) or FakeDrive(),
+    )
+
+    google_sheets.list_spreadsheet_files()
+
+    assert 쓴계정 == [google_sheets.OPERATING_ACCOUNT]
+
+
+def test_계정_환경변수가_없으면_폴백하지_않는다(monkeypatch):
+    # .get() 으로 기본 계정에 흘려보내면 예외도 없이 시트만 안 보인다.
+    monkeypatch.delenv(google_sheets.OPERATING_ACCOUNT, raising=False)
+    google_sheets._clients.clear()
+
+    with pytest.raises(KeyError, match=google_sheets.OPERATING_ACCOUNT):
+        google_sheets._get_client(google_sheets.OPERATING_ACCOUNT)
