@@ -189,3 +189,24 @@ print(f"Processed {len(data_rows)} rows")
 
         # 슬랙 업로드가 호출되었는지 확인
         mock_slack_client.files_upload_v2.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_코드가_정의한_함수가_상위_이름을_본다():
+    # exec 에 locals 를 따로 주면 함수 본문이 상위 import 를 못 찾는다.
+    # 하이픈 지우는 함수를 apply 로 넘기는 일이 흔해서 바로 터진다.
+    tool = get_execute_python_tool()
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                "import re\n"
+                "def 숫자만(값):\n"
+                "    return re.sub(r'\\D', '', 값)\n"
+                "print(숫자만('010-1111-2222'))\n"
+            )
+        }
+    )
+
+    assert "01011112222" in result
+    assert "NameError" not in result
