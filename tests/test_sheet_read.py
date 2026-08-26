@@ -95,9 +95,8 @@ def test_셀_안의_탭과_줄나눔이_표를_밀지_않는다():
     ]
 
     header, rows = read.pick(values, [])
-    out = read.render(header, rows)
 
-    assert len(out.splitlines()) == 3  # 머리행 + 1행 + 총계
+    assert len(rows) == 1
     assert rows[0][1] == "첫 줄 둘째 줄 끝"
 
 
@@ -108,32 +107,6 @@ def test_짧은_행도_열을_채운다():
     _, rows = read.pick(values, [])
 
     assert rows[0] == ["가", "", ""]
-
-
-def test_총_행수를_알려준다():
-    header, rows = read.pick(VALUES, ["성함"])
-
-    assert read.render(header, rows).endswith("총 2행")
-
-
-def test_상한을_넘으면_몇_행까지_읽었는지_말한다():
-    # 잘린 목록을 전부라고 믿고 문자를 보내면 절반이 못 받는다.
-    values = [["성함"]] + [[f"이름{i}"] for i in range(1, 101)]
-    header, rows = read.pick(values, [])
-
-    out = read.render(header, rows, char_limit=60)
-
-    assert "100행 중" in out
-    assert len(out) < 200
-
-
-def test_상한은_최대치를_넘지_못한다():
-    values = [["성함"]] + [[f"이름{i}"] for i in range(1, 5001)]
-    header, rows = read.pick(values, [])
-
-    out = read.render(header, rows, char_limit=10_000_000)
-
-    assert len(out) <= read.MAX_CHAR_LIMIT + 100
 
 
 def test_같은_머리행이_두_벌이면_값이_든_열을_고른다():

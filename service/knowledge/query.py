@@ -45,6 +45,20 @@ SCHEMA_GUIDE = """
   raw_text가 스레드 원문이고 평균 1,148자다. distilled_text는 아직 전부 비어 있다.
 - query_log(actor, tool, query, filters, latency_ms, created_at): 이 도구의 실행 기록.
 
+구글 시트 찾기:
+- data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트
+  하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
+  않다 -- 응답이 계속 쌓여 곧 낡기 때문이다.
+- 그래서 여기서 답할 수 있는 것은 "그런 시트가 어디 있나"까지다. 행수·집계·명단은
+  **execute_python 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
+- metadata->'tabs' 에 탭별 gid 와 columns 가 있다. 시트를 찾은 뒤
+  external_id(=스프레드시트 ID)와 gid 를 execute_python 코드에 넘긴다.
+- 예: 출석 열이 있는 시트 찾기
+  SELECT i.title, i.external_id, i.url
+  FROM item i JOIN data_source d ON d.id = i.data_source_id
+  WHERE d.source = 'drive_sheet' AND lower(i.raw_text) LIKE lower('%출석%')
+  ORDER BY i.source_updated_at DESC
+
 규약:
 - 어휘를 찾을 때는 lower(raw_text) LIKE lower('%키워드%')로 쓴다. GIN(pg_bigm)
   인덱스가 lower(raw_text)에만 걸려 있어 ILIKE나 정규식은 전체 스캔이 된다.

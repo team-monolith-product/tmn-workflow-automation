@@ -13,12 +13,15 @@ from google.oauth2.service_account import Credentials
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 
+def _credentials() -> Credentials:
+    """환경 변수에서 서비스 계정 JSON을 읽어 자격증명을 만든다."""
+    info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+
 def _get_client() -> gspread.Client:
     """환경 변수에서 서비스 계정 JSON을 읽어 gspread 클라이언트 생성"""
-    sa_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
-    info = json.loads(sa_json)
-    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    return gspread.authorize(creds)
+    return gspread.authorize(_credentials())
 
 
 def get_worksheet_values(
@@ -67,6 +70,71 @@ def search_spreadsheets(name: str = "") -> list[dict]:
         for item in files
         if not want or want in item["name"].lower()
     ]
+
+
+def list_spreadsheets_changed_since(modified_after: str = "") -> list[dict]:
+    """수정 시각이 기준보다 뒤인 스프레드시트를 나열한다.
+
+    **공유 드라이브를 포함해야 한다.** 실측(8/21)에서 보이는 시트 94개가
+    전부 공유 드라이브 소속이었고, 플래그 없이 부르면 0개가 나온다.
+
+    Args:
+        modified_after: RFC3339 시각. 비우면 전부
+
+    Returns:
+        list[dict]: id·name·modifiedTime·webViewLink·trashed
+    """
+    from googleapiclient.discovery import build
+
+    drive = build("drive", "v3", credentials=_credentials())
+    query = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+    if modified_after:
+        query += f" and modifiedTime > '{modified_after}'"
+
+    files, page = [], None
+    while True:
+        result = (
+            drive.files()
+            .list(
+                q=query,
+                fields="nextPageToken, files(id,name,modifiedTime,webViewLink)",
+                pageSize=1000,
+                pageToken=page,
+                orderBy="modifiedTime desc",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
+        files.extend(result.get("files", []))
+        page = result.get("nextPageToken")
+        if not page:
+            return files
+
+
+def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
+    """탭마다 머리행만 읽는다. 카탈로그에 넣을 것은 이것뿐이다.
+
+    셀 값은 읽지 않는다 -- 응답이 계속 쌓이므로 적재하면 곧 낡고, 실제 값은
+    필요할 때 실시간으로 읽는다.
+
+    Args:
+        spreadsheet_id: 스프레드시트 ID
+
+    Returns:
+        list[dict]: id·title·header
+    """
+    gc = _get_client()
+    sheet = gc.open_by_key(spreadsheet_id)
+    out = []
+    for worksheet in sheet.worksheets():
+        try:
+            header = worksheet.row_values(1)
+        except Exception:
+            # 탭 하나가 막혀도 나머지는 담는다.
+            header = []
+        out.append({"id": worksheet.id, "title": worksheet.title, "header": header})
+    return out
 
 
 def get_worksheet_titles(spreadsheet_id: str) -> list[dict]:

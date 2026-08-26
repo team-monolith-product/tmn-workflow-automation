@@ -2,8 +2,10 @@
 구글 시트를 에이전트가 읽을 모양으로 다듬습니다.
 
 시트는 사람이 보라고 만든 것이라 그대로 넘기면 못 씁니다. 신청 응답 시트가
-297행 × 25열이고, 전부 실으면 문안 한 줄 뽑으려다 컨텍스트를 다 씁니다.
-그래서 **열을 골라 받고, 글자 수 상한에서 자릅니다.**
+297행 × 25열이라, 필요한 **열만 골라** 받습니다.
+
+여기서 자르지는 않습니다. 결과는 execute_python 안의 메모리로 가지 컨텍스트로
+가지 않으므로 상한을 둘 이유가 없고, 두면 잘린 표로 통계를 내게 됩니다.
 
 셀 값은 사람이 손으로 넣은 것이라 믿지 않습니다. 탭과 줄 나눔이 섞여 있으면
 표가 한 칸씩 밀리고, 밀린 표는 엉뚱한 사람 번호로 문자를 보내게 합니다.
@@ -11,9 +13,6 @@
 
 import re
 from typing import Any, NamedTuple
-
-DEFAULT_CHAR_LIMIT = 8_000
-MAX_CHAR_LIMIT = 20_000
 
 # https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid}
 _ID = re.compile(r"/spreadsheets/d/([A-Za-z0-9-_]+)")
@@ -144,35 +143,3 @@ def pick(
         if any(picked):
             rows.append(picked)
     return [header[i] for i in keep], rows
-
-
-def render(
-    header: list[str], rows: list[list[str]], char_limit: int = DEFAULT_CHAR_LIMIT
-) -> str:
-    """표를 탭으로 가른 글로 만듭니다. 상한을 넘으면 자릅니다.
-
-    Args:
-        header: 머리행
-        rows: 행 목록
-        char_limit: 돌려줄 글자 수 상한
-
-    Returns:
-        str: 첫 줄이 머리행, 마지막 줄에 총 행수
-    """
-    limit = max(1, min(char_limit, MAX_CHAR_LIMIT))
-    lines = ["\t".join(header)]
-    length = len(lines[0])
-    shown = 0
-    for row in rows:
-        line = "\t".join(row)
-        if length + len(line) + 1 > limit:
-            break
-        lines.append(line)
-        length += len(line) + 1
-        shown += 1
-    # 몇 행 중 몇 행을 봤는지 안 적으면, 잘린 목록을 전부라고 믿고 문자를 보낸다.
-    if shown < len(rows):
-        lines.append(f"… {len(rows)}행 중 {shown}행까지 ({limit}자 상한)")
-    else:
-        lines.append(f"— 총 {len(rows)}행")
-    return "\n".join(lines)

@@ -161,6 +161,14 @@ task_alerts:
             - alert_no_tasks
 
 scheduled_jobs:
+  # 구글 시트 카탈로그. 셀 값이 아니라 이름·탭·머리행만 넣으므로 자주 돌려도 싸다.
+  - name: sync_sheet_catalog
+    module: scripts.sync_sheet_catalog
+    function: main
+    cron:
+      minute: "*/30"
+    business_day_only: false
+
   - name: validate_customer_reports
     module: scripts.validate_customer_reports
     function: main
