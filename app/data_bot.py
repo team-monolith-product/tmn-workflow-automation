@@ -271,6 +271,8 @@ async def answer_data_analysis(
         say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
     # execute_python_with_chart tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
+    # 이 도구에는 read_sheet 도 함께 주입된다(app/tools/chart_tools.py). 데이터봇도
+    # 구글 시트를 읽어 Athena 결과와 맞춰 볼 수 있다 -- 도구 설명에 사용법이 있다.
     execute_python_with_chart = get_execute_python_with_chart_tool(
         say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )

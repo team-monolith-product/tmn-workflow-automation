@@ -7,21 +7,73 @@ import os
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.urls import DRIVE_FILES_API_V3_URL
 
-# 파일 목록을 이름으로 찾으려면 Drive 스코프가 필요하다. 읽기 전용은 유지한다 --
-# 쓰기를 얹으면 에이전트가 사람이 관리하는 시트를 고칠 수 있게 되고, 되돌릴 수 없다.
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# 파일 목록을 이름으로 찾으려면 Drive 스코프가, 셀을 읽으려면 Sheets 스코프가 필요하다.
+# 둘 다 읽기 전용으로 둔다 -- 쓰기를 얹으면 에이전트가 사람이 관리하는 시트를 고칠 수
+# 있게 되고, 되돌릴 방법이 없다.
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+]
 
-
-def _credentials() -> Credentials:
-    """환경 변수에서 서비스 계정 JSON을 읽어 자격증명을 만든다."""
-    info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    return Credentials.from_service_account_info(info, scopes=SCOPES)
+_client: gspread.Client | None = None
 
 
 def _get_client() -> gspread.Client:
-    """환경 변수에서 서비스 계정 JSON을 읽어 gspread 클라이언트 생성"""
-    return gspread.authorize(_credentials())
+    """gspread 클라이언트를 만들어 재사용한다.
+
+    호출마다 만들면 시트 하나당 OAuth 토큰 grant 가 한 번씩 더 나가고 커넥션도
+    재사용되지 않는다. 카탈로그 동기화는 한 번에 수십 개 시트를 훑으므로 그만큼
+    쿼터를 태운다.
+
+    BackOffHTTPClient 를 쓰는 이유는 429 다. 기본 클라이언트는 재시도가 없어서
+    Sheets 읽기 쿼터(사용자당 분당 60회)에 걸리는 순간 그대로 예외가 된다.
+    """
+    global _client
+    if _client is None:
+        info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+        credentials = Credentials.from_service_account_info(info, scopes=SCOPES)
+        _client = gspread.authorize(credentials, http_client=gspread.BackOffHTTPClient)
+    return _client
+
+
+SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
+
+
+def list_spreadsheet_files() -> list[dict]:
+    """서비스 계정이 볼 수 있는 스프레드시트를 나열한다. 휴지통은 뺀다.
+
+    gspread 의 list_spreadsheet_files 를 쓰지 않는 이유는 그 쿼리에 trashed=false 가
+    없어서다. Drive files.list 는 기본으로 휴지통 파일을 포함하므로, 사본을 지워
+    정리해도 계속 후보에 섞이고 ID 로는 읽히기까지 한다. 대신 gspread 의 HTTP
+    클라이언트를 그대로 쓰므로 인증·재시도·공유 드라이브 플래그는 같이 따라온다.
+
+    **공유 드라이브 플래그가 필수다.** 실측(8/21)에서 보이는 시트 94개가 전부 공유
+    드라이브 소속이었고, 그 플래그 없이 부르면 0개가 나온다.
+
+    Returns:
+        list[dict]: id·name·modifiedTime·webViewLink. 최근 수정 순
+    """
+    client = _get_client()
+    params = {
+        "q": f"mimeType='{SPREADSHEET_MIME}' and trashed=false",
+        "pageSize": 1000,
+        "orderBy": "modifiedTime desc",
+        "supportsAllDrives": True,
+        "includeItemsFromAllDrives": True,
+        "fields": "nextPageToken,files(id,name,modifiedTime,webViewLink)",
+    }
+    files: list[dict] = []
+    while True:
+        payload = client.http_client.request(
+            "get", DRIVE_FILES_API_V3_URL, params=params
+        ).json()
+        files.extend(payload.get("files", []))
+        token = payload.get("nextPageToken")
+        if not token:
+            return files
+        params["pageToken"] = token
 
 
 def get_worksheet_values(
@@ -49,74 +101,16 @@ def get_worksheet_values(
     return ws.get_all_values(value_render_option=value_render_option)
 
 
-def search_spreadsheets(name: str = "") -> list[dict]:
-    """서비스 계정이 볼 수 있는 스프레드시트를 이름으로 찾는다.
-
-    서비스 계정도 하나의 구글 계정이라, **공유받은 파일만** 보인다.
-    공유되지 않은 시트는 검색에도 안 나오고 읽기도 거부된다 -- 이것이
-    권한 경계다.
-
-    Args:
-        name: 찾을 이름 조각. 비우면 전부
-
-    Returns:
-        list[dict]: id·name (수정 시각이 최근인 순서)
-    """
-    gc = _get_client()
-    want = name.strip().lower()
-    files = gc.list_spreadsheet_files()
-    return [
-        {"id": item["id"], "name": item["name"]}
-        for item in files
-        if not want or want in item["name"].lower()
-    ]
-
-
-def list_spreadsheets_changed_since(modified_after: str = "") -> list[dict]:
-    """수정 시각이 기준보다 뒤인 스프레드시트를 나열한다.
-
-    **공유 드라이브를 포함해야 한다.** 실측(8/21)에서 보이는 시트 94개가
-    전부 공유 드라이브 소속이었고, 플래그 없이 부르면 0개가 나온다.
-
-    Args:
-        modified_after: RFC3339 시각. 비우면 전부
-
-    Returns:
-        list[dict]: id·name·modifiedTime·webViewLink·trashed
-    """
-    from googleapiclient.discovery import build
-
-    drive = build("drive", "v3", credentials=_credentials())
-    query = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
-    if modified_after:
-        query += f" and modifiedTime > '{modified_after}'"
-
-    files, page = [], None
-    while True:
-        result = (
-            drive.files()
-            .list(
-                q=query,
-                fields="nextPageToken, files(id,name,modifiedTime,webViewLink)",
-                pageSize=1000,
-                pageToken=page,
-                orderBy="modifiedTime desc",
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
-            )
-            .execute()
-        )
-        files.extend(result.get("files", []))
-        page = result.get("nextPageToken")
-        if not page:
-            return files
-
-
 def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
-    """탭마다 머리행만 읽는다. 카탈로그에 넣을 것은 이것뿐이다.
+    """탭마다 머리행(1행)만 읽는다.
 
-    셀 값은 읽지 않는다 -- 응답이 계속 쌓이므로 적재하면 곧 낡고, 실제 값은
-    필요할 때 실시간으로 읽는다.
+    탭 수만큼 values.get 을 부르면 시트 하나에 1+N 회가 든다. 94개 시트에
+    탭 평균 셋이면 30분마다 370회고, Sheets 읽기 쿼터는 사용자당 분당 60회다.
+    batch 로 묶어 시트당 2회로 줄인다.
+
+    예외를 삼키지 않는다. 머리행을 못 읽은 탭을 빈 값으로 적재하면 카탈로그가
+    "이 탭에는 열이 없다"를 최신 정보인 척 들고 있게 되고, 커서가 이미 지나가서
+    그 시트가 다시 수정될 때까지 복구되지 않는다.
 
     Args:
         spreadsheet_id: 스프레드시트 ID
@@ -124,28 +118,22 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     Returns:
         list[dict]: id·title·header
     """
-    gc = _get_client()
-    sheet = gc.open_by_key(spreadsheet_id)
-    out = []
-    for worksheet in sheet.worksheets():
-        try:
-            header = worksheet.row_values(1)
-        except Exception:
-            # 탭 하나가 막혀도 나머지는 담는다.
-            header = []
-        out.append({"id": worksheet.id, "title": worksheet.title, "header": header})
-    return out
+    sheet = _get_client().open_by_key(spreadsheet_id)
+    worksheets = sheet.worksheets()
+    if not worksheets:
+        return []
 
-
-def get_worksheet_titles(spreadsheet_id: str) -> list[dict]:
-    """스프레드시트의 탭 목록을 반환한다.
-
-    Args:
-        spreadsheet_id: 스프레드시트 ID
-
-    Returns:
-        list[dict]: id·title
-    """
-    gc = _get_client()
-    sh = gc.open_by_key(spreadsheet_id)
-    return [{"id": ws.id, "title": ws.title} for ws in sh.worksheets()]
+    result = sheet.values_batch_get(
+        [f"'{ws.title}'!1:1" for ws in worksheets],
+        params={"majorDimension": "ROWS"},
+    )
+    ranges = result.get("valueRanges", [])
+    return [
+        {
+            "id": ws.id,
+            "title": ws.title,
+            # 빈 탭은 values 키 자체가 없다.
+            "header": (value_range.get("values") or [[]])[0],
+        }
+        for ws, value_range in zip(worksheets, ranges)
+    ]

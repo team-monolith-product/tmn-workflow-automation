@@ -17,8 +17,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
-from api.google_sheets import get_worksheet_values, search_spreadsheets
-from service.sheets.frame import build_read_sheet
+from service.sheets.read import read_sheet
 
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
@@ -147,6 +146,7 @@ def get_execute_python_with_chart_tool(
           결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
         - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
           반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
+          tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 첫 번째 탭입니다.
           **여기서는 전량을 읽고 자르지 않습니다** — 수백 행 통계는 이 도구로 내십시오.
           이름으로 여러 시트가 걸리면 후보를 담은 ValueError 가 납니다. 그때는
           임의로 고르지 말고 사람에게 어느 것인지 물어보십시오.
@@ -204,11 +204,11 @@ def get_execute_python_with_chart_tool(
                 athena.execute_and_wait(query, database, max_wait_seconds), loop
             ).result()
 
+        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 매 호출 만들 필요가 없다.
+        # execute_athena_query 만 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
         injected = {
             "execute_athena_query": execute_athena_query,
-            # gspread 는 동기라 실행 스레드에서 그대로 부른다. 루프를 왕복시키면
-            # 이벤트 루프를 붙잡는 시간만 길어진다.
-            "read_sheet": build_read_sheet(search_spreadsheets, get_worksheet_values),
+            "read_sheet": read_sheet,
         }
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
@@ -248,5 +248,21 @@ def get_execute_python_with_chart_tool(
     return execute_python_with_chart
 
 
-# 기본 tool (backward compatibility를 위해 유지)
-execute_python_with_chart = get_execute_python_with_chart_tool()
+def get_chart_tools(
+    say: Callable[[dict[str, Any], str], Any] | None = None,
+    thread_ts: str | None = None,
+    slack_client: Any | None = None,
+    channel: str | None = None,
+) -> list:
+    """코드 실행 도구를 목록으로 반환합니다.
+
+    다른 도구 그룹이 전부 get_*_tools() 로 리스트를 돌려주므로 조립부를 맞춥니다.
+
+    Returns:
+        list: [코드 실행 도구]
+    """
+    return [
+        get_execute_python_with_chart_tool(
+            say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
+        )
+    ]

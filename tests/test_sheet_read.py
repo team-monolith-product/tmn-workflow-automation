@@ -47,8 +47,15 @@ def test_ID만_줘도_된다():
 
 
 def test_시트_링크가_아니면_거절한다():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="ID 를 찾을 수 없습니다"):
         read.parse_target("https://team-mono.com/hello")
+
+
+def test_영문_시트_이름은_ID로_보지_않는다():
+    # 길이만 보면 "2026_customer_satisfaction_survey" 같은 이름이 ID 로 오인돼
+    # Drive 검색을 건너뛰고, 사람은 "공유를 확인하십시오" 대신 구글 404 를 본다.
+    with pytest.raises(ValueError):
+        read.parse_target("2026_customer_satisfaction_survey")
 
 
 def test_열을_골라_읽는다():
@@ -66,6 +73,15 @@ def test_열_이름을_포함으로_찾는다():
     assert header == ["휴대전화 번호"]
 
 
+def test_부분일치가_여럿이면_고르지_않는다():
+    # 시트가 모호하면 안 고르는데 열이라고 다를 이유가 없다. 잘못 고르면
+    # 엉뚱한 사람 번호로 문자가 나가고, 카드만 봐서는 어느 열인지 알 수 없다.
+    values = [["비상 연락처", "학부모 연락처"], ["010-1", "010-2"]]
+
+    with pytest.raises(read.AmbiguousColumn, match="비상 연락처"):
+        read.pick(values, ["연락처"])
+
+
 def test_없는_열은_시트의_열_이름을_알려준다():
     # 그냥 실패하면 에이전트가 같은 이름으로 계속 다시 부른다.
     with pytest.raises(ValueError, match="휴대전화 번호"):
@@ -77,6 +93,14 @@ def test_열을_비우면_전부_읽는다():
 
     assert len(header) == 5
     assert len(rows) == 2
+
+
+def test_빈_시트를_거절한다():
+    # gspread 는 빈 시트에 [] 가 아니라 [[]] 을 준다(pad_values 기본값).
+    # [] 만 막으면 이 가드는 죽은 코드가 되고, 빈 목록이 조용히 흘러나간다.
+    for empty in ([], [[]], [["", ""]]):
+        with pytest.raises(ValueError, match="비어 있습니다"):
+            read.pick(empty, [])
 
 
 def test_빈_행은_버린다():
@@ -109,6 +133,28 @@ def test_짧은_행도_열을_채운다():
     assert rows[0] == ["가", "", ""]
 
 
+def test_머리행이_겹치면_이름을_갈라_준다():
+    # **행을 dict 로 접을 때 같은 키가 겹치면 뒤엣것만 남는다.** 열이 소리 없이
+    # 사라지고 명단이 통째로 비어도 예외가 나지 않는다.
+    header, rows = read.pick(
+        [["성함", "연락처", "성함", "연락처"], ["가", "010-1", "나", "010-2"]], []
+    )
+
+    assert header == ["성함", "연락처", "성함_2", "연락처_2"]
+    assert len(dict(zip(header, rows[0]))) == 4
+
+
+def test_이름_없는_열도_자리를_지킨다():
+    # gspread 는 머리행보다 오른쪽에 값이 있으면 빈 문자열로 패딩한다(pad_values).
+    # 빈 이름이 둘 이상이면 그대로 겹쳐 열이 사라진다.
+    header, rows = read.pick(
+        [["성함", "", "비고", ""], ["가", "010-1", "메모", "추가"]], []
+    )
+
+    assert header == ["성함", "열2", "비고", "열4"]
+    assert dict(zip(header, rows[0]))["열2"] == "010-1"
+
+
 def test_같은_머리행이_두_벌이면_값이_든_열을_고른다():
     # 폼에서 문항을 지웠다 다시 만들면 응답 시트에 옛 열이 그대로 남고, 새 응답은
     # 뒤에 붙은 열에 쌓인다. 앞엣것을 집으면 "명단 0명" 이 되어 아무에게도
@@ -121,7 +167,7 @@ def test_같은_머리행이_두_벌이면_값이_든_열을_고른다():
 
     header, rows = read.pick(values, ["성함", "연락처"])
 
-    assert header == ["성함", "연락처"]
+    assert header == ["성함_2", "연락처_2"]
     assert [row[0] for row in rows] == ["이진선", "김지수"]
 
 

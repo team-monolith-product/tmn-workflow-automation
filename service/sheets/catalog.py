@@ -6,9 +6,11 @@
 진실로 믿는 것이 값을 아예 모르는 것보다 나쁩니다. 실제 값은 필요할 때
 execute_python 안에서 실시간으로 읽습니다.
 
-그래서 content_hash 의 입력도 이름·탭·머리행뿐입니다. 응답이 300건 쌓여도
-해시가 그대로라 재적재가 일어나지 않습니다 -- 노션과 다른 점이고, 시트를
-훨씬 싸게 따라갈 수 있는 이유입니다.
+content_hash 는 **정제 상태를 가르는 게이트**입니다(ingest.UPSERT_ITEM 의 CASE).
+이 소스는 정제를 돌리지 않으므로(distill_state 가 늘 skipped) 해시가 갈라도
+바뀌는 것이 없습니다. 즉 여기서는 사실상 쓰지 않는 값이고, 셀이 바뀌었다고
+UPDATE 가 도는 것을 막아 주지도 않습니다 -- upsert 는 해시와 무관하게 매번
+전 컬럼을 씁니다. 94개 규모에서는 그 UPDATE 가 문제될 일이 없어 그대로 둡니다.
 """
 
 import json
@@ -81,7 +83,7 @@ def build_row(
             },
             ensure_ascii=False,
         ),
-        # 셀이 바뀌어도 이름·탭·머리행이 그대로면 해시가 같다 -> 재적재 없음.
+        # 이름·탭·머리행만 본다. 정제 게이트용이라 이 소스에서는 갈라도 달라질 게 없다.
         "content_hash": compute_content_hash(raw_text),
         "distill_state": DISTILL_STATE,
         "distill_after": None,
