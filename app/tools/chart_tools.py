@@ -17,8 +17,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+from service.sheets.read import read_sheet
 
-# pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다
+# 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
+STDOUT_LIMIT = 4_000
+
+# pyplot은 전역 figure 상태를 쓰므로 코드 실행을 워커 하나로 직렬화한다.
+# 시트 읽기(read_sheet)도 이 코드 안에서 도는 이상 같은 큐를 탄다 -- 봇 넷이
+# 이 워커 하나를 나눠 쓰므로, 서로 몇 초씩 막히기 시작하면 시트 전용 풀로 가른다.
 _code_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chart-exec")
 
 
@@ -60,7 +66,7 @@ setup_korean_font()
 
 
 def _run_code(
-    code: str, execute_athena_query: Callable[..., dict]
+    code: str, injected: dict[str, Callable[..., Any]]
 ) -> tuple[str, io.BytesIO | None, str | None]:
     """
     LLM이 만든 코드를 실행하고 결과를 반환합니다.
@@ -69,14 +75,14 @@ def _run_code(
 
     Args:
         code: 실행할 파이썬 코드
-        execute_athena_query: 코드에 주입할 Athena 조회 함수
+        injected: 코드에 주입할 함수들. 이름이 그대로 코드 안의 이름이 된다
 
     Returns:
         tuple: (STDOUT 출력, 차트 PNG 버퍼 또는 None, 실패 시 스택트레이스)
     """
     captured_output = io.StringIO()
     exec_globals = {
-        "execute_athena_query": execute_athena_query,
+        **injected,
         "plt": plt,
         "matplotlib": matplotlib,
         "pd": pd,
@@ -103,7 +109,6 @@ def _run_code(
 
 
 def get_execute_python_with_chart_tool(
-    say: Callable[[dict[str, Any], str], Any] | None = None,
     thread_ts: str | None = None,
     slack_client: Any | None = None,
     channel: str | None = None,
@@ -112,7 +117,6 @@ def get_execute_python_with_chart_tool(
     파이썬 코드를 실행하고 matplotlib 차트를 슬랙으로 전송하는 도구를 반환합니다.
 
     Args:
-        say: Slack 메시지 전송 함수
         thread_ts: Slack 스레드 타임스탬프
         slack_client: Slack WebClient 인스턴스
         channel: Slack 채널 ID
@@ -140,6 +144,26 @@ def get_execute_python_with_chart_tool(
         - `plt` (matplotlib.pyplot): 차트 시각화를 위한 matplotlib
         - `execute_athena_query(query: str, database: str)`: Athena SQL을 실행하고 결과를 반환합니다.
           결과는 dict 형태이며, "ResultSet" 키에 쿼리 결과가 포함됩니다.
+        - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
+          반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
+          tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 첫 번째 탭입니다.
+          **여기서는 전량을 읽고 자르지 않습니다** — 수백 행 통계는 이 도구로 내십시오.
+          이름으로 여러 시트가 걸리면 후보를 담은 ValueError 가 납니다. 그때는
+          임의로 고르지 말고 사람에게 어느 것인지 물어보십시오. 열 이름이
+          모호할 때도 같습니다 — 예외 메시지가 대안을 알려주니 그대로 따르십시오.
+          `APIError [429]` 는 읽기 쿼터(분당 60회)가 찬 것입니다. 코드를 고쳐도
+          소용없으니 사람에게 잠시 뒤 다시 부르라고 알리십시오.
+
+        **행 수 주의**: 시트의 데이터 행을 **그대로** 돌려줍니다. 통째로 빈 행만
+        버리므로, 아래쪽에 한 칸씩 끌어내려진 행이 섞여 있으면 그것도 들어옵니다.
+        명단을 뽑을 때는 직접 거르십시오: `df = df[df["성함"].str.strip() != ""]`.
+        여기서 대신 걸러 주면 몇 명이 빠졌는지가 안 보입니다.
+
+        **통계를 낼 때 주의**:
+        - print 로 **집계 결과만** 내보내십시오. DataFrame 전체를 print 하면
+          답을 쓸 자리가 남지 않습니다.
+        - 전화번호는 시트마다 하이픈 유무가 다릅니다. 대조·중복 제거 전에
+          숫자만 남기십시오: `df["전화"].str.replace(r"\\D", "", regex=True)`
 
         **주의사항**:
         - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
@@ -188,9 +212,22 @@ def get_execute_python_with_chart_tool(
                 athena.execute_and_wait(query, database, max_wait_seconds), loop
             ).result()
 
+        # read_sheet 는 루프에 기대지 않으므로(gspread 가 동기다) 매 호출 만들 필요가 없다.
+        # execute_athena_query 만 이번 호출의 루프를 붙잡아야 해서 여기서 만든다.
+        injected = {
+            "execute_athena_query": execute_athena_query,
+            "read_sheet": read_sheet,
+        }
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
-            _code_executor, functools.partial(_run_code, code, execute_athena_query)
+            _code_executor, functools.partial(_run_code, code, injected)
         )
+        # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
+        if len(stdout_output) > STDOUT_LIMIT:
+            stdout_output = (
+                stdout_output[:STDOUT_LIMIT]
+                + f"\n… {len(stdout_output)}자 중 {STDOUT_LIMIT}자에서 잘렸습니다."
+                " 표 전체가 아니라 집계 결과만 print 하십시오."
+            )
 
         if error_traceback:
             error_message = f"❌ 코드 실행 실패:\n\n{error_traceback}"
@@ -217,7 +254,3 @@ def get_execute_python_with_chart_tool(
         return result_message
 
     return execute_python_with_chart
-
-
-# 기본 tool (backward compatibility를 위해 유지)
-execute_python_with_chart = get_execute_python_with_chart_tool()

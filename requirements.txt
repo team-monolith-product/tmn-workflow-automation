@@ -34,7 +34,9 @@ matplotlib
 sentry-sdk[fastapi]
 PyYAML
 apscheduler
-gspread
+# 내부 표면에 기댄다(http_client.fetch_sheet_metadata·values_batch_get,
+# utils.absolute_range_name). 무핀으로 두면 재빌드가 조용히 잡을 죽인다.
+gspread~=6.2
 google-auth
 
 # 교육 입찰 규격서 파싱 (S4 보강)

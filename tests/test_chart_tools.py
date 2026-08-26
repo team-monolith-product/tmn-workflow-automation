@@ -15,11 +15,9 @@ async def test_execute_python_with_chart_success_with_chart():
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
     tool = get_execute_python_with_chart_tool(
-        say=mock_say,
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -63,11 +61,9 @@ async def test_execute_python_with_chart_success_without_chart():
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
     tool = get_execute_python_with_chart_tool(
-        say=mock_say,
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -99,11 +95,9 @@ async def test_execute_python_with_chart_failure():
     """
     # Mock Slack client
     mock_slack_client = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
     tool = get_execute_python_with_chart_tool(
-        say=mock_say,
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -133,7 +127,6 @@ async def test_execute_python_with_chart_with_athena_mock():
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # Mock athena.execute_and_wait
     mock_athena_result = {
@@ -152,7 +145,6 @@ async def test_execute_python_with_chart_with_athena_mock():
 
         # 도구 생성
         tool = get_execute_python_with_chart_tool(
-            say=mock_say,
             thread_ts="1234567890.123456",
             slack_client=mock_slack_client,
             channel="C123456",
