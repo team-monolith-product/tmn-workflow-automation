@@ -38,7 +38,7 @@ from api.google_sheets import (
     get_worksheet_headers,
     list_spreadsheet_files,
 )
-from service.knowledge.db import connect
+from service.db import connect
 from service.knowledge.ingest import upsert_item
 from service.knowledge.register import upsert_source
 from service.sheets import catalog

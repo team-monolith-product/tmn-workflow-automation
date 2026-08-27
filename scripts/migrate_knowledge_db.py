@@ -23,7 +23,7 @@ import pathlib
 
 from dotenv import load_dotenv
 
-from service.knowledge.db import connect, fetch_all
+from service.db import connect, fetch_all
 
 MIGRATION_DIR = (
     pathlib.Path(__file__).resolve().parent.parent / "migrations" / "knowledge"

@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 import psycopg
 
-from service.knowledge.db import connect
+from service.db import connect
 
 # 옛 검색 도구가 스니펫 20건으로 돌려주던 분량이다.
 DEFAULT_CHAR_LIMIT = 8_000
