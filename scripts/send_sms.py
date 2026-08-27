@@ -61,7 +61,7 @@ def main() -> None:
 
     result = sms_send.send(rows=rows, content=args.content, subject=args.subject)
     print(
-        f"접수 완료 — {result['sent']}명\nmessageKey {result['message_key']}\n"
+        f"접수 완료 — {result.sent}명\nmessageKey {result.message_key}\n"
         "접수 성공이지 도달 확인이 아닙니다."
     )
 

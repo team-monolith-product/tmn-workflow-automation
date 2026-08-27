@@ -30,17 +30,42 @@ class Plan(NamedTuple):
     sample: str
     max_bytes: int
     targets: list[dict[str, Any]]  # 벤더로 그대로 나가는 값. 카드도 이걸 보여준다
-    send_time: str | None = None  # 벤더 형식 예약 시각. None 이면 즉시 발송
+    send_at: datetime | None = None  # 예약 시각(aware). None 이면 즉시 발송
 
 
-def parse_send_at(value: str) -> tuple[str | None, str | None]:
-    """예약 시각 문자열을 벤더 형식으로 바꿉니다.
+class Sent(NamedTuple):
+    """벤더로 실제 나간 값.
+
+    이력이 남기는 것과 카드가 그리는 것이 같은 출처여야 합니다. 이름 없는
+    dict 로 돌려주면 어느 쪽이 키를 빠뜨려도 조용히 지나가고, 그걸 막으려고
+    테스트가 키마다 사슬을 손으로 잠그게 됩니다.
+    """
+
+    ref_key: str  # 한 번의 발송을 묶는 우리 쪽 키
+    sender: str
+    message_key: str | None  # 뿌리오 접수 키. 벤더가 빠뜨릴 수 있다
+    message_type: str
+    send_at: datetime | None
+    content: str  # 치환 전 원문
+    targets: list[dict[str, Any]]
+
+    @property
+    def sent(self) -> int:
+        """받는 사람 수. targets 와 갈릴 수 없게 세어서 낸다."""
+        return len(self.targets)
+
+
+def parse_send_at(value: str) -> tuple[datetime | None, str | None]:
+    """예약 시각 문자열을 읽습니다.
+
+    벤더 형식 문자열이 아니라 datetime 을 돌려줍니다. 문자열로 눌러 두면
+    쓰는 쪽마다 다시 파싱하면서 시간대를 잃고, 그걸 손으로 도로 붙이게 됩니다.
 
     Args:
         value: "2026-08-22 09:00" 같은 한국 시간. 빈 값이면 즉시 발송
 
     Returns:
-        tuple: (벤더 형식 시각, 문제). 둘 중 하나만 채워집니다
+        tuple: (예약 시각, 문제). 둘 중 하나만 채워집니다
     """
     text = (value or "").strip()
     if not text:
@@ -58,7 +83,7 @@ def parse_send_at(value: str) -> tuple[str | None, str | None]:
             f"예약은 지금부터 {int(MIN_LEAD.total_seconds() // 60)}분 뒤부터 됩니다"
             f" (지정하신 시각은 {round(lead.total_seconds() / 60)}분 뒤)"
         )
-    return when.astimezone(KST).strftime(SEND_TIME_FORMAT), None
+    return when.astimezone(KST), None
 
 
 def preview(
@@ -84,7 +109,7 @@ def preview(
         return Plan(["수신자가 없습니다."], template, [], 0, None, "", 0, [])
 
     problems: list[str] = []
-    send_time, when_problem = parse_send_at(send_at)
+    send_at_value, when_problem = parse_send_at(send_at)
     if when_problem:
         problems.append(when_problem)
 
@@ -118,7 +143,7 @@ def preview(
         rendered[0] if rendered else "",
         max_bytes,
         templates.build_targets(template, kept),
-        send_time,
+        send_at_value,
     )
 
 
@@ -128,7 +153,7 @@ def send(
     content: str,
     subject: str = "안내",
     send_at: str = "",
-) -> dict[str, Any]:
+) -> Sent:
     """문자를 보냅니다.
 
     Args:
@@ -138,7 +163,7 @@ def send(
         send_at: 예약 시각(한국 시간). 빈 값이면 즉시 발송
 
     Returns:
-        dict[str, Any]: sent·message_key·message_type·send_time
+        Sent: 벤더로 실제 나간 값
 
     Raises:
         ValueError: preview 가 걸러내는 것에 걸렸을 때. 예약 시각이 이미
@@ -150,6 +175,9 @@ def send(
     if plan.problems:
         raise ValueError(" / ".join(plan.problems))
 
+    # 이력에서 한 번의 발송을 묶는 키다. 벤더가 돌려주는 messageKey 는 빠질 수
+    # 있어 그 자리에 쓸 수 없다 -- 우리가 만드는 값이라 늘 있다.
+    ref_key = uuid.uuid4().hex
     payload = {
         "messageType": plan.message_type,
         "content": plan.template,
@@ -158,22 +186,25 @@ def send(
         # 슬랙 카드는 멀쩡히 나와서 보낸 줄 알았습니다.
         # 중복 번호는 preview 가 이미 접으므로 duplicateFlag 값은 결과를 바꾸지 않습니다.
         "duplicateFlag": "Y",
-        "refKey": uuid.uuid4().hex,
+        "refKey": ref_key,
         "targetCount": len(plan.rows),
         "targets": plan.targets,
     }
     if plan.message_type != "SMS":
         payload["subject"] = subject
-    if plan.send_time:
-        payload["sendTime"] = plan.send_time
+    if plan.send_at:
+        payload["sendTime"] = plan.send_at.strftime(SEND_TIME_FORMAT)
 
     result = transport.send(payload)
     if str(result.get("code")) != "1000":
         raise transport.PpurioError(200, result)
 
-    return {
-        "sent": len(plan.rows),
-        "message_key": result.get("messageKey"),
-        "message_type": plan.message_type,
-        "send_time": plan.send_time,
-    }
+    return Sent(
+        ref_key=ref_key,
+        sender=transport.sender(),
+        message_key=result.get("messageKey"),
+        message_type=plan.message_type,
+        send_at=plan.send_at,
+        content=plan.template,
+        targets=plan.targets,
+    )
