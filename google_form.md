@@ -33,7 +33,20 @@
 
 ## 공개는 두 겹이고, 이제 빠뜨리면 무조건 터진다
 
-응답자 공개와 게시는 별개다. 하나만 해도 응답이 0건이다.
+응답자 공개와 게시는 별개다. 하나만 해도 응답이 0건이다. **그리고 게시 안에 스위치가
+또 둘이다.**
+
+```python
+svc.forms().setPublishSettings(formId=fid, body={
+    "publishSettings": {"publishState": {"isPublished": True,
+                                         "isAcceptingResponses": True}},
+    "updateMask": "publishState"}).execute()
+```
+
+`isPublished` 만 켜면 폼은 게시되지만 응답을 안 받는다. 응답자에게는 "이 양식은 더 이상
+응답을 받지 않습니다"가 뜨고 결과는 0건이다. **되읽기도 두 필드를 다 봐야 한다.**
+`isPublished` 만 보면 그대로 통과한다. `updateMask` 를 빼면 400 이라 오히려 낫다. 조용히
+통과하는 쪽이 위험하다.
 
 **2026-07-01 부터 API 로 만든 폼은 기본이 미게시다.** 그 전에는 하위 호환으로 게시된 채
 만들어졌다. 오늘(8/27)은 이미 지난 뒤라 게시를 빼먹은 폼은 예외 없이 응답을 못 받는다.
@@ -85,8 +98,10 @@ drive.files().create(supportsAllDrives=True, fields="id",
 API 로 가야 한다. 같은 문서가 "Please use the Google Drive API if you need to
 programmatically update documentTitle" 이라고 이어서 적는다.
 
-재개 경로는 ① 을 건너뛰므로 제목이 바뀌었으면 ③ 앞에서 `files.update(body={"name": title})`
-로 파일 이름을 맞춘다. 안 맞추면 응답자 제목만 바뀌고 드라이브에서는 옛 제목으로 보인다.
+재개 경로는 ① 을 건너뛰므로 제목이 바뀌었으면 ③ 앞에서
+`files.update(fileId=fid, supportsAllDrives=True, body={"name": title})` 로 파일 이름을
+맞춘다. 안 맞추면 응답자 제목만 바뀌고 드라이브에서는 옛 제목으로 보인다.
+`supportsAllDrives` 를 빼면 공유 드라이브 파일이라 404 다.
 
 **②를 빼먹으면 만드는 폼마다 1번 문항이 "제목 없는 질문"이다.** Drive 우회로 만든 셸에는
 기본 문항이 딸려 온다. `deleteItem`이 뒤 인덱스를 당기므로 **역순으로** 지운다. 정순으로
@@ -118,7 +133,7 @@ programmatically update documentTitle" 이라고 이어서 적는다.
 
 **사유를 반드시 싣는다.** `HttpError` 의 상태 코드와 `reason` 이다. `redash_tools` 도
 `str(e)` 를 붙여 내린다. 그리고 **재개 권유는 재개로 풀리는 실패에만 붙인다.** 403·400 은
-콘솔 설정이나 입력 문제라 다시 불러도 같은 자리에서 멈추는데, 재개는 ②부터 도니까 문항을
+콘솔 설정이나 입력 문제라 다시 불러도 같은 자리에서 멈추는데 재개는 ②부터 도니까 문항을
 지웠다 다시 만드는 왕복만 반복하다 recursion limit 에 닿는다.
 
 `create_form(..., form_id: str | None = None)` 으로 이어받는다. **`form_id` 가 오면 ②부터
@@ -131,7 +146,7 @@ items 를 되읽어 지우는 것이라 몇 번을 돌려도 같은 결과고 �
 
 | 확인 | 아니면 |
 |---|---|
-| `files.get(fields="parents,createdTime")` 의 `parents` 에 `FORM_FOLDER_ID` 가 있는가 | 거부 |
+| `files.get(fields="parents,createdTime,name")` 의 `parents` 에 `FORM_FOLDER_ID` 가 있는가 | 거부 |
 | `createdTime` 이 한 시간 안인가 | 거부. 이어받기는 정의상 방금 만든 폼이다 |
 | `forms.responses.list(pageSize=1)` 이 비어 있는가 | 거부. 응답이 있으면 문항을 갈아엎어선 안 된다 |
 | `forms.get` 의 `linkedSheetId` 가 비어 있는가 | 거부. 사람이 시트를 이미 붙였다 |
@@ -331,7 +346,7 @@ Forms API 가 생성을 지원하지 않고 폼 UI 에도 안 나온다(8/4 실�
 | 1 | 서비스 계정 만들고 JSON 키 발급 | [IAM 서비스 계정](https://console.cloud.google.com/iam-admin/serviceaccounts?project=elegant-circle-503206-a1) |
 | 2 | Forms API 사용 설정 | [Forms API](https://console.cloud.google.com/apis/library/forms.googleapis.com?project=elegant-circle-503206-a1) |
 | 3 | Drive API 사용 설정 | [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com?project=elegant-circle-503206-a1) |
-| 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정과 **편집자 전원**(또는 그들을 담은 그룹)을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
+| 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정과 **편집자 전원을 개인 계정으로** 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
 | 5 | 그 드라이브에서 **외부 공유(링크가 있는 모든 사용자)가 허용**돼 있는지 확인 | 드라이브 설정 |
 | 6 | 그 드라이브에서 **"멤버가 아닌 사람을 파일에 추가하도록 허용"** 이 켜져 있는지 확인 | 드라이브 설정 |
 | 7 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
@@ -340,10 +355,15 @@ Forms API 가 생성을 지원하지 않고 폼 UI 에도 안 나온다(8/4 실�
 4번이 빠지면 `files.create`가 권한 없음으로 죽는다. **편집자를 멤버로 넣는 것까지가 4번이다.**
 멤버로 넣으면 `fileOrganizer` 가 상속돼 내려와 ④ 는 확인만 하고 넘어간다.
 
+**그룹으로 넣지 않는다.** 그룹으로 권한을 받으면 개인 주소가 `permissions.list` 응답에
+안 나오고 ④ 의 판정은 개인 주소로 하므로 편집자 전원이 매번 "권한 없음"으로 잡힌다. 폼을
+만들 때마다 편집자 수만큼 구글 공유 메일이 나가고 `sendNotificationEmail=True` 를 켠
+이유였던 오타 감지 신호가 그 메일 더미에 묻힌다.
+
 5번이 빠지면 응답자 공개가 403 이고 원인이 코드에 없어 찾는 데 오래 걸린다.
 
 6번은 5번과 다른 설정이다. 아직 드라이브 멤버가 아닌 사람(신규 입사자 같은)이 편집자로
-넘어오면 ④ 가 파일 단위로 권한을 줘야 하는데, 이 토글이 꺼져 있으면 403 이다. ⓪ 은
+넘어오면 ④ 가 파일 단위로 권한을 줘야 하는데 이 토글이 꺼져 있으면 403 이다. ⓪ 은
 `@team-mono.com` 접미사만 보므로 그런 주소를 막지 못한다. ① 이 지난 뒤라 삭제 도구 없는
 고아 폼이 남는다.
 
