@@ -7,12 +7,8 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from app.knowledge_mcp import (
-    AdminRailsTokenVerifier,
-    AdminToken,
-    build_mcp,
-    build_mcp_app,
-)
+from app.knowledge_mcp import build_mcp, build_mcp_app
+from app.mcp_common import AdminRailsTokenVerifier, AdminToken
 
 ADMIN = {
     "id": 7,
@@ -31,12 +27,11 @@ def mcp_env(monkeypatch):
     """build_mcp와 build_mcp_app이 읽는 환경 변수를 채웁니다."""
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("KNOWLEDGE_MCP_RESOURCE_URL", RESOURCE_URL)
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
 
 @pytest.mark.asyncio
 async def test_유효한_토큰은_이메일을_실어_돌려준다():
-    with patch("app.knowledge_mcp.get_me", AsyncMock(return_value=ADMIN)):
+    with patch("app.mcp_common.get_me", AsyncMock(return_value=ADMIN)):
         token = await AdminRailsTokenVerifier().verify_token("valid-token")
 
     assert isinstance(token, AdminToken)
@@ -47,7 +42,7 @@ async def test_유효한_토큰은_이메일을_실어_돌려준다():
 
 @pytest.mark.asyncio
 async def test_유효하지_않은_토큰은_None이다():
-    with patch("app.knowledge_mcp.get_me", AsyncMock(return_value=None)):
+    with patch("app.mcp_common.get_me", AsyncMock(return_value=None)):
         token = await AdminRailsTokenVerifier().verify_token("expired-token")
 
     assert token is None
@@ -80,7 +75,7 @@ def test_운영_호스트로_온_요청은_통과하고_다른_호스트는_막�
     mcp = build_mcp()
     headers = MCP_HEADERS | {"Authorization": "Bearer valid-token"}
 
-    with patch("app.knowledge_mcp.get_me", AsyncMock(return_value=ADMIN)):
+    with patch("app.mcp_common.get_me", AsyncMock(return_value=ADMIN)):
         with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
             allowed = client.post("/mcp", json=TOOLS_LIST, headers=headers)
             blocked = client.post(
@@ -123,15 +118,13 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
 async def test_질의_도구가_등록된다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert [tool.name for tool in tools] == [
-        "query_knowledge",
-        "start_slack_list_task",
-        "publish_slack_task_result",
-    ]
+    assert [tool.name for tool in tools] == ["query_knowledge"]
 
 
 @pytest.mark.asyncio
-async def test_중간기록_도구는_등록하지_않는다(mcp_env):
+async def test_운영팀_작업_도구는_등록하지_않는다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
+    names = {tool.name for tool in tools}
+    assert "start_slack_list_task" not in names
+    assert "publish_slack_task_result" not in names

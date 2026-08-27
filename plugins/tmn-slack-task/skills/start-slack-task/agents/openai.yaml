@@ -1,13 +1,13 @@
 interface:
-  display_name: "Start Slack Task"
-  short_description: "Slack List 작업을 시작하고 종료 결과를 공유합니다"
-  default_prompt: "Use $start-slack-task to start this Slack List task and publish a concise result when the work is actually finished."
+  display_name: "Start Operations Task"
+  short_description: "운영팀 Slack List 작업의 시작과 종료 결과를 공유합니다"
+  default_prompt: "Use $start-slack-task to start this operations Slack List task and publish a concise result when the work is actually finished."
 dependencies:
   tools:
     - type: "mcp"
-      value: "team-monolith-workflow"
-      description: "Slack List 작업 맥락을 읽고 작업 결과를 게시하는 사내 MCP"
+      value: "team-monolith-operations-task"
+      description: "운영팀 Slack List 작업 맥락을 읽고 작업 결과를 게시하는 전용 MCP"
       transport: "streamable_http"
-      url: "https://wfa.codle.io/mcp"
+      url: "https://slack-task-mcp.invalid/mcp"
 policy:
   allow_implicit_invocation: true

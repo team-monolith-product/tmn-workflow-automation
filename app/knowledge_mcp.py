@@ -16,69 +16,32 @@ FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저
 
 import asyncio
 import os
-from typing import Any, Literal, cast
-from urllib.parse import urlparse
+from typing import cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
-from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
-from api.admin_rails import get_me
+from app.mcp_common import (
+    AdminRailsTokenVerifier,
+    AdminToken,
+    admin_auth_settings,
+    build_streamable_http_app,
+)
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
-from service.slack_task_thread import publish_task_result, start_task_from_slack_list
 
 INSTRUCTIONS = """
-팀모노리스의 사내 지식과 Slack List 작업을 다룹니다.
-query_knowledge는 공개 Slack 대화를 읽기 전용 SQL로 검색합니다.
-Slack List 작업은 start_slack_list_task로 요청 맥락과 공용 작업 스레드를 읽습니다.
-작업 중 대화는 에이전트 안에 두고, 실제 작업이 끝났을 때만
-publish_slack_task_result로 결과와 선별한 시행착오·경험을 한 번 게시합니다.
-중간 진행 상황이나 매 응답을 Slack에 복사하지 않습니다.
+팀모노리스 사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스입니다.
+읽기 전용 SQL로 질의합니다.
+"예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
 """.strip()
 
 
-class AdminToken(AccessToken):
-    """어드민 이메일을 함께 나르는 토큰.
-
-    query_log.actor에 실제 사람을 남기려면 도구 실행 시점에 이메일이 있어야
-    하는데, AccessToken에는 담을 자리가 없어 넓힙니다.
-    """
-
-    email: str
-
-
-class AdminRailsTokenVerifier(TokenVerifier):
-    """admin-rails에 물어 토큰을 검증합니다."""
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """
-        Args:
-            token: Authorization 헤더로 온 Bearer 토큰
-
-        Returns:
-            AccessToken | None: 검증에 성공하면 AdminToken. 실패하면 None
-        """
-        admin = await get_me(token)
-        if admin is None:
-            return None
-
-        return AdminToken(
-            token=token,
-            client_id=str(admin["id"]),
-            scopes=["public"],
-            email=admin["email"],
-        )
-
-
-def build_mcp(slack_client: AsyncWebClient | None = None) -> MCPServer:
+def build_mcp() -> MCPServer:
     """지식베이스 MCP 서버를 만듭니다.
 
     KNOWLEDGE_MCP_RESOURCE_URL에는 /mcp를 붙이지 않습니다. SDK가 401의
@@ -93,63 +56,14 @@ def build_mcp(slack_client: AsyncWebClient | None = None) -> MCPServer:
         "team-monolith-knowledge",
         instructions=INSTRUCTIONS,
         token_verifier=AdminRailsTokenVerifier(),
-        auth=AuthSettings(
-            issuer_url=cast(Any, os.environ["ADMIN_RAILS_BASE_URL"]),
-            resource_server_url=cast(Any, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
-        ),
+        auth=admin_auth_settings(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
     )
-    slack = slack_client or AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
     @mcp.tool(description=QUERY_TOOL_DESCRIPTION)
     async def query_knowledge(sql: str, char_limit: int = DEFAULT_CHAR_LIMIT) -> str:
         token = cast(AdminToken, get_access_token())
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
-
-    @mcp.tool(
-        description=(
-            "Slack List 작업 행 링크로 작업을 시작합니다. List 필드와 요청 맥락, "
-            "기존 작업 결과를 읽고 작업 기록 스레드를 만들거나 재사용합니다. "
-            "작업 중 대화를 게시하지 않습니다."
-        )
-    )
-    async def start_slack_list_task(list_url: str) -> str:
-        token = cast(AdminToken, get_access_token())
-        return await start_task_from_slack_list(slack, list_url, token.email)
-
-    @mcp.tool(
-        description=(
-            "실제 작업이 완료됐거나 막힘·인계로 종료될 때 작업 기록 스레드에 "
-            "요약 한 건을 게시합니다. learnings에는 최종 접근을 바꿨거나 같은 실수를 "
-            "막아 줄 시행착오·경험이 있을 때만 최대 3개 넣고, 일반 탐색·명령 실행·도구 오류는 "
-            "넣지 않습니다. 매 응답이나 중간 진행에는 사용하지 않습니다."
-        )
-    )
-    async def publish_slack_task_result(
-        list_url: str,
-        status: Literal["completed", "blocked", "handoff"],
-        summary: str,
-        learnings: list[str] | None = None,
-        reusable_findings: list[str] | None = None,
-        outputs: list[str] | None = None,
-        validation: list[str] | None = None,
-        remaining: list[str] | None = None,
-        mark_completed: bool = False,
-    ) -> str:
-        token = cast(AdminToken, get_access_token())
-        return await publish_task_result(
-            client=slack,
-            list_url=list_url,
-            actor=token.email,
-            status=status,
-            summary=summary,
-            learnings=learnings,
-            reusable_findings=reusable_findings,
-            outputs=outputs,
-            validation=validation,
-            remaining=remaining,
-            mark_completed=mark_completed,
-        )
 
     return mcp
 
@@ -171,12 +85,4 @@ def build_mcp_app(mcp: MCPServer) -> Starlette:
     Returns:
         Starlette: /mcp와 리소스 메타데이터 경로를 여는 앱
     """
-    host = urlparse(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]).netloc
-
-    return mcp.streamable_http_app(
-        stateless_http=True,
-        transport_security=TransportSecuritySettings(
-            allowed_hosts=[host],
-            allowed_origins=[f"https://{host}"],
-        ),
-    )
+    return build_streamable_http_app(mcp, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"])

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "team-monolith-workflow": {
+    "team-monolith-operations-task": {
       "type": "http",
-      "url": "https://wfa.codle.io/mcp"
+      "url": "https://slack-task-mcp.invalid/mcp"
     }
   }
 }

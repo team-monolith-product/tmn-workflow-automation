@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "tmn-slack-task",
-  "displayName": "TMN Slack Task",
+  "displayName": "TMN Operations Task",
   "version": "0.1.0",
-  "description": "Slack List 작업의 요청 맥락을 읽고 종료 결과를 공용 스레드에 남깁니다.",
+  "description": "운영팀 Slack List 작업의 요청 맥락을 읽고 종료 결과를 공용 스레드에 남깁니다.",
   "author": {
     "name": "Team Monolith"
   },

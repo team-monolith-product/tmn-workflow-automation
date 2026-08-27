@@ -2,7 +2,7 @@
 
 ## 한 문장 목적
 
-Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 **실제로 어떻게 처리했는지 보여 주는 스레드**를 따로 연결해, 사람이든 AI든 같은 맥락에서 작업을 이어 간다.
+운영팀 Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 **실제로 어떻게 처리했는지 보여 주는 스레드**를 따로 연결해, 사람이든 AI든 같은 맥락에서 작업을 이어 간다.
 
 ## 핵심 변경
 
@@ -11,6 +11,8 @@ Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 
 - `이거 작업 시작`은 `작업 기록` 링크가 없을 때만 새 스레드를 만든다.
 - 에이전트는 List 필드와 두 스레드를 읽되, 작업 중 대화는 Claude·Codex 안에만 둔다.
 - Slack에는 작업이 끝났을 때 **이후에 다시 쓸 결과와 선별한 시행착오·경험 한 건**만 남긴다.
+- 전사용 `knowledge MCP`에는 지식 검색만 남기고, Slack 작업 도구는 운영팀 전용 MCP와 플러그인으로 따로 배포한다.
+- 운영팀 MCP는 별도 이메일 allowlist와 Slack 토큰을 사용한다.
 - `agent_task_session`, 중간 체크포인트, 전체 응답 복사 훅, 별도 업무 DB는 만들지 않는다.
 
 작업 ID는 Slack의 `(list_id, record_id)`를 그대로 사용한다.
@@ -30,9 +32,13 @@ Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 
 
 ```mermaid
 flowchart LR
-    U["운영팀 구성원"] --> A["Claude 또는 Codex"]
-    A --> S["공용 start-slack-task 스킬<br/>시작·종료 요약"]
-    S --> M["기존 사내 MCP<br/>시작·결과 게시"]
+    E["전사 구성원"] --> EA["각자의 에이전트"]
+    EA --> KM["전사용 Knowledge MCP<br/>query_knowledge만"]
+    KM --> KD["사내 지식 DB"]
+
+    U["운영팀 구성원"] --> A["Claude 또는 Codex<br/>운영 플러그인 설치"]
+    A --> S["start-slack-task 스킬<br/>시작·종료 요약"]
+    S --> M["운영팀 전용 Slack Task MCP<br/>별도 배포·allowlist"]
     M --> L["Slack List 행<br/>제목·담당자·마감·상태"]
     L --> C["요청 맥락 열<br/>왜 생겼는지"]
     L --> W["작업 기록 열<br/>어떻게 처리했는지"]
@@ -153,7 +159,7 @@ Slack List: <현재 record 링크>
 
 `(list_id, record_id)` 단위 PostgreSQL advisory lock 안에서 행을 다시 읽어 동시 시작에도 하나만 만든다. 생성한 permalink는 `작업 기록` 열에만 쓴다.
 
-## MCP 도구 2개
+## 운영팀 전용 MCP 도구 2개
 
 ### `start_slack_list_task`
 
@@ -202,18 +208,31 @@ Slack List: <현재 record 링크>
 
 비밀값, 로컬 절대경로, 내부 추론, 도구 원문은 제외한다.
 
-## 스킬과 MCP 배포
+## 전사용 지식과 운영팀 작업의 배포 분리
 
-### 결론
+`query_knowledge`는 전사 기능이고 Slack List 작업은 운영팀 기능이므로 같은 MCP 서버에 넣지 않는다.
 
-스킬과 MCP를 **같은 플러그인에 포함해 함께 설치·업데이트**하는 것은 가능하다. 다만 MCP 서버만 배포했다고 클라이언트의 스킬 파일까지 자동 갱신되는 구조는 아니다.
+| 배포 단위 | 대상 | 노출 도구 | 권한·비밀값 |
+|---|---|---|---|
+| Knowledge MCP | 전사 | `query_knowledge` | 기존 사내 OAuth, Slack 쓰기 토큰 불필요 |
+| Operations Slack Task MCP | 운영팀 | `start_slack_list_task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
+| Operations Task Plugin | 운영팀의 Claude·Codex | `start-slack-task` 스킬 + Operations MCP 연결 | 운영팀에게만 설치·업데이트 배포 |
 
-- MCP 서버 동작: 서버 배포 후 다음 호출부터 반영
-- MCP 도구 목록·스키마: 연결된 클라이언트가 MCP를 다시 연결하거나 도구를 새로 고친 뒤 반영
-- 스킬의 `SKILL.md`: 플러그인 버전을 올리고 사용자가 플러그인을 업데이트해야 반영
-- OpenAI와 Claude: 같은 원본을 쓸 수 있지만 설치 형식과 릴리스는 각각 관리
+두 MCP는 같은 코드 저장소와 Docker 이미지를 재사용할 수 있지만 **프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리**한다.
 
-권장 저장 구조는 하나의 원본 스킬과 두 개의 얇은 매니페스트다.
+```text
+전사용 서비스
+  uvicorn main:app
+  KNOWLEDGE_MCP_RESOURCE_URL
+
+운영팀 전용 서비스
+  uvicorn operations_task_main:app
+  SLACK_TASK_MCP_RESOURCE_URL
+  SLACK_TASK_MCP_ALLOWED_EMAILS
+  SLACK_TASK_MCP_BOT_TOKEN
+```
+
+운영 플러그인은 하나의 원본 스킬과 두 개의 얇은 매니페스트로 구성한다.
 
 ```text
 slack-task-plugin/
@@ -227,7 +246,9 @@ slack-task-plugin/
     └── plugin.json
 ```
 
-릴리스할 때 같은 버전으로 Codex/OpenAI 플러그인과 Claude Code 플러그인을 각각 패키징한다. MCP endpoint는 둘이 공유한다.
+릴리스할 때 같은 버전으로 Codex/OpenAI 플러그인과 Claude Code 플러그인을 각각 패키징한다. 둘은 Operations Slack Task MCP endpoint만 공유하며 Knowledge MCP를 포함하지 않는다.
+
+현재 저장소의 플러그인 URL은 `https://slack-task-mcp.invalid/mcp`로 막아 둔다. 실제 운영 서비스의 소유·DNS·TLS·라우팅이 확정된 뒤 `.mcp.json`과 `agents/openai.yaml`을 같은 주소로 교체해야 설치가 활성화된다.
 
 중요한 규칙은 스킬 지시문에만 의존하지 않고 MCP 도구 구조에도 고정한다.
 
@@ -235,7 +256,7 @@ slack-task-plugin/
 - 서버가 `요청 맥락`에는 쓸 수 없게 하고 `작업 기록`에만 게시한다.
 - 서버가 시행착오 최대 3개, 전체 6,000자, 비밀값·로컬 경로 금지 등 최종 메시지의 적정선을 검증한다.
 
-따라서 어떤 사용자의 스킬 업데이트가 늦어져도 중간 대화가 Slack에 쌓이는 동작은 발생하지 않는다.
+따라서 전사 사용자는 운영 도구 자체를 보지 않고, 운영 플러그인 업데이트가 늦은 사용자도 중간 대화를 게시하는 도구는 받지 않는다.
 
 MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 결과만 게시한다"는 원칙을 넣을 수 있다. 다만 이것은 연결 시 제공되는 서버 지침이지 설치형 스킬을 대체하지 않는다. 트리거 문구 인식과 전체 작업 순서는 얇고 안정적인 스킬이 맡고, 실제 쓰기 범위와 메시지 검증은 서버가 맡는다.
 
@@ -257,15 +278,19 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 - 완료된 행을 시작해도 완료 체크를 자동으로 풀지 않는다.
 - 등록되지 않은 List면 작업 채널을 추측하지 않는다.
 - MCP 사용자가 연결 채널이나 링크 대상 채널을 볼 수 없으면 해당 스레드를 읽거나 쓰지 않는다.
+- 운영팀 이메일 allowlist에 없는 사내 계정은 Operations MCP 인증에 실패한다.
+- Knowledge MCP에는 Slack 작업 도구와 Slack bot token 의존성이 없다.
 - 비밀값, 로컬 절대경로, 전체 도구 출력, 내부 추론은 스레드에 쓰지 않는다.
 
 ## 구현 대상
 
 - `service/slack_task_list.py`: 두 message 열 생성·파싱·읽기·쓰기
 - `migrations/knowledge/006_task_list_work_thread.sql`: 기존 열 rename, 작업 열 추가, `list_id` unique
-- `app/knowledge_mcp.py` 또는 작은 등록 모듈: MCP 도구 2개
-- 공용 `start-slack-task/SKILL.md`: 두 스레드 읽기와 종료 결과·경험 선별
-- 플러그인 패키지: 공용 스킬, MCP 연결, Codex·Claude 매니페스트
+- `app/knowledge_mcp.py`: 전사용 `query_knowledge`만 유지
+- `app/slack_task_mcp.py`: 운영팀 전용 MCP 도구 2개와 allowlist 인증
+- `operations_task_main.py`: 운영팀 MCP의 독립 배포 진입점
+- 운영팀 `start-slack-task/SKILL.md`: 두 스레드 읽기와 종료 결과·경험 선별
+- 운영팀 플러그인 패키지: 스킬, 전용 MCP 연결, Codex·Claude 매니페스트
 - 테스트: 새/기존 List, 스키마 발견, 링크 분리, 동시 시작, 완료 상태 보호
 
 ## 인터랙티브 시연물
@@ -285,6 +310,8 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 9. 736px와 360px에서 두 링크 상태별 시연이 정상 동작한다.
 10. 플러그인 업데이트 전후에도 MCP 서버는 중간 기록 도구를 노출하지 않는다.
 11. 시행착오·경험은 최대 3개이며 비밀값·로컬 절대경로·도구 원문은 거절한다.
+12. Knowledge MCP의 도구 목록에는 `query_knowledge`만 있다.
+13. Operations MCP의 도구 목록에는 Slack 작업 도구 2개만 있고 비운영팀 계정은 401을 받는다.
 
 ## 위험과 판단
 
@@ -294,6 +321,9 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 - **에이전트별 기록 기준 차이:** 종료 요약 형식은 공용 스킬에, 쓰기 대상과 도구 범위는 MCP 서버에 고정한다.
 - **대화 과잉 수집:** 중간 기록 도구와 매 응답 훅을 만들지 않아 구조적으로 막는다.
 - **MCP와 스킬 버전 불일치:** 핵심 안전 규칙은 서버가 강제하고, 스킬은 플러그인 버전으로 함께 릴리스한다.
+- **전사 기능과 운영 기능의 결합:** MCP 서버·공개 URL·환경 변수·플러그인을 분리해 설치 대상과 장애 범위를 나눈다.
+- **플러그인 배포만으로는 접근 통제가 아님:** Operations MCP도 운영팀 이메일 allowlist를 검증한다.
+- **운영 호스트 미확정:** 임의 도메인으로 Slack 데이터를 보내지 않도록 비라우팅 `.invalid` 주소를 사용한다. 인프라 승인 뒤 실제 주소로 교체한다.
 - **루트 게시 후 List 쓰기 실패:** Slack 게시와 List 셀 갱신은 원자적이지 않다. 이 경우 `[시작]` 메시지의 List 링크로 행을 찾아 수동 연결할 수 있으며, 자동 보정은 실제 장애가 반복될 때 추가한다.
 
 ## 구현 승인 기준
@@ -302,6 +332,7 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 2. 새 `작업 기록` message 열을 실제 실행 스레드의 유일한 링크로 사용한다.
 3. 기존 List에는 사용자가 열을 한 번 추가하고, 시스템이 `items.info`로 열 ID를 자동 발견한다.
 4. 작업 중 대화는 에이전트 안에 두고, 종료 시 결과 요약 한 건만 `작업 기록` 스레드에 남긴다.
-5. 스킬과 MCP 연결은 같은 플러그인으로 배포하되 Codex와 Claude 릴리스는 각각 관리한다.
+5. Knowledge MCP와 Operations MCP는 별도 서비스로 배포하고, 운영 플러그인은 Operations MCP만 연결한다.
+6. 운영 플러그인은 운영팀에만 배포하며 서버도 이메일 allowlist로 다시 제한한다.
 
-승인 전에는 구현하지 않는다.
+이 기준을 현재 구현과 배포 검증의 기준으로 사용한다.

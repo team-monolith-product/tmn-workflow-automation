@@ -9,6 +9,9 @@ Slack 채널에서 자동화 명령을 수신하고 처리하는 봇 서버
 ### 2. FastAPI Webhook Server (`main.py`)
 Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 워크플로우를 실행하는 경량 웹훅 서버
 
+### 3. Operations Slack Task MCP (`operations_task_main.py`)
+운영팀 Slack List 작업의 시작과 종료 결과만 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스·URL로 배포합니다.
+
 ## 환경 변수
 
 ### 공통
@@ -32,6 +35,13 @@ python app.py
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+### Operations Slack Task MCP
+```bash
+uvicorn operations_task_main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_ALLOWED_EMAILS`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. `SLACK_TASK_MCP_ALLOWED_EMAILS`는 운영팀 이메일을 쉼표로 구분합니다.
 
 ## FastAPI 웹훅 사용법
 
@@ -77,6 +87,7 @@ curl -X POST http://localhost:8000/webhook \
 
 본 애플리케이션은 `jce-service-helm/workflow-automation-slack` Helm Chart를 통해 배포됩니다.
 - Slack Bot과 FastAPI 서버는 동일한 Docker 이미지를 사용하며, 서로 다른 CMD로 실행됩니다.
+- Operations Slack Task MCP도 같은 이미지를 사용할 수 있지만 FastAPI/Knowledge MCP와 다른 서비스와 CMD로 실행합니다.
 - ArgoCD를 통해 자동 배포됩니다.
 
 ## 문자 발송 (뿌리오)
