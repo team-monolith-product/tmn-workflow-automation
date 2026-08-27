@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from app import general
-from app.task_list import TaskInput, get_task_list_write_tools
+from app.task_list import TaskInput, default_due_date, get_task_list_write_tools
 from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
@@ -28,6 +28,18 @@ TASK_LIST = ChannelTaskList(
     completed_column_id="Col00",
     assignee_column_id="Col01",
     due_date_column_id="Col02",
+    thread_column_id="Col05F6GHIJ7K",
+)
+
+# 슬랙 열이 생기기 전에 만들어진 리스트. 열을 나중에 붙이는 API 가 없어 이런
+# 리스트는 계속 남는다.
+LEGACY_TASK_LIST = ChannelTaskList(
+    list_id=TASK_LIST.list_id,
+    list_url=TASK_LIST.list_url,
+    name_column_id=TASK_LIST.name_column_id,
+    completed_column_id=TASK_LIST.completed_column_id,
+    assignee_column_id=TASK_LIST.assignee_column_id,
+    due_date_column_id=TASK_LIST.due_date_column_id,
 )
 THREAD_URL = "https://example.slack.com/archives/C0XXXX/p1700000000"
 REQUESTER = "U02JLCWGETT"
@@ -40,6 +52,12 @@ CREATE_SCHEMA = [
         "is_primary_column": True,
         "type": "text",
         "id": "Col012A3BCDE4",
+    },
+    {
+        "key": "slack_thread",
+        "name": "슬랙",
+        "type": "message",
+        "id": "Col05F6GHIJ7K",
     },
     {"key": "todo_completed", "type": "todo_completed", "id": "Col00"},
     {"key": "todo_assignee", "type": "todo_assignee", "id": "Col01"},
@@ -82,14 +100,24 @@ def test_external_shared_channel_is_rejected():
 # --- 셀 조립 ---
 
 
-def test_title_cell_carries_thread_link():
-    """제목 셀에 제목과 스레드 링크가 함께 들어간다"""
+def test_thread_link_goes_to_its_own_column():
+    """제목은 제목만 담고 스레드 링크는 슬랙 열로 간다"""
     fields = TASK_LIST.initial_fields("계정 일괄 생성", None, None, THREAD_URL)
 
     assert fields[0]["column_id"] == "Col012A3BCDE4"
     elements = fields[0]["rich_text"][0]["elements"][0]["elements"]
-    assert elements[0]["text"] == "계정 일괄 생성 "
+    assert elements == [{"type": "text", "text": "계정 일괄 생성"}]
+    assert {"column_id": "Col05F6GHIJ7K", "message": [THREAD_URL]} in fields
+
+
+def test_legacy_list_keeps_link_in_title():
+    """슬랙 열이 없는 옛 리스트는 예전처럼 제목 칸에 링크를 붙인다"""
+    fields = LEGACY_TASK_LIST.initial_fields("작업", None, None, THREAD_URL)
+
+    elements = fields[0]["rich_text"][0]["elements"][0]["elements"]
+    assert elements[0]["text"] == "작업 "
     assert elements[1]["url"] == THREAD_URL
+    assert [field["column_id"] for field in fields] == ["Col012A3BCDE4"]
 
 
 def test_assignee_and_due_date_cells_are_arrays():
@@ -101,10 +129,13 @@ def test_assignee_and_due_date_cells_are_arrays():
 
 
 def test_empty_cells_are_omitted():
-    """담당자와 마감일이 없으면 셀을 아예 보내지 않는다"""
+    """담당자와 마감일이 없으면 그 셀은 아예 보내지 않는다"""
     fields = TASK_LIST.initial_fields("작업", None, None, THREAD_URL)
 
-    assert [field["column_id"] for field in fields] == ["Col012A3BCDE4"]
+    assert [field["column_id"] for field in fields] == [
+        "Col012A3BCDE4",
+        "Col05F6GHIJ7K",
+    ]
 
 
 def test_completion_cells_carry_row_ids():
@@ -209,6 +240,26 @@ async def test_create_saves_before_sharing():
     assert client.slackLists_create.await_args.kwargs["name"] == "t_고객_OO교육청 작업"
 
 
+async def test_create_defines_slack_column_up_front():
+    """열은 만들 때만 정할 수 있으므로 슬랙 열을 schema 로 함께 보낸다"""
+    client = AsyncMock()
+    client.slackLists_create.return_value = {
+        "list_id": TASK_LIST.list_id,
+        "list_metadata": {"schema": CREATE_SCHEMA},
+    }
+    client.auth_test.return_value = {
+        "url": "https://example.slack.com/",
+        "team_id": "T1",
+    }
+
+    with patch("service.slack_task_list.save_channel_task_list"):
+        await create_channel_task_list(client, CHANNEL, "t_고객_OO교육청")
+
+    sent = client.slackLists_create.await_args.kwargs
+    assert sent["todo_mode"] is True
+    assert [column["type"] for column in sent["schema"]] == ["text", "message"]
+
+
 # --- 도구 동작 ---
 
 
@@ -231,6 +282,30 @@ async def test_add_tasks_fills_assignee_from_requester():
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "Col01", "user": [REQUESTER]} in fields
     assert "2개" in result
+
+
+async def test_add_tasks_fills_due_date_when_missing():
+    """마감을 못 읽었어도 마감일 칸을 비워 두지 않는다"""
+    client = AsyncMock()
+    tools = write_tools(client)
+
+    await tools["add_channel_tasks"].ainvoke({"tasks": [{"title": "작업"}]})
+
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "Col02", "date": [default_due_date()]} in fields
+
+
+async def test_add_tasks_keeps_given_due_date():
+    """대화에서 읽은 마감일이 있으면 기본값이 덮지 않는다"""
+    client = AsyncMock()
+    tools = write_tools(client)
+
+    await tools["add_channel_tasks"].ainvoke(
+        {"tasks": [{"title": "작업", "due_date": "2026-09-02"}]}
+    )
+
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "Col02", "date": ["2026-09-02"]} in fields
 
 
 async def test_complete_matches_by_substring():
