@@ -12,13 +12,14 @@ from typing import Annotated
 import boto3
 from langchain_core.tools import tool
 
-SCRIPTS_PATH = (
+SKILL_DIR = (
     Path(__file__).parent.parent.parent
-    / ".claude"
+    / "plugins"
+    / "tmn-operating"
     / "skills"
-    / "oom-analyzer"
-    / "scripts"
+    / "rails-pod-restart-request-searcher"
 )
+SCRIPTS_PATH = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_PATH))
 
 from list_log_streams import list_streams, format_time

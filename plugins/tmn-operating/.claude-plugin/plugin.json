@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "tmn-operating",
+  "displayName": "TMN Operating",
+  "version": "0.1.0",
+  "description": "전사 데이터를 검색하고 운영팀 Slack List 작업의 시작·상태·요청 맥락·이전 작업 기록·종료 결과를 관리합니다.",
+  "author": {
+    "name": "Team Monolith"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

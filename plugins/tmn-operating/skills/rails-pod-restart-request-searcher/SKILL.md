@@ -1,6 +1,6 @@
 ---
 name: rails-pod-restart-request-searcher
-description: Analyze Kubernetes rails container restarts to search incomplete requests. Use when you receive Grafana "Container Restarts" alerts for rails applications.
+description: Analyze Rails container restarts and OOM alerts by tracing CloudWatch log streams, incomplete requests, and ALB payload sizes. Use when a Grafana alert reports a Rails pod or container restart.
 ---
 
 ## Analysis Workflow

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Query ALB Access Logs from Athena to find payload sizes for suspicious requests
+Query ALB Access Logs from Athena to find payload sizes for suspicious requests.
+Bundled with the tmn-operating plugin.
 """
 
 import boto3

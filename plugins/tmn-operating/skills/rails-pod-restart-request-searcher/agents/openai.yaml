@@ -1,0 +1,6 @@
+interface:
+  display_name: "Analyze Rails Pod Restart"
+  short_description: "Rails 파드 재시작 전후의 미완료 요청과 OOM 원인을 분석합니다"
+  default_prompt: "Use $rails-pod-restart-request-searcher to analyze this Rails container restart alert and identify suspicious incomplete requests."
+policy:
+  allow_implicit_invocation: true

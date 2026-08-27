@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-List CloudWatch log streams for a pod
+List CloudWatch log streams for a pod.
+Bundled with the tmn-operating plugin.
 Shows all matching streams for manual selection
 """
 

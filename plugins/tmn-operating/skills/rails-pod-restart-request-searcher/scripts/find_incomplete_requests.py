@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Find incomplete requests in Rails logs
+Find incomplete requests in Rails logs.
+Bundled with the tmn-operating plugin.
 Fetches logs from CloudWatch and analyzes incomplete requests before OOM
 """
 

@@ -10,7 +10,10 @@ Slack 채널에서 자동화 명령을 수신하고 처리하는 봇 서버
 Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 워크플로우를 실행하는 경량 웹훅 서버
 
 ### 3. Operations Slack Task MCP (`operations_task_main.py`)
-운영팀 Slack List 작업의 시작과 종료 결과만 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스·URL로 배포합니다.
+운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스·URL로 배포합니다.
+
+### 4. TMN Operating Plugin (`plugins/tmn-operating`)
+전사 지식 검색 MCP, 운영팀 Slack List 작업 MCP, Slack 작업 스킬과 Rails OOM 분석 스킬을 하나로 배포합니다. 두 MCP 서버는 플러그인 안에서 함께 보이지만 서버와 접근 권한은 분리됩니다.
 
 ## 환경 변수
 

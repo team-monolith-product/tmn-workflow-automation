@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "team-monolith-knowledge": {
+      "type": "http",
+      "url": "https://knowledge-mcp.invalid/mcp"
+    },
     "team-monolith-operations-task": {
       "type": "http",
       "url": "https://slack-task-mcp.invalid/mcp"

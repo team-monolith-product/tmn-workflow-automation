@@ -11,7 +11,7 @@
 - `이거 작업 시작`은 `작업 기록` 링크가 없을 때만 새 스레드를 만든다.
 - 에이전트는 List 필드와 두 스레드를 읽되, 작업 중 대화는 Claude·Codex 안에만 둔다.
 - Slack에는 작업이 끝났을 때 **이후에 다시 쓸 결과와 선별한 시행착오·경험 한 건**만 남긴다.
-- 전사용 `knowledge MCP`에는 지식 검색만 남기고, Slack 작업 도구는 운영팀 전용 MCP와 플러그인으로 따로 배포한다.
+- 전사용 `knowledge MCP`와 운영팀 Slack 작업 MCP는 서버·권한을 분리하되, 운영팀의 `tmn-operating` 플러그인에는 두 MCP 연결과 사내 스킬을 함께 배포한다.
 - 운영팀 MCP는 별도 이메일 allowlist와 Slack 토큰을 사용한다.
 - `agent_task_session`, 중간 체크포인트, 전체 응답 복사 훅, 별도 업무 DB는 만들지 않는다.
 
@@ -216,7 +216,7 @@ Slack List: <현재 record 링크>
 |---|---|---|---|
 | Knowledge MCP | 전사 | `query_knowledge` | 기존 사내 OAuth, Slack 쓰기 토큰 불필요 |
 | Operations Slack Task MCP | 운영팀 | `start_slack_list_task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
-| Operations Task Plugin | 운영팀의 Claude·Codex | `start-slack-task` 스킬 + Operations MCP 연결 | 운영팀에게만 설치·업데이트 배포 |
+| TMN Operating Plugin | 운영팀의 Claude·Codex | Knowledge·Operations MCP 연결 + `start-slack-task`·OOM 분석 스킬 | 운영팀에게 설치·업데이트 배포 |
 
 두 MCP는 같은 코드 저장소와 Docker 이미지를 재사용할 수 있지만 **프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리**한다.
 
@@ -232,13 +232,16 @@ Slack List: <현재 record 링크>
   SLACK_TASK_MCP_BOT_TOKEN
 ```
 
-운영 플러그인은 하나의 원본 스킬과 두 개의 얇은 매니페스트로 구성한다.
+운영 플러그인은 두 MCP 연결과 저장소의 사내 스킬, 두 개의 얇은 매니페스트로 구성한다.
 
 ```text
-slack-task-plugin/
+tmn-operating/
 ├── skills/
-│   └── start-slack-task/
-│       └── SKILL.md
+│   ├── start-slack-task/
+│   │   └── SKILL.md
+│   └── rails-pod-restart-request-searcher/
+│       ├── SKILL.md
+│       └── scripts/
 ├── .mcp.json
 ├── .codex-plugin/
 │   └── plugin.json
@@ -246,9 +249,9 @@ slack-task-plugin/
     └── plugin.json
 ```
 
-릴리스할 때 같은 버전으로 Codex/OpenAI 플러그인과 Claude Code 플러그인을 각각 패키징한다. 둘은 Operations Slack Task MCP endpoint만 공유하며 Knowledge MCP를 포함하지 않는다.
+릴리스할 때 같은 버전으로 Codex/OpenAI 플러그인과 Claude Code 플러그인을 각각 패키징한다. 플러그인은 Knowledge와 Operations MCP 연결을 함께 제공하지만, 두 MCP는 서로 다른 서비스·URL·인증 범위를 유지한다.
 
-현재 저장소의 플러그인 URL은 `https://slack-task-mcp.invalid/mcp`로 막아 둔다. 실제 운영 서비스의 소유·DNS·TLS·라우팅이 확정된 뒤 `.mcp.json`과 `agents/openai.yaml`을 같은 주소로 교체해야 설치가 활성화된다.
+현재 저장소의 MCP URL은 `https://knowledge-mcp.invalid/mcp`, `https://slack-task-mcp.invalid/mcp`로 막아 둔다. 각 운영 서비스의 소유·DNS·TLS·라우팅이 승인된 뒤 `.mcp.json`과 관련 `agents/openai.yaml`을 같은 주소로 교체해야 설치가 활성화된다.
 
 중요한 규칙은 스킬 지시문에만 의존하지 않고 MCP 도구 구조에도 고정한다.
 
@@ -290,7 +293,7 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 - `app/slack_task_mcp.py`: 운영팀 전용 MCP 도구 2개와 allowlist 인증
 - `operations_task_main.py`: 운영팀 MCP의 독립 배포 진입점
 - 운영팀 `start-slack-task/SKILL.md`: 두 스레드 읽기와 종료 결과·경험 선별
-- 운영팀 플러그인 패키지: 스킬, 전용 MCP 연결, Codex·Claude 매니페스트
+- `tmn-operating` 플러그인 패키지: 전사 검색·운영 작업 MCP 연결, 사내 스킬, Codex·Claude 매니페스트
 - 테스트: 새/기존 List, 스키마 발견, 링크 분리, 동시 시작, 완료 상태 보호
 
 ## 인터랙티브 시연물
@@ -321,7 +324,7 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 - **에이전트별 기록 기준 차이:** 종료 요약 형식은 공용 스킬에, 쓰기 대상과 도구 범위는 MCP 서버에 고정한다.
 - **대화 과잉 수집:** 중간 기록 도구와 매 응답 훅을 만들지 않아 구조적으로 막는다.
 - **MCP와 스킬 버전 불일치:** 핵심 안전 규칙은 서버가 강제하고, 스킬은 플러그인 버전으로 함께 릴리스한다.
-- **전사 기능과 운영 기능의 결합:** MCP 서버·공개 URL·환경 변수·플러그인을 분리해 설치 대상과 장애 범위를 나눈다.
+- **전사 기능과 운영 기능의 결합:** 플러그인은 배포 편의를 위해 묶되 MCP 서버·공개 URL·환경 변수·접근 권한은 분리해 장애와 권한 범위를 나눈다.
 - **플러그인 배포만으로는 접근 통제가 아님:** Operations MCP도 운영팀 이메일 allowlist를 검증한다.
 - **운영 호스트 미확정:** 임의 도메인으로 Slack 데이터를 보내지 않도록 비라우팅 `.invalid` 주소를 사용한다. 인프라 승인 뒤 실제 주소로 교체한다.
 - **루트 게시 후 List 쓰기 실패:** Slack 게시와 List 셀 갱신은 원자적이지 않다. 이 경우 `[시작]` 메시지의 List 링크로 행을 찾아 수동 연결할 수 있으며, 자동 보정은 실제 장애가 반복될 때 추가한다.
@@ -332,7 +335,7 @@ MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 
 2. 새 `작업 기록` message 열을 실제 실행 스레드의 유일한 링크로 사용한다.
 3. 기존 List에는 사용자가 열을 한 번 추가하고, 시스템이 `items.info`로 열 ID를 자동 발견한다.
 4. 작업 중 대화는 에이전트 안에 두고, 종료 시 결과 요약 한 건만 `작업 기록` 스레드에 남긴다.
-5. Knowledge MCP와 Operations MCP는 별도 서비스로 배포하고, 운영 플러그인은 Operations MCP만 연결한다.
-6. 운영 플러그인은 운영팀에만 배포하며 서버도 이메일 allowlist로 다시 제한한다.
+5. Knowledge MCP와 Operations MCP는 별도 서비스로 배포하고, `tmn-operating` 플러그인은 두 MCP와 저장소의 사내 스킬을 함께 연결한다.
+6. `tmn-operating`은 운영팀에 배포하며 Operations MCP는 이메일 allowlist로 다시 제한한다.
 
 이 기준을 현재 구현과 배포 검증의 기준으로 사용한다.

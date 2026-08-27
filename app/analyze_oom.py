@@ -7,8 +7,6 @@ OOM 원인에 대한 가설을 제시합니다.
 """
 
 from datetime import datetime
-from pathlib import Path
-
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -16,13 +14,12 @@ from langgraph.prebuilt import create_react_agent
 from app.common import KST
 from app.tool_status_handler import ToolStatusHandler
 from app.tools.oom_tools import (
+    SKILL_DIR,
     find_incomplete_requests,
     list_log_streams,
     query_alb_access_logs,
 )
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
-
-SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
 
 
 def _strip_frontmatter(content: str) -> str:
