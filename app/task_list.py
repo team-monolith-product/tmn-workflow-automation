@@ -11,6 +11,8 @@ app/knowledge.py 의 수집 등록 도구와 같은 방식입니다.
 """
 
 import asyncio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -21,13 +23,29 @@ from service.slack_task_list import (
     create_channel_task_list,
     delete_channel_task_list,
     list_all_items,
-    remove_task_list_bookmark,
     validate_task_list_channel,
 )
 
 # 매칭에 실패했을 때 되돌려줄 미완료 작업 수. 오래된 리스트의 제목을 전부
 # 돌려주면 그대로 LLM 컨텍스트가 된다.
 MAX_PENDING_SHOWN = 20
+
+KST = ZoneInfo("Asia/Seoul")
+
+# 대화에서 마감을 못 읽었을 때 넣을 여유. 마감이 빈 작업은 리스트의 마감일
+# 자동화가 집지 못해 아무도 안 보는 채로 남는다.
+DEFAULT_DUE_DAYS = 7
+
+
+def default_due_date() -> str:
+    """대화에 마감이 없을 때 넣을 날짜입니다.
+
+    컨테이너는 UTC 로 도는데 마감일은 사람이 보는 날짜라 KST 로 셉니다.
+
+    Returns:
+        str: YYYY-MM-DD
+    """
+    return (datetime.now(KST) + timedelta(days=DEFAULT_DUE_DAYS)).strftime("%Y-%m-%d")
 
 
 class TaskInput(BaseModel):
@@ -51,7 +69,11 @@ class TaskInput(BaseModel):
     due_date: str | None = Field(
         default=None,
         pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="마감일 (YYYY-MM-DD). 대화에서 언급되지 않으면 생략한다.",
+        description=(
+            "마감일 (YYYY-MM-DD). 대화에 날짜가 있거나 '이번 주까지' 처럼"
+            " 기한을 짐작할 말이 있으면 계산해서 채운다. 아무 단서도 없을"
+            " 때만 생략하며, 그때는 기본 마감일이 들어간다."
+        ),
     )
 
     @field_validator("title")
@@ -89,8 +111,8 @@ def get_enable_task_list_tools(client: AsyncWebClient, channel: str) -> list:
 
         task_list = await create_channel_task_list(client, channel, info["name"])
         return (
-            f"작업 리스트를 만들어 채널에 공유하고 북마크에 걸었습니다:"
-            f" {task_list.list_url}\n"
+            f"작업 리스트를 만들어 채널에 공유했습니다. 상단 탭에서도 열 수"
+            f" 있습니다: {task_list.list_url}\n"
             "이제 작업을 만들어 달라고 하면 여기에 쌓입니다."
             " 마감일 알림은 리스트 화면의 자동화에서 켤 수 있습니다."
         )
@@ -123,7 +145,8 @@ def get_task_list_write_tools(
         """
         이 채널의 작업 리스트에 작업을 추가합니다.
         슬랙 대화를 정리해 작업을 만들어 달라는 요청에 사용합니다.
-        담당자를 비우면 요청한 사람이 담당자가 됩니다.
+        담당자를 비우면 요청한 사람이 담당자가 되고,
+        마감일을 비우면 기본 마감일이 들어갑니다.
 
         Returns:
             추가 결과와 리스트 URL
@@ -134,7 +157,7 @@ def get_task_list_write_tools(
                 initial_fields=task_list.initial_fields(
                     task.title,
                     task.assignee or requester_id,
-                    task.due_date,
+                    task.due_date or default_due_date(),
                     thread_url,
                 ),
             )
@@ -200,9 +223,9 @@ def get_task_list_write_tools(
         if list_url is None:
             return "이 채널은 작업 리스트를 쓰고 있지 않았습니다."
 
-        await remove_task_list_bookmark(client, channel, list_url)
         return (
-            "작업 리스트 연결을 끊고 북마크를 걷었습니다. 이제 작업은 노션에 생깁니다."
+            "작업 리스트 연결을 끊었습니다. 이제 작업은 노션에 생깁니다."
+            " 상단 탭은 리스트 화면에서 내리시면 됩니다."
             f" 쌓인 작업은 리스트에 그대로 있습니다: {list_url}"
         )
 
