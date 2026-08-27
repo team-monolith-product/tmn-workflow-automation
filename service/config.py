@@ -170,6 +170,7 @@ class AppConfig:
     task_alerts: TaskAlertsConfig
     education_bid_crawler: EducationBidCrawlerConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
+    sms_projects: dict[str, str] = field(default_factory=dict)
 
 
 def _parse_config(raw: dict) -> AppConfig:
@@ -322,6 +323,7 @@ def _parse_config(raw: dict) -> AppConfig:
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
         scheduled_jobs=scheduled_jobs,
+        sms_projects=raw.get("sms_projects", {}),
     )
 
 

@@ -64,21 +64,20 @@ class FakeApp:
 
 
 def _ok(**extra):
-    """뿌리오가 접수한 응답. send() 가 실제로 돌려주는 모양이다."""
-    return {
-        "sent": 2,
-        "ref_key": "R1",
-        "sender": "01077647538",
-        "message_key": "K1",
-        "message_type": "SMS",
-        "send_time": None,
-        "content": "[*이름*]선생님",
-        "targets": [
+    """뿌리오가 접수한 결과. 필드를 빠뜨리면 여기서 터진다."""
+    return sms_send.Sent(
+        sent=2,
+        ref_key="R1",
+        sender="01077647538",
+        message_key="K1",
+        message_type="SMS",
+        send_at=None,
+        content="[*이름*]선생님",
+        targets=[
             {"to": "01011111111", "name": "가"},
             {"to": "01022222222", "name": "나"},
         ],
-        **extra,
-    }
+    )._replace(**extra)
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +89,9 @@ def recorded(monkeypatch, client):
     """
     calls = []
     monkeypatch.setattr(
-        history, "record", lambda **kw: calls.append((kw, len(client.updated)))
+        history,
+        "record",
+        lambda sent, **kw: calls.append((sent, kw, len(client.updated))),
     )
     return calls
 
@@ -403,33 +404,46 @@ async def test_보내면_이력을_남긴다(client, handlers, monkeypatch, reco
     await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
     assert len(recorded) == 1
-    kwargs, updates_before = recorded[0]
-    assert kwargs["channel_id"] == "C1"
-    assert kwargs["thread_ts"] == "111.000"
-    # 도구가 받은 날것이 아니라 벤더로 나간 문안을 남긴다.
-    assert kwargs["content"] == "[*이름*]선생님"
-    assert kwargs["approved_by"] == "U1"
+    sent, kwargs, updates_before = recorded[0]
+    assert kwargs == {
+        "channel_id": "C1",
+        "thread_ts": "111.000",
+        "approved_by": "U1",
+    }
+    # send() 가 돌려준 것을 그대로 넘긴다. 도구가 받은 날것이 아니다.
+    assert sent.content == "[*이름*]선생님"
     # 카드를 먼저 고치고 남긴다.
     assert updates_before == 1
-    # 정규화된 번호가 남아야 한다. draft["rows"] 로 새면 '010-1111-1111' 이
-    # 들어가고, "이 번호로 뭐 보냈나" 가 조용히 0행을 낸다.
-    assert [t["to"] for t in kwargs["targets"]] == ["01011111111", "01022222222"]
-    # 접수 키가 NULL 이어도 정상으로 보이게 문서에 적어 둔 탓에, 이 사슬이
-    # 끊기면 카드도 DB 도 조용히 비어 버린다.
-    assert (kwargs["message_key"], kwargs["message_type"]) == ("K1", "SMS")
-    assert kwargs["send_time"] is None
 
 
 async def test_예약이면_예약_시각을_남긴다(client, handlers, monkeypatch, recorded):
     # 이게 안 남으면 다음 주에 나갈 문자가 오늘 나간 것처럼 보인다.
-    monkeypatch.setattr(
-        sms_send, "send", lambda **kw: _ok(send_time="2026-08-22T09:00:00")
-    )
+    when = datetime(2026, 8, 22, 9, 0, tzinfo=sms_send.KST)
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok(send_at=when))
     await _draft(client)
 
     await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
 
-    assert recorded[0][0]["send_time"] == "2026-08-22T09:00:00"
+    assert recorded[0][0].send_at == when
+
+
+async def test_이력을_못_남겨도_카드는_보냈다고_남는다(
+    client, handlers, monkeypatch, recorded
+):
+    # 카드를 먼저 고치는 이유가 이것이다. 순서가 반대면 이미 나간 발송을
+    # 카드가 실패로 그린다.
+    monkeypatch.setattr(sms_send, "send", lambda **kw: _ok())
+
+    def boom(sent, **kwargs):
+        raise RuntimeError("DB down")
+
+    monkeypatch.setattr(history, "record", boom)
+    await _draft(client)
+
+    with pytest.raises(RuntimeError):
+        await _click(handlers, sms.APPROVE, _press(client, sms.APPROVE), client)
+
+    assert "보냈습니다" in client.updated[0]["text"]
 
 
 async def test_안_나갔으면_이력을_남기지_않는다(
@@ -469,7 +483,8 @@ async def test_예약을_승인하면_시각이_함께_나간다(client, handler
     monkeypatch.setattr(
         sms_send,
         "send",
-        lambda **kw: sent.update(kw) or _ok(send_time="2026-08-22T09:00:00"),
+        lambda **kw: sent.update(kw)
+        or _ok(send_at=datetime(2026, 8, 22, 9, 0, tzinfo=sms_send.KST)),
     )
     await _draft(client, send_at=_later(60))
 

@@ -142,6 +142,6 @@ def send(payload: dict) -> dict:
     body = {
         **payload,
         "account": _env("PPURIO_ACCOUNT"),
-        "from": _env("PPURIO_SENDER"),
+        "from": sender(),
     }
     return _post("/v1/message", body, {"Authorization": "Bearer " + issue_token()})

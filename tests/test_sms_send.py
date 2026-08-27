@@ -47,8 +47,8 @@ def _accept(monkeypatch, captured=None):
 def test_한_번의_요청으로_전원에게_보낸다(monkeypatch):
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K1"})
 
-    assert result["sent"] == 2
-    assert result["message_key"] == "K1"
+    assert result.sent == 2
+    assert result.message_key == "K1"
     assert payload["targetCount"] == 2
     assert [t["to"] for t in payload["targets"]] == ["01011111111", "01022222222"]
 
@@ -77,14 +77,14 @@ def test_치환값이_벤더로_넘어간다(monkeypatch):
 
 
 def test_벤더로_나가는_것은_치환_전_원문이다(monkeypatch):
-    # 이력이 남기는 result["content"] 가 벤더로 나간 값과 같아야 한다. 갈리면
+    # 이력이 남기는 result.content 가 벤더로 나간 값과 같아야 한다. 갈리면
     # 앞뒤 공백 하나로 같은 문안이 DB 에서 둘로 쪼개진다.
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
-    assert payload["content"] == result["content"] == CONTENT
+    assert payload["content"] == result.content == CONTENT
     # 이력이 남기는 targets 도 벤더로 나간 값이어야 한다. plan.rows 로 새면
     # change_word 가 전 행 NULL 이 되고, 기수·치환값은 재구성할 수 없다.
-    assert payload["targets"] == result["targets"]
+    assert payload["targets"] == result.targets
 
 
 def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):
@@ -94,7 +94,7 @@ def test_같은_번호는_접어서_한_번만_보낸다(monkeypatch):
         rows=[{"to": "010-1111-1111"}, {"to": "01011111111"}], content="안녕"
     )
 
-    assert result["sent"] == 1
+    assert result.sent == 1
 
 
 def test_벤더가_거절하면_터뜨린다(monkeypatch):
@@ -116,7 +116,7 @@ def test_LMS면_제목을_붙인다(monkeypatch):
 
     result = sms_send.send(rows=ROWS, content=long_body)
 
-    assert result["message_type"] == "LMS"
+    assert result.message_type == "LMS"
     assert captured["subject"] == "안내"
 
 
@@ -241,7 +241,7 @@ def test_지난_시각은_보내기_전에_걸린다():
     plan = sms_send.preview(ROWS, CONTENT, send_at=_later(-10))
 
     assert plan.problems
-    assert plan.send_time is None
+    assert plan.send_at is None
 
 
 def test_너무_촉박한_예약은_걸린다():
@@ -262,10 +262,10 @@ def test_시간대가_없으면_한국_시간으로_읽는다():
     when = datetime.now(tz=sms_send.KST) + timedelta(hours=5)
     naive = when.strftime("%Y-%m-%d %H:%M:%S")
 
-    send_time, problem = sms_send.parse_send_at(naive)
+    parsed, problem = sms_send.parse_send_at(naive)
 
     assert problem is None
-    assert send_time == when.strftime(sms_send.SEND_TIME_FORMAT)
+    assert parsed == when.replace(microsecond=0)
 
 
 def test_예약해도_수신자와_문안은_그대로다(monkeypatch):
@@ -277,19 +277,13 @@ def test_예약해도_수신자와_문안은_그대로다(monkeypatch):
     assert payload["content"] == CONTENT
 
 
-def test_한_번의_발송은_ref_key_하나다(monkeypatch):
-    # 이력에서 발송 건수를 count(distinct ref_key) 로 센다. 벤더로 나가는 값과
-    # 돌려주는 값이 다르면 뿌리오 쪽 기록과 우리 기록을 맞춰볼 수 없다.
+def test_돌려주는_값이_벤더로_나간_값이다(monkeypatch):
+    # 이력에서 발송 건수를 count(distinct ref_key) 로 세므로 벤더로 나간 키와
+    # 같아야 한다. 발신번호도 호출부가 정하면 실제로 나간 번호와 갈린다.
     result, payload = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
-    assert result["ref_key"] == payload["refKey"]
-
-
-def test_실제로_나간_발신번호를_돌려준다(monkeypatch):
-    # 호출부가 발신번호를 정하게 하면 실제로 나간 번호와 다른 값을 기록할 수 있다.
-    result, _ = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
-
-    assert result["sender"] == "01077647538"
+    assert result.ref_key == payload["refKey"]
+    assert result.sender == "01077647538"
 
 
 def test_merge_가_만든_빈_칸과_실수가_그대로_나가지_않는다():

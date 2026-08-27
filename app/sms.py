@@ -51,7 +51,7 @@ def _draft_id(channel: str, thread_ts: str, plan: sms_send.Plan) -> str:
             channel,
             thread_ts,
             plan.template,
-            plan.send_time,
+            plan.send_at.isoformat() if plan.send_at else None,
             # 순서가 바뀌는 것은 다른 발송이 아니다.
             sorted(plan.targets, key=lambda target: target["to"]),
         ],
@@ -98,17 +98,16 @@ def _value_table(targets: list[dict]) -> str:
     )
 
 
-def _when(send_time: str | None) -> str:
+def _when(send_at: datetime | None) -> str:
     """예약 시각을 사람이 읽는 꼴로. 즉시 발송이면 빈 문자열입니다.
 
     시간대를 붙여 씁니다. 해외에 있거나 노트북 시계가 딴 데 맞춰져 있으면
     "09:00" 이 어느 나라 9시인지 물어보게 됩니다.
     """
-    if not send_time:
+    if not send_at:
         return ""
-    when = datetime.strptime(send_time, sms_send.SEND_TIME_FORMAT)
-    days = "월화수목금토일"[when.weekday()]
-    return f"{when.month}/{when.day}({days}) {when:%H:%M} KST"
+    days = "월화수목금토일"[send_at.weekday()]
+    return f"{send_at.month}/{send_at.day}({days}) {send_at:%H:%M} KST"
 
 
 def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
@@ -118,8 +117,8 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
         head += f" · 중복 {plan.folded}건 접음"
     # 예약은 헤더 맨 앞에 둡니다. 뒤에 붙이면 중복 접음 문구에 묻혀,
     # 지금 나갈 문자로 읽고 눌러 버립니다.
-    if plan.send_time:
-        head = f"⏰ {_when(plan.send_time)} 예약 · " + head
+    if plan.send_at:
+        head = f"⏰ {_when(plan.send_at)} 예약 · " + head
     # 문안에 백틱이 있으면 펜스가 거기서 닫혀 나머지가 mrkdwn 으로 렌더된다.
     # 그러면 [*이름*] 이 굵은 글씨가 되어, 실명이 박힌 사고와 화면상 구분이
     # 안 된다. 개행은 문안에서 의미가 있으므로 건드리지 않는다.
@@ -149,7 +148,7 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
                     # 예약인데 "보내기" 라고 쓰면 지금 나가는 줄 알고 누릅니다.
                     "text": {
                         "type": "plain_text",
-                        "text": "예약하기" if plan.send_time else "보내기",
+                        "text": "예약하기" if plan.send_at else "보내기",
                     },
                     "value": draft_id,
                 },
@@ -236,10 +235,10 @@ def get_draft_sms_tool(
         except BaseException:
             _DRAFTS.pop(draft_id, None)
             raise
-        if plan.send_time:
+        if plan.send_at:
             return (
                 f"{len(plan.rows)}명 대상 {POSTED_MARK}."
-                f" {_when(plan.send_time)} 발송으로 예약하려면"
+                f" {_when(plan.send_at)} 발송으로 예약하려면"
                 " [예약하기] 를 눌러주세요."
             )
         return f"{len(plan.rows)}명 대상 {POSTED_MARK}. [보내기] 를 눌러주세요."
@@ -275,7 +274,7 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        (f"⏰ {_when(plan.send_time)} 예약\n" if plan.send_time else "")
+                        (f"⏰ {_when(plan.send_at)} 예약\n" if plan.send_at else "")
                         + f"```{plan.template.replace('`', chr(39))}```"
                     ),
                 },
@@ -363,32 +362,31 @@ def register_sms_handlers(app, revise=None):
             raise
 
         done = (
-            f"{_when(result['send_time'])} 발송으로 예약했습니다"
-            if result.get("send_time")
+            f"{_when(result.send_at)} 발송으로 예약했습니다"
+            if result.send_at
             else "보냈습니다"
         )
         await _replace(
             client,
             channel,
             ts,
-            f"<@{body['user']['id']}> 님이 {done} — {result['sent']}명"
-            f" (messageKey `{result['message_key'] or '없음'}`)",
+            f"<@{body['user']['id']}> 님이 {done} — {result.sent}명"
+            f" (messageKey `{result.message_key or '없음'}`)",
         )
+
+        # 나간 것을 먼저 로그에 박는다. 이력을 못 남기면 카드에는 승인자와
+        # 인원수만 남아 번호도 문안도 되살릴 수 없다 — 이 기능이 없애려던
+        # 상태가 그대로 재현되고, 이번엔 아무도 그런 줄 모른다.
+        print(f"SMS SENT {result.ref_key} {channel} {body['user']['id']} {result}")
 
         # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
         # 발송을 카드가 실패로 그린다.
         await asyncio.to_thread(
             history.record,
-            ref_key=result["ref_key"],
+            result,
             channel_id=channel,
             thread_ts=draft["thread_ts"],
-            sender=result["sender"],
-            content=result["content"],
-            message_type=result["message_type"],
-            message_key=result["message_key"],
-            send_time=result["send_time"],
             approved_by=body["user"]["id"],
-            targets=result["targets"],
         )
 
     @app.action(REVISE)
