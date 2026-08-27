@@ -6,12 +6,15 @@
 지금은 이 일이 `repo/industry-linked/create_*_form.py` 일곱 개에 복붙으로 흩어져 있고
 **공개 처리를 둘 다 갖춘 것은 넷뿐이다.**
 
-| 스크립트 | 링크 공개 | 게시 |
+| 스크립트 | 응답자 공개 | 게시 |
 |---|---|---|
 | demand / jitda_event / team / visit | O | O |
 | staff_doc | O | **X** |
-| survey | **X** | O |
+| survey | **X** | **X** |
 | short_term | **X** | **X** |
+
+`survey` 는 `publish()` 를 정의만 해 두고 `main()` 에서 부르지 않는다. 하필 사업계획서가
+약속한 만족도 지표를 재는 폼이다.
 
 공개를 부르는 쪽의 선택지로 두는 한 이 표는 계속 나온다.
 
@@ -34,7 +37,7 @@
 
 **2026-07-01 부터 API 로 만든 폼은 기본이 미게시다.** 그 전에는 하위 호환으로 게시된 채
 만들어졌다. 오늘(8/27)은 이미 지난 뒤라 게시를 빼먹은 폼은 예외 없이 응답을 못 받는다.
-`staff_doc`·`short_term` 방식은 지금 그대로 돌리면 죽는다.
+`survey`·`staff_doc`·`short_term` 방식은 지금 그대로 돌리면 죽는다.
 
 **응답자 공개는 `view: "published"` 로 준다.**
 
@@ -55,13 +58,31 @@ drive.permissions().create(fileId=fid, supportsAllDrives=True,
 ### 1. 순서가 곧 안전장치다
 
 ```
-① files.create        전용 공유 드라이브 폴더에 폼 셸을 만든다
+⓪ 입력 검증          편집자 주소 · 마크다운 마커 · 문항 스펙  → ValueError
+① files.create        전용 공유 드라이브 폴더에 이름 있는 폼 셸을 만든다
 ② deleteItem × N      셸에 딸려 온 기본 문항을 역순으로 지운다
 ③ batchUpdate         제목·설명·문항을 넣는다
 ④ 편집자 공유         → 그 자리에서 되읽어 확인
 ⑤ setPublishSettings  → 그 자리에서 되읽어 확인
 ⑥ 응답자 공개         → 그 자리에서 되읽어 확인
 ```
+
+**⓪ 이 ① 앞이다.** 편집자 주소 오타나 마크다운 마커 같은 것은 폼을 만들기 전에 걸러야 한다.
+①이 지난 뒤에 거부하면 부를 때마다 고아 폼이 하나씩 쌓이는데 삭제 도구가 없다.
+
+**① 에 파일 이름을 넣는다.**
+
+```python
+drive.files().create(supportsAllDrives=True, fields="id",
+    body={"name": title, "parents": [FORM_FOLDER_ID],
+          "mimeType": "application/vnd.google-apps.form"}).execute()
+```
+
+`documentTitle`(드라이브에 보이는 이름)은 **`batchUpdate` 로 고칠 수 없다.** 공식 문서가
+"can be set on create, but cannot be modified by a batchUpdate request" 라고 못 박았다.
+③ 의 `updateFormInfo` 가 채우는 `info.title` 은 응답자에게 보이는 제목이지 파일 이름이
+아니다. ① 에서 `name` 을 빼면 드라이브에 "제목 없는 설문지"만 쌓이고 이후 어떤 API 로도
+못 고친다.
 
 **②를 빼먹으면 만드는 폼마다 1번 문항이 "제목 없는 질문"이다.** Drive 우회로 만든 셸에는
 기본 문항이 딸려 온다. `deleteItem`이 뒤 인덱스를 당기므로 **역순으로** 지운다. 정순으로
@@ -81,7 +102,7 @@ drive.permissions().create(fileId=fid, supportsAllDrives=True,
 부른다. **①이 이미 끝난 뒤라면 재호출은 폼을 하나 더 만든다.**
 
 그래서 ① 이후의 실패는 예외로 올리지 않고 문자열로 내린다. `app/tools/redash_tools.py` 가
-이미 쓰는 관례다.
+이미 쓰는 관례다. ⓪ 의 입력 거부는 폼을 만들기 전이므로 그냥 `ValueError` 다.
 
 ```
 폼은 만들어졌지만 ⑤ 게시에서 멈췄습니다.
@@ -90,14 +111,31 @@ drive.permissions().create(fileId=fid, supportsAllDrives=True,
   이어서 하려면 form_id 를 넘겨 다시 불러 주세요.
 ```
 
-`create_form(..., form_id: str | None = None)` 으로 이어받는다. `form_id` 가 오면 ①②③ 을
-건너뛰고 ④부터 다시 돈다. `service/form.py` 안에서는 예외를 던지고 tool 경계에서 잡아
-문자열로 바꾼다. 예외 메시지에도 formId 와 편집 링크를 싣는다.
+`create_form(..., form_id: str | None = None)` 으로 이어받는다. **`form_id` 가 오면 ②부터
+다시 돈다.** ④부터 돌리면 ②나 ③ 에서 멈춘 폼이 문항 없이 게시되고 공개된다. ② 는 현재
+items 를 되읽어 지우는 것이라 몇 번을 돌려도 같은 결과고 ③ 은 ② 뒤에서만 안전하다.
+`createItem` 은 삽입이라 남아 있는 항목 뒤로 index 가 밀린다.
+
+**`form_id` 도 LLM 이 채우는 인자다.** 스레드 위쪽에 떠 있는 옛 formId 를 집어 들면 ② 가
+남의 폼 문항을 지운다. 만지기 전에 재개 대상임을 확인한다. 호출 두 번이면 된다.
+
+| 확인 | 아니면 |
+|---|---|
+| `files.get(fields="parents,createdTime")` 의 `parents` 에 `FORM_FOLDER_ID` 가 있는가 | 거부 |
+| `createdTime` 이 한 시간 안인가 | 거부. 이어받기는 정의상 방금 만든 폼이다 |
+| `forms.responses.list(pageSize=1)` 이 비어 있는가 | 거부. 응답이 있으면 문항을 갈아엎어선 안 된다 |
+
+세 번째가 특히 중요하다. 문항을 갈아엎으면 `questionId` 가 새로 발급되고 사람이 붙여 둔
+응답 시트에 새 열이 생긴다. 기존 응답은 옛 열에 남아 어긋나고 시트만 봐서는 이유를 알 수
+없다. `drive` 스코프가 이미 `forms.responses.list` 를 열어 두므로 스코프는 안 는다.
 
 `assert` 는 쓰지 않는다. `api/google_sheets.py` 처럼 사람이 다음에 뭘 할지 담아
 `ValueError` 를 던진다.
 
 ### 3. 편집자 검증은 부여와 같은 기준으로 본다
+
+편집자는 **전용 공유 드라이브의 콘텐츠 관리자 멤버**로 넣는 것이 기본이다(선행 작업 4번).
+그러면 ④ 는 확인만 하고 넘어간다.
 
 ```python
 # 공유 드라이브 멤버십은 파일 권한에 organizer·fileOrganizer 로 상속돼 내려온다.
@@ -110,17 +148,25 @@ def _permissions(drive, fid: str) -> list[dict]:
     params = {
         "fileId": fid, "supportsAllDrives": True, "pageSize": 100,
         "includePermissionsForView": "published",
-        "fields": "nextPageToken,permissions(id,type,role,view,emailAddress)",
+        "fields": ("nextPageToken,permissions"
+                   "(id,type,role,view,emailAddress,permissionDetails(inherited,role))"),
     }
     ...
 ```
 
 **부여를 건너뛰는 기준과 통과 판정 기준이 같아야 한다.** 편집자가 이미 `reader` 나
-`commenter` 로 붙어 있으면, "있는 사람은 건너뛴다"로 짜면 부여를 건너뛰는데,
-판정은 `WRITE_ROLES` 만 인정하므로 그 사람이 실패로 잡힌다. 건너뛰기는 `WRITE_ROLES` 인 사람만 하고, 낮은 역할이 이미
-있으면 `permissions.create` 가 아니라 그 permission id 로 `permissions.update` 를 부른다.
-공유 드라이브는 상속된 역할보다 낮은 파일 단위 부여를 거부하므로 이미 콘텐츠 관리자인
-사람에게 `writer` 를 주려 들면 그 호출 자체가 실패한다.
+`commenter` 로 붙어 있으면 "있는 사람은 건너뛴다"로 짜면 부여를 건너뛰는데 판정은
+`WRITE_ROLES` 만 인정하므로 그 사람이 실패로 잡힌다. 건너뛰기는 `WRITE_ROLES` 인 사람만
+한다.
+
+낮은 역할이 이미 있으면 그것이 **상속인지 파일 단위인지**로 갈린다.
+
+- **상속**(`permissionDetails[].inherited == true`): `permissions.create(role="writer")` 로
+  올린다. 상속 권한은 항목에서 줄이거나 없앨 수 없고 올리는 것만 된다. `update` 를 부르면
+  403 이다.
+- **파일 단위 직접 부여**: 그 permission id 로 `permissions.update` 를 부른다.
+
+그래서 `fields` 에 `permissionDetails` 가 필요하다. 없으면 둘을 구분할 정보 자체가 안 온다.
 
 `emailAddress` 는 `type` 이 `user`·`group` 일 때만 온다. 편집자가 그룹으로 권한을 받고
 있으면 개인 주소는 응답 어디에도 없다. **그런 주소는 실패로 치지 않고 안내문에 "확인 불가"로
@@ -173,8 +219,9 @@ AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검�
 `assert "**" not in DESCRIPTION` 으로 이걸 막는다.
 
 **이 설계에서는 그 글을 LLM 이 쓴다.** 사람이 손으로 쓰던 때보다 마커가 섞일 확률이 훨씬
-높다. 폼 제목·설명과 문항 제목·설명에서 마크다운 마커를 검사해 거부한다. 선생님이 보는
-화면에 `**` 가 찍히는 것은 되돌릴 수 없다.
+높다. 검사 대상은 폼 제목·설명과 **`Question` 의 문자열 필드 전부**다. `title`,
+`description`, `options[*]`, `low_label`, `high_label` 이다. 선택지에 `**기타**` 가
+들어가도 선생님 화면에 별표가 그대로 찍힌다.
 
 ### 7. 계정과 폴더
 
@@ -215,10 +262,10 @@ AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검�
 
 ```
 api/google_forms.py         Forms·Drive REST 얇은 래퍼 (api/ 규칙: 래퍼만)
-service/form.py             ①~⑥ 오케스트레이션 + 안내문
+service/form.py             ⓪~⑥ 오케스트레이션 + 안내문
 app/tools/form_tools.py     create_form (async @tool)
 app/general.py              도구 목록에 추가
-tests/test_form_requests.py 문항 스펙 → createItem 변환, 마크다운 거부
+tests/test_form_requests.py 문항 스펙 → createItem 변환, 입력 거부
 .env.example                FORM_SERVICE_ACCOUNT_JSON, FORM_FOLDER_ID, FORM_EDITORS
 ```
 
@@ -226,8 +273,8 @@ tests/test_form_requests.py 문항 스펙 → createItem 변환, 마크다운 �
 frozen dataclass라 `config.yaml`에 키를 하나 더하려면 `service/config.py`까지 고쳐야 하고
 모르는 키는 조용히 버려져 그 사실이 예외로도 드러나지 않는다.
 
-테스트는 API 없이 도는 두 가지만 본다. 문항 스펙을 `createItem` 요청으로 옮기는 변환과
-마크다운 거부다. 나머지는 구글이 답해야 알 수 있다.
+테스트는 API 없이 도는 것만 본다. 문항 스펙을 `createItem` 요청으로 옮기는 변환, 마크다운
+거부, 선택지 없는 객관식 거부다. 나머지는 구글이 답해야 알 수 있다.
 
 ### 문항 스펙
 
@@ -247,6 +294,10 @@ class Question:
     high_label: str | None = None         # scale
 ```
 
+`kind` 가 `radio`·`radio_other`·`check` 인데 `options` 가 비면 ⓪ 에서 거부한다. 비운 채
+보내면 `choiceQuestion.options` 가 빈 배열이라 ③ 이 400 이고 그 순간 이미 폼이 만들어져
+있다.
+
 `scale` 은 `low=1`·`high=5` 로 고정한다. Forms 는 `low` 를 0 또는 1, `high` 를 3~10 만
 받으므로 LLM 이 임의 값을 넣으면 400 이다. 5점 리커트가 사업계획서가 약속한 측정 방식이기도
 하다.
@@ -264,13 +315,17 @@ Forms API 가 생성을 지원하지 않고 폼 UI 에도 안 나온다(8/4 실�
 | 1 | 서비스 계정 만들고 JSON 키 발급 | [IAM 서비스 계정](https://console.cloud.google.com/iam-admin/serviceaccounts?project=elegant-circle-503206-a1) |
 | 2 | Forms API 사용 설정 | [Forms API](https://console.cloud.google.com/apis/library/forms.googleapis.com?project=elegant-circle-503206-a1) |
 | 3 | Drive API 사용 설정 | [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com?project=elegant-circle-503206-a1) |
-| 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
+| 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정과 **편집자 전원**(또는 그들을 담은 그룹)을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
 | 5 | 그 드라이브에서 **외부 공유(링크가 있는 모든 사용자)가 허용**돼 있는지 확인 | 드라이브 설정 |
 | 6 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
 | 7 | 헬름에 `FORM_SERVICE_ACCOUNT_JSON`(시크릿) + `FORM_FOLDER_ID`·`FORM_EDITORS`(env) 추가 | 레포 PR |
 
-4번이 빠지면 `files.create`가 권한 없음으로 죽는다. 5번이 빠지면 응답자 공개가 403 이고
-원인이 코드에 없어 찾는 데 오래 걸린다.
+4번이 빠지면 `files.create`가 권한 없음으로 죽는다. **편집자를 멤버로 넣는 것까지가 4번이다.**
+멤버가 아니면 ④ 가 파일 단위로 권한을 줘야 하는데 공유 드라이브에는 "멤버가 아닌 사람을
+파일에 추가하도록 허용"이라는 별도 토글이 있고 그것이 꺼져 있으면 `create_form` 호출이 전부
+403 이다. 5번의 외부 공유 허용과는 다른 설정이라 그것만 지켜서는 안 걸린다.
+
+5번이 빠지면 응답자 공개가 403 이고 원인이 코드에 없어 찾는 데 오래 걸린다.
 
 ## 안 하는 것
 
