@@ -28,7 +28,8 @@ TASK_LIST = ChannelTaskList(
     completed_column_id="Col00",
     assignee_column_id="Col01",
     due_date_column_id="Col02",
-    thread_column_id="Col05F6GHIJ7K",
+    source_thread_column_id="Col05F6GHIJ7K",
+    work_thread_column_id="Col09WORK1234",
 )
 
 # 슬랙 열이 생기기 전에 만들어진 리스트. 열을 나중에 붙이는 API 가 없어 이런
@@ -55,9 +56,15 @@ CREATE_SCHEMA = [
     },
     {
         "key": "slack_thread",
-        "name": "슬랙",
+        "name": "요청 맥락",
         "type": "message",
         "id": "Col05F6GHIJ7K",
+    },
+    {
+        "key": "work_thread",
+        "name": "작업 기록",
+        "type": "message",
+        "id": "Col09WORK1234",
     },
     {"key": "todo_completed", "type": "todo_completed", "id": "Col00"},
     {"key": "todo_assignee", "type": "todo_assignee", "id": "Col01"},
@@ -108,6 +115,7 @@ def test_thread_link_goes_to_its_own_column():
     elements = fields[0]["rich_text"][0]["elements"][0]["elements"]
     assert elements == [{"type": "text", "text": "계정 일괄 생성"}]
     assert {"column_id": "Col05F6GHIJ7K", "message": [THREAD_URL]} in fields
+    assert not any(field["column_id"] == "Col09WORK1234" for field in fields)
 
 
 def test_legacy_list_keeps_link_in_title():
@@ -163,6 +171,34 @@ def test_reading_item_without_fields_key():
     """셀이 하나도 없는 항목은 fields 자체가 없을 수 있다"""
     assert TASK_LIST.title_of({"id": "Rec01"}) == ""
     assert TASK_LIST.is_completed({"id": "Rec01"}) is False
+
+
+def test_message_cell_accepts_object_array_and_legacy_url():
+    """Slack message 셀은 실제 API에서 단일 객체나 배열로 모두 올 수 있다"""
+    single = {
+        "fields": [
+            {
+                "column_id": "Col09WORK1234",
+                "message": {"channel_id": CHANNEL, "ts": "1700000000.000100"},
+            }
+        ]
+    }
+    multiple = {
+        "fields": [
+            {
+                "column_id": "Col05F6GHIJ7K",
+                "message": [THREAD_URL, {"value": THREAD_URL}],
+            }
+        ]
+    }
+
+    assert TASK_LIST.work_thread_references_of(single) == [
+        {"channel_id": CHANNEL, "ts": "1700000000.000100"}
+    ]
+    assert TASK_LIST.source_thread_references_of(multiple) == [
+        {"value": THREAD_URL},
+        {"value": THREAD_URL},
+    ]
 
 
 # --- 도구 인자 계약 ---
@@ -257,7 +293,11 @@ async def test_create_defines_slack_column_up_front():
 
     sent = client.slackLists_create.await_args.kwargs
     assert sent["todo_mode"] is True
-    assert [column["type"] for column in sent["schema"]] == ["text", "message"]
+    assert [column["type"] for column in sent["schema"]] == [
+        "text",
+        "message",
+        "message",
+    ]
 
 
 # --- 도구 동작 ---

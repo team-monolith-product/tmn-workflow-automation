@@ -4,9 +4,10 @@
 channel_task_list 표가 SOT입니다. 채널이 작업을 리스트로 관리하는지는 이 표에
 행이 있느냐로만 정해집니다.
 
-열 ID를 표에 두는 이유가 있습니다. 슬랙에는 리스트의 열을 조회하는 API가
-없어서 slackLists.create 응답이 열 ID를 아는 유일한 자리입니다. 그때 받아
-저장해 두지 않으면 다시 알아낼 방법이 없습니다.
+열 ID를 표에 두는 이유가 있습니다. 자주 쓰는 봇 경로에서 매번 List 전체
+스키마를 읽지 않고 바로 셀을 조립하기 위해서입니다. MCP로 특정 행을 시작할
+때는 slackLists.items.info가 돌려주는 스키마로 수동 추가된 작업 기록 열을
+발견해 이 표를 보충합니다.
 
 셀을 읽고 쓰는 방법도 여기 둡니다. 열 ID를 아는 곳과 그 열에 무엇을 써넣는지
 아는 곳이 갈리면 슬랙이 표기를 바꿀 때 두 계층을 같이 고쳐야 합니다.
@@ -24,14 +25,15 @@ from slack_sdk.web.async_client import AsyncWebClient
 from service.db import connect, fetch_one
 
 # 리스트를 만들 때 우리가 정의하는 열. todo_mode 가 완료·담당자·마감일 셋을
-# 뒤에 알아서 붙이므로 여기에는 제목과 슬랙 열만 둔다.
+# 뒤에 알아서 붙이므로 여기에는 제목과 두 스레드 열만 둔다.
 #
 # 슬랙 열이 message 타입인 이유가 있다. link 로 두면 URL 문자열만 남지만
 # message 는 슬랙이 채널과 ts 를 풀어 카드로 보여 주고, 값이 배열이라 작업
 # 하나에 스레드를 여럿 달 수 있다.
 CREATE_SCHEMA = [
     {"key": "name", "name": "작업", "type": "text", "is_primary_column": True},
-    {"key": "slack_thread", "name": "슬랙", "type": "message"},
+    {"key": "slack_thread", "name": "요청 맥락", "type": "message"},
+    {"key": "work_thread", "name": "작업 기록", "type": "message"},
 ]
 
 # 항목 조회 한 페이지 크기. 완료된 항목도 같이 오므로 한 페이지로는 부족하다.
@@ -74,7 +76,8 @@ class ChannelTaskList:
     completed_column_id: str
     assignee_column_id: str
     due_date_column_id: str
-    thread_column_id: str | None = None
+    source_thread_column_id: str | None = None
+    work_thread_column_id: str | None = None
 
     def initial_fields(
         self,
@@ -88,7 +91,7 @@ class ChannelTaskList:
         스레드 링크는 슬랙 열에 따로 넣습니다. 제목에 섞으면 제목으로 작업을
         찾는 완료 처리가 링크 텍스트까지 같이 읽습니다.
 
-        thread_column_id 가 없는 리스트는 이 변경 전에 만들어진 것입니다. 열을
+        source_thread_column_id 가 없는 리스트는 이 변경 전에 만들어진 것입니다. 열을
         나중에 추가하는 API가 없으니 그런 리스트는 예전처럼 제목 칸에 링크를
         붙입니다.
 
@@ -101,7 +104,7 @@ class ChannelTaskList:
         Returns:
             list[dict]: 셀 목록
         """
-        if self.thread_column_id:
+        if self.source_thread_column_id:
             title_elements = [{"type": "text", "text": title}]
         else:
             title_elements = [
@@ -126,8 +129,10 @@ class ChannelTaskList:
             }
         ]
 
-        if self.thread_column_id:
-            cells.append({"column_id": self.thread_column_id, "message": [thread_url]})
+        if self.source_thread_column_id:
+            cells.append(
+                {"column_id": self.source_thread_column_id, "message": [thread_url]}
+            )
 
         if assignee:
             cells.append({"column_id": self.assignee_column_id, "user": [assignee]})
@@ -163,6 +168,63 @@ class ChannelTaskList:
         values = _read_cell(item, self.completed_column_id, "checkbox")
         return bool(values and values[0])
 
+    def assignees_of(self, item: dict) -> list[str]:
+        """담당자 Slack 사용자 ID 목록을 읽습니다."""
+        return _read_cell(item, self.assignee_column_id, "user") or []
+
+    def due_dates_of(self, item: dict) -> list[str]:
+        """마감일 목록을 읽습니다."""
+        return _read_cell(item, self.due_date_column_id, "date") or []
+
+    def source_thread_references_of(self, item: dict) -> list[dict[str, Any]]:
+        """요청 맥락 셀의 메시지 참조를 정규화합니다.
+
+        Slack은 message 값을 단일 객체 또는 배열로 돌려줄 수 있습니다. 오래된
+        응답과 테스트 데이터에는 URL 문자열이 그대로 남아 있을 수도 있어 세
+        형태를 한 번에 받습니다.
+
+        Args:
+            item: slackLists.items.info의 record
+
+        Returns:
+            list[dict[str, Any]]: 메시지 참조 목록
+        """
+        return self._message_references_of(item, self.source_thread_column_id)
+
+    def work_thread_references_of(self, item: dict) -> list[dict[str, Any]]:
+        """작업 기록 셀의 메시지 참조를 정규화합니다.
+
+        Args:
+            item: slackLists.items.info의 record
+
+        Returns:
+            list[dict[str, Any]]: 메시지 참조 목록
+        """
+        return self._message_references_of(item, self.work_thread_column_id)
+
+    @staticmethod
+    def _message_references_of(
+        item: dict, column_id: str | None
+    ) -> list[dict[str, Any]]:
+        """message 셀의 여러 응답 모양을 dict 배열로 맞춥니다."""
+        if not column_id:
+            return []
+
+        raw = _read_cell(item, column_id, "message")
+        if raw is None:
+            return []
+        values = raw if isinstance(raw, list) else [raw]
+
+        normalized = []
+        for value in values:
+            if isinstance(value, str):
+                normalized.append({"value": value})
+            elif isinstance(value, dict):
+                normalized.append(value)
+            else:
+                raise ValueError("Slack message 셀의 형식을 해석할 수 없습니다.")
+        return normalized
+
     def completion_cells(self, row_ids: list[str]) -> list[dict]:
         """여러 행을 한 번에 완료로 표시할 셀 목록을 만듭니다.
 
@@ -192,6 +254,12 @@ FROM channel_task_list
 WHERE channel_id = %(channel_id)s
 """
 
+SELECT_TASK_LIST_BY_LIST_ID = f"""
+SELECT channel_id, {", ".join(TASK_LIST_COLUMNS)}
+FROM channel_task_list
+WHERE list_id = %(list_id)s
+"""
+
 INSERT_TASK_LIST = f"""
 INSERT INTO channel_task_list (channel_id, {", ".join(TASK_LIST_COLUMNS)})
 VALUES (%(channel_id)s, {", ".join(f"%({name})s" for name in TASK_LIST_COLUMNS)})
@@ -201,6 +269,12 @@ DELETE_TASK_LIST = """
 DELETE FROM channel_task_list
 WHERE channel_id = %(channel_id)s
 RETURNING list_url
+"""
+
+UPDATE_WORK_THREAD_COLUMN = """
+UPDATE channel_task_list
+SET work_thread_column_id = %(column_id)s
+WHERE list_id = %(list_id)s
 """
 
 
@@ -256,7 +330,8 @@ def to_task_list(
         completed_column_id=columns["todo_completed"],
         assignee_column_id=columns["todo_assignee"],
         due_date_column_id=columns["todo_due_date"],
-        thread_column_id=columns.get("slack_thread"),
+        source_thread_column_id=columns.get("slack_thread"),
+        work_thread_column_id=columns.get("work_thread"),
     )
 
 
@@ -272,6 +347,44 @@ def find_channel_task_list(channel_id: str) -> ChannelTaskList | None:
     with connect(read_only=True) as conn:
         row = fetch_one(conn, SELECT_TASK_LIST, {"channel_id": channel_id})
     return ChannelTaskList(**row) if row else None
+
+
+def find_channel_task_list_by_list_id(
+    list_id: str,
+) -> tuple[str, ChannelTaskList] | None:
+    """List ID로 연결 채널과 열 매핑을 찾습니다.
+
+    MCP에는 채널 ID가 아니라 List URL이 들어오므로 역방향 조회가 필요합니다.
+
+    Args:
+        list_id: Slack List ID
+
+    Returns:
+        tuple[str, ChannelTaskList] | None: 채널 ID와 List. 미등록이면 None
+    """
+    with connect(read_only=True) as conn:
+        row = fetch_one(conn, SELECT_TASK_LIST_BY_LIST_ID, {"list_id": list_id})
+    if not row:
+        return None
+
+    channel_id = row.pop("channel_id")
+    return channel_id, ChannelTaskList(**row)
+
+
+def save_work_thread_column_id(list_id: str, column_id: str) -> None:
+    """수동 추가된 작업 기록 열 ID를 List 매핑에 저장합니다.
+
+    Args:
+        list_id: Slack List ID
+        column_id: message 타입 작업 기록 열 ID
+    """
+    with connect() as conn:
+        result = conn.execute(
+            UPDATE_WORK_THREAD_COLUMN,
+            {"list_id": list_id, "column_id": column_id},
+        )
+        if result.rowcount != 1:
+            raise ValueError("등록되지 않은 Slack List입니다.")
 
 
 def save_channel_task_list(channel_id: str, task_list: ChannelTaskList) -> None:
@@ -341,11 +454,11 @@ async def create_channel_task_list(
 ) -> ChannelTaskList:
     """슬랙 리스트를 만들어 채널에 공유하고 등록합니다.
 
-    schema 로 제목과 슬랙 열을 정의하고 todo_mode 가 완료·담당자·마감일을
+    schema 로 제목과 요청 맥락·작업 기록 열을 정의하고 todo_mode 가 완료·담당자·마감일을
     뒤에 붙입니다. 둘은 같이 씁니다.
 
-    열은 만들 때만 정할 수 있고 뒤에 추가하는 API가 없습니다. 그래서 슬랙
-    열이 필요하면 리스트를 새로 만드는 수밖에 없습니다.
+    열은 만들 때만 정할 수 있고 뒤에 추가하는 API가 없습니다. 그래서 새 List는
+    두 message 열을 처음부터 같이 만듭니다.
 
     리스트를 만든 직후 표에 넣고 공유를 뒤에 합니다. 공유가 실패해도 만들어진
     리스트를 표가 알고 있어야, 다시 켤 때 리스트가 하나씩 더 생기지 않습니다.

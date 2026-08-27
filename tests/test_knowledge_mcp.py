@@ -31,6 +31,7 @@ def mcp_env(monkeypatch):
     """build_mcp와 build_mcp_app이 읽는 환경 변수를 채웁니다."""
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("KNOWLEDGE_MCP_RESOURCE_URL", RESOURCE_URL)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
 
 @pytest.mark.asyncio
@@ -122,4 +123,15 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
 async def test_질의_도구가_등록된다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert [tool.name for tool in tools] == ["query_knowledge"]
+    assert [tool.name for tool in tools] == [
+        "query_knowledge",
+        "start_slack_list_task",
+        "publish_slack_task_result",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_중간기록_도구는_등록하지_않는다(mcp_env):
+    tools = await build_mcp().list_tools()
+
+    assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
