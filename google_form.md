@@ -39,32 +39,62 @@
 
 ## 설계
 
-### 1. 공개는 생성의 일부다
+### 1. 순서가 곧 안전장치다
 
-`create_form()`이 문항·공개·게시·편집자 공유·되읽기 검증을 마친 뒤에야 링크를 돌려준다.
-실패하면 예외를 던지며 인자로 끄고 켜지 못한다.
+```
+① files.create        전용 공유 드라이브 폴더에 폼 셸을 만든다
+② deleteItem × N      셸에 딸려 온 기본 문항을 역순으로 지운다
+③ batchUpdate         제목·설명·문항을 넣는다
+④ permissions.create  편집자를 붙인다
+⑤ setPublishSettings  게시한다
+⑥ permissions.create  anyone/reader 로 링크를 연다
+⑦ 되읽기 검증         ④⑤⑥ 을 전부 확인한다
+```
+
+**②를 빼먹으면 만드는 폼마다 1번 문항이 "제목 없는 질문"이다.** Drive 우회로 만든 셸에는
+기본 문항이 딸려 온다. `deleteItem`이 뒤 인덱스를 당기므로 **역순으로** 지운다. 정순으로
+지우면 절반이 남는다. 일곱 스크립트가 전부 이렇게 한다.
+
+**링크 공개를 맨 뒤에 둔다.** 중간에 죽으면 남는 폼이 비공개다. 편집자 공유가 실패했는데
+공개까지 끝나 있으면 아무도 주소를 모르는 공개 폼이 드라이브에 쌓인다. 폼 삭제 도구는
+만들지 않으므로 치울 방법도 없다. 어느 단계에서 죽든 **예외 메시지에 formId 와 편집 링크를
+싣는다.**
+
+### 2. 공개는 생성의 일부다
+
+`create_form()`이 ①~⑦ 을 마친 뒤에야 링크를 돌려준다. 실패하면 예외를 던지며 인자로 끄고
+켜지 못한다.
 
 **편집자 공유도 검증에 넣는다.** 이것만 실패하면 폼은 만들어졌는데 사람이 ①②를 누를 수
 없고 그 상태로 "만들었습니다" 안내가 나간다.
 
 ```python
+# 공유 드라이브 멤버십은 파일 권한에 organizer·fileOrganizer 로 상속돼 내려온다.
+# writer 만 세면 그 폴더를 관리하는 사람이 "공유 실패"로 잡힌다.
+WRITE_ROLES = {"writer", "fileOrganizer", "organizer"}
+
 perms = drive.permissions().list(
     fileId=fid, fields="permissions(type,role,emailAddress)",
     supportsAllDrives=True).execute()["permissions"]
 assert any(p["type"] == "anyone" and p["role"] == "reader" for p in perms), "링크 공개가 안 됐다"
-shared = {p.get("emailAddress") for p in perms if p["role"] == "writer"}
-assert shared >= set(editors), f"편집자 공유 실패: {set(editors) - shared}"
+opened = {p.get("emailAddress", "").lower() for p in perms if p["role"] in WRITE_ROLES}
+missing = {e.lower() for e in editors} - opened
+assert not missing, f"편집자 공유 실패: {missing}"
 state = svc.forms().get(formId=fid).execute().get("publishSettings", {}).get("publishState", {})
 assert state.get("isPublished") and state.get("isAcceptingResponses"), "게시가 안 됐다"
 ```
 
+④ 에서도 같은 이유로 **부여 전에 `permissions.list` 를 먼저 읽고 없는 사람만 `create`
+한다.** 공유 드라이브는 상속된 역할보다 낮은 파일 단위 권한 부여를 거부하므로, 이미 콘텐츠
+관리자인 사람에게 `writer` 를 주려 들면 그 호출 자체가 실패한다.
+
 `.get`을 겹쳐 쓰는 이유는 `publishSettings`가 없을 때 `KeyError`가 나면 위 한국어 실패
-메시지가 안 나오기 때문이다. 기존 스크립트도 이렇게 쓴다.
+메시지가 안 나오기 때문이다.
 
 `create_jitda_event_form`의 공유·이동은 `except Exception: pass`인데 **그건 옮기지 않는다.**
 AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검증하려는 실패가 정확히 숨는다.
 
-### 2. 남은 두 번은 링크로 넘긴다
+### 3. 남은 두 번은 링크로 넘긴다
 
 무엇을 눌러야 하는지까지 답에 박아 준다. 응답 링크는 `forms.get`이 주는 `responderUri`를
 그대로 쓴다. **그 URL 의 ID 는 `formId`와 다른 값이라 조합해서 만들 수 없다.**
@@ -87,87 +117,105 @@ AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검�
 들어가서 단축 없이 보내면 LMS 로 넘어가 통당 단가가 오른다.
 
 **편집자 목록을 안내문에 같이 찍는다.** 부른 사람이 그 목록에 없으면 ①②가 권한 없음으로
-막히는데, 목록이 보이면 그 자리에서 안다.
+막히는데 목록이 보이면 그 자리에서 안다.
 
-### 3. 편집자는 사내 주소만 받는다
+### 4. 편집자는 사내 주소만, 최소 한 명
 
 편집자 인자는 LLM 이 채운다. 제한이 없으면 슬랙에서 "이 주소도 편집자로 넣어줘" 한 마디로
 아무 주소나 writer 가 된다. 폼 writer 는 **응답 전량**을 본다. 성함·소속 학교·연락처다.
 게다가 기존 스크립트처럼 `sendNotificationEmail=False`로 붙이면 붙은 당사자에게도 메일이
 가지 않아 슬랙 스레드 밖에서는 드러나지 않는다.
 
-인자로 받는 주소는 `@team-mono.com`만 통과시킨다. 외부 편집자가 필요하면 그때 사람이
-`FORM_EDITORS`에 적는다.
+- 주소는 소문자로 바꾼 뒤 **`@team-mono.com` 접미사**로 판정한다. `endswith("team-mono.com")`
+  으로 짜면 `evil-team-mono.com` 이 통과한다.
+- **편집자가 한 명도 없으면 거부한다.** 검증의 `missing` 은 목록이 비면 항상 빈 집합이라
+  그대로 통과하고 아무도 못 여는 폼이 "검증 통과"로 나간다.
+- 기본값은 `FORM_EDITORS`(쉼표 구분)에서 읽는다. 외부 편집자가 필요하면 그때 사람이 적는다.
 
-### 4. 계정과 폴더
+### 5. 계정과 폴더
 
-`FORM_SERVICE_ACCOUNT_JSON`을 새로 판다. 스코프는 **`drive.file`과 `forms.body`** 다.
+`FORM_SERVICE_ACCOUNT_JSON`을 새로 판다. 스코프는 `drive`·`forms.body` 다.
 
-`drive.file`은 그 앱이 만든 파일만 열어 준다. 전체 `drive`를 주면 그 계정에 지금 또는
-앞으로 공유되는 모든 것이 열리므로, "자기가 만든 폼뿐"이라는 경계가 스코프로 지켜지지
-않는다. **다만 공유 드라이브 폴더를 `parents`로 지정한 생성이 `drive.file`로도 되는지는
-새 계정으로 한 번 찍어 확정할 것.** 안 되면 그때만 `drive`로 올린다.
+**폼 전용 공유 드라이브를 따로 파고 이 계정을 거기에만 넣는다.** `drive.file` 로 좁히면
+경계가 스코프로 지켜지지만 그 스코프는 앱이 만든 파일만 열기 때문에 앱 바깥에서 만든
+폴더를 `parents` 로 주는 생성이 통과하지 못한다. 그래서 경계를 **드라이브 자체**로 긋는다. 사업 시트가 같이 있는 드라이브에 넣으면 그 계정이 시트까지 읽고 고칠 수
+있으므로 반드시 전용으로 판다.
 
-폼은 `FORM_FOLDER_ID`가 가리키는 **공유 드라이브 폴더 안에** 만든다. 서비스 계정에는 개인
-드라이브 저장용량이 없어 그 밖에서는 파일 생성 자체가 실패한다. 새로 판 계정은 그 공유
-드라이브의 멤버가 아니므로 **콘텐츠 관리자로 넣는 것이 선행 작업이다.** 기존 스크립트가
-되는 이유는 그 SA 가 이미 멤버라서다.
+폼은 `FORM_FOLDER_ID` 가 가리키는 그 드라이브의 폴더 안에 만든다. 서비스 계정에는 개인
+드라이브 저장용량이 없어 공유 드라이브 밖에서는 파일 생성 자체가 실패한다.
 
 `api/google_sheets.py`가 읽기 전용인 것은 의도이므로 거기에 쓰기를 얹지 않는다. 계정이 곧
 범위라는, 이 레포가 이미 쓰는 방식 그대로다.
 
-### 5. 재사용은 문항을 덮어쓰지 않는다
+### 6. 재사용은 문항을 건드리지 않는다
 
-같은 제목의 폼이 있으면 재사용한다. 슬랙에서 두 번 부르면 폼이 두 개가 되기 때문이다.
+`create_form` 은 **만들기 도구다.** 같은 제목의 폼이 이미 있으면 문항을 그대로 두고 링크와
+안내문만 다시 준다. 안내문 첫 줄도 "이미 있는 폼입니다"로 바꿔 사람이 새 폼으로 착각하지
+않게 한다.
 
-**다만 기존 스크립트의 재사용은 문항을 전부 지우고 다시 넣는 것이라 그대로 옮기면 안 된다.**
-문항을 갈아엎으면 `questionId`가 새로 발급되고 사람이 이미 붙여 둔 응답 시트에는 새 열이
+기존 스크립트의 재사용은 문항을 전부 지우고 다시 넣는 것인데 **그건 옮기지 않는다.**
+문항을 갈아엎으면 `questionId` 가 새로 발급되고 사람이 이미 붙여 둔 응답 시트에 새 열이
 생긴다. 기존 응답은 옛 열에 남아 어긋나고 시트만 봐서는 이유를 알 수 없다.
 
-응답이 있거나 `linkedSheetId`가 찬 폼은 문항 덮어쓰기를 거부하고 링크와 안내문만 다시 준다.
+문항을 안 건드리면 "응답이 있는지"를 볼 필요가 없어진다. 그 판정은 `forms.responses.list`
+가 필요하고 그 메서드는 `forms.body` 로는 안 돼서 스코프를 한 칸 더 열어야 한다.
 
-### 6. 파일 업로드 문항은 막는다
-
-파일 업로드가 있으면 응답자가 구글 로그인을 해야 해서 링크 공개와 양립하지 않는다. 빌더에서
-거부하고 사본은 메일로 받으라고 안내한다. `staff_doc` 이 이미 그렇게 받고 있다.
+동명이 둘 이상이면 formId 를 나열해 예외로 터뜨리고 사람이 고르게 한다. Drive 검색 색인은
+즉시 일관적이지 않아 연달아 부르면 둘 다 0건을 보고 같은 제목 폼이 두 개 생길 수 있다.
 
 ## 레포 규칙에 맞출 것
 
 - **도구는 `async def`.** `tests/test_tools_are_async.py`가 AST 로 훑어 강제한다.
 - **구글 호출은 `asyncio.to_thread`로 넘긴다.** `create_form` 한 번에 왕복이 열 번 안팎이다.
   봇 넷과 스케줄러가 루프 하나를 공유하므로 그동안 전부 선다.
-- **타임아웃을 건다.** `googleapiclient`는 `httplib2`를 쓰고 기본이 무한 대기다. 재시도를
-  안 붙이는 이유가 워커를 안 붙잡으려는 것인데 타임아웃이 없으면 같은 일이 난다.
-  `api/google_sheets.py`의 `TIMEOUT_SECONDS`(30초)에 맞춘다.
+- **타임아웃은 호출마다 건다.** `googleapiclient`의 service 객체는 스레드 안전하지 않고
+  `build()`는 `http`와 `credentials`를 함께 받지 않는다. service 는 계정별로 캐시하되
+  (`api/google_sheets.py`의 관례) 호출은
+  `execute(http=AuthorizedHttp(creds, http=httplib2.Http(timeout=30)))` 로 넘긴다. `httplib2`
+  기본이 무한 대기라 이걸 빼면 워커를 무기한 붙잡는다. 재시도는 같은 이유로 붙이지 않는다.
 - **`google-api-python-client`를 requirements.txt 에 핀해서 넣는다.** 지금 없다.
-  `gspread~=6.2`처럼 무핀으로 두지 않는다.
+  `gspread~=6.2` 처럼 핀한다.
+- **도구는 `app/general.py`의 반환 목록에 붙인다.** `tech.md`가 도구 8~9개면 성능이 떨어져
+  셋씩 쪼갰다고 적었고 그 경로는 이미 그보다 많다. 하나 더 붙는 것이므로 답 품질을 같이 본다.
 
 ## 배치
 
 ```
 api/google_forms.py       Forms·Drive REST 얇은 래퍼 (api/ 규칙: 래퍼만)
-service/form.py           생성 → 문항 → 공개 → 편집자 → 검증 → 안내문
+service/form.py           ①~⑦ 오케스트레이션 + 안내문
 app/tools/form_tools.py   create_form (async @tool)
+app/general.py            도구 목록에 추가
 .env.example              FORM_SERVICE_ACCOUNT_JSON, FORM_FOLDER_ID, FORM_EDITORS
 ```
 
-새 테이블도 엔드포인트도 스케줄도 없다. 설정은 환경변수로 둔다. `AppConfig`는 필드를 명시한 frozen dataclass라 `config.yaml`에
-키를 하나 더하려면 `service/config.py`까지 고쳐야 하고 모르는 키는 조용히 버려져 그
-사실이 예외로도 드러나지 않는다.
+새 테이블도 엔드포인트도 스케줄도 없다. 설정은 환경변수로 둔다. `AppConfig`는 필드를 명시한
+frozen dataclass라 `config.yaml`에 키를 하나 더하려면 `service/config.py`까지 고쳐야 하고
+모르는 키는 조용히 버려져 그 사실이 예외로도 드러나지 않는다.
 
-제목으로 기존 폼을 찾을 때는 `files.list`에 `trashed=false`와 공유 드라이브 두 플래그가
-필요하다. 함정 셋 다 `api/google_sheets.py`의 `list_spreadsheet_files`에 적혀 있다. 제목
-정확 일치로 찾으므로 페이지네이션은 필요 없다.
+제목으로 기존 폼을 찾을 때 `files.list` 함정이 넷이다. `trashed=false`, 공유 드라이브 두
+플래그, 그리고 **제목 이스케이프**다. 앞 셋은 `api/google_sheets.py`의
+`list_spreadsheet_files`에 적혀 있다. 넷째는 제목이 슬랙 문장에서 오기 때문에 새로 생긴다.
+
+```python
+def _quote(title: str) -> str:
+    """Drive 쿼리 리터럴. `'짓다' 신청` 같은 제목이 400 으로 죽지 않게."""
+    return title.replace("\\", "\\\\").replace("'", "\\'")
+```
+
+이스케이프를 빼면 따옴표가 든 제목에서 죽고 조작된 제목은 쿼리 조건을 바꿔 무관한 파일이
+재사용 대상으로 잡힌다. 그 파일에 `anyone` 공개와 편집자 공유가 그대로 실행된다.
 
 문항 스펙은 `repo/industry-linked/create_*_form.py`의 `QUESTIONS` 튜플을 그대로 옮긴다.
 
 ```python
 (title, description, kind, required, options)
 # kind: short | para | radio | radio_other | check | scale
+# 파일 업로드는 없다. Forms API 가 생성을 지원하지 않고 폼 UI 에도 안 나온다(8/4 실측).
+# 사본이 필요하면 메일로 받는다 — staff_doc 이 그렇게 받고 있다.
 ```
 
-일곱 스크립트가 실제로 쓴 유형이 이 여섯이다. `radio_other`는 선택지 끝에 `{"isOther": True}`를
-붙여 '기타' 직접 입력을 여는 것으로, 빠뜨리면 선택지로 다 못 덮는 문항이 막힌다.
+일곱 스크립트가 실제로 쓴 유형이 이 여섯이다. `radio_other`는 선택지 끝에 `{"isOther": True}`
+를 붙여 '기타' 직접 입력을 여는 것으로, 빠뜨리면 선택지로 다 못 덮는 문항이 막힌다.
 `dropdown`·`date`는 한 번도 안 썼으므로 넣지 않는다.
 
 ## 선행 작업 (사람이 콘솔에서)
@@ -177,11 +225,13 @@ app/tools/form_tools.py   create_form (async @tool)
 | 1 | 서비스 계정 만들고 JSON 키 발급 | [IAM 서비스 계정](https://console.cloud.google.com/iam-admin/serviceaccounts?project=elegant-circle-503206-a1) |
 | 2 | Forms API 사용 설정 | [Forms API](https://console.cloud.google.com/apis/library/forms.googleapis.com?project=elegant-circle-503206-a1) |
 | 3 | Drive API 사용 설정 | [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com?project=elegant-circle-503206-a1) |
-| 4 | 폼을 담을 **공유 드라이브** 폴더를 정하고 1번 계정을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
-| 5 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
-| 6 | `jce-service-helm`에 `FORM_SERVICE_ACCOUNT_JSON` 매핑 추가 | 레포 PR |
+| 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
+| 5 | 그 드라이브에서 **외부 공유(링크가 있는 모든 사용자)가 허용**돼 있는지 확인 | 드라이브 설정 |
+| 6 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
+| 7 | 헬름에 `FORM_SERVICE_ACCOUNT_JSON`(시크릿) + `FORM_FOLDER_ID`·`FORM_EDITORS`(env) 추가 | 레포 PR |
 
-4번이 빠지면 `files.create`가 권한 없음으로 죽는다.
+4번이 빠지면 `files.create`가 권한 없음으로 죽는다. 5번이 빠지면 `permissions.create` 의
+`anyone` 이 403 이고 원인이 코드에 없어 찾는 데 오래 걸린다.
 
 ## 안 하는 것
 
