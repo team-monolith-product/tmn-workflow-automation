@@ -23,7 +23,6 @@ from service.slack_task_list import (
     create_channel_task_list,
     delete_channel_task_list,
     list_all_items,
-    remove_task_list_bookmark,
     validate_task_list_channel,
 )
 
@@ -112,8 +111,8 @@ def get_enable_task_list_tools(client: AsyncWebClient, channel: str) -> list:
 
         task_list = await create_channel_task_list(client, channel, info["name"])
         return (
-            f"작업 리스트를 만들어 채널에 공유하고 북마크에 걸었습니다:"
-            f" {task_list.list_url}\n"
+            f"작업 리스트를 만들어 채널에 공유했습니다. 상단 탭에서도 열 수"
+            f" 있습니다: {task_list.list_url}\n"
             "이제 작업을 만들어 달라고 하면 여기에 쌓입니다."
             " 마감일 알림은 리스트 화면의 자동화에서 켤 수 있습니다."
         )
@@ -224,9 +223,9 @@ def get_task_list_write_tools(
         if list_url is None:
             return "이 채널은 작업 리스트를 쓰고 있지 않았습니다."
 
-        await remove_task_list_bookmark(client, channel, list_url)
         return (
-            "작업 리스트 연결을 끊고 북마크를 걷었습니다. 이제 작업은 노션에 생깁니다."
+            "작업 리스트 연결을 끊었습니다. 이제 작업은 노션에 생깁니다."
+            " 상단 탭은 리스트 화면에서 내리시면 됩니다."
             f" 쌓인 작업은 리스트에 그대로 있습니다: {list_url}"
         )
 

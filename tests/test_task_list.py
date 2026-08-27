@@ -215,7 +215,7 @@ async def test_list_all_items_reports_truncation():
 
 
 async def test_create_saves_before_sharing():
-    """공유와 북마크가 실패해도 표가 리스트를 알고 있어야 중복 생성이 없다"""
+    """공유가 실패해도 표가 리스트를 알고 있어야 중복 생성이 없다"""
     client = AsyncMock()
     client.slackLists_create.return_value = {
         "list_id": TASK_LIST.list_id,
@@ -227,7 +227,6 @@ async def test_create_saves_before_sharing():
     }
     order: list[str] = []
     client.slackLists_access_set.side_effect = lambda **kwargs: order.append("share")
-    client.bookmarks_add.side_effect = lambda **kwargs: order.append("bookmark")
 
     with patch(
         "service.slack_task_list.save_channel_task_list",
@@ -235,7 +234,8 @@ async def test_create_saves_before_sharing():
     ):
         task_list = await create_channel_task_list(client, CHANNEL, "t_고객_OO교육청")
 
-    assert order == ["save", "share", "bookmark"]
+    assert order == ["save", "share"]
+    assert client.bookmarks_add.await_count == 0
     assert task_list == TASK_LIST
     assert client.slackLists_create.await_args.kwargs["name"] == "t_고객_OO교육청 작업"
 
@@ -359,15 +359,9 @@ async def test_complete_rejects_blank_titles():
     assert "제목을 알려주세요" in result
 
 
-async def test_disable_removes_bookmark():
-    """해제할 때 북마크를 걷지 않으면 다시 켤 때 북마크가 둘이 된다"""
+async def test_disable_returns_list_url_and_leaves_slack_alone():
+    """해제는 표에서만 끊는다. 리스트도 상단 탭도 슬랙에 그대로 둔다"""
     client = AsyncMock()
-    client.bookmarks_list.return_value = {
-        "bookmarks": [
-            {"id": "Bk01", "link": "https://example.slack.com/other"},
-            {"id": "Bk02", "link": TASK_LIST.list_url},
-        ]
-    }
     tools = write_tools(client)
 
     with patch(
@@ -375,10 +369,9 @@ async def test_disable_removes_bookmark():
     ):
         result = await tools["disable_channel_task_list"].ainvoke({})
 
-    client.bookmarks_remove.assert_awaited_once_with(
-        channel_id=CHANNEL, bookmark_id="Bk02"
-    )
     assert TASK_LIST.list_url in result
+    assert client.bookmarks_list.await_count == 0
+    assert client.bookmarks_remove.await_count == 0
 
 
 # --- 도구 선택 분기 ---

@@ -11,8 +11,8 @@ channel_task_list 표가 SOT입니다. 채널이 작업을 리스트로 관리�
 셀을 읽고 쓰는 방법도 여기 둡니다. 열 ID를 아는 곳과 그 열에 무엇을 써넣는지
 아는 곳이 갈리면 슬랙이 표기를 바꿀 때 두 계층을 같이 고쳐야 합니다.
 
-채널 북마크도 걸지만 사람이 리스트로 바로 가는 용도일 뿐이고, 봇이 읽는
-자리는 아닙니다.
+리스트를 채널에 공유하면 슬랙이 상단 탭으로 걸어 줍니다. 사람이 리스트로 바로
+가는 길은 그것으로 끝이라 따로 손댈 자리가 없습니다.
 """
 
 import asyncio
@@ -22,8 +22,6 @@ from typing import Any
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import connect, fetch_one
-
-BOOKMARK_TITLE = "작업 리스트"
 
 # 리스트를 만들 때 우리가 정의하는 열. todo_mode 가 완료·담당자·마감일 셋을
 # 뒤에 알아서 붙이므로 여기에는 제목과 슬랙 열만 둔다.
@@ -338,27 +336,6 @@ async def list_all_items(
     return items, True
 
 
-async def remove_task_list_bookmark(
-    client: AsyncWebClient, channel_id: str, list_url: str
-) -> None:
-    """채널 북마크에서 그 리스트를 가리키는 것을 걷어냅니다.
-
-    남겨 두면 다시 켤 때 같은 이름의 북마크가 하나 더 붙어, 서로 다른 리스트를
-    가리키는 북마크 둘이 채널에 남습니다.
-
-    Args:
-        client: 슬랙 클라이언트
-        channel_id: 슬랙 채널 ID
-        list_url: 걷어낼 리스트의 URL
-    """
-    response = await client.bookmarks_list(channel_id=channel_id)
-    for bookmark in response["bookmarks"]:
-        if bookmark.get("link") == list_url:
-            await client.bookmarks_remove(
-                channel_id=channel_id, bookmark_id=bookmark["id"]
-            )
-
-
 async def create_channel_task_list(
     client: AsyncWebClient, channel_id: str, channel_name: str
 ) -> ChannelTaskList:
@@ -370,10 +347,13 @@ async def create_channel_task_list(
     열은 만들 때만 정할 수 있고 뒤에 추가하는 API가 없습니다. 그래서 슬랙
     열이 필요하면 리스트를 새로 만드는 수밖에 없습니다.
 
-    리스트를 만든 직후 표에 넣고 공유와 북마크를 뒤에 합니다. 뒤쪽이 실패해도
-    만들어진 리스트를 표가 알고 있어야, 다시 켤 때 리스트가 하나씩 더 생기지
-    않습니다. 만들기와 저장 사이만은 원자적이지 않아서, 그 사이에 끊기면
-    리스트가 표에 없는 채로 남습니다.
+    리스트를 만든 직후 표에 넣고 공유를 뒤에 합니다. 공유가 실패해도 만들어진
+    리스트를 표가 알고 있어야, 다시 켤 때 리스트가 하나씩 더 생기지 않습니다.
+    만들기와 저장 사이만은 원자적이지 않아서, 그 사이에 끊기면 리스트가 표에
+    없는 채로 남습니다.
+
+    공유하면 슬랙이 그 리스트를 채널 상단 탭으로 걸어 줍니다. 탭을 다루는 API
+    는 없고 필요하지도 않습니다.
 
     Args:
         client: 슬랙 클라이언트
@@ -396,14 +376,6 @@ async def create_channel_task_list(
 
     await client.slackLists_access_set(
         list_id=list_id, access_level="write", channel_ids=[channel_id]
-    )
-
-    await client.bookmarks_add(
-        channel_id=channel_id,
-        title=BOOKMARK_TITLE,
-        type="link",
-        link=list_url,
-        emoji=":white_check_mark:",
     )
 
     return task_list
