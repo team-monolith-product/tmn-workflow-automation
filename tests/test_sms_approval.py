@@ -1,5 +1,6 @@
 """승인 흐름 테스트 — 누르기 전에는 안 나가야 한다."""
 
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -9,6 +10,8 @@ from service.sms import send as sms_send
 from service.sms import transport
 
 from app import sms
+from app.tools import python_tools
+from app.tools.python_tools import get_execute_python_tool
 
 ROWS = [
     {"to": "010-1111-1111", "name": "가"},
@@ -134,8 +137,15 @@ def _later(minutes: int) -> str:
     return when.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _code_tool(client):
+    """코드가 draft_sms 를 부를 수 있는 실행 도구. 진짜 코루틴을 물린다."""
+    return get_execute_python_tool(
+        draft_sms=sms.get_draft_sms_tool(client, "C1", "111.000").coroutine
+    )
+
+
 async def _draft(client, targets=ROWS, content="[*이름*]님", send_at=""):
-    tool = sms.get_sms_tools(client, "C1", "111.000")[0]
+    tool = sms.get_draft_sms_tool(client, "C1", "111.000")
     return await tool.ainvoke(
         {"content": content, "targets": targets, "send_at": send_at}
     )
@@ -588,3 +598,242 @@ async def test_수정_모달이_슬랙_한도를_넘지_않는다(client, handle
     for block in client.views[-1]["blocks"]:
         if block["type"] == "section":
             assert len(block["text"]["text"]) <= 3000
+
+
+async def test_같은_초안을_두_번_올리지_않는다(client):
+    # 카드를 올린 뒤 코드가 터지면 도구는 "실행 실패" 만 돌려준다. 모델은
+    # 아무 일도 없었던 줄 알고 통째로 다시 내고, 두 장 다 눌리면 같은
+    # 사람이 문자를 두 번 받는다.
+    첫째 = await _draft(client)
+    둘째 = await _draft(client)
+
+    assert "초안을 올렸습니다" in 첫째
+    assert "이미 이 스레드에" in 둘째
+    assert len(client.posted) == 1
+
+
+async def test_치환값이_다르면_새_초안을_올린다(client):
+    # 문안 틀과 번호가 같아도 기수가 다르면 다른 발송이다. 접어 버리면
+    # 값이 틀린 첫 카드를 누르라고 안내하게 된다.
+    행 = {"to": "010-1111-2222", "name": "가", "var1": "1기"}
+
+    await _draft(client, targets=[행], content="[*이름*] [*1*]")
+    await _draft(client, targets=[{**행, "var1": "2기"}], content="[*이름*] [*1*]")
+
+    assert len(client.posted) == 2
+
+
+async def test_번호_순서만_다르면_같은_초안이다(client):
+    # 모델이 코드를 고칠 때 정렬이나 groupby 가 바뀌면 순서가 달라진다.
+    # 그것을 다른 발송으로 보면 중복 검사를 그냥 통과한다.
+    둘 = [{"to": "010-1111-2222", "name": "가"}, {"to": "010-3333-4444", "name": "나"}]
+
+    await _draft(client, targets=둘)
+    await _draft(client, targets=list(reversed(둘)))
+
+    assert len(client.posted) == 1
+
+
+async def test_카드를_못_올리면_초안이_남지_않는다(client):
+    # 앞서 저장하면 전송이 실패했을 때 카드는 없는데 지문만 남아, 이후
+    # 재시도가 전부 "그 카드에서 보내기를 누르세요" 로 거절된다.
+    async def 실패(**kwargs):
+        raise RuntimeError("ratelimited")
+
+    client.chat_postMessage = 실패
+    with pytest.raises(RuntimeError):
+        await _draft(client)
+
+    assert len(sms._DRAFTS) == 0
+
+
+async def test_코드가_부른_초안이_카드로_올라간다(client):
+    # general.py 가 .coroutine 을 샌드박스에 넘긴다. 그 이음매를 진짜
+    # 객체로 걷는다 -- 속성이 사라지거나 to_sync 가 깨지면 여기서 죽는다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "print(draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '010-1111-2222', 'name': '가'}]))"
+            )
+        }
+    )
+
+    assert "초안을 올렸습니다" in 결과
+    assert len(client.posted) == 1
+
+
+async def test_다른_스레드면_새_초안을_올린다(client):
+    # _DRAFTS 는 프로세스 전역이고 봇 넷이 한 프로세스를 쓴다. 채널과
+    # 스레드를 안 보면 남의 스레드 초안이 내 카드를 막는다. 그때 도구가
+    # 가리키는 카드는 볼 수도 없는 곳에 있다.
+    await _draft(client)
+
+    다른곳 = sms.get_draft_sms_tool(client, "C2", "999.000")
+    await 다른곳.ainvoke({"content": "[*이름*]님", "targets": ROWS, "send_at": ""})
+
+    assert len(client.posted) == 2
+
+
+async def test_초안_결과는_print_하지_않아도_돌아온다(client):
+    # draft_sms 는 실패를 문자열로 돌려준다. 코드가 반환을 안 받으면 그것이
+    # 통째로 사라지고 도구는 "성공" 만 답한다. 카드는 0장인데 모델은 올라간
+    # 줄 알고 사람에게 그렇게 말한다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])"
+            )
+        }
+    )
+
+    assert len(client.posted) == 0
+    assert "보내기 전에 고칠 것" in 결과
+
+
+async def test_같은_턴에_두_번_실려도_카드는_한_장이다(client):
+    # ToolNode 가 한 AI 메시지의 tool call 을 gather 로 돌린다. 검사와 저장
+    # 사이에 await 가 있으면 둘 다 빠져나가 카드가 두 장 된다.
+    보내기 = client.chat_postMessage
+
+    async def 네트워크처럼(**kwargs):
+        # FakeClient 는 await 지점이 없어 루프를 놓지 않는다. 실제 슬랙은
+        # 네트워크에서 놓으므로, 그 자리를 만들지 않으면 창이 안 열린다.
+        await asyncio.sleep(0)
+        return await 보내기(**kwargs)
+
+    client.chat_postMessage = 네트워크처럼
+    도구 = sms.get_draft_sms_tool(client, "C1", "111.000")
+    인자 = {"content": "[*이름*]님", "targets": ROWS, "send_at": ""}
+
+    답 = await asyncio.gather(도구.ainvoke(인자), 도구.ainvoke(인자))
+
+    assert len(client.posted) == 1
+    assert sum("이미 이 스레드에" in 하나 for 하나 in 답) == 1
+
+
+async def test_반복_응답이_집계_결과를_밀어내지_않는다(client):
+    # 거절 응답은 글자 하나 다르지 않다. 접지 않으면 상한을 채워 모델이
+    # 방금 계산한 것을 통째로 밀어낸다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "print('중요한집계결과=42')\n"
+                "for _ in range(3):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '010-1111-2222', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert "중요한집계결과=42" in 결과
+    assert 결과.count("초안을 올렸습니다") == 1
+    assert 결과.count("이미 이 스레드에") == 1
+
+
+async def test_카드가_여러_장이면_모델도_여러_장으로_본다(client):
+    # 받는 사람이 달라도 인원이 같으면 draft_sms 의 답이 글자 하나 다르지
+    # 않다. 그냥 접으면 카드 다섯 장이 한 줄이 되고, 모델은 "그 카드" 라고
+    # 단수로 안내한다. 사람은 한 장만 누르고 나머지는 안 나간다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for i in range(3):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': f'010-1111-{i:04d}', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 3
+    assert "(×3)" in 결과
+
+
+async def test_거절된_호출은_카드_예산을_쓰지_않는다(client):
+    # 번호가 깨진 호출은 슬랙을 건드리지 않는다. 그것이 예산을 먹으면
+    # 카드 0장인 채로 멀쩡한 명단이 거절된다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for _ in range(6):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])\n"
+                "draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '010-1111-2222', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 1
+    assert "초안을 올렸습니다" in 결과
+
+
+async def test_카드_상한에_걸려도_코드는_계속_돈다(client):
+    # 예외로 끊으면 이미 올라간 카드는 그대로인데 도구는 "실행 실패" 만
+    # 답한다. 모델은 카드가 없는 줄 알고, 사람 눈에 보이는 것과 어긋난다.
+    도구 = _code_tool(client)
+
+    결과 = await 도구.ainvoke(
+        {
+            "code": (
+                "for i in range(8):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': f'010-2222-{i:04d}', 'name': '가'}])\n"
+                "print('끝까지왔다')\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
+    assert "끝까지왔다" in 결과
+    assert "더 올리지 않았습니다" in 결과
+
+
+async def test_예약_초안도_카드_예산을_쓴다(client):
+    # 예약 갈래는 문구가 따로다. 그 문구에서 POSTED_MARK 가 빠지면 카드는
+    # 올라가는데 예산을 안 써서 상한이 영영 안 걸린다.
+    tool = _code_tool(client)
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                f"for i in range(8):\n"
+                f"    draft_sms(content='[*이름*]님',"
+                f" targets=[{{'to': f'010-3333-{{i:04d}}', 'name': '가'}}],"
+                f" send_at='{_later(30)}')\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == python_tools.DRAFT_CARDS_PER_RUN
+    assert "더 올리지 않았습니다" in result
+
+
+async def test_카드를_안_올리는_호출도_무한히_반복할_수_없다(client):
+    # 거절과 형식 오류는 카드 예산을 안 쓴다. 그것만 보면 상한이 영영 안
+    # 걸린다. preview 가 동기라 루프 위에서 도는데 봇 넷이 그 루프를 나눠 쓴다.
+    tool = _code_tool(client)
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                "for i in range(60):\n"
+                "    draft_sms(content='[*이름*]님',"
+                " targets=[{'to': '없는번호', 'name': '가'}])\n"
+            )
+        }
+    )
+
+    assert len(client.posted) == 0
+    assert "상한이라 더 올리지 않았습니다" in result

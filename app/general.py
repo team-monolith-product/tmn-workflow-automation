@@ -7,13 +7,16 @@ from datetime import datetime, timedelta
 import importlib
 import traceback
 
+import psycopg
 from cachetools import TTLCache
 from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
-from .sms import get_sms_tools
+from .sms import get_draft_sms_tool
+from .task_list import get_enable_task_list_tools, get_task_list_write_tools
+from .tools.python_tools import get_execute_python_tool
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -27,6 +30,7 @@ from .common import (
     get_notion_page_tool,
 )
 from service.config import load_config, Squad
+from service.slack_task_list import find_channel_task_list
 
 # 상수들
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
@@ -56,6 +60,8 @@ async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad 
         return config.squad_overrides[user_id]
 
     for squad in config.squads:
+        if squad.slack_usergroup_id is None:
+            continue
         cache_key = f"usergroup_{squad.slack_usergroup_id}"
         if cache_key not in _cache_usergroup_members:
             try:
@@ -79,6 +85,11 @@ async def _build_tools(
     작업 생성 도구는 스쿼드별 Notion DB를 대상으로 하며,
     후속 작업 도구는 프로젝트/구성요소 속성이 있는 메인 DB에서만 사용합니다.
 
+    작업 리스트로 등록된 채널은 예외입니다. 작업이 노션이 아니라 그 채널의
+    슬랙 리스트로 가므로 노션 작업 생성 도구와 후속 작업 도구가 리스트 도구로
+    바뀝니다. 후속 작업은 노션 작업에 딸리는 개념이라 함께 빠집니다.
+    노션 작업을 조회하고 고치는 도구는 그대로 둡니다.
+
     Args:
         client: 슬랙 클라이언트
         user_id: 질문자의 Slack 사용자 ID
@@ -95,7 +106,7 @@ async def _build_tools(
     )
 
     squad = await _get_user_squad(client, user_id)
-    if squad and squad.notion_db.name != "main":
+    if squad and squad.notion_db and squad.notion_db.name != "main":
         task_ds_id = squad.notion_db.data_source_id
         title_prop = squad.notion_db.properties.title
         project_ds_id = None
@@ -104,28 +115,67 @@ async def _build_tools(
         title_prop = "제목"
         project_ds_id = PROJECT_DATA_SOURCE_ID
 
+    # 작업 리스트로 등록된 채널은 작업을 노션이 아니라 그 리스트에 만든다.
+    # 노션 작업 생성 도구를 같이 주면 에이전트가 둘 사이에서 흔들린다.
+    #
+    # 접속 실패는 노션 흐름으로 내려간다. 이 함수는 모든 답변이 지나는 길이라
+    # 여기서 터지면 리스트와 무관한 기능까지 전부 무응답이 된다. 표가 없는
+    # 경우(ProgrammingError)는 그대로 터뜨려 마이그레이션 누락을 드러낸다.
+    try:
+        task_list = await asyncio.to_thread(find_channel_task_list, channel)
+        task_list_available = True
+    except psycopg.OperationalError as error:
+        print(f"작업 리스트 조회 실패, 노션으로 진행합니다: {error}")
+        task_list = None
+        task_list_available = False
+
+    if task_list:
+        create_tools = get_task_list_write_tools(
+            client, channel, task_list, user_id, slack_thread_url
+        )
+    else:
+        create_tools = [
+            get_create_notion_task_tool(
+                user_id,
+                slack_thread_url,
+                task_ds_id,
+                client,
+                project_ds_id,
+                title_prop,
+            )
+        ]
+        if project_ds_id:
+            create_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+        # 조회가 실패한 동안에는 등록 도구를 주지 않는다. 이미 등록된 채널을
+        # 미등록으로 보고 켜면 아무도 안 읽는 리스트가 하나 더 만들어진다.
+        if task_list_available:
+            create_tools += get_enable_task_list_tools(client, channel)
+
     notion_tools = [
-        get_create_notion_task_tool(
-            user_id,
-            slack_thread_url,
-            task_ds_id,
-            client,
-            project_ds_id,
-            title_prop,
-        ),
         get_update_notion_task_deadline_tool(),
         get_update_notion_task_status_tool(task_ds_id),
         get_notion_page_tool(),
     ]
-    if project_ds_id:
-        notion_tools.append(get_create_notion_follow_up_task_tool(task_ds_id))
+
+    draft_sms = get_draft_sms_tool(client, channel, thread_ts)
 
     return (
         [search_tool, get_web_page_from_url]
+        + create_tools
         + notion_tools
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
-        + get_sms_tools(client, channel, thread_ts)
+        + [draft_sms]
+        # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
+        # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
+        + [
+            get_execute_python_tool(
+                thread_ts=thread_ts,
+                slack_client=client,
+                channel=channel,
+                draft_sms=draft_sms.coroutine,
+            )
+        ]
     )
 
 

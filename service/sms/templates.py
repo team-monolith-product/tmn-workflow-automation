@@ -10,6 +10,8 @@
 import re
 from typing import Any
 
+import pandas as pd
+
 SMS_MAX_BYTES = 90
 LMS_MAX_BYTES = 2000
 
@@ -59,6 +61,21 @@ def _tag_key(tag: str) -> str:
     return "name" if tag == "이름" else f"var{tag}"
 
 
+def _text(value: Any) -> str:
+    """치환값을 벤더가 받는 문자열로 바꿉니다. 없으면 빈 칸입니다."""
+    # 결측 판정은 pandas 에 맡긴다. pd.NA 는 비교 결과마저 NA 라
+    # `value != value` 를 참·거짓으로 물으면 TypeError 로 터진다. isna 는
+    # 배열에 배열을 돌려주므로 참인지 물어야 한다.
+    if pd.isna(value) is True:
+        return ""
+    # 두 명단을 merge 하면 짝이 없는 칸 때문에 정수 열이 float 로 올라간다.
+    # 그대로 두면 "3.0기 안내입니다" 가 나간다. 2**53 을 넘으면 float 이
+    # 이미 정수를 정확히 못 담으므로 그럴듯한 오답을 만들지 않는다.
+    if isinstance(value, float) and value.is_integer() and abs(value) < 2**53:
+        return str(int(value))
+    return str(value)
+
+
 def render(template: str, row: dict[str, Any]) -> str:
     """치환 태그를 실제 값으로 바꿉니다.
 
@@ -72,7 +89,7 @@ def render(template: str, row: dict[str, Any]) -> str:
     Returns:
         str: 치환이 끝난 본문
     """
-    return _TAG.sub(lambda m: str(row.get(_tag_key(m.group(1))) or ""), template)
+    return _TAG.sub(lambda m: _text(row.get(_tag_key(m.group(1)))), template)
 
 
 def build_targets(template: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -95,8 +112,8 @@ def build_targets(template: str, rows: list[dict[str, Any]]) -> list[dict[str, A
     for row in rows:
         target: dict[str, Any] = {"to": row["to"]}
         if "이름" in used:
-            target["name"] = str(row.get("name") or "")
+            target["name"] = _text(row.get("name"))
         if change_keys:
-            target["changeWord"] = {key: str(row.get(key) or "") for key in change_keys}
+            target["changeWord"] = {key: _text(row.get(key)) for key in change_keys}
         targets.append(target)
     return targets

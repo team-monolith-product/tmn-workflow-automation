@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 import psycopg
 
-from service.knowledge.db import connect
+from service.db import connect
 
 # 옛 검색 도구가 스니펫 20건으로 돌려주던 분량이다.
 DEFAULT_CHAR_LIMIT = 8_000
@@ -59,6 +59,20 @@ SCHEMA_GUIDE = """
   문자열, 문안이 아예 안 쓰면 NULL이라 둘 다 봐야 한다.
   project는 발송 시점에 박은 사업명이고, 매핑에 없는 채널이면 NULL이다.
   sender는 발신번호다. 슬랙 [보내기] 승인으로 나간 발송만 여기 있다.
+
+구글 시트 찾기:
+- data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트
+  하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
+  않다 -- 응답이 계속 쌓여 곧 낡기 때문이다.
+- 그래서 여기서 답할 수 있는 것은 "그런 시트가 어디 있나"까지다. 행수·집계·명단은
+  **execute_python 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
+- metadata->'tabs' 에 탭별 gid 와 columns 가 있다. 시트를 찾은 뒤
+  external_id(=스프레드시트 ID)와 탭 이름(또는 gid)을 그 코드에 넘긴다.
+- 예: 출석 열이 있는 시트 찾기
+  SELECT i.title, i.external_id, i.url
+  FROM item i JOIN data_source d ON d.id = i.data_source_id
+  WHERE d.source = 'drive_sheet' AND lower(i.raw_text) LIKE lower('%출석%')
+  ORDER BY i.source_updated_at DESC
 
 규약:
 - 어휘를 찾을 때는 lower(raw_text) LIKE lower('%키워드%')로 쓴다. GIN(pg_bigm)

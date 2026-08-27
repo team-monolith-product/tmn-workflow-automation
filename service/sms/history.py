@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from service.knowledge.db import connect
+from service.db import connect
 from service.sms.send import KST, SEND_TIME_FORMAT
 
 # 채널이 어느 사업인지. 매핑 표를 따로 두면 조인이 생기고, 조인은 에이전트가

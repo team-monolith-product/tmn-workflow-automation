@@ -4,22 +4,20 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.tools.chart_tools import get_execute_python_with_chart_tool
+from app.tools.python_tools import get_execute_python_tool
 
 
 @pytest.mark.asyncio
-async def test_execute_python_with_chart_success_with_chart():
+async def test_execute_python_success_with_chart():
     """
     차트를 생성하는 파이썬 코드가 성공적으로 실행되고 슬랙에 업로드되는지 테스트
     """
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
-    tool = get_execute_python_with_chart_tool(
-        say=mock_say,
+    tool = get_execute_python_tool(
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -56,18 +54,16 @@ print("Chart created successfully!")
 
 
 @pytest.mark.asyncio
-async def test_execute_python_with_chart_success_without_chart():
+async def test_execute_python_success_without_chart():
     """
     차트를 생성하지 않는 파이썬 코드가 성공적으로 실행되는지 테스트
     """
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
-    tool = get_execute_python_with_chart_tool(
-        say=mock_say,
+    tool = get_execute_python_tool(
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -93,17 +89,15 @@ print(f"Result: {result}")
 
 
 @pytest.mark.asyncio
-async def test_execute_python_with_chart_failure():
+async def test_execute_python_failure():
     """
     파이썬 코드 실행 실패 시 스택트레이스를 반환하는지 테스트
     """
     # Mock Slack client
     mock_slack_client = AsyncMock()
-    mock_say = AsyncMock()
 
     # 도구 생성
-    tool = get_execute_python_with_chart_tool(
-        say=mock_say,
+    tool = get_execute_python_tool(
         thread_ts="1234567890.123456",
         slack_client=mock_slack_client,
         channel="C123456",
@@ -126,14 +120,13 @@ result = x / y  # Division by zero
 
 
 @pytest.mark.asyncio
-async def test_execute_python_with_chart_with_athena_mock():
+async def test_execute_python_with_athena_mock():
     """
     athena 함수를 사용하는 코드가 성공적으로 실행되는지 테스트
     """
     # Mock Slack client
     mock_slack_client = AsyncMock()
     mock_slack_client.files_upload_v2 = AsyncMock()
-    mock_say = AsyncMock()
 
     # Mock athena.execute_and_wait
     mock_athena_result = {
@@ -151,8 +144,7 @@ async def test_execute_python_with_chart_with_athena_mock():
         mock_execute.return_value = mock_athena_result
 
         # 도구 생성
-        tool = get_execute_python_with_chart_tool(
-            say=mock_say,
+        tool = get_execute_python_tool(
             thread_ts="1234567890.123456",
             slack_client=mock_slack_client,
             channel="C123456",
@@ -197,3 +189,33 @@ print(f"Processed {len(data_rows)} rows")
 
         # 슬랙 업로드가 호출되었는지 확인
         mock_slack_client.files_upload_v2.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_코드가_정의한_함수가_상위_이름을_본다():
+    # exec 에 locals 를 따로 주면 함수 본문이 상위 import 를 못 찾는다.
+    # 하이픈 지우는 함수를 apply 로 넘기는 일이 흔해서 바로 터진다.
+    tool = get_execute_python_tool()
+
+    result = await tool.ainvoke(
+        {
+            "code": (
+                "import re\n"
+                "def 숫자만(값):\n"
+                "    return re.sub(r'\\D', '', 값)\n"
+                "print(숫자만('010-1111-2222'))\n"
+            )
+        }
+    )
+
+    assert "01011112222" in result
+    assert "NameError" not in result
+
+
+def test_draft_sms_를_주입해야_설명에_나온다():
+    # 없는 함수를 알려 주면 코드가 부르고 NameError 로 끝난다.
+    열린도구 = get_execute_python_tool(draft_sms=AsyncMock())
+    닫힌도구 = get_execute_python_tool()
+
+    assert "draft_sms" in 열린도구.description
+    assert "draft_sms" not in 닫힌도구.description

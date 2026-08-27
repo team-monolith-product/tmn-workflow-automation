@@ -22,7 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 
 from app.common import notion, notion_page_to_markdown
 from app.knowledge import DISTILL_DELAY_SECONDS
-from service.knowledge.db import connect
+from service.db import connect
 from service.knowledge.ingest import upsert_item
 from service.knowledge.notion import (
     MIN_BODY_CHARS,

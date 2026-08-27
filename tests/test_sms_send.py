@@ -2,9 +2,11 @@
 
 from datetime import datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from service.sms import send as sms_send
+from service.sms import templates
 from service.sms import transport
 
 ROWS = [
@@ -288,3 +290,64 @@ def test_실제로_나간_발신번호를_돌려준다(monkeypatch):
     result, _ = _run(monkeypatch, {"code": "1000", "messageKey": "K"})
 
     assert result["sender"] == "01077647538"
+
+
+def test_merge_가_만든_빈_칸과_실수가_그대로_나가지_않는다():
+    # 정수 열을 how="left" 로 merge 하면 짝 없는 칸이 NaN 이 되면서 열
+    # 전체가 float 로 올라간다. 짝이 있는 칸은 3.0 이 된다. 손으로 NaN 을
+    # 넣으면 뒤쪽 절반을 못 잡는다.
+    명단 = pd.DataFrame(
+        [
+            {"to": "010-1111-2222", "name": "김철수"},
+            {"to": "010-3333-4444", "name": "이영희"},
+        ]
+    )
+    기수 = pd.DataFrame([{"to": "010-1111-2222", "var1": 3}])
+    rows = 명단.merge(기수, on="to", how="left").to_dict("records")
+
+    plan = sms_send.preview(rows, "[*이름*] 선생님, [*1*]기 안내입니다.")
+
+    assert plan.problems == []
+    assert plan.targets[0]["changeWord"]["var1"] == "3"
+    assert plan.targets[1]["changeWord"]["var1"] == ""
+    assert (
+        templates.render(plan.template, plan.rows[0])
+        == "김철수 선생님, 3기 안내입니다."
+    )
+    assert (
+        templates.render(plan.template, plan.rows[1]) == "이영희 선생님, 기 안내입니다."
+    )
+
+
+def test_판다스_결측과_큰_수를_문자로_만들지_않는다():
+    # iterrows 로 행을 만들면 nullable 열의 결측이 pd.NA 로 남는다. NA 는
+    # 비교 결과마저 NA 라 참·거짓을 물으면 터진다. 2**53 을 넘는 float 은
+    # 이미 정수를 정확히 못 담으므로 정수로 바꾸면 그럴듯한 오답이 된다.
+    plan = sms_send.preview(
+        [
+            {"to": "010-1111-2222", "name": "가", "var1": pd.NA},
+            {"to": "010-3333-4444", "name": "나", "var1": 1.2345678901234567e19},
+        ],
+        "[*이름*] [*1*]",
+    )
+
+    assert plan.problems == []
+    assert plan.targets[0]["changeWord"]["var1"] == ""
+    assert "e+19" in plan.targets[1]["changeWord"]["var1"]
+
+
+def test_넘파이_정수가_빈_칸이_되지_않는다():
+    # to_dict("records") 만 파이썬 정수로 박싱해 준다. df.loc·iloc·max·sum·
+    # 산술은 전부 np.int64 라, 그 경로만 보면 나머지를 놓친다. 이 도구의
+    # 용도가 집계인데 집계 결과가 치환값으로 들어오는 자리다.
+    df = pd.DataFrame(
+        [{"to": "010-1111-2222", "기수": 3}, {"to": "010-3333-4444", "기수": 5}]
+    )
+
+    plan = sms_send.preview(
+        [{"to": "010-1111-2222", "name": "가", "var1": df["기수"].max()}],
+        "[*이름*] 남은 자리 [*1*]석",
+    )
+
+    assert plan.targets[0]["changeWord"]["var1"] == "5"
+    assert templates.render(plan.template, plan.rows[0]) == "가 남은 자리 5석"

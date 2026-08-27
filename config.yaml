@@ -85,6 +85,11 @@ squads:
     notion_db: infra
     pm_slack_user_id: "U02PFUPCJNM"  # 류호선
 
+  # 유저그룹·Notion DB가 아직 없어 스크럼 껍데기 메시지만 받는다.
+  # 멘션·태스크 요약이 필요해지면 slack_usergroup_id 와 notion_db 를 채운다.
+  - handle: "게임"
+    display_name: ":video_game: 게임 스쿼드"
+
   - handle: "콘텐츠"
     display_name: ":pencil2: 콘텐츠 본부"
     slack_usergroup_id: "S08LHAA2HL3"
@@ -115,6 +120,10 @@ scrum:
     - handle: "ie"
       channel_id: "C09277NGUET"
       pr_warning: true
+
+    - handle: "게임"
+      channel_id: "C09277NGUET"
+      pr_warning: false
 
   personal_scrums:
     - name: "CTO"
@@ -161,6 +170,18 @@ task_alerts:
             - alert_no_tasks
 
 scheduled_jobs:
+  # 구글 시트 카탈로그. 셀 값이 아니라 이름·탭·머리행만 넣는다.
+  # 지난번 수정 시각과 대조해 **바뀐 시트만** 읽으므로 보통 실행은 몇 초다.
+  # 다만 첫 실행(또는 --full)은 전량이라 6분쯤 걸린다 -- Sheets 읽기 쿼터의
+  # 절반만 쓰도록 스스로 쉬기 때문이다. 사람이 부르는 read_sheet 가 같은 쿼터를
+  # 쓰므로 그 몫을 남겨야 한다.
+  - name: sync_sheet_catalog
+    module: scripts.sync_sheet_catalog
+    function: main
+    cron:
+      minute: "*/30"
+    business_day_only: false
+
   - name: validate_customer_reports
     module: scripts.validate_customer_reports
     function: main
