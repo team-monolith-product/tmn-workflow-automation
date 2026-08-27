@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from service.slack_task_list import ChannelTaskList
 from service.slack_task_thread import (
     find_work_thread_column_id,
     message_location,
     parse_slack_list_task_url,
     publish_task_result,
     start_task_from_slack_list,
+    task_list_schema,
 )
 
 LIST_ID = "F0BTVRW2AAU"
@@ -23,17 +23,9 @@ LIST_URL = (
 )
 ROOT_TS = "1700000000.000100"
 ROOT_URL = "https://example.slack.com/archives/C0ABCDE1234/p1700000000000100"
-
-TASK_LIST = ChannelTaskList(
-    list_id=LIST_ID,
-    list_url=LIST_URL.split("?")[0],
-    name_column_id="ColTitle",
-    completed_column_id="ColDone",
-    assignee_column_id="ColOwner",
-    due_date_column_id="ColDue",
-    source_thread_column_id="ColSource",
-    work_thread_column_id="ColWork",
-)
+SOURCE_TS = "1699999999.000000"
+SOURCE_URL = "https://example.slack.com/archives/C0ABCDE1234/p1699999999000000"
+SOURCE_REF = {"value": SOURCE_URL, "channel_id": CHANNEL, "ts": SOURCE_TS}
 
 SCHEMA = [
     {
@@ -55,6 +47,9 @@ SCHEMA = [
         "name": "작업 기록",
         "type": "message",
     },
+    {"id": "ColDone", "key": "todo_completed", "type": "todo_completed"},
+    {"id": "ColOwner", "key": "todo_assignee", "type": "todo_assignee"},
+    {"id": "ColDue", "key": "todo_due_date", "type": "todo_due_date"},
 ]
 
 
@@ -109,7 +104,7 @@ def test_work_column_can_be_discovered_by_visible_name():
         }
     ]
 
-    assert find_work_thread_column_id(manual, None) == "ColManual"
+    assert find_work_thread_column_id(manual) == "ColManual"
 
 
 def test_duplicate_work_columns_are_rejected():
@@ -123,7 +118,26 @@ def test_duplicate_work_columns_are_rejected():
     ]
 
     with pytest.raises(ValueError, match="여러 개"):
-        find_work_thread_column_id(duplicate, "ColWork")
+        find_work_thread_column_id(duplicate)
+
+
+def test_schema_reads_message_objects_arrays_and_legacy_urls():
+    schema = task_list_schema(SCHEMA)
+    item = record(
+        source=[
+            ROOT_URL,
+            {"value": ROOT_URL},
+        ],
+        work={"channel_id": CHANNEL, "ts": ROOT_TS},
+    )
+
+    assert schema.source_thread_references_of(item) == [
+        {"value": ROOT_URL},
+        {"value": ROOT_URL},
+    ]
+    assert schema.work_thread_references_of(item) == [
+        {"channel_id": CHANNEL, "ts": ROOT_TS}
+    ]
 
 
 def test_message_permalink_uses_thread_root():
@@ -158,8 +172,8 @@ def test_message_permalink_accepts_private_channel_id():
 async def test_start_creates_one_root_and_stores_its_permalink():
     client = AsyncMock()
     client.slackLists_items_info.side_effect = [
-        info(record()),
-        info(record()),
+        info(record(source=SOURCE_REF)),
+        info(record(source=SOURCE_REF)),
     ]
     client.chat_postMessage.return_value = {"channel": CHANNEL, "ts": ROOT_TS}
     client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
@@ -170,18 +184,14 @@ async def test_start_creates_one_root_and_stores_its_permalink():
     lock = Mock()
 
     with patch(
-        "service.slack_task_thread.find_channel_task_list_by_list_id",
-        return_value=(CHANNEL, TASK_LIST),
-    ), patch(
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
-    ), patch(
-        "service.slack_task_thread.release_task_record_lock"
-    ) as release:
+    ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
             await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
         )
 
     client.chat_postMessage.assert_awaited_once()
+    assert client.chat_postMessage.await_args.kwargs["channel"] == CHANNEL
     root_text = client.chat_postMessage.await_args.kwargs["text"]
     assert "[시작] 교육생 계정 일괄 생성" in root_text
     assert "시행착오·경험" in root_text
@@ -197,31 +207,26 @@ async def test_start_creates_one_root_and_stores_its_permalink():
     )
     release.assert_called_once_with(lock)
     assert result["work_thread_created"] is True
-    assert result["source_threads"] == []
+    assert len(result["source_threads"]) == 1
     assert result["work_thread"]["messages"][0]["text"] == "[시작] 작업"
 
 
 async def test_start_reuses_existing_thread_without_posting():
     client = AsyncMock()
-    source_url = "https://example.slack.com/archives/C0ABCDE1234/p1699999999000000"
-    source_ref = {"value": source_url, "channel_id": CHANNEL, "ts": "1699999999.000000"}
     work_ref = {"value": ROOT_URL, "channel_id": CHANNEL, "ts": ROOT_TS}
     client.slackLists_items_info.return_value = info(
-        record(source=[source_ref], work=work_ref)
+        record(source=[SOURCE_REF], work=work_ref)
     )
     client.conversations_replies.side_effect = [
         {"messages": [{"user": "U01", "ts": "1699999999.000000", "text": "요청 배경"}]},
         {"messages": [{"bot_id": "B01", "ts": ROOT_TS, "text": "[시작]"}]},
     ]
     client.chat_getPermalink.side_effect = [
-        {"permalink": source_url},
+        {"permalink": SOURCE_URL},
         {"permalink": ROOT_URL},
     ]
 
-    with patch(
-        "service.slack_task_thread.find_channel_task_list_by_list_id",
-        return_value=(CHANNEL, TASK_LIST),
-    ), patch("service.slack_task_thread.acquire_task_record_lock") as acquire:
+    with patch("service.slack_task_thread.acquire_task_record_lock") as acquire:
         result = json.loads(
             await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
         )
@@ -247,13 +252,8 @@ async def test_start_rechecks_record_after_lock_before_creating_root():
     lock = Mock()
 
     with patch(
-        "service.slack_task_thread.find_channel_task_list_by_list_id",
-        return_value=(CHANNEL, TASK_LIST),
-    ), patch(
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
-    ), patch(
-        "service.slack_task_thread.release_task_record_lock"
-    ) as release:
+    ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
             await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
         )
@@ -264,31 +264,41 @@ async def test_start_rechecks_record_after_lock_before_creating_root():
     assert result["work_thread_created"] is False
 
 
-async def test_start_continues_when_source_thread_reference_is_broken():
+@pytest.mark.parametrize(
+    "source",
+    [None, {"value": "not-a-slack-link"}],
+)
+async def test_start_requires_valid_source_when_creating_work_thread(source):
     client = AsyncMock()
+    client.slackLists_items_info.return_value = info(record(source=source))
+    lock = Mock()
+
+    with patch(
+        "service.slack_task_thread.acquire_task_record_lock", return_value=lock
+    ), patch("service.slack_task_thread.release_task_record_lock") as release:
+        with pytest.raises(ValueError, match="요청 맥락"):
+            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+
+    client.chat_postMessage.assert_not_awaited()
+    release.assert_called_once_with(lock)
+
+
+async def test_start_reports_broken_source_when_work_thread_already_exists():
+    client = AsyncMock()
+    work_ref = {"value": ROOT_URL, "channel_id": CHANNEL, "ts": ROOT_TS}
     client.slackLists_items_info.return_value = info(
-        record(source={"value": "not-a-slack-link"})
+        record(source={"value": "not-a-slack-link"}, work=work_ref)
     )
-    client.chat_postMessage.return_value = {"channel": CHANNEL, "ts": ROOT_TS}
     client.conversations_replies.return_value = {
         "messages": [{"bot_id": "B01", "ts": ROOT_TS, "text": "[시작]"}]
     }
     client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
-    lock = Mock()
 
-    with patch(
-        "service.slack_task_thread.find_channel_task_list_by_list_id",
-        return_value=(CHANNEL, TASK_LIST),
-    ), patch(
-        "service.slack_task_thread.acquire_task_record_lock", return_value=lock
-    ), patch(
-        "service.slack_task_thread.release_task_record_lock"
-    ):
-        result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
-        )
+    result = json.loads(
+        await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+    )
 
-    assert result["work_thread_created"] is True
+    assert result["work_thread_created"] is False
     assert result["source_threads"][0]["messages"] == []
     assert "읽지 못했습니다" in result["source_threads"][0]["error"]
     assert result["work_thread"]["messages"][0]["text"] == "[시작]"
@@ -309,27 +319,23 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
     )
     client.chat_getPermalink.return_value = {"permalink": result_url}
 
-    with patch(
-        "service.slack_task_thread.find_channel_task_list_by_list_id",
-        return_value=(CHANNEL, TASK_LIST),
-    ):
-        result = json.loads(
-            await publish_task_result(
-                client,
-                LIST_URL,
-                "owner@example.com",
-                "completed",
-                "계정 68개를 생성하고 로그인을 확인했습니다.",
-                learnings=[
-                    "전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눴습니다."
-                ],
-                reusable_findings=["외부 강사는 별도 승인이 필요합니다."],
-                outputs=["https://docs.example.com/account-result"],
-                validation=["생성 수와 샘플 로그인을 확인했습니다."],
-                remaining=["외부 강사 12명 승인 대기"],
-                mark_completed=True,
-            )
+    result = json.loads(
+        await publish_task_result(
+            client,
+            LIST_URL,
+            "owner@example.com",
+            "completed",
+            "계정 68개를 생성하고 로그인을 확인했습니다.",
+            learnings=[
+                "전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눴습니다."
+            ],
+            reusable_findings=["외부 강사는 별도 승인이 필요합니다."],
+            outputs=["https://docs.example.com/account-result"],
+            validation=["생성 수와 샘플 로그인을 확인했습니다."],
+            remaining=["외부 강사 12명 승인 대기"],
+            mark_completed=True,
         )
+    )
 
     sent = client.chat_postMessage.await_args.kwargs
     assert sent["thread_ts"] == ROOT_TS

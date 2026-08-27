@@ -9,7 +9,7 @@ import asyncio
 import html
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
@@ -18,12 +18,9 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
-from service.slack_task_list import (
-    ChannelTaskList,
-    find_channel_task_list_by_list_id,
-    save_work_thread_column_id,
-)
 
+SOURCE_THREAD_COLUMN_NAME = "요청 맥락"
+SOURCE_THREAD_COLUMN_KEY = "slack_thread"
 WORK_THREAD_COLUMN_NAME = "작업 기록"
 WORK_THREAD_COLUMN_KEY = "work_thread"
 MAX_THREAD_PAGES = 5
@@ -67,6 +64,80 @@ class SlackMessageLocation:
     permalink: str | None = None
 
 
+def _read_cell(
+    item: dict[str, Any], column_id: str | None, value_key: str
+) -> Any | None:
+    """Slack List 행에서 지정한 열 값을 읽습니다."""
+    if not column_id:
+        return None
+    for field in item.get("fields", []):
+        if field.get("column_id") == column_id:
+            return field.get(value_key)
+    return None
+
+
+@dataclass(frozen=True)
+class SlackTaskListSchema:
+    """items.info가 돌려준 작업 List의 열 계약입니다."""
+
+    name_column_id: str
+    completed_column_id: str
+    assignee_column_id: str
+    due_date_column_id: str
+    source_thread_column_id: str | None
+    work_thread_column_id: str
+
+    def title_of(self, record: dict[str, Any]) -> str:
+        return _read_cell(record, self.name_column_id, "text") or ""
+
+    def is_completed(self, record: dict[str, Any]) -> bool:
+        values = _read_cell(record, self.completed_column_id, "checkbox")
+        return bool(values and values[0])
+
+    def assignees_of(self, record: dict[str, Any]) -> list[str]:
+        return _read_cell(record, self.assignee_column_id, "user") or []
+
+    def due_dates_of(self, record: dict[str, Any]) -> list[str]:
+        return _read_cell(record, self.due_date_column_id, "date") or []
+
+    def source_thread_references_of(
+        self, record: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        return self._message_references_of(record, self.source_thread_column_id)
+
+    def work_thread_references_of(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._message_references_of(record, self.work_thread_column_id)
+
+    @staticmethod
+    def _message_references_of(
+        record: dict[str, Any], column_id: str | None
+    ) -> list[dict[str, Any]]:
+        raw = _read_cell(record, column_id, "message")
+        if raw is None:
+            return []
+        values = raw if isinstance(raw, list) else [raw]
+
+        normalized = []
+        for value in values:
+            if isinstance(value, str):
+                normalized.append({"value": value})
+            elif isinstance(value, dict):
+                normalized.append(value)
+            else:
+                raise ValueError("Slack message 셀의 형식을 해석할 수 없습니다.")
+        return normalized
+
+    def completion_cells(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "row_id": row_id,
+                "column_id": self.completed_column_id,
+                "checkbox": [True],
+            }
+            for row_id in row_ids
+        ]
+
+
 def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
     """Slack List의 record URL을 검증하고 ID를 꺼냅니다.
 
@@ -101,36 +172,75 @@ def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
     )
 
 
-def find_work_thread_column_id(
-    schema: list[dict[str, Any]], current_column_id: str | None
-) -> str:
-    """List 스키마에서 작업 기록 message 열을 하나만 고릅니다.
-
-    Args:
-        schema: ``list_metadata.schema``
-        current_column_id: DB에 이미 저장된 열 ID
-
-    Returns:
-        str: 작업 기록 열 ID
-    """
+def _find_message_column_id(
+    schema: list[dict[str, Any]], key: str, name: str
+) -> str | None:
+    """List 스키마에서 key 또는 표시 이름이 맞는 message 열을 고릅니다."""
     candidates = [
         column
         for column in schema
         if column.get("type") == "message"
-        and (
-            column.get("id") == current_column_id
-            or column.get("key") == WORK_THREAD_COLUMN_KEY
-            or str(column.get("name", "")).strip() == WORK_THREAD_COLUMN_NAME
-        )
+        and (column.get("key") == key or str(column.get("name", "")).strip() == name)
     ]
-
-    if not candidates:
-        raise ValueError('이 List에 message 타입의 "작업 기록" 열을 먼저 추가해주세요.')
     if len(candidates) > 1:
         raise ValueError(
-            'message 타입의 "작업 기록" 열이 여러 개입니다. 하나만 남겨주세요.'
+            f'message 타입의 "{name}" 열이 여러 개입니다. 하나만 남겨주세요.'
         )
+    if not candidates:
+        return None
     return str(candidates[0]["id"])
+
+
+def find_work_thread_column_id(schema: list[dict[str, Any]]) -> str:
+    """List 스키마에서 작업 기록 message 열을 하나만 고릅니다.
+
+    Args:
+        schema: ``list_metadata.schema``
+
+    Returns:
+        str: 작업 기록 열 ID
+    """
+    column_id = _find_message_column_id(
+        schema, WORK_THREAD_COLUMN_KEY, WORK_THREAD_COLUMN_NAME
+    )
+    if column_id is None:
+        raise ValueError(
+            f'이 List에 message 타입의 "{WORK_THREAD_COLUMN_NAME}" 열을 먼저 추가해주세요.'
+        )
+    return column_id
+
+
+def task_list_schema(schema: list[dict[str, Any]]) -> SlackTaskListSchema:
+    """items.info의 List 스키마를 작업 행을 읽는 열 계약으로 바꿉니다."""
+    columns: dict[str, str] = {}
+    for column in schema:
+        column_id = column.get("id")
+        key = "name" if column.get("is_primary_column") else column.get("key")
+        if column_id and key:
+            columns[str(key)] = str(column_id)
+    required = {
+        "name",
+        "todo_completed",
+        "todo_assignee",
+        "todo_due_date",
+    }
+    missing = required - columns.keys()
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise ValueError(f"Slack List 작업 열이 부족합니다: {names}")
+
+    return SlackTaskListSchema(
+        name_column_id=columns["name"],
+        completed_column_id=columns["todo_completed"],
+        assignee_column_id=columns["todo_assignee"],
+        due_date_column_id=columns["todo_due_date"],
+        source_thread_column_id=_find_message_column_id(
+            schema,
+            SOURCE_THREAD_COLUMN_KEY,
+            SOURCE_THREAD_COLUMN_NAME,
+        ),
+        work_thread_column_id=find_work_thread_column_id(schema),
+    )
 
 
 def message_location(reference: dict[str, Any]) -> SlackMessageLocation:
@@ -183,21 +293,12 @@ def release_task_record_lock(conn: psycopg.Connection) -> None:
 async def _read_record(
     client: AsyncWebClient,
     reference: SlackListTaskReference,
-    task_list: ChannelTaskList,
-) -> tuple[ChannelTaskList, dict[str, Any]]:
+) -> tuple[SlackTaskListSchema, dict[str, Any]]:
     response = await client.slackLists_items_info(
         list_id=reference.list_id, id=reference.record_id
     )
-    schema = response["list"]["list_metadata"]["schema"]
-    work_column_id = find_work_thread_column_id(schema, task_list.work_thread_column_id)
-
-    if work_column_id != task_list.work_thread_column_id:
-        await asyncio.to_thread(
-            save_work_thread_column_id, reference.list_id, work_column_id
-        )
-        task_list = replace(task_list, work_thread_column_id=work_column_id)
-
-    return task_list, response["record"]
+    schema = task_list_schema(response["list"]["list_metadata"]["schema"])
+    return schema, response["record"]
 
 
 async def _permalink(
@@ -301,6 +402,19 @@ async def _source_permalink(
         return None
 
 
+def _work_thread_channel(source_references: list[dict[str, Any]]) -> str:
+    """새 작업 스레드를 만들 첫 번째 유효한 요청 맥락의 채널을 고릅니다."""
+    for source_reference in source_references:
+        try:
+            return message_location(source_reference).channel_id
+        except ValueError:
+            continue
+    raise ValueError(
+        "작업 기록을 새로 만들려면 요청 맥락 열에 읽을 수 있는 Slack 메시지 링크가 "
+        "하나 이상 있어야 합니다."
+    )
+
+
 def _escape(value: str) -> str:
     return html.escape(value, quote=False)
 
@@ -337,15 +451,8 @@ async def start_task_from_slack_list(
 ) -> str:
     """List 행의 맥락을 읽고 공용 작업 스레드를 만들거나 재사용합니다."""
     reference = parse_slack_list_task_url(list_url)
-    registered = await asyncio.to_thread(
-        find_channel_task_list_by_list_id, reference.list_id
-    )
-    if not registered:
-        raise ValueError("이 Slack List는 작업 채널에 등록되어 있지 않습니다.")
-    channel_id, task_list = registered
-
-    task_list, record = await _read_record(client, reference, task_list)
-    work_references = task_list.work_thread_references_of(record)
+    task_schema, record = await _read_record(client, reference)
+    work_references = task_schema.work_thread_references_of(record)
     if len(work_references) > 1:
         raise ValueError("작업 기록 셀에는 Slack 스레드 링크가 하나만 있어야 합니다.")
 
@@ -353,15 +460,16 @@ async def start_task_from_slack_list(
     if not work_references:
         lock = await asyncio.to_thread(acquire_task_record_lock, reference)
         try:
-            task_list, record = await _read_record(client, reference, task_list)
-            work_references = task_list.work_thread_references_of(record)
+            task_schema, record = await _read_record(client, reference)
+            work_references = task_schema.work_thread_references_of(record)
             if len(work_references) > 1:
                 raise ValueError(
                     "작업 기록 셀에는 Slack 스레드 링크가 하나만 있어야 합니다."
                 )
 
             if not work_references:
-                source_references = task_list.source_thread_references_of(record)
+                source_references = task_schema.source_thread_references_of(record)
+                channel_id = _work_thread_channel(source_references)
                 source_link_results = await asyncio.gather(
                     *(_source_permalink(client, item) for item in source_references)
                 )
@@ -370,7 +478,7 @@ async def start_task_from_slack_list(
                     channel=channel_id,
                     text=_start_message(
                         reference,
-                        task_list.title_of(record),
+                        task_schema.title_of(record),
                         source_links,
                         actor,
                     ),
@@ -386,7 +494,7 @@ async def start_task_from_slack_list(
                     cells=[
                         {
                             "row_id": reference.record_id,
-                            "column_id": task_list.work_thread_column_id,
+                            "column_id": task_schema.work_thread_column_id,
                             "message": [permalink],
                         }
                     ],
@@ -402,7 +510,7 @@ async def start_task_from_slack_list(
         finally:
             await asyncio.to_thread(release_task_record_lock, lock)
 
-    source_references = task_list.source_thread_references_of(record)
+    source_references = task_schema.source_thread_references_of(record)
     histories = await asyncio.gather(
         *(_read_source_thread(client, item) for item in source_references),
         _read_thread(client, work_references[0]),
@@ -415,10 +523,10 @@ async def start_task_from_slack_list(
             "list_url": reference.list_url,
             "list_id": reference.list_id,
             "record_id": reference.record_id,
-            "title": task_list.title_of(record),
-            "assignees": task_list.assignees_of(record),
-            "due_dates": task_list.due_dates_of(record),
-            "completed": task_list.is_completed(record),
+            "title": task_schema.title_of(record),
+            "assignees": task_schema.assignees_of(record),
+            "due_dates": task_schema.due_dates_of(record),
+            "completed": task_schema.is_completed(record),
         },
         "source_threads": source_threads,
         "work_thread": work_thread,
@@ -522,15 +630,8 @@ async def publish_task_result(
     )
 
     reference = parse_slack_list_task_url(list_url)
-    registered = await asyncio.to_thread(
-        find_channel_task_list_by_list_id, reference.list_id
-    )
-    if not registered:
-        raise ValueError("이 Slack List는 작업 채널에 등록되어 있지 않습니다.")
-    _, task_list = registered
-
-    task_list, record = await _read_record(client, reference, task_list)
-    work_references = task_list.work_thread_references_of(record)
+    task_schema, record = await _read_record(client, reference)
+    work_references = task_schema.work_thread_references_of(record)
     if len(work_references) != 1:
         raise ValueError("먼저 start_slack_list_task로 작업 스레드를 연결해주세요.")
 
@@ -539,7 +640,7 @@ async def publish_task_result(
         channel=location.channel_id,
         thread_ts=location.root_ts,
         text=_result_message(
-            task_list.title_of(record),
+            task_schema.title_of(record),
             status,
             summary,
             curated_learnings,
@@ -554,7 +655,7 @@ async def publish_task_result(
     if mark_completed:
         await client.slackLists_items_update(
             list_id=reference.list_id,
-            cells=task_list.completion_cells([reference.record_id]),
+            cells=task_schema.completion_cells([reference.record_id]),
         )
 
     reply_location = SlackMessageLocation(

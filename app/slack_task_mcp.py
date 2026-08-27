@@ -20,6 +20,8 @@ from service.slack_task_thread import publish_task_result, start_task_from_slack
 INSTRUCTIONS = """
 운영팀의 Slack List 작업을 시작하거나 재개하고, 현재 상태와 요청 맥락,
 이전 작업 기록을 읽어 공용 작업 스레드로 연결합니다.
+새 작업 스레드는 요청 맥락 메시지의 채널에 만들며, 관계와 상태는 Slack List에만
+저장합니다.
 작업 중 대화는 에이전트 안에 두고, 실제 작업이 끝났을 때만 결과와 선별한
 시행착오·경험을 한 번 게시합니다. 전사 지식 검색은 이 서버가 제공하지 않습니다.
 """.strip()
@@ -72,7 +74,8 @@ def build_mcp(
         description=(
             "운영팀 Slack List 작업 행 링크로 작업을 시작합니다. List 필드와 요청 "
             "맥락, 현재 상태, 기존 작업 결과를 읽고 작업 기록 스레드를 만들거나 "
-            "재사용합니다. 작업 중 대화를 게시하지 않습니다."
+            "재사용합니다. 새 스레드는 요청 맥락 메시지의 채널에 만들고 연결은 "
+            "Slack List에만 저장합니다. 작업 중 대화를 게시하지 않습니다."
         )
     )
     async def start_slack_list_task(list_url: str) -> str:

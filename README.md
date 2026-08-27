@@ -44,7 +44,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 uvicorn operations_task_main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_ALLOWED_EMAILS`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. `SLACK_TASK_MCP_ALLOWED_EMAILS`는 운영팀 이메일을 쉼표로 구분합니다.
+필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `DATABASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_ALLOWED_EMAILS`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. `SLACK_TASK_MCP_ALLOWED_EMAILS`는 운영팀 이메일을 쉼표로 구분합니다. `DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
 
 ## FastAPI 웹훅 사용법
 

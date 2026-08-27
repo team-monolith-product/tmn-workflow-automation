@@ -2,33 +2,33 @@
 
 ## 한 문장 목적
 
-운영팀 Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 **실제로 어떻게 처리했는지 보여 주는 스레드**를 따로 연결해, 사람이든 AI든 같은 맥락에서 작업을 이어 간다.
+운영팀 Slack List 작업 하나에 **왜 생긴 일인지 보여 주는 스레드**와 **실제로 어떻게 처리했는지 보여 주는 스레드**를 연결해, 사람이든 AI든 같은 맥락에서 작업을 이어 간다.
 
-## 핵심 변경
+## 최종 판단
 
-- List 행에 `요청 맥락`과 `작업 기록`이라는 `message` 열을 각각 둔다.
-- 기존 `슬랙` 열과 링크는 `요청 맥락`으로 보존한다.
-- `이거 작업 시작`은 `작업 기록` 링크가 없을 때만 새 스레드를 만든다.
-- 에이전트는 List 필드와 두 스레드를 읽되, 작업 중 대화는 Claude·Codex 안에만 둔다.
-- Slack에는 작업이 끝났을 때 **이후에 다시 쓸 결과와 선별한 시행착오·경험 한 건**만 남긴다.
-- 전사용 `knowledge MCP`와 운영팀 Slack 작업 MCP는 서버·권한을 분리하되, 운영팀의 `tmn-operating` 플러그인에는 두 MCP 연결과 사내 스킬을 함께 배포한다.
-- 운영팀 MCP는 별도 이메일 allowlist와 Slack 토큰을 사용한다.
-- `agent_task_session`, 중간 체크포인트, 전체 응답 복사 훅, 별도 업무 DB는 만들지 않는다.
+- Slack List 행이 작업 상태와 스레드 관계의 유일한 원장이다.
+- `task_list_work_thread` 같은 별도 테이블이나 `agent_task_session`은 만들지 않는다.
+- 이번 PR에서 `migrations/knowledge/006_task_list_work_thread.sql`을 제거한다.
+- 새 운영팀 MCP는 기존 `channel_task_list`를 조회하거나 갱신하지 않는다.
+- 기존 `channel_task_list`는 Slack 봇이 채널의 새 요청을 어느 List에 넣을지 정하는 예전 라우팅 설정으로만 유지한다.
+- PostgreSQL은 같은 행에서 작업 루트를 동시에 두 개 만드는 일을 막는 advisory lock에만 쓴다. 잠금은 관계나 작업 상태를 저장하지 않는다.
 
 작업 ID는 Slack의 `(list_id, record_id)`를 그대로 사용한다.
 
-## List의 두 축
+## Slack List의 두 축
 
 | List 열 | 답하는 질문 | 생성 시점 | 변경 규칙 |
 |---|---|---|---|
 | `요청 맥락` | 어디서, 왜 만들어졌는가? | Slack 대화에서 작업을 만들 때 | 원본이므로 작업 시작 과정에서 덮어쓰지 않음 |
-| `작업 기록` | 실제로 어떻게 처리했는가? | 누군가 `이거 작업 시작`을 실행할 때 | 비어 있을 때 한 번 만들고 이후 재사용 |
+| `작업 기록` | 실제로 어떻게 처리했는가? | 누군가 작업을 시작할 때 | 비어 있을 때 한 번 만들고 이후 재사용 |
 
-- `요청 맥락`은 List에서 직접 만든 작업이면 비어 있을 수 있다.
-- `작업 기록`은 하나의 루트 스레드만 가진다. 이미 있으면 Claude와 Codex 모두 같은 링크를 사용한다.
-- 두 열 모두 Slack의 `message` 타입이라 List에서 스레드 미리보기를 바로 볼 수 있다.
+- 두 열은 Slack의 `message` 타입이다.
+- `작업 기록`에는 하나의 루트 스레드만 둔다. Claude와 Codex 모두 같은 링크를 사용한다.
+- 새 작업 스레드는 첫 번째로 해석 가능한 `요청 맥락` 메시지와 같은 채널에 만든다.
+- `작업 기록`이 이미 있으면 `요청 맥락`이 없거나 깨져도 기존 작업을 재개할 수 있다.
+- `작업 기록`이 비어 있는데 유효한 `요청 맥락`도 없으면 생성할 채널을 추측하지 않고 중단한다.
 
-## 구조 그림 — 데이터와 책임
+## 데이터와 책임
 
 ```mermaid
 flowchart LR
@@ -39,55 +39,53 @@ flowchart LR
     U["운영팀 구성원"] --> A["Claude 또는 Codex<br/>운영 플러그인 설치"]
     A --> S["start-slack-task 스킬<br/>시작·종료 요약"]
     S --> M["운영팀 전용 Slack Task MCP<br/>별도 배포·allowlist"]
-    M --> L["Slack List 행<br/>제목·담당자·마감·상태"]
-    L --> C["요청 맥락 열<br/>왜 생겼는지"]
-    L --> W["작업 기록 열<br/>어떻게 처리했는지"]
+    M --> L["Slack List 행<br/>상태와 연결의 유일한 원장"]
+    L --> C["요청 맥락<br/>왜 생겼는지"]
+    L --> W["작업 기록<br/>어떻게 처리했는지"]
     C --> CT["원본 Slack 스레드<br/>읽기 중심"]
     W --> WT["공용 작업 스레드<br/>시작 연결·최종 결과"]
     S --> O["코드·문서·시트<br/>실제 산출물"]
     O -. "결과 링크" .-> WT
+    M -. "중복 생성 방지 잠금만" .-> DB["PostgreSQL advisory lock"]
 ```
 
 | 정보 | 단일 원본 |
 |---|---|
 | 현재 제목·담당자·마감·완료 상태 | Slack List 행 |
-| 요청이 생긴 배경과 원래 대화 | `요청 맥락` 스레드 |
-| 공유 가치가 있는 최종 결과·경험·결정·남은 일 | `작업 기록` 스레드 |
+| 요청이 생긴 배경과 원래 대화 | `요청 맥락` 셀과 그 스레드 |
+| 공유할 최종 결과·경험·남은 일 | `작업 기록` 셀과 그 스레드 |
 | 코드·문서·시트 | 기존 저장소 |
 
-## 시작 흐름 — 두 링크를 어떻게 사용하는가
+DB에는 List 행과 두 스레드 사이의 관계를 복제하지 않는다. List 링크만 있으면 `slackLists.items.info`로 스키마와 행을 함께 읽을 수 있기 때문이다.
+
+## 시작 흐름
 
 ```mermaid
 flowchart TD
     U["List 링크 + 이거 시작"] --> P["list_id·record_id 파싱"]
-    P --> I["slackLists.items.info<br/>행과 List 스키마 조회"]
-    I --> C{"요청 맥락 링크가 있나?"}
-    C -- 예 --> CR["원본 스레드 읽기"]
-    C -- 아니요 --> CN["List 필드만 맥락으로 사용"]
-    CR --> W{"작업 기록 링크가 있나?"}
-    CN --> W
+    P --> I["slackLists.items.info<br/>행과 스키마 직접 조회"]
+    I --> W{"작업 기록 링크가 있나?"}
     W -- 예 --> WR["기존 작업 스레드 읽고 재사용"]
-    W -- 아니요 --> K["record 단위 잠금 후 행 재조회"]
+    W -- 아니요 --> K["record 단위 advisory lock 후 행 재조회"]
     K --> Q{"다른 요청이 먼저 만들었나?"}
     Q -- 예 --> WR
-    Q -- 아니요 --> N["연결 채널에 [시작] 루트 생성"]
-    N --> V["작업 기록 열에 permalink 저장"]
+    Q -- 아니요 --> C{"유효한 요청 맥락 링크가 있나?"}
+    C -- 아니요 --> B["중단: 생성할 채널을 추측하지 않음"]
+    C -- 예 --> N["요청 맥락 채널에 [시작] 루트 생성"]
+    N --> V["작업 기록 셀에 permalink 저장"]
     V --> R["List + 요청 맥락 + 작업 기록 반환"]
     WR --> R
     R --> X["Claude·Codex 안에서 작업과 대화 계속"]
-    X --> E{"현재 작업이 실제로 끝났나?"}
+    X --> E{"실제 업무가 종료됐나?"}
     E -- "아니요" --> Z["Slack에 쓰지 않음"]
-    E -- "완료" --> F["[작업 결과] 한 건 게시"]
-    E -- "막힘·인계로 종료" --> H["필요할 때만 [작업 결과] 한 건 게시"]
+    E -- "완료·막힘·인계" --> F["[작업 결과] 한 건 게시"]
 ```
 
-`요청 맥락` 스레드에는 에이전트 진행 로그를 쓰지 않는다. 원래 대화와 실행 기록이 섞이면 두 열을 나눈 의미가 사라지기 때문이다.
+`요청 맥락` 스레드에는 진행 로그를 쓰지 않는다. 원래 요청과 실행 기록을 섞으면 두 축을 나눈 의미가 사라진다.
 
-## 실제 구현
+## Slack List 스키마
 
-### 1. 새 List의 열
-
-앞으로 봇이 만드는 List는 처음부터 아래 두 열을 만든다.
+앞으로 Slack 봇이 만드는 List는 처음부터 두 message 열을 만든다.
 
 ```python
 CREATE_SCHEMA = [
@@ -97,245 +95,101 @@ CREATE_SCHEMA = [
 ]
 ```
 
-기존 `slack_thread` key는 호환성을 위해 유지하되 코드에서는 `source_thread` 의미로 다룬다.
+기존 `slack_thread` key는 호환성을 위해 유지한다. 화면 이름이 예전의 `슬랙`이어도 key로 찾을 수 있다.
 
-### 2. 기존 List 전환
-
-현재 List의 `슬랙` 열과 값은 그대로 `요청 맥락`으로 사용한다. 데이터를 옮기거나 덮어쓰지 않는다.
-
-Slack의 `slackLists.update`는 이름·설명·todo mode만 바꿀 수 있고 일반 열을 추가하는 인자는 없다. 따라서 기존 List에는 운영자가 Slack 화면에서 `message` 타입의 `작업 기록` 열을 한 번 추가해야 한다.
-
-그 뒤 첫 `start_slack_list_task` 호출이 다음을 자동으로 처리한다.
-
-1. `slackLists.items.info` 응답의 `list_metadata.schema`를 읽는다.
-2. `message` 타입이면서 이름이 `작업 기록`인 열 ID를 찾는다.
-3. `channel_task_list.work_thread_column_id`에 저장한다.
-4. 현재 행의 해당 셀이 비어 있으면 작업 스레드를 만든다.
-
-기존 `슬랙` 열의 화면 이름을 `요청 맥락`으로 바꾸는 것은 권장하지만 코드 동작에는 필수가 아니다.
+기존 List에는 Slack 화면에서 `message` 타입의 `작업 기록` 열을 한 번 추가해야 한다. Slack의 `slackLists.update`는 일반 열 추가를 지원하지 않기 때문이다. 첫 시작 호출은 `items.info`의 `list_metadata.schema`에서 열을 직접 찾으며, 열 ID를 DB에 캐시하지 않는다.
 
 공식 API 근거:
 
 - [slackLists.create](https://docs.slack.dev/reference/methods/slackLists.create/): List 생성 시 `schema`로 `message` 열을 정의할 수 있다.
-- [slackLists.items.info](https://docs.slack.dev/reference/methods/slackLists.items.info/): 행과 함께 `list_metadata.schema`를 반환한다.
+- [slackLists.items.info](https://docs.slack.dev/reference/methods/slackLists.items.info/): 행과 `list_metadata.schema`를 함께 반환한다.
 - [slackLists.update](https://docs.slack.dev/reference/methods/slackLists.update/): 이름·설명·todo mode만 갱신하며 일반 열 추가는 지원하지 않는다.
 
-### 3. `channel_task_list` 변경
-
-새 테이블은 만들지 않고 기존 열 매핑만 확장한다.
-
-```text
-thread_column_id
-  → source_thread_column_id      기존 값 보존
-
-work_thread_column_id            새 열, 기존 List 때문에 NULL 허용
-UNIQUE (list_id)                 List URL에서 연결 채널을 역조회
-```
-
-`work_thread_column_id`가 비어 있으면 `items.info`의 스키마로 보충한다. 스키마에도 `작업 기록` 열이 없으면 임의 열에 쓰지 않고 추가 방법을 안내한다.
-
-### 4. 행을 읽는 방식
-
-`start_slack_list_task`는 `slackLists.items.info(list_id, record_id)` 한 번으로 아래를 받는다.
-
-- List의 전체 스키마
-- 작업 제목·담당자·마감·완료 여부
-- `요청 맥락` 링크
-- `작업 기록` 링크
-
-Slack 쓰기 API에는 `message: [URL]`을 보내고, 조회 응답의 `message: [{value: URL}]`는 Service Layer에서 URL 목록으로 정규화한다.
-
-### 5. 작업 스레드 생성
-
-`작업 기록`이 비어 있으면 `channel_task_list`에서 찾은 연결 채널에 다음 루트 메시지를 만든다.
-
-```text
-[시작] 교육생 계정 일괄 생성
-
-요청 맥락: <원본 스레드 링크 또는 없음>
-Slack List: <현재 record 링크>
-기록 방식: 작업 종료 시 결과와 선별한 시행착오·경험 한 건
-```
-
-`(list_id, record_id)` 단위 PostgreSQL advisory lock 안에서 행을 다시 읽어 동시 시작에도 하나만 만든다. 생성한 permalink는 `작업 기록` 열에만 쓴다.
-
-## 운영팀 전용 MCP 도구 2개
+## 운영팀 MCP 동작
 
 ### `start_slack_list_task`
 
 - 입력: `list_url`
-- 출력: List 필드, 요청 맥락 링크·대화, 작업 기록 링크·대화, 생성/재사용 여부
-- `작업 기록`이 없을 때만 새 루트 스레드를 만들고 해당 열에 기록한다.
+- List 전체 스키마와 해당 행을 Slack에서 직접 읽는다.
+- `작업 기록`이 있으면 새 메시지를 만들지 않고 그 스레드를 재사용한다.
+- `작업 기록`이 없으면 advisory lock을 잡고 행을 다시 읽는다.
+- 여전히 비어 있으면 첫 유효한 `요청 맥락` 채널에 `[시작]` 루트를 만들고 permalink를 `작업 기록` 셀에 쓴다.
+- List 필드, 요청 맥락 대화, 작업 기록 대화, 생성·재사용 여부를 반환한다.
 
 ### `publish_slack_task_result`
 
 - 입력: `list_url`, `status`, `summary`, `learnings`, `reusable_findings`, `outputs`, `validation`, `remaining`, `mark_completed`
-- `status`: `completed | blocked | handoff`
-- 작업 중 대화나 마지막 답변을 복사하지 않고, 다음 사람이 재사용할 수 있는 내용만 구조화해 `[작업 결과]` 한 건으로 만든다.
-- List 행의 `작업 기록` 링크를 다시 찾아 그 스레드에만 답글을 단다.
+- Slack List에서 `작업 기록` 링크를 다시 찾아 해당 스레드에만 답글을 단다.
+- 작업 중 대화나 에이전트의 마지막 답변을 그대로 복사하지 않는다.
 - `mark_completed=true`일 때만 List 완료 체크를 바꾼다.
 
-각 호출이 `list_url`로 대상 행을 다시 찾으므로 `agent_task_session`은 필요 없다.
+각 호출이 List URL로 행을 다시 찾으므로 에이전트 세션과 Slack 작업의 연결 테이블이 필요 없다.
 
-## 언제 작업 기록에 메시지를 남기는가
+## 언제 메시지를 남기는가
 
 | 시점 | Slack 동작 |
 |---|---|
 | 작업 시작 | 링크를 만들기 위한 `[시작]` 루트 한 번 |
-| 에이전트와 대화하며 탐색·수정·의사결정 | 기록하지 않음 |
+| 탐색·수정·의사결정 | 기록하지 않음 |
 | 사용자 답변을 기다리지만 같은 작업을 계속할 예정 | 기록하지 않음 |
 | 작업 완료 | `[작업 결과]` 한 건 |
-| 막혀서 종료하거나 다른 사람에게 넘김 | 인계 가치가 있을 때만 `[작업 결과]` 한 건 |
+| 막혀서 종료하거나 다른 사람에게 넘김 | 인계 가치가 있을 때 `[작업 결과]` 한 건 |
 
-`final_only` 같은 선택 옵션도 두지 않는다. 이 기능의 목적 자체를 **종료 시 조직 기억 남기기**로 고정한다.
+`final_only` 같은 설정도 두지 않는다. 이 기능의 목적을 **작업 종료 시 재사용할 조직 기억 남기기**로 고정한다. 종료는 에이전트 응답 한 번이 끝나는 시점이 아니라, 실제 업무가 완료됐거나 이번 실행을 중단하고 다른 사람이 이어받아야 하는 시점이다.
 
-여기서 종료는 에이전트가 답변 한 번을 끝내는 시점이 아니다. 실제 업무가 완료됐거나, 현재 실행을 중단하고 다른 사람이 이어받아야 하는 시점이다. 따라서 매 응답마다 실행되는 Stop 훅에는 연결하지 않는다.
+시행착오는 시간순 작업 일지가 아니다. 최종 접근을 바꿨거나 같은 실수를 막아 줄 내용만 0~3개 남긴다. 보통 비자명한 작업은 1~2개, 단순 작업은 0개가 적정선이다.
 
-최종 Slack 메시지도 에이전트의 마지막 답변을 그대로 복사하지 않는다. 시행착오는 시간순으로 나열하지 않고, 최종 접근을 바꿨거나 같은 실수를 막아 줄 내용만 0~3개 남긴다. 보통 비자명한 작업에는 1~2개, 단순 작업에는 0개가 적정선이다.
-
-```text
-[작업 결과] 교육생 계정 일괄 생성
-
-상태: 완료
-결과: 교육생 68명의 계정을 생성하고 로그인 검증을 마침
-시행착오·경험:
-• 전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눠 진행함
-재사용할 정보: 외부 강사 계정은 별도 승인 후 생성해야 함
-산출물: <문서·PR·시트 링크>
-검증: 샘플 로그인 및 전체 계정 수 확인
-남은 일: 외부 강사 12명 승인 대기
-```
-
-비밀값, 로컬 절대경로, 내부 추론, 도구 원문은 제외한다.
+비밀값, 로컬 절대경로, 내부 추론, 도구 원문은 게시하지 않는다.
 
 ## 전사용 지식과 운영팀 작업의 배포 분리
-
-`query_knowledge`는 전사 기능이고 Slack List 작업은 운영팀 기능이므로 같은 MCP 서버에 넣지 않는다.
 
 | 배포 단위 | 대상 | 노출 도구 | 권한·비밀값 |
 |---|---|---|---|
 | Knowledge MCP | 전사 | `query_knowledge` | 기존 사내 OAuth, Slack 쓰기 토큰 불필요 |
 | Operations Slack Task MCP | 운영팀 | `start_slack_list_task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
-| TMN Operating Plugin | 운영팀의 Claude·Codex | Knowledge·Operations MCP 연결 + `start-slack-task`·OOM 분석 스킬 | 운영팀에게 설치·업데이트 배포 |
+| TMN Operating Plugin | 운영팀의 Claude·Codex | 두 MCP 연결 + 사내 스킬 | 운영팀에게 설치·업데이트 배포 |
 
-두 MCP는 같은 코드 저장소와 Docker 이미지를 재사용할 수 있지만 **프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리**한다.
+두 MCP는 코드 저장소와 이미지를 재사용할 수 있지만 프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리한다.
 
-```text
-전사용 서비스
-  uvicorn main:app
-  KNOWLEDGE_MCP_RESOURCE_URL
+현재 플러그인의 MCP URL은 비라우팅 `.invalid` 주소다. 운영 서비스의 소유·DNS·TLS·라우팅이 승인된 뒤 실제 주소로 교체해야 설치가 활성화된다.
 
-운영팀 전용 서비스
-  uvicorn operations_task_main:app
-  SLACK_TASK_MCP_RESOURCE_URL
-  SLACK_TASK_MCP_ALLOWED_EMAILS
-  SLACK_TASK_MCP_BOT_TOKEN
-```
+## 예외와 실패 원칙
 
-운영 플러그인은 두 MCP 연결과 저장소의 사내 스킬, 두 개의 얇은 매니페스트로 구성한다.
-
-```text
-tmn-operating/
-├── skills/
-│   ├── start-slack-task/
-│   │   └── SKILL.md
-│   └── rails-pod-restart-request-searcher/
-│       ├── SKILL.md
-│       └── scripts/
-├── .mcp.json
-├── .codex-plugin/
-│   └── plugin.json
-└── .claude-plugin/
-    └── plugin.json
-```
-
-릴리스할 때 같은 버전으로 Codex/OpenAI 플러그인과 Claude Code 플러그인을 각각 패키징한다. 플러그인은 Knowledge와 Operations MCP 연결을 함께 제공하지만, 두 MCP는 서로 다른 서비스·URL·인증 범위를 유지한다.
-
-현재 저장소의 MCP URL은 `https://knowledge-mcp.invalid/mcp`, `https://slack-task-mcp.invalid/mcp`로 막아 둔다. 각 운영 서비스의 소유·DNS·TLS·라우팅이 승인된 뒤 `.mcp.json`과 관련 `agents/openai.yaml`을 같은 주소로 교체해야 설치가 활성화된다.
-
-중요한 규칙은 스킬 지시문에만 의존하지 않고 MCP 도구 구조에도 고정한다.
-
-- MCP에는 `start`와 `publish result`만 제공하고 중간 기록 도구를 만들지 않는다.
-- 서버가 `요청 맥락`에는 쓸 수 없게 하고 `작업 기록`에만 게시한다.
-- 서버가 시행착오 최대 3개, 전체 6,000자, 비밀값·로컬 경로 금지 등 최종 메시지의 적정선을 검증한다.
-
-따라서 전사 사용자는 운영 도구 자체를 보지 않고, 운영 플러그인 업데이트가 늦은 사용자도 중간 대화를 게시하는 도구는 받지 않는다.
-
-MCP의 서버 `instructions`에도 "대화는 에이전트 안에 두고 종료 결과만 게시한다"는 원칙을 넣을 수 있다. 다만 이것은 연결 시 제공되는 서버 지침이지 설치형 스킬을 대체하지 않는다. 트리거 문구 인식과 전체 작업 순서는 얇고 안정적인 스킬이 맡고, 실제 쓰기 범위와 메시지 검증은 서버가 맡는다.
-
-공식 문서 근거:
-
-- [OpenAI plugin architecture](https://developers.openai.com/plugins/concepts/plugins): 하나의 플러그인에 skills와 MCP server를 함께 포함할 수 있다.
-- [Package and build a plugin](https://developers.openai.com/plugins/build/plugins): `.codex-plugin/plugin.json`, `skills/`, `.mcp.json` 구성과 배포 방식을 설명한다.
-- [Build skills for ChatGPT and Codex](https://developers.openai.com/plugins/build/skills): MCP에서 가져온 스킬도 런타임 동기화가 아니라 플러그인 버전의 스냅샷이며 변경 후 다시 스캔·제출해야 한다.
-- [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server): MCP 초기화 응답의 `instructions`로 도구 전반의 사용 지침을 전달할 수 있다.
-- [Claude Code plugins](https://code.claude.com/docs/en/plugins): Claude 플러그인도 skills와 MCP server를 함께 묶을 수 있다.
-
-## 예외
-
-- List에서 직접 만든 행은 `요청 맥락`이 없어도 시작할 수 있다.
-- `요청 맥락` 링크가 삭제됐거나 읽을 수 없으면 해당 항목에 `error`를 담아 경고하고 List 필드로 계속한다.
-- 기존 List에 `작업 기록` 열이 없으면 원본 열을 재사용하지 않고 중단한다.
-- 이름이 `작업 기록`인 message 열이 둘 이상이면 열 ID를 추측하지 않고 정리를 요청한다.
-- `작업 기록`에 링크가 둘 이상이면 어느 것이 기준인지 추측하지 않고 정리를 요청한다.
+- `작업 기록`이 없고 유효한 `요청 맥락`도 없으면 새 스레드를 만들지 않는다.
+- `작업 기록`이 이미 있으면 깨진 요청 맥락은 `error`와 함께 반환하고 작업 기록은 계속 읽는다.
+- `작업 기록` 열이 없으면 원본 열을 대신 쓰지 않고 중단한다.
+- 같은 이름의 message 열이나 작업 기록 링크가 둘 이상이면 기준을 추측하지 않는다.
 - 완료된 행을 시작해도 완료 체크를 자동으로 풀지 않는다.
-- 등록되지 않은 List면 작업 채널을 추측하지 않는다.
-- MCP 사용자가 연결 채널이나 링크 대상 채널을 볼 수 없으면 해당 스레드를 읽거나 쓰지 않는다.
-- 운영팀 이메일 allowlist에 없는 사내 계정은 Operations MCP 인증에 실패한다.
+- Slack 링크가 가리키는 채널에 봇 권한이 없으면 읽기·쓰기를 시도해 우회하지 않는다.
+- Operations MCP의 운영팀 allowlist에 없는 사내 계정은 인증에 실패한다.
 - Knowledge MCP에는 Slack 작업 도구와 Slack bot token 의존성이 없다.
-- 비밀값, 로컬 절대경로, 전체 도구 출력, 내부 추론은 스레드에 쓰지 않는다.
+- 루트 게시 후 List 셀 쓰기가 실패하면 `[시작]` 메시지의 List 링크로 수동 복구할 수 있다. 자동 보정은 실제 장애가 반복될 때 추가한다.
 
 ## 구현 대상
 
-- `service/slack_task_list.py`: 두 message 열 생성·파싱·읽기·쓰기
-- `migrations/knowledge/006_task_list_work_thread.sql`: 기존 열 rename, 작업 열 추가, `list_id` unique
-- `app/knowledge_mcp.py`: 전사용 `query_knowledge`만 유지
+- `service/slack_task_list.py`: 새 List에 두 message 열을 만들되, 기존 채널 라우팅 모델은 유지
+- `service/slack_task_thread.py`: List URL만으로 스키마·행·스레드를 읽고 작업 기록을 갱신
 - `app/slack_task_mcp.py`: 운영팀 전용 MCP 도구 2개와 allowlist 인증
-- `operations_task_main.py`: 운영팀 MCP의 독립 배포 진입점
-- 운영팀 `start-slack-task/SKILL.md`: 두 스레드 읽기와 종료 결과·경험 선별
-- `tmn-operating` 플러그인 패키지: 전사 검색·운영 작업 MCP 연결, 사내 스킬, Codex·Claude 매니페스트
-- 테스트: 새/기존 List, 스키마 발견, 링크 분리, 동시 시작, 완료 상태 보호
+- `operations_task_main.py`: 운영팀 MCP 독립 진입점
+- `plugins/tmn-operating`: 전사 검색·운영 작업 MCP 연결과 사내 스킬
+- 테스트: 스키마 직접 발견, 링크 분리, 기존 작업 재사용, 동시 시작, 완료 상태 보호
 
-## 인터랙티브 시연물
+DB migration은 구현 대상에 없다.
 
-시연물에서 `요청 맥락 있음/없음`과 `작업 기록 비어 있음/기존 기록 있음`을 바꿔 작업을 시작한다. 일반 대화와 시행착오는 즉시 Slack 메시지를 만들지 않고, 작업 종료 때 재사용 가치가 있는 경험만 결과 한 건에 포함되는지 확인한다.
+## 검증 기준
 
-## 검증
-
-1. Slack 대화에서 만든 작업은 원본 링크가 `요청 맥락`에만 들어간다.
-2. List에서 직접 만든 작업은 요청 맥락 없이 시작된다.
-3. 작업 시작 시 `작업 기록`이 비어 있으면 생성하고, 있으면 재사용한다.
-4. 같은 행을 동시에 시작해도 작업 루트와 permalink가 하나만 생긴다.
-5. 일반 대화와 중간 결정은 어느 Slack 스레드에도 추가되지 않는다.
-6. 기존 `슬랙` 열의 링크는 변경되지 않는다.
-7. 기존 List에서 수동 추가한 `작업 기록` 열을 `items.info` 스키마로 발견한다.
-8. `mark_completed=false`면 `[작업 결과]`를 남겨도 List 완료 체크는 유지된다.
-9. 736px와 360px에서 두 링크 상태별 시연이 정상 동작한다.
-10. 플러그인 업데이트 전후에도 MCP 서버는 중간 기록 도구를 노출하지 않는다.
-11. 시행착오·경험은 최대 3개이며 비밀값·로컬 절대경로·도구 원문은 거절한다.
-12. Knowledge MCP의 도구 목록에는 `query_knowledge`만 있다.
-13. Operations MCP의 도구 목록에는 Slack 작업 도구 2개만 있고 비운영팀 계정은 401을 받는다.
-
-## 위험과 판단
-
-- **기존 List에 열을 자동 추가할 수 없음:** 한 번의 수동 열 추가가 필요하다.
-- **두 스레드가 다시 섞일 위험:** source 열은 읽기 전용, work 열만 쓰기 대상으로 코드에 고정한다.
-- **동시 시작 중 중복 생성:** record 단위 잠금과 잠금 후 재조회로 막는다.
-- **에이전트별 기록 기준 차이:** 종료 요약 형식은 공용 스킬에, 쓰기 대상과 도구 범위는 MCP 서버에 고정한다.
-- **대화 과잉 수집:** 중간 기록 도구와 매 응답 훅을 만들지 않아 구조적으로 막는다.
-- **MCP와 스킬 버전 불일치:** 핵심 안전 규칙은 서버가 강제하고, 스킬은 플러그인 버전으로 함께 릴리스한다.
-- **전사 기능과 운영 기능의 결합:** 플러그인은 배포 편의를 위해 묶되 MCP 서버·공개 URL·환경 변수·접근 권한은 분리해 장애와 권한 범위를 나눈다.
-- **플러그인 배포만으로는 접근 통제가 아님:** Operations MCP도 운영팀 이메일 allowlist를 검증한다.
-- **운영 호스트 미확정:** 임의 도메인으로 Slack 데이터를 보내지 않도록 비라우팅 `.invalid` 주소를 사용한다. 인프라 승인 뒤 실제 주소로 교체한다.
-- **루트 게시 후 List 쓰기 실패:** Slack 게시와 List 셀 갱신은 원자적이지 않다. 이 경우 `[시작]` 메시지의 List 링크로 행을 찾아 수동 연결할 수 있으며, 자동 보정은 실제 장애가 반복될 때 추가한다.
-
-## 구현 승인 기준
-
-1. 기존 `슬랙` 열을 `요청 맥락`으로 정의한다.
-2. 새 `작업 기록` message 열을 실제 실행 스레드의 유일한 링크로 사용한다.
-3. 기존 List에는 사용자가 열을 한 번 추가하고, 시스템이 `items.info`로 열 ID를 자동 발견한다.
-4. 작업 중 대화는 에이전트 안에 두고, 종료 시 결과 요약 한 건만 `작업 기록` 스레드에 남긴다.
-5. Knowledge MCP와 Operations MCP는 별도 서비스로 배포하고, `tmn-operating` 플러그인은 두 MCP와 저장소의 사내 스킬을 함께 연결한다.
-6. `tmn-operating`은 운영팀에 배포하며 Operations MCP는 이메일 allowlist로 다시 제한한다.
+1. `migrations/knowledge/006_task_list_work_thread.sql`이 PR에 없다.
+2. 운영팀 MCP 코드가 `channel_task_list`를 읽거나 쓰지 않는다.
+3. Slack 대화에서 만든 작업은 원본 링크가 `요청 맥락`에만 들어간다.
+4. 새 작업 기록은 요청 맥락과 같은 채널에 생성되고 permalink가 `작업 기록`에만 저장된다.
+5. 기존 작업 기록이 있으면 요청 맥락이 없어도 같은 스레드를 재사용한다.
+6. 새 작업 기록이 필요한데 요청 맥락이 없으면 명확히 중단한다.
+7. 같은 행을 동시에 시작해도 작업 루트와 permalink가 하나만 생긴다.
+8. 일반 대화와 중간 결정은 어느 Slack 스레드에도 추가되지 않는다.
+9. 기존 List의 `작업 기록` 열을 `items.info` 스키마로 발견한다.
+10. `mark_completed=false`면 결과를 남겨도 List 완료 체크는 유지된다.
+11. 시행착오·경험은 최대 3개이며 비밀값·로컬 경로·도구 원문은 거절한다.
+12. Knowledge MCP는 `query_knowledge`만, Operations MCP는 Slack 작업 도구 2개만 노출한다.
+13. 736px와 360px 시연에서 요청 맥락 없는 신규 생성은 막히고, 기존 작업 재개는 허용된다.
 
 이 기준을 현재 구현과 배포 검증의 기준으로 사용한다.
