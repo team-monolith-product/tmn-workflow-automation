@@ -37,9 +37,6 @@ class FakeClient:
     async def views_open(self, **kwargs):
         self.views.append(kwargs["view"])
 
-    async def conversations_replies(self, **kwargs):
-        return {"messages": [{"thread_ts": "111.000"}]}
-
 
 class FakeApp:
     """@app.action 으로 등록된 핸들러를 붙잡아 둔다."""
@@ -66,7 +63,6 @@ class FakeApp:
 def _ok(**extra):
     """뿌리오가 접수한 결과. 필드를 빠뜨리면 여기서 터진다."""
     return sms_send.Sent(
-        sent=2,
         ref_key="R1",
         sender="01077647538",
         message_key="K1",

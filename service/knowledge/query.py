@@ -52,6 +52,8 @@ SCHEMA_GUIDE = """
       148번 반복된다. 발송 건수는 count(*)가 아니라 count(distinct ref_key).
   (2) "언제 나갔나"는 coalesce(scheduled_at, sent_at). sent_at은 뿌리오가 접수한
       시각이고, 예약 발송이면 실제로 나가는 시각은 scheduled_at에 있다.
+      둘 다 timestamptz이고 세션 타임존이 UTC라 그대로 뽑으면 09:00 KST가
+      00:00+00:00으로 보인다. 사람에게 보일 값은 AT TIME ZONE 'Asia/Seoul'.
   (3) name은 문안이 [*이름*]을 쓰는데 값이 없으면 빈 문자열, 문안이 아예 안 쓰면
       NULL이라 둘 다 봐야 한다. phone은 하이픈 없는 숫자다.
   (4) 채널 이름으로 찾으려면 sms_log.channel_id = data_source.external_id AND

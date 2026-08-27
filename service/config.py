@@ -323,7 +323,7 @@ def _parse_config(raw: dict) -> AppConfig:
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
         scheduled_jobs=scheduled_jobs,
-        sms_projects=raw.get("sms_projects", {}),
+        sms_projects=raw.get("sms_projects") or {},
     )
 
 

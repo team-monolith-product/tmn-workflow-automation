@@ -41,7 +41,6 @@ class Sent(NamedTuple):
     테스트가 키마다 사슬을 손으로 잠그게 됩니다.
     """
 
-    sent: int  # 접힌 중복을 뺀 실제 수신자 수
     ref_key: str  # 한 번의 발송을 묶는 우리 쪽 키
     sender: str
     message_key: str | None  # 뿌리오 접수 키. 벤더가 빠뜨릴 수 있다
@@ -49,6 +48,11 @@ class Sent(NamedTuple):
     send_at: datetime | None
     content: str  # 치환 전 원문
     targets: list[dict[str, Any]]
+
+    @property
+    def sent(self) -> int:
+        """받는 사람 수. targets 와 갈릴 수 없게 세어서 낸다."""
+        return len(self.targets)
 
 
 def parse_send_at(value: str) -> tuple[datetime | None, str | None]:
@@ -196,7 +200,6 @@ def send(
         raise transport.PpurioError(200, result)
 
     return Sent(
-        sent=len(plan.rows),
         ref_key=ref_key,
         sender=transport.sender(),
         message_key=result.get("messageKey"),

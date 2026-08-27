@@ -51,20 +51,28 @@ def _change_word(target: dict) -> str | None:
 
 
 def build_rows(
-    sent: Sent, *, channel_id: str, thread_ts: str, approved_by: str
+    sent: Sent,
+    *,
+    channel_id: str,
+    project: str | None,
+    thread_ts: str,
+    approved_by: str,
 ) -> list[SmsLogRow]:
     """발송 한 건을 받는 사람 수만큼의 행으로 폅니다.
+
+    설정을 여기서 읽지 않습니다. 읽으면 순수 함수가 아니게 되고, 행 모양을
+    보는 테스트가 운영 config.yaml 의 값에 묶입니다.
 
     Args:
         sent: 벤더로 실제 나간 값
         channel_id: 발송을 승인한 채널
+        project: 그 채널의 사업명. 매핑에 없으면 None
         thread_ts: 카드가 올라간 스레드
         approved_by: [보내기] 를 누른 사람의 Slack 사용자 ID
 
     Returns:
         list[SmsLogRow]: 수신자 수만큼의 행
     """
-    project = load_config().sms_projects.get(channel_id)
     return [
         SmsLogRow(
             ref_key=sent.ref_key,
@@ -100,7 +108,11 @@ def record(sent: Sent, *, channel_id: str, thread_ts: str, approved_by: str) -> 
         None
     """
     rows = build_rows(
-        sent, channel_id=channel_id, thread_ts=thread_ts, approved_by=approved_by
+        sent,
+        channel_id=channel_id,
+        project=load_config().sms_projects.get(channel_id),
+        thread_ts=thread_ts,
+        approved_by=approved_by,
     )
     with connect() as conn, conn.cursor() as cur:
         cur.executemany(INSERT, [asdict(row) for row in rows])

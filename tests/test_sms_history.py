@@ -6,16 +6,19 @@
 """
 
 import json
+import re
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from service.sms import history
 from service.sms.send import Sent
 
+MIGRATION = "migrations/knowledge/004_sms.sql"
 KST = timezone(timedelta(hours=9))
 SENT = Sent(
-    sent=1,
     ref_key="R1",
     sender="01077647538",
     message_key="K1",
@@ -29,9 +32,11 @@ SENT = Sent(
 def _rows(**extra):
     """기본 발송에 extra 를 덮어써서 행을 만든다."""
     channel_id = extra.pop("channel_id", "C0AP8CG1Y6N")
+    project = extra.pop("project", "26기업연계정보교원연수")
     return history.build_rows(
         SENT._replace(**extra),
         channel_id=channel_id,
+        project=project,
         thread_ts="111.000",
         approved_by="U1",
     )
@@ -75,15 +80,25 @@ def cursor(monkeypatch):
     return cur
 
 
-def test_넣는_키가_열_목록과_같다(cursor):
-    # FakeCursor 는 바인딩을 하지 않아 %(이름)s 와 키가 어긋나도 통과한다.
-    # 실제 실패 모드가 그것뿐이라, 둘이 같은 곳에서 나오는지를 대신 잠근다.
-    history.record(
-        SENT, channel_id="C0AP8CG1Y6N", thread_ts="111.000", approved_by="U1"
+def test_열_목록이_마이그레이션과_같다():
+    # 행 모양에 필드를 더하고 SQL 을 안 고치면 INSERT 가 런타임에 터진다.
+    # 하필 문자가 이미 나간 직후라, 여기서 잡아야 한다.
+    sql = (Path(__file__).parent.parent / MIGRATION).read_text(encoding="utf-8")
+    declared = set(re.findall(r"^\s{4}(\w+)\s", sql, re.M))
+
+    assert set(history.SMS_LOG_COLUMNS) <= declared
+
+
+def test_설정에_없는_채널이면_사업이_비어_있다(cursor, monkeypatch):
+    # record 가 설정을 읽는 유일한 자리다. build_rows 는 받은 값을 쓸 뿐이다.
+    monkeypatch.setattr(
+        history, "load_config", lambda: SimpleNamespace(sms_projects={})
     )
 
+    history.record(SENT, channel_id="C9999", thread_ts="111.000", approved_by="U1")
+
     _, params = cursor.calls[0]
-    assert set(params) == set(history.SMS_LOG_COLUMNS)
+    assert params["project"] is None
 
 
 def test_받는_사람마다_한_행이다():
@@ -119,13 +134,12 @@ def test_한_발송의_모든_행이_같은_ref_key다():
 
 def test_사업을_발송_시점에_박는다():
     # 매핑 표를 조인하지 않는다. 조인은 에이전트가 SQL 을 짤 때 틀릴 자리다.
-    assert _rows()[0].project == "26기업연계정보교원연수"
-
-
-def test_매핑에_없는_채널이면_사업이_비어_있다():
-    # NULL 로 남겨 두면 나중에 UPDATE 로 소급할 수 있다. 빈 문자열로 채우면
+    # NULL 로 남겨 두면 나중에 UPDATE 로 소급할 수 있고, 빈 문자열로 채우면
     # "매핑이 없다" 와 "사업이 없다" 가 구분되지 않는다.
-    assert _rows(channel_id="C9999")[0].project is None
+    assert (
+        _rows(project="26기업연계정보교원연수")[0].project == "26기업연계정보교원연수"
+    )
+    assert _rows(project=None)[0].project is None
 
 
 def test_예약_시각을_시간대와_함께_남긴다():

@@ -361,6 +361,12 @@ def register_sms_handlers(app, revise=None):
             )
             raise
 
+        # 나간 것을 맨 먼저 로그에 박는다. 카드 갱신도 이력 저장도 외부를
+        # 부르므로 둘 다 실패할 수 있고, 그러면 카드에는 아무것도 안 남아
+        # 번호도 문안도 되살릴 수 없다. 수신자 번호와 이름이 그대로 찍히는데,
+        # 나간 발송을 되살릴 유일한 수단이라 의도한 것이다.
+        print(f"SMS SENT {channel} {body['user']['id']} {result}")
+
         done = (
             f"{_when(result.send_at)} 발송으로 예약했습니다"
             if result.send_at
@@ -373,11 +379,6 @@ def register_sms_handlers(app, revise=None):
             f"<@{body['user']['id']}> 님이 {done} — {result.sent}명"
             f" (messageKey `{result.message_key or '없음'}`)",
         )
-
-        # 나간 것을 먼저 로그에 박는다. 이력을 못 남기면 카드에는 승인자와
-        # 인원수만 남아 번호도 문안도 되살릴 수 없다 — 이 기능이 없애려던
-        # 상태가 그대로 재현되고, 이번엔 아무도 그런 줄 모른다.
-        print(f"SMS SENT {result.ref_key} {channel} {body['user']['id']} {result}")
 
         # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
         # 발송을 카드가 실패로 그린다.
@@ -422,7 +423,8 @@ def register_sms_handlers(app, revise=None):
         ]
         # 초안을 여기서 버린다. 이 카드의 [보내기] 는 이제 옛 문안이라
         # 눌리면 안 된다. 새 문안은 에이전트가 새 카드로 올린다.
-        if _DRAFTS.pop(meta["draft_id"], None) is None:
+        draft = _DRAFTS.pop(meta["draft_id"], None)
+        if draft is None:
             return
         user = body["user"]["id"]
         quoted = "\n".join(f"&gt; {line}" for line in feedback.splitlines())
@@ -434,13 +436,11 @@ def register_sms_handlers(app, revise=None):
         )
         if revise is None:
             return
-        # 스레드 타임스탬프는 카드가 달린 스레드다. 카드는 항상 스레드 안에 올린다.
-        thread = await client.conversations_replies(
-            channel=meta["channel"], ts=meta["ts"], limit=1
-        )
-        thread_ts = thread["messages"][0].get("thread_ts", meta["ts"])
         await revise(
-            channel=meta["channel"], thread_ts=thread_ts, user=user, text=feedback
+            channel=meta["channel"],
+            thread_ts=draft["thread_ts"],
+            user=user,
+            text=feedback,
         )
 
     @app.action(CANCEL)
