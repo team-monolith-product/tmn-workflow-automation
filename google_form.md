@@ -81,8 +81,12 @@ drive.files().create(supportsAllDrives=True, fields="id",
 `documentTitle`(드라이브에 보이는 이름)은 **`batchUpdate` 로 고칠 수 없다.** 공식 문서가
 "can be set on create, but cannot be modified by a batchUpdate request" 라고 못 박았다.
 ③ 의 `updateFormInfo` 가 채우는 `info.title` 은 응답자에게 보이는 제목이지 파일 이름이
-아니다. ① 에서 `name` 을 빼면 드라이브에 "제목 없는 설문지"만 쌓이고 이후 어떤 API 로도
-못 고친다.
+아니다. ① 에서 `name` 을 빼면 드라이브에 "제목 없는 설문지"만 쌓인다. 고치려면 Drive
+API 로 가야 한다. 같은 문서가 "Please use the Google Drive API if you need to
+programmatically update documentTitle" 이라고 이어서 적는다.
+
+재개 경로는 ① 을 건너뛰므로 제목이 바뀌었으면 ③ 앞에서 `files.update(body={"name": title})`
+로 파일 이름을 맞춘다. 안 맞추면 응답자 제목만 바뀌고 드라이브에서는 옛 제목으로 보인다.
 
 **②를 빼먹으면 만드는 폼마다 1번 문항이 "제목 없는 질문"이다.** Drive 우회로 만든 셸에는
 기본 문항이 딸려 온다. `deleteItem`이 뒤 인덱스를 당기므로 **역순으로** 지운다. 정순으로
@@ -105,11 +109,17 @@ drive.files().create(supportsAllDrives=True, fields="id",
 이미 쓰는 관례다. ⓪ 의 입력 거부는 폼을 만들기 전이므로 그냥 `ValueError` 다.
 
 ```
-폼은 만들어졌지만 ⑤ 게시에서 멈췄습니다.
+폼은 만들어졌지만 ⑥ 응답자 공개에서 멈췄습니다.
+  사유   : 403 Insufficient permissions for this file
   formId : 1AbC...
   편집   : https://docs.google.com/forms/d/1AbC.../edit
-  이어서 하려면 form_id 를 넘겨 다시 불러 주세요.
+  재개해도 같은 곳에서 멈춥니다. 선행 작업 4·5 를 확인해 주세요.
 ```
+
+**사유를 반드시 싣는다.** `HttpError` 의 상태 코드와 `reason` 이다. `redash_tools` 도
+`str(e)` 를 붙여 내린다. 그리고 **재개 권유는 재개로 풀리는 실패에만 붙인다.** 403·400 은
+콘솔 설정이나 입력 문제라 다시 불러도 같은 자리에서 멈추는데, 재개는 ②부터 도니까 문항을
+지웠다 다시 만드는 왕복만 반복하다 recursion limit 에 닿는다.
 
 `create_form(..., form_id: str | None = None)` 으로 이어받는다. **`form_id` 가 오면 ②부터
 다시 돈다.** ④부터 돌리면 ②나 ③ 에서 멈춘 폼이 문항 없이 게시되고 공개된다. ② 는 현재
@@ -124,9 +134,11 @@ items 를 되읽어 지우는 것이라 몇 번을 돌려도 같은 결과고 �
 | `files.get(fields="parents,createdTime")` 의 `parents` 에 `FORM_FOLDER_ID` 가 있는가 | 거부 |
 | `createdTime` 이 한 시간 안인가 | 거부. 이어받기는 정의상 방금 만든 폼이다 |
 | `forms.responses.list(pageSize=1)` 이 비어 있는가 | 거부. 응답이 있으면 문항을 갈아엎어선 안 된다 |
+| `forms.get` 의 `linkedSheetId` 가 비어 있는가 | 거부. 사람이 시트를 이미 붙였다 |
 
-세 번째가 특히 중요하다. 문항을 갈아엎으면 `questionId` 가 새로 발급되고 사람이 붙여 둔
-응답 시트에 새 열이 생긴다. 기존 응답은 옛 열에 남아 어긋나고 시트만 봐서는 이유를 알 수
+뒤 둘이 특히 중요하다. 문항을 갈아엎으면 `questionId` 가 새로 발급되고 사람이 붙여 둔
+응답 시트에 새 열이 생긴다. **시트 연결은 첫 응답보다 먼저 일어난다.** §4 가 사람에게
+시키는 첫 클릭이 그것이라, 응답 유무만 보면 시트가 붙은 폼이 그대로 통과한다. 기존 응답은 옛 열에 남아 어긋나고 시트만 봐서는 이유를 알 수
 없다. `drive` 스코프가 이미 `forms.responses.list` 를 열어 두므로 스코프는 안 는다.
 
 `assert` 는 쓰지 않는다. `api/google_sheets.py` 처럼 사람이 다음에 뭘 할지 담아
@@ -191,6 +203,7 @@ AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검�
 
   공개 상태 : 응답자 공개 O · 게시 O
   편집자   : byb@team-mono.com, chk@team-mono.com
+             (이 폼이 놓인 공유 드라이브의 멤버는 전원 응답을 볼 수 있습니다)
   응답 링크 : {responderUri}
 ```
 
@@ -204,13 +217,16 @@ AGENTS.md 가 예외를 삼키지 말라고 못 박았고 삼키면 지금 검�
 
 편집자 인자는 LLM 이 채운다. 제한이 없으면 슬랙에서 "이 주소도 편집자로 넣어줘" 한 마디로
 아무 주소나 writer 가 된다. 폼 writer 는 **응답 전량**을 본다. 성함·소속 학교·연락처다.
-게다가 기존 스크립트처럼 `sendNotificationEmail=False`로 붙이면 붙은 당사자에게도 메일이
-가지 않아 슬랙 스레드 밖에서는 드러나지 않는다.
+게다가 기존 스크립트는 전부 `sendNotificationEmail=False` 로 붙여서 당사자에게도 메일이
+가지 않아 슬랙 스레드 밖에서는 드러나지 않는다. **④ 는 `True` 로 붙인다.**
+접미사 검사로는 `byb2@team-mono.com` 같은 로컬파트 오타를 못 거른다. 그 주소가 실재하는
+다른 동료면 조용히 writer 가 되고 되읽기도 통과한다. 메일이 가야 당사자가 안다.
 
 - 주소는 소문자로 바꾼 뒤 **`@team-mono.com` 접미사**로 판정한다. `endswith("team-mono.com")`
   으로 짜면 `evil-team-mono.com` 이 통과한다.
 - **편집자가 한 명도 없으면 거부한다.** 판정 집합은 목록이 비면 항상 통과라 아무도 못 여는
-  폼이 "검증 통과"로 나간다.
+  폼이 "검증 통과"로 나간다. **문항이 0개일 때도 같다.** ③ 은 `updateFormInfo` 만 보내고
+  성공하므로 문항 없는 폼이 게시·공개돼 나간다.
 - 기본값은 `FORM_EDITORS`(쉼표 구분)에서 읽는다.
 
 ### 6. 폼 설명은 plain text 다
@@ -317,15 +333,19 @@ Forms API 가 생성을 지원하지 않고 폼 UI 에도 안 나온다(8/4 실�
 | 3 | Drive API 사용 설정 | [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com?project=elegant-circle-503206-a1) |
 | 4 | **폼 전용 공유 드라이브**를 새로 만들고 1번 계정과 **편집자 전원**(또는 그들을 담은 그룹)을 콘텐츠 관리자로 추가 | [공유 드라이브](https://drive.google.com/drive/shared-drives) |
 | 5 | 그 드라이브에서 **외부 공유(링크가 있는 모든 사용자)가 허용**돼 있는지 확인 | 드라이브 설정 |
-| 6 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
-| 7 | 헬름에 `FORM_SERVICE_ACCOUNT_JSON`(시크릿) + `FORM_FOLDER_ID`·`FORM_EDITORS`(env) 추가 | 레포 PR |
+| 6 | 그 드라이브에서 **"멤버가 아닌 사람을 파일에 추가하도록 허용"** 이 켜져 있는지 확인 | 드라이브 설정 |
+| 7 | `tmn-secret-prd`에 `workflow_form_service_account_json` 추가 | [Secrets Manager](https://ap-northeast-2.console.aws.amazon.com/secretsmanager/listsecrets?region=ap-northeast-2) |
+| 8 | 헬름에 `FORM_SERVICE_ACCOUNT_JSON`(시크릿) + `FORM_FOLDER_ID`·`FORM_EDITORS`(env) 추가 | 레포 PR |
 
 4번이 빠지면 `files.create`가 권한 없음으로 죽는다. **편집자를 멤버로 넣는 것까지가 4번이다.**
-멤버가 아니면 ④ 가 파일 단위로 권한을 줘야 하는데 공유 드라이브에는 "멤버가 아닌 사람을
-파일에 추가하도록 허용"이라는 별도 토글이 있고 그것이 꺼져 있으면 `create_form` 호출이 전부
-403 이다. 5번의 외부 공유 허용과는 다른 설정이라 그것만 지켜서는 안 걸린다.
+멤버로 넣으면 `fileOrganizer` 가 상속돼 내려와 ④ 는 확인만 하고 넘어간다.
 
 5번이 빠지면 응답자 공개가 403 이고 원인이 코드에 없어 찾는 데 오래 걸린다.
+
+6번은 5번과 다른 설정이다. 아직 드라이브 멤버가 아닌 사람(신규 입사자 같은)이 편집자로
+넘어오면 ④ 가 파일 단위로 권한을 줘야 하는데, 이 토글이 꺼져 있으면 403 이다. ⓪ 은
+`@team-mono.com` 접미사만 보므로 그런 주소를 막지 못한다. ① 이 지난 뒤라 삭제 도구 없는
+고아 폼이 남는다.
 
 ## 안 하는 것
 
