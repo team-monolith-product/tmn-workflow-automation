@@ -83,6 +83,10 @@ def cursor(monkeypatch):
 def test_열_목록이_마이그레이션과_같다():
     # 행 모양에 필드를 더하고 SQL 을 안 고치면 INSERT 가 런타임에 터진다.
     # 하필 문자가 이미 나간 직후라, 여기서 잡아야 한다.
+    #
+    # sms_log 를 만드는 파일만 읽는다. 뒤에 오는 마이그레이션이 이 표의 열을
+    # 지우거나 이름을 바꾸면 이 테스트는 통과한 채로 INSERT 가 깨지므로,
+    # 그때는 여기서 읽는 파일도 같이 늘려야 한다.
     sql = (Path(__file__).parent.parent / MIGRATION).read_text(encoding="utf-8")
     declared = set(re.findall(r"^\s{4}(\w+)\s", sql, re.M))
 
