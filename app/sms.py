@@ -12,12 +12,12 @@
 """
 
 import asyncio
+import hashlib
 import json
-import uuid
 from datetime import datetime
 
 from cachetools import TTLCache
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import send as sms_send
@@ -34,9 +34,30 @@ FEEDBACK_INPUT = "sms_feedback_input"
 # 초안은 여기 두고 버튼에는 id 만 싣는다.
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
+# 카드가 실제로 올라갔을 때만 답에 들어가는 말. 샌드박스가 이것으로
+# 카드 수를 세어 상한을 건다(app/tools/python_tools.py).
+POSTED_MARK = "초안을 올렸습니다"
+
 # 줄 수와 줄 폭. 22줄 × 121자면 슬랙 section text 3000자에 든다.
 MAX_ROWS = 20
 MAX_WIDTH = 120
+
+
+def _draft_id(channel: str, thread_ts: str, plan: sms_send.Plan) -> str:
+    """초안을 식별하는 값입니다. 같은 발송이면 같은 id 라 카드가 두 장 되지 않습니다."""
+    payload = json.dumps(
+        [
+            channel,
+            thread_ts,
+            plan.template,
+            plan.send_time,
+            # 순서가 바뀌는 것은 다른 발송이 아니다.
+            sorted(plan.targets, key=lambda target: target["to"]),
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.blake2s(payload.encode(), digest_size=6).hexdigest()
 
 
 def _value_table(targets: list[dict]) -> str:
@@ -148,7 +169,9 @@ def _blocks(draft_id: str, plan: sms_send.Plan) -> list[dict]:
     ]
 
 
-def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
+def get_draft_sms_tool(
+    client: AsyncWebClient, channel: str, thread_ts: str
+) -> StructuredTool:
     """문자 발송 초안 도구를 반환합니다.
 
     채널을 도구 인자가 아니라 클로저로 받습니다.
@@ -159,7 +182,7 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         thread_ts: 스레드 타임스탬프
 
     Returns:
-        list: [초안 도구]
+        StructuredTool: 초안 도구
     """
 
     @tool
@@ -186,27 +209,40 @@ def get_sms_tools(client: AsyncWebClient, channel: str, thread_ts: str) -> list:
         if plan.problems:
             return "보내기 전에 고칠 것: " + " / ".join(plan.problems)
 
-        draft_id = uuid.uuid4().hex[:12]
+        draft_id = _draft_id(channel, thread_ts, plan)
+        if draft_id in _DRAFTS:
+            return (
+                f"같은 초안({len(plan.rows)}명)이 이미 이 스레드에 올라가 있습니다."
+                " 다시 올리지 않았습니다. 그 카드에서 [보내기] 를 눌러주세요."
+            )
+
+        # 검사와 저장 사이에 await 가 있으면 한 턴에 실린 두 호출이 둘 다
+        # 빠져나간다. ToolNode 가 tool call 을 gather 로 돌리기 때문이다.
+        # 자리를 먼저 잡고, 카드가 못 올라가면 되돌린다.
         _DRAFTS[draft_id] = {
             "rows": targets,
             "content": content,
             "send_at": send_at,
         }
-        await client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=f"문자 발송 확인 — {len(plan.rows)}명",
-            blocks=_blocks(draft_id, plan),
-        )
+        try:
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"문자 발송 확인 — {len(plan.rows)}명",
+                blocks=_blocks(draft_id, plan),
+            )
+        except BaseException:
+            _DRAFTS.pop(draft_id, None)
+            raise
         if plan.send_time:
             return (
-                f"{len(plan.rows)}명 대상 초안을 올렸습니다."
+                f"{len(plan.rows)}명 대상 {POSTED_MARK}."
                 f" {_when(plan.send_time)} 발송으로 예약하려면"
                 " [예약하기] 를 눌러주세요."
             )
-        return f"{len(plan.rows)}명 대상 초안을 올렸습니다. [보내기] 를 눌러주세요."
+        return f"{len(plan.rows)}명 대상 {POSTED_MARK}. [보내기] 를 눌러주세요."
 
-    return [draft_sms]
+    return draft_sms
 
 
 def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> dict:

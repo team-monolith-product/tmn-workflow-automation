@@ -13,7 +13,7 @@ from .common import KST, slack_users_list
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
 from .tools.athena_tools import get_execute_athena_query_tool
-from .tools.chart_tools import get_execute_python_with_chart_tool
+from .tools.python_tools import get_execute_python_tool
 from .tools.redash_tools import (
     list_redash_dashboards,
     read_redash_dashboard,
@@ -221,9 +221,9 @@ async def answer_data_analysis(
                 "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
                 "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
                 "\n"
-                "**차트 시각화**:\n"
-                "- 데이터를 차트로 시각화하고 싶을 때는 execute_python_with_chart 도구를 사용하세요.\n"
-                "- 이 도구는 파이썬 코드를 실행하고 matplotlib 차트를 슬랙에 자동으로 업로드합니다.\n"
+                "**파이썬 실행**:\n"
+                "- 집계·대조·명단 추출·시각화는 execute_python 도구를 사용하세요.\n"
+                "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
                 "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
                 "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
                 "\n"
@@ -270,16 +270,18 @@ async def answer_data_analysis(
     execute_athena_query = get_execute_athena_query_tool(
         say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
-    # execute_python_with_chart tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
-    execute_python_with_chart = get_execute_python_with_chart_tool(
-        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
+    # execute_python tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
+    # 이 도구에는 read_sheet 도 함께 주입된다(app/tools/python_tools.py). 데이터봇도
+    # 구글 시트를 읽어 Athena 결과와 맞춰 볼 수 있다 -- 도구 설명에 사용법이 있다.
+    execute_python = get_execute_python_tool(
+        thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
     tools = [
         list_redash_dashboards,
         read_redash_dashboard,
         read_redash_query,
         execute_athena_query,
-        execute_python_with_chart,
+        execute_python,
     ]
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
