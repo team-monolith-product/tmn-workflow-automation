@@ -22,6 +22,7 @@ def get_public_holidays(year: int, month: int) -> set[str]:
 
     Note:
         - 근로자의 날(5/1)은 공공데이터에 없으므로 수동 추가
+        - 2026년 8월 17일(광복절 대체공휴일)은 공공데이터에 누락되어 수동 추가
     """
     holidays = set()
     try:
@@ -48,6 +49,9 @@ def get_public_holidays(year: int, month: int) -> set[str]:
     if month == 5:
         # 근로자의 날 추가 (5월 1일)
         holidays.add(f"{year}-05-01")
+    if year == 2026 and month == 8:
+        # 광복절(8/15, 토) 대체공휴일이 공공데이터에 누락되어 있어 수동 추가
+        holidays.add(f"{year}-08-17")
 
     return holidays
 
