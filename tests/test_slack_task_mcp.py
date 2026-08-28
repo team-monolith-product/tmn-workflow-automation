@@ -142,9 +142,12 @@ def test_플러그인은_지식과_운영_MCP를_서로_다른_주소로_연결�
     assert dependency_url == operations_url
 
 
-def test_운영_플러그인에는_운영_작업_스킬만_포함한다():
+def test_운영_플러그인에는_허용된_운영_스킬만_포함한다():
     skill_names = {
         path.parent.name for path in (PLUGIN_ROOT / "skills").glob("*/SKILL.md")
     }
 
-    assert skill_names == {"start-operate-task"}
+    assert skill_names == {
+        "send-docu24-official-document",
+        "start-operate-task",
+    }
