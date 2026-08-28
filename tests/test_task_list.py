@@ -55,9 +55,15 @@ CREATE_SCHEMA = [
     },
     {
         "key": "slack_thread",
-        "name": "슬랙",
+        "name": "요청 맥락",
         "type": "message",
         "id": "Col05F6GHIJ7K",
+    },
+    {
+        "key": "work_thread",
+        "name": "작업 기록",
+        "type": "message",
+        "id": "Col09WORK1234",
     },
     {"key": "todo_completed", "type": "todo_completed", "id": "Col00"},
     {"key": "todo_assignee", "type": "todo_assignee", "id": "Col01"},
@@ -257,7 +263,11 @@ async def test_create_defines_slack_column_up_front():
 
     sent = client.slackLists_create.await_args.kwargs
     assert sent["todo_mode"] is True
-    assert [column["type"] for column in sent["schema"]] == ["text", "message"]
+    assert [column["type"] for column in sent["schema"]] == [
+        "text",
+        "message",
+        "message",
+    ]
 
 
 # --- 도구 동작 ---

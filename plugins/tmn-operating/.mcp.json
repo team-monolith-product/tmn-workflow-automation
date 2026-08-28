@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "team-monolith-knowledge": {
+      "type": "http",
+      "url": "https://wfa.codle.io/mcp"
+    },
+    "team-monolith-operations-task": {
+      "type": "http",
+      "url": "https://wfa.codle.io/mcp/operate"
+    }
+  }
+}

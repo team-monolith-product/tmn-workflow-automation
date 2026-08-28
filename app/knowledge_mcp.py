@@ -16,17 +16,18 @@ FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저
 
 import asyncio
 import os
-from typing import Any, cast
-from urllib.parse import urlparse
+from typing import cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
-from api.admin_rails import get_me
+from app.mcp_common import (
+    AdminRailsTokenVerifier,
+    AdminToken,
+    admin_auth_settings,
+    build_streamable_http_app,
+)
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
@@ -38,39 +39,6 @@ INSTRUCTIONS = """
 읽기 전용 SQL로 질의합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
 """.strip()
-
-
-class AdminToken(AccessToken):
-    """어드민 이메일을 함께 나르는 토큰.
-
-    query_log.actor에 실제 사람을 남기려면 도구 실행 시점에 이메일이 있어야
-    하는데, AccessToken에는 담을 자리가 없어 넓힙니다.
-    """
-
-    email: str
-
-
-class AdminRailsTokenVerifier(TokenVerifier):
-    """admin-rails에 물어 토큰을 검증합니다."""
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """
-        Args:
-            token: Authorization 헤더로 온 Bearer 토큰
-
-        Returns:
-            AccessToken | None: 검증에 성공하면 AdminToken. 실패하면 None
-        """
-        admin = await get_me(token)
-        if admin is None:
-            return None
-
-        return AdminToken(
-            token=token,
-            client_id=str(admin["id"]),
-            scopes=["public"],
-            email=admin["email"],
-        )
 
 
 def build_mcp() -> MCPServer:
@@ -88,10 +56,7 @@ def build_mcp() -> MCPServer:
         "team-monolith-knowledge",
         instructions=INSTRUCTIONS,
         token_verifier=AdminRailsTokenVerifier(),
-        auth=AuthSettings(
-            issuer_url=cast(Any, os.environ["ADMIN_RAILS_BASE_URL"]),
-            resource_server_url=cast(Any, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
-        ),
+        auth=admin_auth_settings(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
     )
 
     @mcp.tool(description=QUERY_TOOL_DESCRIPTION)
@@ -120,12 +85,4 @@ def build_mcp_app(mcp: MCPServer) -> Starlette:
     Returns:
         Starlette: /mcp와 리소스 메타데이터 경로를 여는 앱
     """
-    host = urlparse(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]).netloc
-
-    return mcp.streamable_http_app(
-        stateless_http=True,
-        transport_security=TransportSecuritySettings(
-            allowed_hosts=[host],
-            allowed_origins=[f"https://{host}"],
-        ),
-    )
+    return build_streamable_http_app(mcp, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"])

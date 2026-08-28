@@ -1,12 +1,13 @@
 """
 채널별 슬랙 작업 리스트의 Service Layer입니다.
 
-channel_task_list 표가 SOT입니다. 채널이 작업을 리스트로 관리하는지는 이 표에
-행이 있느냐로만 정해집니다.
+channel_task_list 표는 기존 Slack 봇의 라우팅 설정입니다. 채널에서 새 작업
+요청이 왔을 때 어느 List에 행을 만들지 정하고, 행이 없으면 Notion 흐름을
+유지합니다. Slack List 행과 작업 스레드의 관계는 저장하지 않습니다.
 
-열 ID를 표에 두는 이유가 있습니다. 슬랙에는 리스트의 열을 조회하는 API가
-없어서 slackLists.create 응답이 열 ID를 아는 유일한 자리입니다. 그때 받아
-저장해 두지 않으면 다시 알아낼 방법이 없습니다.
+열 ID는 새 행을 만들 때 기존 행 ID가 없어 items.info를 호출할 수 없는 봇
+경로를 위해 저장합니다. List 행 링크로 시작하는 운영 MCP는 이 표를 사용하지
+않고 items.info 응답의 스키마를 직접 읽습니다.
 
 셀을 읽고 쓰는 방법도 여기 둡니다. 열 ID를 아는 곳과 그 열에 무엇을 써넣는지
 아는 곳이 갈리면 슬랙이 표기를 바꿀 때 두 계층을 같이 고쳐야 합니다.
@@ -24,14 +25,15 @@ from slack_sdk.web.async_client import AsyncWebClient
 from service.db import connect, fetch_one
 
 # 리스트를 만들 때 우리가 정의하는 열. todo_mode 가 완료·담당자·마감일 셋을
-# 뒤에 알아서 붙이므로 여기에는 제목과 슬랙 열만 둔다.
+# 뒤에 알아서 붙이므로 여기에는 제목과 두 스레드 열만 둔다.
 #
 # 슬랙 열이 message 타입인 이유가 있다. link 로 두면 URL 문자열만 남지만
 # message 는 슬랙이 채널과 ts 를 풀어 카드로 보여 주고, 값이 배열이라 작업
 # 하나에 스레드를 여럿 달 수 있다.
 CREATE_SCHEMA = [
     {"key": "name", "name": "작업", "type": "text", "is_primary_column": True},
-    {"key": "slack_thread", "name": "슬랙", "type": "message"},
+    {"key": "slack_thread", "name": "요청 맥락", "type": "message"},
+    {"key": "work_thread", "name": "작업 기록", "type": "message"},
 ]
 
 # 항목 조회 한 페이지 크기. 완료된 항목도 같이 오므로 한 페이지로는 부족하다.
@@ -341,11 +343,11 @@ async def create_channel_task_list(
 ) -> ChannelTaskList:
     """슬랙 리스트를 만들어 채널에 공유하고 등록합니다.
 
-    schema 로 제목과 슬랙 열을 정의하고 todo_mode 가 완료·담당자·마감일을
+    schema 로 제목과 요청 맥락·작업 기록 열을 정의하고 todo_mode 가 완료·담당자·마감일을
     뒤에 붙입니다. 둘은 같이 씁니다.
 
-    열은 만들 때만 정할 수 있고 뒤에 추가하는 API가 없습니다. 그래서 슬랙
-    열이 필요하면 리스트를 새로 만드는 수밖에 없습니다.
+    열은 만들 때만 정할 수 있고 뒤에 추가하는 API가 없습니다. 그래서 새 List는
+    두 message 열을 처음부터 같이 만듭니다.
 
     리스트를 만든 직후 표에 넣고 공유를 뒤에 합니다. 공유가 실패해도 만들어진
     리스트를 표가 알고 있어야, 다시 켤 때 리스트가 하나씩 더 생기지 않습니다.
