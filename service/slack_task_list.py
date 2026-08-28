@@ -366,7 +366,7 @@ async def create_channel_task_list(
         ChannelTaskList: 만들어진 작업 리스트
     """
     created = await client.slackLists_create(
-        name=f"{channel_name} 작업", todo_mode=True, schema=CREATE_SCHEMA
+        name=f"{channel_name} 운영 작업", todo_mode=True, schema=CREATE_SCHEMA
     )
     list_id = created["list_id"]
 

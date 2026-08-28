@@ -243,7 +243,10 @@ async def test_create_saves_before_sharing():
     assert order == ["save", "share"]
     assert client.bookmarks_add.await_count == 0
     assert task_list == TASK_LIST
-    assert client.slackLists_create.await_args.kwargs["name"] == "t_고객_OO교육청 작업"
+    assert (
+        client.slackLists_create.await_args.kwargs["name"]
+        == "t_고객_OO교육청 운영 작업"
+    )
 
 
 async def test_create_defines_slack_column_up_front():
