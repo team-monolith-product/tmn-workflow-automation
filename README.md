@@ -10,7 +10,7 @@ Slack 채널에서 자동화 명령을 수신하고 처리하는 봇 서버
 Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 워크플로우를 실행하는 경량 웹훅 서버
 
 ### 3. Operations Slack Task MCP (`main.py`)
-운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리합니다. Knowledge MCP와 같은 FastAPI 프로세스에서 `/mcp/operate` 경로를 제공합니다.
+운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 원인 스레드 포스트모템·개선 작업 연결, 사용자 승인 뒤 종료 결과 게시를 처리합니다. Knowledge MCP와 같은 FastAPI 프로세스에서 `/mcp/operate` 경로를 제공합니다.
 
 ### 4. TMN Operating Plugin
 사내 플러그인 원문은 비공개 Marketplace에서 관리합니다. Codex·Claude에서 다음 HTTPS Git Marketplace URL을 최초 한 번 등록한 뒤 `TMN Operating`을 설치합니다.

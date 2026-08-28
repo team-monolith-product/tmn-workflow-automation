@@ -12,7 +12,6 @@ from service.slack_task_thread import (
     message_location,
     parse_slack_list_task_url,
     publish_task_result,
-    record_task_references,
     start_task_from_slack_list,
     task_list_schema,
 )
@@ -249,10 +248,14 @@ async def test_start_creates_one_root_and_stores_its_permalink():
             "기존 판단과 충돌하는 정보",
         ],
         "coverage_goal": "서로 다른 관련 출처에서 새로운 사실이나 판단이 더 나오지 않을 때까지",
-        "record_references_after_each_gate": True,
-        "reference_tool": "record_slack_task_references",
+        "record_references_at_finish_only": True,
         "ask_starter_if_no_references": True,
         "clarify_ambiguity_before_work": True,
+        "wait_if_prerequisites_are_missing": True,
+        "task_states": ["pending", "completed"],
+        "explicit_user_completion_approval": True,
+        "postmortem_assessment_before_completion": True,
+        "postmortem_skill": "tmn-operating:operational-postmortem",
         "runtime_metadata_at_finish": [
             "tool",
             "model",
@@ -359,7 +362,7 @@ async def test_start_reports_broken_source_when_work_thread_already_exists():
     assert result["work_thread"]["messages"][0]["text"] == "[시작]"
 
 
-async def test_publish_posts_curated_learnings_and_marks_completed():
+async def test_publish_posts_short_result_and_marks_completed():
     client = AsyncMock()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
@@ -379,16 +382,8 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
             await publish_task_result(
                 client,
                 LIST_URL,
-                "owner@example.com",
-                "completed",
                 "계정 68개를 생성하고 로그인을 확인했습니다.",
                 outputs=["계정 생성 결과: https://docs.example.com/account-result"],
-                learnings=[
-                    "전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눴습니다."
-                ],
-                reusable_findings=["외부 강사는 별도 승인이 필요합니다."],
-                validation=["생성 수와 샘플 로그인을 확인했습니다."],
-                remaining=["외부 강사 12명 승인 대기"],
                 references=[
                     "이전 계정 생성 작업: https://example.slack.com/archives/C01/p1"
                 ],
@@ -405,10 +400,11 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
 
     sent = client.chat_postMessage.await_args.kwargs
     assert sent["thread_ts"] == ROOT_TS
-    assert "시행착오·경험:" in sent["text"]
-    assert "승인 여부로 먼저 나눴습니다" in sent["text"]
-    assert "일반 탐색" not in sent["text"]
-    assert "상태:" not in sent["text"]
+    assert "client_msg_id" in sent
+    assert "시행착오·경험:" not in sent["text"]
+    assert "재사용할 정보:" not in sent["text"]
+    assert "검증:" not in sent["text"]
+    assert "남은 일:" not in sent["text"]
     assert (
         "산출물: <https://docs.example.com/account-result|계정 생성 결과>"
         in sent["text"]
@@ -441,67 +437,6 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
     assert result["completion_reaction_added"] is True
 
 
-async def test_record_references_posts_one_curated_gate_log():
-    client = AsyncMock()
-    client.slackLists_items_info.return_value = info(
-        record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
-    )
-    client.chat_postMessage.return_value = {
-        "channel": CHANNEL,
-        "ts": "1700000004.000200",
-    }
-    client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
-
-    result = json.loads(
-        await record_task_references(
-            client,
-            LIST_URL,
-            "요구사항 변경: 공유 대상 추가",
-            [
-                "기존 컨소시엄 공유 사례: https://example.slack.com/archives/C01/p1",
-                "기존 컨소시엄 공유 사례 중복: https://example.slack.com/archives/C01/p1",
-                "운영 가이드: https://docs.example.com/guide",
-            ],
-        )
-    )
-
-    sent = client.chat_postMessage.await_args.kwargs
-    assert sent["thread_ts"] == ROOT_TS
-    assert "[참고 자료] 요구사항 변경: 공유 대상 추가" in sent["text"]
-    assert sent["text"].count("https://example.slack.com/archives/C01/p1") == 1
-    assert "<https://docs.example.com/guide|운영 가이드>" in sent["text"]
-    assert all(block["expand"] is False for block in sent["blocks"])
-    assert result["reference_count"] == 2
-
-
-async def test_publish_keeps_blocked_task_open_by_default():
-    client = AsyncMock()
-    client.slackLists_items_info.return_value = info(
-        record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
-    )
-    client.chat_postMessage.return_value = {
-        "channel": CHANNEL,
-        "ts": "1700000004.000200",
-    }
-    client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
-
-    result = json.loads(
-        await publish_task_result(
-            client,
-            LIST_URL,
-            "owner@example.com",
-            "blocked",
-            "외부 승인 확인이 없어 계정 생성을 진행하지 못했습니다.",
-            outputs=[],
-        )
-    )
-
-    client.slackLists_items_update.assert_not_awaited()
-    client.reactions_add.assert_not_awaited()
-    assert result["list_marked_completed"] is False
-    assert result["completion_reaction_added"] is False
-
-
 async def test_publish_keeps_completed_result_when_check_reaction_fails():
     client = AsyncMock()
     client.slackLists_items_info.return_value = info(
@@ -520,8 +455,6 @@ async def test_publish_keeps_completed_result_when_check_reaction_fails():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
-            "completed",
             "계정 생성 결과를 확인해 완료 처리했습니다.",
             outputs=[],
         )
@@ -532,23 +465,6 @@ async def test_publish_keeps_completed_result_when_check_reaction_fails():
     assert result["completion_reaction_added"] is False
 
 
-async def test_publish_rejects_too_many_learnings_before_slack_call():
-    client = AsyncMock()
-
-    with pytest.raises(ValueError, match="최대 3개"):
-        await publish_task_result(
-            client,
-            LIST_URL,
-            "owner@example.com",
-            "completed",
-            "충분히 구체적인 완료 요약입니다.",
-            outputs=[],
-            learnings=["하나", "둘", "셋", "넷"],
-        )
-
-    client.chat_postMessage.assert_not_awaited()
-
-
 async def test_publish_rejects_secrets_and_local_paths():
     client = AsyncMock()
 
@@ -556,8 +472,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
-            "completed",
             "토큰 xoxb-abcdefghijklmnopqrstuvwxyz 를 사용했습니다.",
             outputs=[],
         )
@@ -566,8 +480,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
-            "completed",
             "결과는 /Users/name/report.md 에 저장했습니다.",
             outputs=[],
         )
@@ -580,8 +492,6 @@ async def test_publish_rejects_output_without_shareable_link():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
-            "completed",
             "확정된 연수 안내문을 작성했습니다.",
             outputs=["최종 연수 안내문"],
         )

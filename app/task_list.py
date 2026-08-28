@@ -11,8 +11,6 @@ app/knowledge.py 의 수집 등록 도구와 같은 방식입니다.
 """
 
 import asyncio
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
@@ -21,6 +19,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
+    default_due_date,
     delete_channel_task_list,
     list_all_items,
     validate_task_list_channel,
@@ -29,23 +28,6 @@ from service.slack_task_list import (
 # 매칭에 실패했을 때 되돌려줄 미완료 작업 수. 오래된 리스트의 제목을 전부
 # 돌려주면 그대로 LLM 컨텍스트가 된다.
 MAX_PENDING_SHOWN = 20
-
-KST = ZoneInfo("Asia/Seoul")
-
-# 대화에서 마감을 못 읽었을 때 넣을 여유. 마감이 빈 작업은 리스트의 마감일
-# 자동화가 집지 못해 아무도 안 보는 채로 남는다.
-DEFAULT_DUE_DAYS = 7
-
-
-def default_due_date() -> str:
-    """대화에 마감이 없을 때 넣을 날짜입니다.
-
-    컨테이너는 UTC 로 도는데 마감일은 사람이 보는 날짜라 KST 로 셉니다.
-
-    Returns:
-        str: YYYY-MM-DD
-    """
-    return (datetime.now(KST) + timedelta(days=DEFAULT_DUE_DAYS)).strftime("%Y-%m-%d")
 
 
 class TaskInput(BaseModel):

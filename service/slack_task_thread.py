@@ -6,12 +6,12 @@
 """
 
 import asyncio
-import html
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import psycopg
@@ -19,6 +19,19 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
+from service.slack_task_message import (
+    SlackMessageLocation,
+    clean_list as _clean_list,
+    clean_outputs as _clean_outputs,
+    clean_references as _clean_references,
+    escape_slack as _escape,
+    get_permalink as _permalink,
+    message_blocks as _message_blocks,
+    message_location,
+    reference_section as _reference_section,
+    slack_link as _slack_link,
+    validate_publishable as _validate_publishable,
+)
 
 SOURCE_THREAD_COLUMN_NAME = "요청 맥락"
 SOURCE_THREAD_COLUMN_KEY = "slack_thread"
@@ -28,26 +41,6 @@ MAX_THREAD_PAGES = 5
 THREAD_PAGE_SIZE = 100
 MAX_THREAD_CHARS = 20_000
 
-TaskResultStatus = Literal["completed", "blocked", "handoff"]
-
-STATUS_LABELS: dict[TaskResultStatus, str] = {
-    "completed": "완료",
-    "blocked": "막힘",
-    "handoff": "인계",
-}
-
-SECRET_PATTERN = re.compile(
-    r"(?:xox[baprs]-\S+|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
-    r"AKIA[0-9A-Z]{16}|Bearer\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)",
-    re.IGNORECASE,
-)
-LOCAL_PATH_PATTERN = re.compile(
-    r"(?:^|[\s(])(?:/Users/|/home/|file://|[A-Za-z]:\\)", re.MULTILINE
-)
-OUTPUT_PATTERN = re.compile(r"^(.+?):\s*(https://[^\s<>]+)$", re.IGNORECASE)
-MAX_REFERENCE_COUNT = 30
-SLACK_SECTION_TEXT_LIMIT = 3_000
-
 
 @dataclass(frozen=True)
 class SlackListTaskReference:
@@ -56,16 +49,6 @@ class SlackListTaskReference:
     list_url: str
     list_id: str
     record_id: str
-
-
-@dataclass(frozen=True)
-class SlackMessageLocation:
-    """Slack 메시지와 그 메시지가 속한 루트 스레드 위치입니다."""
-
-    channel_id: str
-    ts: str
-    root_ts: str
-    permalink: str | None = None
 
 
 def _read_cell(
@@ -140,6 +123,49 @@ class SlackTaskListSchema:
             }
             for row_id in row_ids
         ]
+
+    def new_task_cells(
+        self,
+        title: str,
+        assignee: str | None,
+        due_date: str | None,
+        source_thread_url: str,
+        work_thread_url: str,
+    ) -> list[dict[str, Any]]:
+        """두 맥락 스레드가 연결된 새 대기 작업의 초기 셀을 만듭니다."""
+        if self.source_thread_column_id is None:
+            raise ValueError(
+                '새 작업을 만들려면 message 타입의 "요청 맥락" 열이 필요합니다.'
+            )
+        cells: list[dict[str, Any]] = [
+            {
+                "column_id": self.name_column_id,
+                "rich_text": [
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [{"type": "text", "text": title}],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "column_id": self.source_thread_column_id,
+                "message": [source_thread_url],
+            },
+            {
+                "column_id": self.work_thread_column_id,
+                "message": [work_thread_url],
+            },
+        ]
+        if assignee:
+            cells.append({"column_id": self.assignee_column_id, "user": [assignee]})
+        if due_date:
+            cells.append({"column_id": self.due_date_column_id, "date": [due_date]})
+        return cells
 
 
 def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
@@ -247,38 +273,6 @@ def task_list_schema(schema: list[dict[str, Any]]) -> SlackTaskListSchema:
     )
 
 
-def message_location(reference: dict[str, Any]) -> SlackMessageLocation:
-    """List message 셀의 참조를 Slack API 호출 위치로 바꿉니다."""
-    permalink = reference.get("value") or reference.get("permalink")
-    channel_id = reference.get("channel_id")
-    ts = reference.get("ts")
-    thread_ts = reference.get("thread_ts")
-
-    if permalink:
-        parsed = urlparse(str(permalink))
-        segments = [segment for segment in parsed.path.split("/") if segment]
-        if len(segments) >= 3 and re.fullmatch(r"[CDG][A-Z0-9]+", segments[-2]):
-            channel_id = channel_id or segments[-2]
-            path_ts = segments[-1]
-            if path_ts.startswith("p") and path_ts[1:].isdigit():
-                digits = path_ts[1:]
-                if len(digits) > 6:
-                    ts = ts or f"{digits[:-6]}.{digits[-6:]}"
-        query = parse_qs(parsed.query)
-        thread_ts = thread_ts or (query.get("thread_ts") or [None])[0]
-        channel_id = channel_id or (query.get("cid") or [None])[0]
-
-    if not channel_id or not ts:
-        raise ValueError("List의 Slack 메시지 링크에서 채널과 시각을 읽지 못했습니다.")
-
-    return SlackMessageLocation(
-        channel_id=str(channel_id),
-        ts=str(ts),
-        root_ts=str(thread_ts or ts),
-        permalink=str(permalink) if permalink else None,
-    )
-
-
 def acquire_task_record_lock(
     reference: SlackListTaskReference,
 ) -> psycopg.Connection:
@@ -303,18 +297,6 @@ async def _read_record(
     )
     schema = task_list_schema(response["list"]["list_metadata"]["schema"])
     return schema, response["record"]
-
-
-async def _permalink(
-    client: AsyncWebClient, location: SlackMessageLocation, root: bool = False
-) -> str:
-    if location.permalink and not root:
-        return location.permalink
-    message_ts = location.root_ts if root else location.ts
-    response = await client.chat_getPermalink(
-        channel=location.channel_id, message_ts=message_ts
-    )
-    return response["permalink"]
 
 
 async def _read_thread(
@@ -405,14 +387,6 @@ def _work_thread_channel(source_references: list[dict[str, Any]]) -> str:
         "작업 기록을 새로 만들려면 요청 맥락 열에 읽을 수 있는 Slack 메시지 링크가 "
         "하나 이상 있어야 합니다."
     )
-
-
-def _escape(value: str) -> str:
-    return html.escape(value, quote=False)
-
-
-def _slack_link(url: str, label: str) -> str:
-    return f"<{_escape(url)}|{_escape(label)}>"
 
 
 def _start_message(list_url: str, title: str) -> str:
@@ -541,10 +515,14 @@ async def start_task_from_slack_list(
                 "기존 판단과 충돌하는 정보",
             ],
             "coverage_goal": "서로 다른 관련 출처에서 새로운 사실이나 판단이 더 나오지 않을 때까지",
-            "record_references_after_each_gate": True,
-            "reference_tool": "record_slack_task_references",
+            "record_references_at_finish_only": True,
             "ask_starter_if_no_references": True,
             "clarify_ambiguity_before_work": True,
+            "wait_if_prerequisites_are_missing": True,
+            "task_states": ["pending", "completed"],
+            "explicit_user_completion_approval": True,
+            "postmortem_assessment_before_completion": True,
+            "postmortem_skill": "tmn-operating:operational-postmortem",
             "runtime_metadata_at_finish": [
                 "tool",
                 "model",
@@ -557,106 +535,14 @@ async def start_task_from_slack_list(
             "starter": actor,
         },
         "recording_rule": (
-            "실제 작업이 완료되거나 막힘·인계로 종료될 때만 결과를 한 번 게시합니다. "
-            "요약에는 작업 과정보다 중요한 현재 상태와 다음 행동을 쓰고, 산출물은 "
-            "'산출물 이름: https://공유링크' 형식으로 남깁니다. 비슷한 사업에서도 쓸 "
-            "중요한 결정·이유·요구사항·실수 방지 규칙은 산출물과 중복돼도 남기고, "
-            "판단이나 행동을 바꾸지 않는 작업 과정과 통상적인 검증은 생략합니다."
+            "결과를 현재 대화에서 검토받고 사용자가 완료를 승인한 뒤에만 결과를 한 번 "
+            "게시하고 List를 완료 처리합니다. 그 전에는 대기 상태를 유지합니다. 종료 "
+            "직전에는 포스트모템 검토를 반드시 실행하고, 실제 실패와 시스템 개선 작업이 "
+            "있을 때만 원인 결정이 내려진 스레드에 별도 포스트모템을 남깁니다. 참고 자료는 "
+            "종료 결과의 마지막 상세 영역에 한 번만 넣습니다."
         ),
     }
     return json.dumps(result, ensure_ascii=False)
-
-
-def _clean_list(name: str, values: list[str] | None, maximum: int) -> list[str]:
-    cleaned = [value.strip() for value in (values or []) if value.strip()]
-    if len(cleaned) > maximum:
-        raise ValueError(f"{name}은 최대 {maximum}개만 남겨주세요.")
-    if any(len(value) > 600 for value in cleaned):
-        raise ValueError(f"{name}의 각 항목은 600자 이내로 요약해주세요.")
-    return cleaned
-
-
-def _clean_outputs(values: list[str]) -> list[tuple[str, str]]:
-    """`산출물 이름: https://링크` 입력을 Slack 이름 링크로 쓸 형태로 검증합니다."""
-    outputs = _clean_list("산출물", values, 10)
-    parsed = []
-    for output in outputs:
-        match = OUTPUT_PATTERN.fullmatch(output)
-        if not match:
-            raise ValueError(
-                '산출물은 각각 "산출물 이름: https://공유링크" 형식으로 작성해주세요.'
-            )
-        parsed.append((match.group(1).strip(), match.group(2)))
-    return parsed
-
-
-def _clean_references(values: list[str] | None) -> list[tuple[str, str]]:
-    """`자료 이름: https://링크` 입력을 중복 없는 참고 자료로 검증합니다."""
-    references = _clean_list("참고 자료", values, MAX_REFERENCE_COUNT)
-    parsed = []
-    seen_urls = set()
-    for reference in references:
-        match = OUTPUT_PATTERN.fullmatch(reference)
-        if not match:
-            raise ValueError(
-                '참고 자료는 각각 "자료 이름: https://공유링크" 형식으로 작성해주세요.'
-            )
-        name, url = match.group(1).strip(), match.group(2)
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        parsed.append((name, url))
-    return parsed
-
-
-def _validate_publishable(parts: list[str], max_chars: int = 6_000) -> None:
-    text = "\n".join(parts)
-    if len(text) > max_chars:
-        raise ValueError(f"Slack 기록은 전체 {max_chars:,}자 이내로 요약해주세요.")
-    if SECRET_PATTERN.search(text):
-        raise ValueError("Slack 결과에 토큰이나 비밀값으로 보이는 문자열이 있습니다.")
-    if LOCAL_PATH_PATTERN.search(text):
-        raise ValueError("Slack 결과에는 로컬 절대경로를 넣지 말고 공유 링크를 쓰세요.")
-
-
-def _reference_section(references: list[tuple[str, str]]) -> str:
-    return "\n".join(
-        [
-            f"참고 자료 ({len(references)}건):",
-            *[f"• {_slack_link(url, name)}" for name, url in references],
-        ]
-    )
-
-
-def _section_blocks(text: str, *, expand: bool) -> list[dict[str, Any]]:
-    """Slack section 한도를 넘지 않게 줄바꿈 경계로 나눕니다."""
-    blocks = []
-    remaining = text
-    while remaining:
-        if len(remaining) <= SLACK_SECTION_TEXT_LIMIT:
-            chunk, remaining = remaining, ""
-        else:
-            cut = remaining.rfind("\n", 0, SLACK_SECTION_TEXT_LIMIT + 1)
-            if cut <= 0:
-                cut = SLACK_SECTION_TEXT_LIMIT
-            chunk = remaining[:cut]
-            remaining = remaining[cut:].lstrip("\n")
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": chunk},
-                "expand": expand,
-            }
-        )
-    return blocks
-
-
-def _message_blocks(body: str, details: str) -> list[dict[str, Any]]:
-    blocks = _section_blocks(body, expand=True)
-    if details:
-        blocks.append({"type": "divider"})
-        blocks.extend(_section_blocks(details, expand=False))
-    return blocks
 
 
 def _format_elapsed(seconds: int) -> str:
@@ -767,76 +653,16 @@ def _detail_section(execution_metadata: str, references: list[tuple[str, str]]) 
     return "\n".join(sections)
 
 
-def _reference_message(reason: str, references: list[tuple[str, str]]) -> str:
-    return f"[참고 자료] {_escape(reason)}\n\n{_reference_section(references)}"
-
-
-async def record_task_references(
-    client: AsyncWebClient,
-    list_url: str,
-    reason: str,
-    references: list[str],
-) -> str:
-    """조사 게이트에서 실제 판단에 사용한 자료를 작업 스레드에 남깁니다."""
-    reason = reason.strip()
-    if len(reason) < 2 or len(reason) > 200:
-        raise ValueError("조사 이유는 2자 이상 200자 이내로 작성해주세요.")
-    curated_references = _clean_references(references)
-    if not curated_references:
-        raise ValueError("실제로 참고한 자료를 하나 이상 남겨주세요.")
-    _validate_publishable(
-        [reason, *[f"{name}: {url}" for name, url in curated_references]],
-        max_chars=20_000,
-    )
-
-    reference = parse_slack_list_task_url(list_url)
-    task_schema, record = await _read_record(client, reference)
-    work_references = task_schema.work_thread_references_of(record)
-    if len(work_references) != 1:
-        raise ValueError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
-
-    location = message_location(work_references[0])
-    text = _reference_message(reason, curated_references)
-    posted = await client.chat_postMessage(
-        channel=location.channel_id,
-        thread_ts=location.root_ts,
-        text=text,
-        blocks=_section_blocks(text, expand=False),
-    )
-    reply_location = SlackMessageLocation(
-        channel_id=str(posted.get("channel", location.channel_id)),
-        ts=str(posted["ts"]),
-        root_ts=location.root_ts,
-    )
-    permalink = await _permalink(client, reply_location)
-    return json.dumps(
-        {
-            "posted": True,
-            "permalink": permalink,
-            "reference_count": len(curated_references),
-        },
-        ensure_ascii=False,
-    )
-
-
 def _result_message(
     title: str,
-    status: TaskResultStatus,
     summary: str,
-    learnings: list[str],
-    reusable_findings: list[str],
     outputs: list[tuple[str, str]],
-    validation: list[str],
-    remaining: list[str],
 ) -> str:
     lines = [
         f"[작업 결과] {_escape(title)}",
         "",
         f"결과: {_escape(summary)}",
     ]
-    if status != "completed":
-        lines.insert(2, f"상태: {STATUS_LABELS[status]}")
-
     if len(outputs) == 1:
         name, url = outputs[0]
         lines.extend(["", f"산출물: {_slack_link(url, name)}"])
@@ -845,31 +671,14 @@ def _result_message(
             ["", "산출물:", *[f"• {_slack_link(url, name)}" for name, url in outputs]]
         )
 
-    sections = (
-        ("시행착오·경험", learnings),
-        ("재사용할 정보", reusable_findings),
-        ("검증", validation),
-        ("남은 일", remaining),
-    )
-    for label, values in sections:
-        if values:
-            lines.extend(
-                ["", f"{label}:", *[f"• {_escape(value)}" for value in values]]
-            )
     return "\n".join(lines)
 
 
 async def publish_task_result(
     client: AsyncWebClient,
     list_url: str,
-    actor: str,
-    status: TaskResultStatus,
     summary: str,
     outputs: list[str],
-    learnings: list[str] | None = None,
-    reusable_findings: list[str] | None = None,
-    validation: list[str] | None = None,
-    remaining: list[str] | None = None,
     references: list[str] | None = None,
     client_name: str | None = None,
     model: str | None = None,
@@ -880,19 +689,14 @@ async def publish_task_result(
     reasoning_output_tokens: int | None = None,
     total_tokens: int | None = None,
     conversation_turns: int | None = None,
-    mark_completed: bool = True,
 ) -> str:
-    """작업 스레드에 선별한 종료 요약 한 건을 게시합니다."""
+    """승인된 완료 결과를 작업 스레드에 게시하고 List를 완료 처리합니다."""
     summary = summary.strip()
-    if len(summary) < 5 or len(summary) > 1_200:
-        raise ValueError("결과 요약은 5자 이상 1,200자 이내로 작성해주세요.")
+    if len(summary) < 5 or len(summary) > 600:
+        raise ValueError("결과 요약은 5자 이상 600자 이내로 작성해주세요.")
 
-    curated_learnings = _clean_list("시행착오·경험", learnings, 3)
-    curated_findings = _clean_list("재사용할 정보", reusable_findings, 5)
     curated_outputs = _clean_outputs(outputs)
     curated_references = _clean_references(references)
-    curated_validation = _clean_list("검증", validation, 5)
-    curated_remaining = _clean_list("남은 일", remaining, 5)
     client_name = _clean_runtime_label("도구", client_name)
     model = _clean_runtime_label("모델", model)
     reasoning_effort = _clean_runtime_label("Effort", reasoning_effort, maximum=50)
@@ -907,12 +711,8 @@ async def publish_task_result(
     _validate_publishable(
         [
             summary,
-            *curated_learnings,
-            *curated_findings,
             *[f"{name}: {url}" for name, url in curated_outputs],
             *[f"{name}: {url}" for name, url in curated_references],
-            *curated_validation,
-            *curated_remaining,
             *(value for value in (client_name, model, reasoning_effort) if value),
         ],
         max_chars=24_000,
@@ -940,40 +740,36 @@ async def publish_task_result(
     )
     body = _result_message(
         task_schema.title_of(record),
-        status,
         summary,
-        curated_learnings,
-        curated_findings,
         curated_outputs,
-        curated_validation,
-        curated_remaining,
     )
     details = _detail_section(execution_metadata, curated_references)
     text = f"{body}\n\n{details}"
+    message_id = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"slack-task-result:{reference.list_id}:{reference.record_id}:completed",
+    )
     posted = await client.chat_postMessage(
         channel=location.channel_id,
         thread_ts=location.root_ts,
         text=text,
         blocks=_message_blocks(body, details),
+        client_msg_id=str(message_id),
     )
 
-    list_marked_completed = mark_completed and status == "completed"
-    if list_marked_completed:
-        await client.slackLists_items_update(
-            list_id=reference.list_id,
-            cells=task_schema.completion_cells([reference.record_id]),
+    await client.slackLists_items_update(
+        list_id=reference.list_id,
+        cells=task_schema.completion_cells([reference.record_id]),
+    )
+    try:
+        await client.reactions_add(
+            channel=location.channel_id,
+            timestamp=location.root_ts,
+            name="white_check_mark",
         )
-        try:
-            await client.reactions_add(
-                channel=location.channel_id,
-                timestamp=location.root_ts,
-                name="white_check_mark",
-            )
-            completion_reaction_added = True
-        except SlackApiError:
-            # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
-            completion_reaction_added = False
-    else:
+        completion_reaction_added = True
+    except SlackApiError:
+        # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
         completion_reaction_added = False
 
     reply_location = SlackMessageLocation(
@@ -985,9 +781,9 @@ async def publish_task_result(
     return json.dumps(
         {
             "posted": True,
-            "status": status,
+            "status": "completed",
             "permalink": permalink,
-            "list_marked_completed": list_marked_completed,
+            "list_marked_completed": True,
             "completion_reaction_added": completion_reaction_added,
         },
         ensure_ascii=False,
