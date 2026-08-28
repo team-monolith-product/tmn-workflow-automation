@@ -98,3 +98,10 @@ def test_MCP_클라이언트_이름을_사람이_읽을_수_있게_표시한다(
     context.session.client_params.client_info = client_info
 
     assert _client_display_name(context) == expected
+
+
+def test_MCP_초기화_정보가_없으면_클라이언트_이름을_알_수_없음으로_표시한다():
+    context = Mock()
+    context.session.client_params = None
+
+    assert _client_display_name(context) == "알 수 없음"
