@@ -80,3 +80,13 @@ test("runner never clicks final send before approval matches the preview", async
   await runner.send({ confirmSend: true, summaryId: "preview-1" }, summary);
   assert.equal(clicks, 1);
 });
+
+test("runner detects that the sent-documents route requires an interactive login", async () => {
+  const page = {
+    goto: async () => {},
+    url: () => "https://docu.gdoc.go.kr/cmm/main/loginForm.do?redirect=%2Fdoc%2Fsnd%2FsendDocList.do",
+  };
+
+  const runner = new Document24Runner(page);
+  assert.equal(await runner.requiresLoginForSentDocuments(), true);
+});

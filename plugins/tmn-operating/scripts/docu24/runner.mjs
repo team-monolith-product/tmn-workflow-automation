@@ -5,6 +5,7 @@ import { DocumentJobError, assertFinalApproval } from "./contracts.mjs";
 const ORIGIN = "https://docu.gdoc.go.kr";
 const HOME_URL = `${ORIGIN}/index.do`;
 const SENT_DOCUMENTS_URL = `${ORIGIN}/doc/snd/sendDocList.do`;
+const LOGIN_URL_PATTERN = /\/cmm\/main\/loginForm\.do/;
 const WRITE_URL_PATTERN = /\/doc\/wte\/docWriteForm\.do/;
 const DETAIL_URL_PATTERN = /\/doc\/snd\/sendDocDetail\.do/;
 
@@ -35,28 +36,21 @@ export class Document24Runner {
     this.page = page;
   }
 
+  async openHome() {
+    await this.page.goto(HOME_URL, { waitUntil: "domcontentloaded" });
+  }
+
+  async requiresLoginForSentDocuments() {
+    await this.page.goto(SENT_DOCUMENTS_URL, { waitUntil: "domcontentloaded" });
+    return LOGIN_URL_PATTERN.test(this.page.url());
+  }
+
   async findReusableDocuments(search) {
     await this.page.goto(SENT_DOCUMENTS_URL, { waitUntil: "domcontentloaded" });
     await expectUrl(this.page, /\/doc\/snd\/sendDocList\.do/, "Sent documents list");
-
-    const input = await expectExactly(
-      this.page.getByPlaceholder("검색어를 입력하세요."),
-      "Sent documents search field",
-    );
-    const queries = [...search.titleTerms, ...search.recipientTerms];
     const byRowText = new Map();
-    for (const query of queries) {
-      await input.fill(query);
-      await (await expectExactly(this.page.getByRole("button", { name: "검색", exact: true }), "Search button")).click();
-      const table = await expectExactly(this.page.getByRole("table", { name: "보낸 문서함", exact: true }), "Sent documents table");
-      const rows = await table.getByRole("row").all();
-      for (const row of rows.slice(1)) {
-        const rawText = normalizeText(await row.innerText());
-        const candidate = byRowText.get(rawText) ?? { rawText, matchedQueries: [] };
-        candidate.matchedQueries.push(query);
-        byRowText.set(rawText, candidate);
-      }
-    }
+    for (const query of search.titleTerms) await this.#collectSentDocumentRows(query, byRowText, "title");
+    for (const query of search.recipientTerms) await this.#collectSentDocumentRows(query, byRowText, "recipient");
     return [...byRowText.values()];
   }
 
@@ -106,9 +100,34 @@ export class Document24Runner {
   }
 
   async #openNewDocument() {
-    await this.page.goto(HOME_URL, { waitUntil: "domcontentloaded" });
+    await this.openHome();
     await (await expectExactly(this.page.getByRole("link", { name: /문서 보내기/ }), "Document send link")).click();
     await this.page.waitForURL(WRITE_URL_PATTERN, { waitUntil: "domcontentloaded" });
+  }
+
+  async #collectSentDocumentRows(query, byRowText, field) {
+    if (field === "title") {
+      await (await expectExactly(this.page.locator("#defaultSearchWord:visible"), "Sent documents title search field")).fill(query);
+      await (await expectExactly(this.page.locator("button:visible").filter({ hasText: /^검색$/ }), "Sent documents title search button")).click();
+    } else {
+      const openDetailSearch = this.page.getByRole("button", { name: "상세검색 열기", exact: true });
+      if (await openDetailSearch.count()) await openDetailSearch.click();
+      await (await expectExactly(this.page.getByRole("button", { name: "문서제목", exact: true }), "Sent documents search field menu")).click();
+      const menu = await expectExactly(this.page.getByRole("menu"), "Sent documents search field options");
+      await (await expectExactly(menu.getByText("받은기관", { exact: true }), "Recipient search field option")).click();
+      await (await expectExactly(this.page.locator("#searchWord:visible"), "Sent documents recipient search field")).fill(query);
+      await (await expectExactly(this.page.locator("#btnSearch:visible"), "Sent documents recipient search button")).click();
+    }
+
+    await this.page.waitForTimeout(1000);
+    const table = await expectExactly(this.page.getByRole("table", { name: "보낸 문서함", exact: true }), "Sent documents table");
+    const rows = await table.getByRole("row").all();
+    for (const row of rows.slice(1)) {
+      const rawText = normalizeText(await row.innerText());
+      const candidate = byRowText.get(rawText) ?? { rawText, matchedQueries: [] };
+      candidate.matchedQueries.push(query);
+      byRowText.set(rawText, candidate);
+    }
   }
 
   async #confirmSubmissionChecks() {

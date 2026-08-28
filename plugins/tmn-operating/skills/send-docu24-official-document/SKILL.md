@@ -18,12 +18,13 @@ description: 문서24에서 보낸 공문을 먼저 검색해 재작성하거나
 ```bash
 cd plugins/tmn-operating
 npm install
+npm run docu24 -- login --profile-dir /absolute/docu24-browser-profile
 npm run docu24 -- search --job search.json --profile-dir /absolute/docu24-browser-profile
 npm run docu24 -- prepare --job prepared-job.json --profile-dir /absolute/docu24-browser-profile
 npm run docu24 -- send --job prepared-job.json --approval approval.json --profile-dir /absolute/docu24-browser-profile
 ```
 
-전용 `profile-dir`은 사용자별로 정한다. 첫 실행에는 보이는 Chrome에서 문서24 로그인을 사용자가 직접 완료한다. 기존 개인 Chrome 프로필을 그대로 쓰지 않는다.
+전용 `profile-dir`은 사용자별로 정한다. runner는 이 디렉터리 안의 `docu24-auth-state.json`에 문서24 세션을 저장·복원한다. 이 파일은 로그인 자격이므로 Git에 추가하거나 다른 사람과 공유하지 않는다. `search`·`prepare`·`send`가 로그인 화면으로 이동하면 같은 보이는 Chrome 창에서 사용자가 로그인·인증서·CAPTCHA를 직접 완료한 뒤 터미널에서 Enter를 누른다. runner가 같은 브라우저 세션에서 보낸문서함 접근을 다시 확인한 뒤에만 작업을 계속한다. 기존 개인 Chrome 프로필을 그대로 쓰지 않는다.
 
 ## 입력 규칙
 
