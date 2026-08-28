@@ -1,7 +1,5 @@
 """운영팀 Slack 작업 전용 MCP 서버 테스트입니다."""
 
-import importlib
-import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,7 +22,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 @pytest.fixture
 def mcp_env(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
-    monkeypatch.setenv("SLACK_TASK_MCP_RESOURCE_URL", RESOURCE_URL)
+    monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
     monkeypatch.setenv("SLACK_TASK_MCP_BOT_TOKEN", "xoxb-test")
 
 
@@ -75,16 +73,3 @@ async def test_작업_도구만_등록하고_중간기록은_두지_않는다(mc
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
-
-
-def test_독립_배포_진입점이_health를_제공한다(mcp_env):
-    sys.modules.pop("operations_task_main", None)
-    module = importlib.import_module("operations_task_main")
-
-    try:
-        with TestClient(module.app, base_url=RESOURCE_URL) as client:
-            response = client.get("/health")
-    finally:
-        sys.modules.pop("operations_task_main", None)
-
-    assert response.json() == {"status": "ok"}

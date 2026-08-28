@@ -17,9 +17,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 from app.common import notion_page_to_markdown
-from app.knowledge_mcp import build_mcp, build_mcp_app
+from app.knowledge_mcp import (
+    build_mcp as build_knowledge_mcp,
+    build_mcp_app as build_knowledge_mcp_app,
+)
 from app.knowledge_notion import router as knowledge_notion_router
+from app.mcp_dispatcher import MCPPathDispatcher
 from app.plugin_marketplace import router as plugin_marketplace_router
+from app.slack_task_mcp import (
+    build_mcp as build_operations_task_mcp,
+    build_mcp_app as build_operations_task_mcp_app,
+)
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -58,9 +66,11 @@ if not GITHUB_TOKEN:
 # FastAPI 앱 초기화
 # ============================================================================
 
-knowledge_mcp = build_mcp()
+knowledge_mcp = build_knowledge_mcp()
 # 세션 매니저가 여기서 만들어지므로 lifespan보다 먼저 불러야 한다.
-knowledge_mcp_app = build_mcp_app(knowledge_mcp)
+knowledge_mcp_app = build_knowledge_mcp_app(knowledge_mcp)
+operations_task_mcp = build_operations_task_mcp()
+operations_task_mcp_app = build_operations_task_mcp_app(operations_task_mcp)
 
 
 @asynccontextmanager
@@ -69,7 +79,10 @@ async def lifespan(_app: FastAPI):
 
     mount만 하고 이걸 빠뜨리면 /mcp 요청이 전부 실패합니다.
     """
-    async with knowledge_mcp.session_manager.run():
+    async with (
+        knowledge_mcp.session_manager.run(),
+        operations_task_mcp.session_manager.run(),
+    ):
         yield
 
 
@@ -502,11 +515,9 @@ async def general_exception_handler(request: Request, exc: Exception):
 # MCP 서버 마운트
 # ============================================================================
 
-# "/"에 붙이는 이유는 MCP 클라이언트가 찾는 경로가 정해져 있기 때문입니다.
-# 리소스는 https://wfa.codle.io/mcp 이고 메타데이터는 그 호스트의
-# /.well-known/oauth-protected-resource 입니다. 하위 경로에 붙이면 둘 다
-# 어긋납니다. 위에 선언된 라우트가 먼저 잡히고 나머지가 MCP로 갑니다.
-app.mount("/", knowledge_mcp_app)
+# 두 MCP는 같은 공개 호스트와 OAuth 메타데이터를 공유한다. 각각을 독립 앱으로
+# 유지해 인증·전송 미들웨어는 보존하고, 마지막 catch-all mount에서 경로만 나눈다.
+app.mount("/", MCPPathDispatcher(knowledge_mcp_app, operations_task_mcp_app))
 
 
 # ============================================================================

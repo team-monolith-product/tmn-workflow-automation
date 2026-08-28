@@ -9,8 +9,8 @@ Slack 채널에서 자동화 명령을 수신하고 처리하는 봇 서버
 ### 2. FastAPI Webhook Server (`main.py`)
 Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 워크플로우를 실행하는 경량 웹훅 서버
 
-### 3. Operations Slack Task MCP (`operations_task_main.py`)
-운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스로 배포하고 같은 도메인의 `/mcp/operate` 경로로 라우팅합니다.
+### 3. Operations Slack Task MCP (`main.py`)
+운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리합니다. Knowledge MCP와 같은 FastAPI 프로세스에서 `/mcp/operate` 경로를 제공합니다.
 
 ### 4. TMN Operating Plugin
 사내 플러그인 원문은 비공개 Marketplace에서 관리합니다. Codex·Claude에서 다음 HTTPS Git Marketplace URL을 최초 한 번 등록한 뒤 `TMN Operating`을 설치합니다.
@@ -43,14 +43,9 @@ python app.py
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Operations Slack Task MCP
-```bash
-uvicorn operations_task_main:app --host 0.0.0.0 --port 8001 --reload
-```
+Operations Slack Task MCP도 같은 서버에서 실행됩니다. 로컬 주소는 `http://localhost:8000/mcp/operate`이고, 운영 환경에서는 `https://wfa.codle.io/mcp/operate`입니다.
 
-로컬 Operations MCP 주소는 `http://localhost:8001/mcp/operate`입니다. 운영 환경에서는 `https://wfa.codle.io/mcp/operate` 요청을 이 서비스에 경로 변경 없이 라우팅합니다.
-
-필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. 운영 환경의 `SLACK_TASK_MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`입니다. Operations MCP는 별도 이메일 허용 목록 없이 admin-rails 인증에 성공한 사내 계정을 허용합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
+필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `MCP_RESOURCE_URL`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. 운영 환경의 `MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`이며 두 MCP가 공유합니다. 기존 `KNOWLEDGE_MCP_RESOURCE_URL`은 `MCP_RESOURCE_URL`로 이름을 바꿉니다. Operations MCP는 별도 이메일 허용 목록 없이 admin-rails 인증에 성공한 사내 계정을 허용합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
 
 ## FastAPI 웹훅 사용법
 
@@ -96,7 +91,7 @@ curl -X POST http://localhost:8000/webhook \
 
 본 애플리케이션은 `jce-service-helm/workflow-automation-slack` Helm Chart를 통해 배포됩니다.
 - Slack Bot과 FastAPI 서버는 동일한 Docker 이미지를 사용하며, 서로 다른 CMD로 실행됩니다.
-- Operations Slack Task MCP도 같은 이미지를 사용하되 FastAPI/Knowledge MCP와 다른 서비스와 CMD로 실행합니다. Ingress는 `/mcp/operate`만 Operations 서비스로 전달합니다.
+- Operations Slack Task MCP는 Knowledge MCP와 같은 FastAPI 서비스에서 실행합니다. Ingress는 `/mcp`와 `/mcp/operate`를 같은 서비스로 전달합니다.
 - ArgoCD를 통해 자동 배포됩니다.
 
 ## 문자 발송 (뿌리오)

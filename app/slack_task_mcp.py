@@ -30,7 +30,8 @@ def build_mcp(
     slack_client: AsyncWebClient | None = None,
 ) -> MCPServer:
     """운영팀 Slack 작업 MCP 서버를 만듭니다."""
-    resource_url = os.environ["SLACK_TASK_MCP_RESOURCE_URL"]
+    # 두 MCP는 같은 wfa.codle.io 호스트와 OAuth 메타데이터를 공유한다.
+    resource_url = os.environ["MCP_RESOURCE_URL"]
     mcp: MCPServer = MCPServer(
         "team-monolith-operations-task",
         instructions=INSTRUCTIONS,
@@ -93,6 +94,6 @@ def build_mcp_app(mcp: MCPServer) -> Starlette:
     """공용 호스트의 운영팀 전용 경로에 mount할 MCP 앱을 만듭니다."""
     return build_streamable_http_app(
         mcp,
-        os.environ["SLACK_TASK_MCP_RESOURCE_URL"],
+        os.environ["MCP_RESOURCE_URL"],
         streamable_http_path="/mcp/operate",
     )

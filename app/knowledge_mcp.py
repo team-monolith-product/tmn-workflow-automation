@@ -44,7 +44,7 @@ INSTRUCTIONS = """
 def build_mcp() -> MCPServer:
     """지식베이스 MCP 서버를 만듭니다.
 
-    KNOWLEDGE_MCP_RESOURCE_URL에는 /mcp를 붙이지 않습니다. SDK가 401의
+    MCP_RESOURCE_URL에는 /mcp를 붙이지 않습니다. SDK가 401의
     resource_metadata 주소를 "이 값 + /.well-known/oauth-protected-resource"로
     만드는데, /mcp를 붙이면 실제로 열려 있는 경로와 어긋나 클라이언트가
     인가 서버를 찾지 못합니다.
@@ -56,7 +56,7 @@ def build_mcp() -> MCPServer:
         "team-monolith-knowledge",
         instructions=INSTRUCTIONS,
         token_verifier=AdminRailsTokenVerifier(),
-        auth=admin_auth_settings(os.environ["KNOWLEDGE_MCP_RESOURCE_URL"]),
+        auth=admin_auth_settings(os.environ["MCP_RESOURCE_URL"]),
     )
 
     @mcp.tool(description=QUERY_TOOL_DESCRIPTION)
@@ -85,4 +85,4 @@ def build_mcp_app(mcp: MCPServer) -> Starlette:
     Returns:
         Starlette: /mcp와 리소스 메타데이터 경로를 여는 앱
     """
-    return build_streamable_http_app(mcp, os.environ["KNOWLEDGE_MCP_RESOURCE_URL"])
+    return build_streamable_http_app(mcp, os.environ["MCP_RESOURCE_URL"])
