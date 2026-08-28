@@ -62,7 +62,7 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
     assert response.status_code == 200
     assert "start-slack-list-task" in response.text
     assert "publish_slack_task_result" in response.text
-    assert "query_knowledge" not in response.text
+    assert '"name":"query_knowledge"' not in response.text
 
 
 @pytest.mark.asyncio

@@ -508,6 +508,12 @@ async def start_task_from_slack_list(
         "source_threads": source_threads,
         "work_thread": work_thread,
         "work_thread_created": created,
+        "execution_requirements": {
+            "knowledge_query_before_work": True,
+            "knowledge_tool": "query_knowledge",
+            "clarify_ambiguity_before_work": True,
+            "starter": actor,
+        },
         "recording_rule": (
             "작업 중 대화는 에이전트 안에 둡니다. 실제 작업이 완료되거나 막힘·인계로 "
             "종료될 때만 publish_slack_task_result를 한 번 호출합니다. 작업 중 만든 "

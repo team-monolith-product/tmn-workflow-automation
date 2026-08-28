@@ -222,6 +222,12 @@ async def test_start_creates_one_root_and_stores_its_permalink():
     assert result["work_thread_created"] is True
     assert len(result["source_threads"]) == 1
     assert result["work_thread"]["messages"][0]["text"] == "[시작] 작업"
+    assert result["execution_requirements"] == {
+        "knowledge_query_before_work": True,
+        "knowledge_tool": "query_knowledge",
+        "clarify_ambiguity_before_work": True,
+        "starter": "owner@example.com",
+    }
 
 
 async def test_start_reuses_existing_thread_without_posting():
