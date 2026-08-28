@@ -32,7 +32,11 @@ query_knowledge로 관련 과거 기록을 조사해야 합니다. 결과·범�
 
 def _client_display_name(context: Context) -> str:
     """MCP 초기화 정보의 클라이언트 이름을 팀원이 알아볼 표기로 바꿉니다."""
-    client_info = context.session.client_params.client_info
+    client_params = context.session.client_params
+    if client_params is None:
+        return "알 수 없음"
+
+    client_info = client_params.client_info
     identity = f"{client_info.name} {client_info.title or ''}".casefold()
     if "claude" in identity:
         return "Claude Code"
