@@ -390,18 +390,6 @@ async def _read_source_thread(
     }
 
 
-async def _source_permalink(
-    client: AsyncWebClient, reference: dict[str, Any]
-) -> str | None:
-    """요청 맥락을 못 읽어도 원래 permalink가 있으면 시작 메시지에 보존합니다."""
-    try:
-        return await _permalink(client, message_location(reference), root=True)
-    except SlackApiError:
-        return reference.get("value") or reference.get("permalink")
-    except ValueError:
-        return None
-
-
 def _work_thread_channel(source_references: list[dict[str, Any]]) -> str:
     """새 작업 스레드를 만들 첫 번째 유효한 요청 맥락의 채널을 고릅니다."""
     for source_reference in source_references:
@@ -423,31 +411,19 @@ def _slack_link(url: str, label: str) -> str:
     return f"<{_escape(url)}|{_escape(label)}>"
 
 
-def _start_message(
-    reference: SlackListTaskReference,
-    title: str,
-    source_links: list[str],
-    actor: str,
-) -> str:
-    if source_links:
-        source = "\n".join(
-            f"• {_slack_link(link, f'요청 맥락 {index + 1}')}"
-            for index, link in enumerate(source_links)
-        )
-    else:
-        source = "없음 — List 필드를 시작 맥락으로 사용"
-
+def _start_reply_message(actor: str, started_at: str, client_name: str) -> str:
+    """작업 시작 주체·시각·도구만 첫 댓글에 남깁니다."""
+    epoch = started_at.partition(".")[0]
+    slack_date = f"<!date^{epoch}^{{date_short_pretty}} {{time}}|{_escape(started_at)}>"
     return (
-        f"[시작] {_escape(title)}\n\n"
-        f"Slack List: {_slack_link(reference.list_url, '작업 행')}\n"
-        f"요청 맥락:\n{source}\n"
-        "기록 방식: 작업 종료 시 결과와 선별한 시행착오·경험 한 건\n"
-        f"시작한 사람: {_escape(actor)}"
+        f"• 시작한 사람: {_escape(actor)}\n"
+        f"• 시작 시각: {slack_date}\n"
+        f"• 사용 도구: {_escape(client_name)}"
     )
 
 
 async def start_task_from_slack_list(
-    client: AsyncWebClient, list_url: str, actor: str
+    client: AsyncWebClient, list_url: str, actor: str, client_name: str
 ) -> str:
     """List 행의 맥락을 읽고 공용 작업 스레드를 만들거나 재사용합니다."""
     reference = parse_slack_list_task_url(list_url)
@@ -470,23 +446,23 @@ async def start_task_from_slack_list(
             if not work_references:
                 source_references = task_schema.source_thread_references_of(record)
                 channel_id = _work_thread_channel(source_references)
-                source_link_results = await asyncio.gather(
-                    *(_source_permalink(client, item) for item in source_references)
-                )
-                source_links = [link for link in source_link_results if link]
                 posted = await client.chat_postMessage(
                     channel=channel_id,
-                    text=_start_message(
-                        reference,
-                        task_schema.title_of(record),
-                        source_links,
-                        actor,
-                    ),
+                    text=_slack_link(reference.list_url, task_schema.title_of(record)),
                 )
                 root_location = SlackMessageLocation(
                     channel_id=str(posted.get("channel", channel_id)),
                     ts=str(posted["ts"]),
                     root_ts=str(posted["ts"]),
+                )
+                await client.chat_postMessage(
+                    channel=root_location.channel_id,
+                    thread_ts=root_location.root_ts,
+                    text=_start_reply_message(
+                        actor,
+                        root_location.ts,
+                        client_name,
+                    ),
                 )
                 permalink = await _permalink(client, root_location, root=True)
                 await client.slackLists_items_update(

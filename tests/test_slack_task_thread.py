@@ -187,14 +187,27 @@ async def test_start_creates_one_root_and_stores_its_permalink():
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
-    client.chat_postMessage.assert_awaited_once()
-    assert client.chat_postMessage.await_args.kwargs["channel"] == CHANNEL
-    root_text = client.chat_postMessage.await_args.kwargs["text"]
-    assert "[시작] 교육생 계정 일괄 생성" in root_text
-    assert "시행착오·경험" in root_text
+    assert client.chat_postMessage.await_count == 2
+    root_call, reply_call = client.chat_postMessage.await_args_list
+    assert root_call.kwargs == {
+        "channel": CHANNEL,
+        "text": f"<{LIST_URL}|교육생 계정 일괄 생성>",
+    }
+    assert reply_call.kwargs == {
+        "channel": CHANNEL,
+        "thread_ts": ROOT_TS,
+        "text": (
+            "• 시작한 사람: owner@example.com\n"
+            "• 시작 시각: "
+            "<!date^1700000000^{date_short_pretty} {time}|1700000000.000100>\n"
+            "• 사용 도구: Codex"
+        ),
+    }
     client.slackLists_items_update.assert_awaited_once_with(
         list_id=LIST_ID,
         cells=[
@@ -228,7 +241,9 @@ async def test_start_reuses_existing_thread_without_posting():
 
     with patch("service.slack_task_thread.acquire_task_record_lock") as acquire:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
     acquire.assert_not_called()
@@ -255,7 +270,9 @@ async def test_start_rechecks_record_after_lock_before_creating_root():
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
     client.chat_postMessage.assert_not_awaited()
@@ -277,7 +294,9 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         with pytest.raises(ValueError, match="요청 맥락"):
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
 
     client.chat_postMessage.assert_not_awaited()
     release.assert_called_once_with(lock)
@@ -295,7 +314,7 @@ async def test_start_reports_broken_source_when_work_thread_already_exists():
     client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
 
     result = json.loads(
-        await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+        await start_task_from_slack_list(client, LIST_URL, "owner@example.com", "Codex")
     )
 
     assert result["work_thread_created"] is False

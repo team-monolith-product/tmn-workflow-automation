@@ -4,7 +4,7 @@ import os
 from typing import Literal, cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
@@ -24,6 +24,17 @@ INSTRUCTIONS = """
 작업 중 대화는 에이전트 안에 두고, 실제 작업이 끝났을 때만 결과와 선별한
 시행착오·경험을 한 번 게시합니다. 전사 지식 검색은 이 서버가 제공하지 않습니다.
 """.strip()
+
+
+def _client_display_name(context: Context) -> str:
+    """MCP 초기화 정보의 클라이언트 이름을 팀원이 알아볼 표기로 바꿉니다."""
+    client_info = context.session.client_params.client_info
+    identity = f"{client_info.name} {client_info.title or ''}".casefold()
+    if "claude" in identity:
+        return "Claude Code"
+    if "codex" in identity:
+        return "Codex"
+    return client_info.title or client_info.name
 
 
 def build_mcp(
@@ -49,9 +60,14 @@ def build_mcp(
             "Slack List에만 저장합니다. 작업 중 대화를 게시하지 않습니다."
         ),
     )
-    async def start_slack_list_task(list_url: str) -> str:
+    async def start_slack_list_task(list_url: str, context: Context) -> str:
         token = cast(AdminToken, get_access_token())
-        return await start_task_from_slack_list(slack, list_url, token.email)
+        return await start_task_from_slack_list(
+            slack,
+            list_url,
+            token.email,
+            _client_display_name(context),
+        )
 
     @mcp.tool(
         description=(
