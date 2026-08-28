@@ -7,8 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from starlette.testclient import TestClient
 
-from app.mcp_common import AdminToken
-from app.slack_task_mcp import OperationsTokenVerifier, build_mcp, build_mcp_app
+from app.slack_task_mcp import build_mcp, build_mcp_app
 
 ADMIN = {
     "id": 7,
@@ -26,32 +25,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 def mcp_env(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("SLACK_TASK_MCP_RESOURCE_URL", RESOURCE_URL)
-    monkeypatch.setenv("SLACK_TASK_MCP_ALLOWED_EMAILS", ADMIN["email"])
     monkeypatch.setenv("SLACK_TASK_MCP_BOT_TOKEN", "xoxb-test")
-
-
-@pytest.mark.asyncio
-async def test_운영팀_계정만_토큰_검증을_통과한다():
-    verifier = OperationsTokenVerifier(frozenset({ADMIN["email"].upper()}))
-
-    with patch("app.mcp_common.get_me", AsyncMock(return_value=ADMIN)):
-        allowed = await verifier.verify_token("valid-token")
-
-    assert isinstance(allowed, AdminToken)
-    assert allowed.email == ADMIN["email"]
-
-    outside = ADMIN | {"email": "outside@team-mono.com"}
-    with patch("app.mcp_common.get_me", AsyncMock(return_value=outside)):
-        denied = await verifier.verify_token("valid-token")
-
-    assert denied is None
-
-
-def test_allowlist가_비면_서버가_시작되지_않는다(mcp_env, monkeypatch):
-    monkeypatch.setenv("SLACK_TASK_MCP_ALLOWED_EMAILS", "")
-
-    with pytest.raises(RuntimeError, match="비어 있습니다"):
-        build_mcp()
 
 
 def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
@@ -75,25 +49,21 @@ def test_운영팀_경로의_401은_공용_OAuth_메타데이터를_가리킨다
     assert advertised == f"{RESOURCE_URL}/.well-known/oauth-protected-resource"
 
 
-def test_허용된_운영팀_계정에만_작업_도구를_노출한다(mcp_env):
+def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다(mcp_env):
     mcp = build_mcp()
     headers = MCP_HEADERS | {"Authorization": "Bearer valid-token"}
+    internal_user = ADMIN | {"email": "outside@team-mono.com"}
 
-    with patch("app.mcp_common.get_me", AsyncMock(return_value=ADMIN)):
+    with patch("app.mcp_common.get_me", AsyncMock(return_value=internal_user)):
         with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
-            allowed = client.post(OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers)
+            response = client.post(
+                OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers
+            )
 
-    assert allowed.status_code == 200
-    assert "start-slack-list-task" in allowed.text
-    assert "publish_slack_task_result" in allowed.text
-    assert "query_knowledge" not in allowed.text
-
-    outside = ADMIN | {"email": "outside@team-mono.com"}
-    with patch("app.mcp_common.get_me", AsyncMock(return_value=outside)):
-        with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
-            denied = client.post(OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers)
-
-    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert "start-slack-list-task" in response.text
+    assert "publish_slack_task_result" in response.text
+    assert "query_knowledge" not in response.text
 
 
 @pytest.mark.asyncio
