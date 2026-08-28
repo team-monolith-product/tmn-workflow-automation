@@ -1,0 +1,12 @@
+{
+  "name": "@team-monolith/tmn-operating-docu24",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docu24": "node scripts/docu24/cli.mjs",
+    "test:docu24": "node --test tests/docu24-*.test.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
