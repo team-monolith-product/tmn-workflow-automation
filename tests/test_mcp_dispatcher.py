@@ -79,8 +79,8 @@ def test_한_앱에서_두_MCP_경로와_공용_OAuth_메타데이터를_연다(
                 headers=MCP_HEADERS | {"Authorization": "Bearer valid-token"},
             )
 
-    assert "query_knowledge" in knowledge_tools.text
-    assert "start-slack-list-task" not in knowledge_tools.text
-    assert "start-slack-list-task" in operations_tools.text
-    assert "publish_slack_task_result" in operations_tools.text
-    assert "query_knowledge" not in operations_tools.text
+    assert '"name":"query_knowledge"' in knowledge_tools.text
+    assert '"name":"start-slack-list-task"' not in knowledge_tools.text
+    assert '"name":"start-slack-list-task"' in operations_tools.text
+    assert '"name":"publish_slack_task_result"' in operations_tools.text
+    assert '"name":"query_knowledge"' not in operations_tools.text

@@ -1,11 +1,12 @@
 """운영팀 Slack 작업 전용 MCP 서버 테스트입니다."""
 
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from starlette.testclient import TestClient
 
-from app.slack_task_mcp import build_mcp, build_mcp_app
+from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
 
 ADMIN = {
     "id": 7,
@@ -61,7 +62,7 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
     assert response.status_code == 200
     assert "start-slack-list-task" in response.text
     assert "publish_slack_task_result" in response.text
-    assert "query_knowledge" not in response.text
+    assert '"name":"query_knowledge"' not in response.text
 
 
 @pytest.mark.asyncio
@@ -73,3 +74,27 @@ async def test_작업_도구만_등록하고_중간기록은_두지_않는다(mc
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
+    start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
+    assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    publish_tool = next(
+        tool for tool in tools if tool.name == "publish_slack_task_result"
+    )
+    assert "outputs" in publish_tool.input_schema["required"]
+    assert "learnings" not in publish_tool.input_schema["required"]
+
+
+@pytest.mark.parametrize(
+    ("name", "title", "expected"),
+    [
+        ("codex-mcp-client", None, "Codex"),
+        ("claude-code", None, "Claude Code"),
+        ("codex-mcp-client", "AI coding agent", "Codex"),
+        ("custom-client", "사내 에이전트", "사내 에이전트"),
+    ],
+)
+def test_MCP_클라이언트_이름을_사람이_읽을_수_있게_표시한다(name, title, expected):
+    client_info = SimpleNamespace(name=name, title=title)
+    context = Mock()
+    context.session.client_params.client_info = client_info
+
+    assert _client_display_name(context) == expected

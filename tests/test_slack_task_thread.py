@@ -187,14 +187,27 @@ async def test_start_creates_one_root_and_stores_its_permalink():
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
-    client.chat_postMessage.assert_awaited_once()
-    assert client.chat_postMessage.await_args.kwargs["channel"] == CHANNEL
-    root_text = client.chat_postMessage.await_args.kwargs["text"]
-    assert "[시작] 교육생 계정 일괄 생성" in root_text
-    assert "시행착오·경험" in root_text
+    assert client.chat_postMessage.await_count == 2
+    root_call, reply_call = client.chat_postMessage.await_args_list
+    assert root_call.kwargs == {
+        "channel": CHANNEL,
+        "text": f"<{LIST_URL}|교육생 계정 일괄 생성>",
+    }
+    assert reply_call.kwargs == {
+        "channel": CHANNEL,
+        "thread_ts": ROOT_TS,
+        "text": (
+            "• 시작한 사람: owner@example.com\n"
+            "• 시작 시각: "
+            "<!date^1700000000^{date_short_pretty} {time}|1700000000.000100>\n"
+            "• 사용 도구: Codex"
+        ),
+    }
     client.slackLists_items_update.assert_awaited_once_with(
         list_id=LIST_ID,
         cells=[
@@ -209,6 +222,12 @@ async def test_start_creates_one_root_and_stores_its_permalink():
     assert result["work_thread_created"] is True
     assert len(result["source_threads"]) == 1
     assert result["work_thread"]["messages"][0]["text"] == "[시작] 작업"
+    assert result["execution_requirements"] == {
+        "knowledge_query_before_work": True,
+        "knowledge_tool": "query_knowledge",
+        "clarify_ambiguity_before_work": True,
+        "starter": "owner@example.com",
+    }
 
 
 async def test_start_reuses_existing_thread_without_posting():
@@ -228,7 +247,9 @@ async def test_start_reuses_existing_thread_without_posting():
 
     with patch("service.slack_task_thread.acquire_task_record_lock") as acquire:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
     acquire.assert_not_called()
@@ -255,7 +276,9 @@ async def test_start_rechecks_record_after_lock_before_creating_root():
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         result = json.loads(
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
         )
 
     client.chat_postMessage.assert_not_awaited()
@@ -277,7 +300,9 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
     ), patch("service.slack_task_thread.release_task_record_lock") as release:
         with pytest.raises(ValueError, match="요청 맥락"):
-            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+            await start_task_from_slack_list(
+                client, LIST_URL, "owner@example.com", "Codex"
+            )
 
     client.chat_postMessage.assert_not_awaited()
     release.assert_called_once_with(lock)
@@ -295,7 +320,7 @@ async def test_start_reports_broken_source_when_work_thread_already_exists():
     client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
 
     result = json.loads(
-        await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+        await start_task_from_slack_list(client, LIST_URL, "owner@example.com", "Codex")
     )
 
     assert result["work_thread_created"] is False
@@ -326,11 +351,11 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
             "owner@example.com",
             "completed",
             "계정 68개를 생성하고 로그인을 확인했습니다.",
+            outputs=["계정 생성 결과: https://docs.example.com/account-result"],
             learnings=[
                 "전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눴습니다."
             ],
             reusable_findings=["외부 강사는 별도 승인이 필요합니다."],
-            outputs=["https://docs.example.com/account-result"],
             validation=["생성 수와 샘플 로그인을 확인했습니다."],
             remaining=["외부 강사 12명 승인 대기"],
             mark_completed=True,
@@ -360,6 +385,7 @@ async def test_publish_rejects_too_many_learnings_before_slack_call():
             "owner@example.com",
             "completed",
             "충분히 구체적인 완료 요약입니다.",
+            outputs=[],
             learnings=["하나", "둘", "셋", "넷"],
         )
 
@@ -376,6 +402,7 @@ async def test_publish_rejects_secrets_and_local_paths():
             "owner@example.com",
             "completed",
             "토큰 xoxb-abcdefghijklmnopqrstuvwxyz 를 사용했습니다.",
+            outputs=[],
         )
 
     with pytest.raises(ValueError, match="로컬 절대경로"):
@@ -385,4 +412,21 @@ async def test_publish_rejects_secrets_and_local_paths():
             "owner@example.com",
             "completed",
             "결과는 /Users/name/report.md 에 저장했습니다.",
+            outputs=[],
         )
+
+
+async def test_publish_rejects_output_without_shareable_link():
+    client = AsyncMock()
+
+    with pytest.raises(ValueError, match="https:// 공유 링크"):
+        await publish_task_result(
+            client,
+            LIST_URL,
+            "owner@example.com",
+            "completed",
+            "확정된 연수 안내문을 작성했습니다.",
+            outputs=["최종 연수 안내문"],
+        )
+
+    client.chat_postMessage.assert_not_awaited()
