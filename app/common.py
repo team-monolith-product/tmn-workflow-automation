@@ -15,7 +15,7 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from dotenv import load_dotenv
-from notion_client import Client as NotionClient
+from notion_client import APIResponseError, Client as NotionClient
 from notion_to_md import NotionToMarkdown
 from langchain_core.tools import tool
 from langchain_community.document_loaders import WebBaseLoader
@@ -612,7 +612,13 @@ def get_notion_page_tool():
         노션 페이지를 마크다운 형태로 조회합니다.
         www.notion.so 에 대한 링크는 반드시 이 도구를 사용하여 조회합니다.
         """
-        return await asyncio.to_thread(notion_page_to_markdown, page_id)
+        try:
+            return await asyncio.to_thread(notion_page_to_markdown, page_id)
+        except APIResponseError:
+            return (
+                "이 페이지를 조회할 수 없습니다. 페이지가 삭제되었거나 "
+                "워크플로 자동화 연동 앱에 공유되지 않았을 수 있습니다."
+            )
 
     return get_notion_page
 
