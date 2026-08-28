@@ -21,8 +21,9 @@ INSTRUCTIONS = """
 이전 작업 기록을 읽어 공용 작업 스레드로 연결합니다.
 새 작업 스레드는 요청 맥락 메시지의 채널에 만들며, 관계와 상태는 Slack List에만
 저장합니다.
-작업 중 대화는 에이전트 안에 두고, 실제 작업이 끝났을 때만 결과와 선별한
-시행착오·경험을 한 번 게시합니다. 전사 지식 검색은 이 서버가 제공하지 않습니다.
+작업 중 대화는 에이전트 안에 두고, 실제 작업이 끝났을 때만 결과와 작업 중 만든
+공유 가능한 산출물 링크를 한 번 게시합니다. 시행착오·경험은 중요한 내용이 있을
+때만 포함합니다. 전사 지식 검색은 이 서버가 제공하지 않습니다.
 """.strip()
 
 
@@ -72,18 +73,20 @@ def build_mcp(
     @mcp.tool(
         description=(
             "운영팀 작업이 완료됐거나 막힘·인계로 종료될 때 작업 기록 스레드에 "
-            "요약 한 건을 게시합니다. learnings에는 최종 접근을 바꿨거나 같은 실수를 "
-            "막아 줄 시행착오·경험이 있을 때만 최대 3개 넣습니다. 매 응답이나 중간 "
-            "진행에는 사용하지 않습니다."
+            "요약 한 건을 게시합니다. outputs에는 작업 중 만든 공유 가능한 산출물 "
+            "링크를 모두 넣고 각 항목에 https:// 링크를 포함해야 합니다. 만든 링크가 "
+            "없을 때만 빈 배열을 사용합니다. learnings에는 최종 접근을 바꿨거나 같은 "
+            "실수를 막아 줄 중요한 시행착오·경험이 있을 때만 최대 3개 넣고, 없으면 "
+            "생략합니다. 매 응답이나 중간 진행에는 사용하지 않습니다."
         )
     )
     async def publish_slack_task_result(
         list_url: str,
         status: Literal["completed", "blocked", "handoff"],
         summary: str,
+        outputs: list[str],
         learnings: list[str] | None = None,
         reusable_findings: list[str] | None = None,
-        outputs: list[str] | None = None,
         validation: list[str] | None = None,
         remaining: list[str] | None = None,
         mark_completed: bool = False,

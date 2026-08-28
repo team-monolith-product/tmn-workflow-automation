@@ -345,11 +345,11 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
             "owner@example.com",
             "completed",
             "계정 68개를 생성하고 로그인을 확인했습니다.",
+            outputs=["계정 생성 결과: https://docs.example.com/account-result"],
             learnings=[
                 "전체 명단을 한 번에 처리하니 승인 대상이 섞여, 승인 여부로 먼저 나눴습니다."
             ],
             reusable_findings=["외부 강사는 별도 승인이 필요합니다."],
-            outputs=["https://docs.example.com/account-result"],
             validation=["생성 수와 샘플 로그인을 확인했습니다."],
             remaining=["외부 강사 12명 승인 대기"],
             mark_completed=True,
@@ -379,6 +379,7 @@ async def test_publish_rejects_too_many_learnings_before_slack_call():
             "owner@example.com",
             "completed",
             "충분히 구체적인 완료 요약입니다.",
+            outputs=[],
             learnings=["하나", "둘", "셋", "넷"],
         )
 
@@ -395,6 +396,7 @@ async def test_publish_rejects_secrets_and_local_paths():
             "owner@example.com",
             "completed",
             "토큰 xoxb-abcdefghijklmnopqrstuvwxyz 를 사용했습니다.",
+            outputs=[],
         )
 
     with pytest.raises(ValueError, match="로컬 절대경로"):
@@ -404,4 +406,21 @@ async def test_publish_rejects_secrets_and_local_paths():
             "owner@example.com",
             "completed",
             "결과는 /Users/name/report.md 에 저장했습니다.",
+            outputs=[],
         )
+
+
+async def test_publish_rejects_output_without_shareable_link():
+    client = AsyncMock()
+
+    with pytest.raises(ValueError, match="https:// 공유 링크"):
+        await publish_task_result(
+            client,
+            LIST_URL,
+            "owner@example.com",
+            "completed",
+            "확정된 연수 안내문을 작성했습니다.",
+            outputs=["최종 연수 안내문"],
+        )
+
+    client.chat_postMessage.assert_not_awaited()

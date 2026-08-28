@@ -76,6 +76,11 @@ async def test_작업_도구만_등록하고_중간기록은_두지_않는다(mc
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
     start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
     assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    publish_tool = next(
+        tool for tool in tools if tool.name == "publish_slack_task_result"
+    )
+    assert "outputs" in publish_tool.input_schema["required"]
+    assert "learnings" not in publish_tool.input_schema["required"]
 
 
 @pytest.mark.parametrize(

@@ -43,6 +43,7 @@ SECRET_PATTERN = re.compile(
 LOCAL_PATH_PATTERN = re.compile(
     r"(?:^|[\s(])(?:/Users/|/home/|file://|[A-Za-z]:\\)", re.MULTILINE
 )
+HTTPS_URL_PATTERN = re.compile(r"https://[^\s<>]+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -509,7 +510,9 @@ async def start_task_from_slack_list(
         "work_thread_created": created,
         "recording_rule": (
             "작업 중 대화는 에이전트 안에 둡니다. 실제 작업이 완료되거나 막힘·인계로 "
-            "종료될 때만 publish_slack_task_result를 한 번 호출합니다."
+            "종료될 때만 publish_slack_task_result를 한 번 호출합니다. 작업 중 만든 "
+            "공유 가능한 산출물 링크는 모두 게시하고, 시행착오·경험은 중요한 내용이 "
+            "있을 때만 선별합니다."
         ),
     }
     return json.dumps(result, ensure_ascii=False)
@@ -575,9 +578,9 @@ async def publish_task_result(
     actor: str,
     status: TaskResultStatus,
     summary: str,
+    outputs: list[str],
     learnings: list[str] | None = None,
     reusable_findings: list[str] | None = None,
-    outputs: list[str] | None = None,
     validation: list[str] | None = None,
     remaining: list[str] | None = None,
     mark_completed: bool = False,
@@ -592,6 +595,11 @@ async def publish_task_result(
     curated_learnings = _clean_list("시행착오·경험", learnings, 3)
     curated_findings = _clean_list("재사용할 정보", reusable_findings, 5)
     curated_outputs = _clean_list("산출물", outputs, 10)
+    if any(not HTTPS_URL_PATTERN.search(output) for output in curated_outputs):
+        raise ValueError(
+            "산출물의 각 항목에는 팀원이 열 수 있는 https:// 공유 링크를 "
+            "반드시 포함해주세요."
+        )
     curated_validation = _clean_list("검증", validation, 5)
     curated_remaining = _clean_list("남은 일", remaining, 5)
     _validate_publishable(
