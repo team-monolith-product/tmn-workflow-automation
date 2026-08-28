@@ -71,12 +71,13 @@ def build_mcp(
     slack = slack_client or AsyncWebClient(token=os.environ["SLACK_TASK_MCP_BOT_TOKEN"])
 
     @mcp.tool(
+        name="start-slack-list-task",
         description=(
             "운영팀 Slack List 작업 행 링크로 작업을 시작합니다. List 필드와 요청 "
             "맥락, 현재 상태, 기존 작업 결과를 읽고 작업 기록 스레드를 만들거나 "
             "재사용합니다. 새 스레드는 요청 맥락 메시지의 채널에 만들고 연결은 "
             "Slack List에만 저장합니다. 작업 중 대화를 게시하지 않습니다."
-        )
+        ),
     )
     async def start_slack_list_task(list_url: str) -> str:
         token = cast(AdminToken, get_access_token())

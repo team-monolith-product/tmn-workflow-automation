@@ -1,7 +1,7 @@
 interface:
   display_name: "Start Operations Task"
   short_description: "운영팀 작업의 시작·상태·이전 맥락·종료 결과를 관리합니다"
-  default_prompt: "Use $start-slack-task to start or resume this Slack List task, read its current state and prior context, and publish a concise result only when the work ends."
+  default_prompt: "Use $start-operate-task to start or resume this Slack List task, read its current state and prior context, and publish a concise result only when the work ends."
 dependencies:
   tools:
     - type: "mcp"

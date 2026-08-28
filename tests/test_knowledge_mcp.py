@@ -126,5 +126,5 @@ async def test_운영팀_작업_도구는_등록하지_않는다(mcp_env):
     tools = await build_mcp().list_tools()
 
     names = {tool.name for tool in tools}
-    assert "start_slack_list_task" not in names
+    assert "start-slack-list-task" not in names
     assert "publish_slack_task_result" not in names

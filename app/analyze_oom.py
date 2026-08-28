@@ -7,6 +7,8 @@ OOM 원인에 대한 가설을 제시합니다.
 """
 
 from datetime import datetime
+from pathlib import Path
+
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -14,28 +16,18 @@ from langgraph.prebuilt import create_react_agent
 from app.common import KST
 from app.tool_status_handler import ToolStatusHandler
 from app.tools.oom_tools import (
-    SKILL_DIR,
     find_incomplete_requests,
     list_log_streams,
     query_alb_access_logs,
 )
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 
-
-def _strip_frontmatter(content: str) -> str:
-    """YAML frontmatter 제거 (--- 로 둘러싸인 부분)"""
-    if content.startswith("---"):
-        end_index = content.find("---", 3)
-        if end_index != -1:
-            return content[end_index + 3 :].strip()
-    return content
+OOM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "oom_analysis.md"
 
 
 def _load_system_prompt() -> str:
-    """SKILL.md 파일에서 시스템 프롬프트 로드"""
-    skill_md = SKILL_DIR / "SKILL.md"
-    content = skill_md.read_text(encoding="utf-8")
-    return _strip_frontmatter(content)
+    """애플리케이션 전용 OOM 분석 프롬프트를 읽습니다."""
+    return OOM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
 async def analyze_oom_alert(slack_client, body, say):

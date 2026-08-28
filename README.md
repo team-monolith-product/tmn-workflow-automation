@@ -13,7 +13,7 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스로 배포하고 같은 도메인의 `/mcp/operate` 경로로 라우팅합니다.
 
 ### 4. TMN Operating Plugin (`plugins/tmn-operating`)
-전사 지식 검색 MCP, 운영팀 Slack List 작업 MCP, Slack 작업 스킬과 Rails OOM 분석 스킬을 하나로 배포합니다. 두 MCP 서버는 플러그인 안에서 함께 보이지만 서버와 접근 권한은 분리됩니다.
+전사 지식 검색 MCP, 운영팀 Slack List 작업 MCP와 `start-operate-task` 스킬을 하나로 배포합니다. 두 MCP 서버는 플러그인 안에서 함께 보이지만 서버와 접근 권한은 분리됩니다.
 
 Knowledge MCP는 `https://wfa.codle.io/mcp`, Operations MCP는 `https://wfa.codle.io/mcp/operate`를 사용합니다. 공개 도메인과 OAuth 메타데이터는 공유하지만 MCP 서버, 도구, 권한 검증은 분리합니다.
 

@@ -88,7 +88,7 @@ def test_허용된_운영팀_계정에만_작업_도구를_노출한다(mcp_env)
             allowed = client.post(OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers)
 
     assert allowed.status_code == 200
-    assert "start_slack_list_task" in allowed.text
+    assert "start-slack-list-task" in allowed.text
     assert "publish_slack_task_result" in allowed.text
     assert "query_knowledge" not in allowed.text
 
@@ -105,7 +105,7 @@ async def test_작업_도구만_등록하고_중간기록은_두지_않는다(mc
     tools = await build_mcp().list_tools()
 
     assert [tool.name for tool in tools] == [
-        "start_slack_list_task",
+        "start-slack-list-task",
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
@@ -131,7 +131,7 @@ def test_플러그인은_지식과_운영_MCP를_서로_다른_주소로_연결�
     knowledge_url = servers["team-monolith-knowledge"]["url"]
     operations_url = servers["team-monolith-operations-task"]["url"]
     skill = yaml.safe_load(
-        (PLUGIN_ROOT / "skills/start-slack-task/agents/openai.yaml").read_text(
+        (PLUGIN_ROOT / "skills/start-operate-task/agents/openai.yaml").read_text(
             encoding="utf-8"
         )
     )
@@ -140,3 +140,11 @@ def test_플러그인은_지식과_운영_MCP를_서로_다른_주소로_연결�
     assert knowledge_url == "https://wfa.codle.io/mcp"
     assert operations_url == "https://wfa.codle.io/mcp/operate"
     assert dependency_url == operations_url
+
+
+def test_운영_플러그인에는_운영_작업_스킬만_포함한다():
+    skill_names = {
+        path.parent.name for path in (PLUGIN_ROOT / "skills").glob("*/SKILL.md")
+    }
+
+    assert skill_names == {"start-operate-task"}

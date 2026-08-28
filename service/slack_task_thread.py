@@ -633,7 +633,7 @@ async def publish_task_result(
     task_schema, record = await _read_record(client, reference)
     work_references = task_schema.work_thread_references_of(record)
     if len(work_references) != 1:
-        raise ValueError("먼저 start_slack_list_task로 작업 스레드를 연결해주세요.")
+        raise ValueError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
 
     location = message_location(work_references[0])
     posted = await client.chat_postMessage(

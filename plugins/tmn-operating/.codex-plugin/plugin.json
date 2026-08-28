@@ -15,8 +15,7 @@
     "capabilities": ["Read", "Write"],
     "defaultPrompt": [
       "사내 과거 대화와 업무 데이터를 검색해줘.",
-      "운영팀 Slack List 작업을 시작하고 이전 맥락과 상태를 파악해줘.",
-      "Rails 파드 재시작 알림에서 OOM 원인을 분석해줘."
+      "운영팀 Slack List 작업을 시작하고 이전 맥락과 상태를 파악해줘."
     ]
   },
   "mcpServers": "./.mcp.json"

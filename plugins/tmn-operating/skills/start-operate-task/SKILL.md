@@ -1,9 +1,9 @@
 ---
-name: start-slack-task
+name: start-operate-task
 description: 운영팀 Slack List 작업을 시작하거나 재개하고, 현재 상태·요청 맥락·이전 작업 기록을 추적한 뒤 종료 결과와 공유할 경험을 작업 스레드에 남깁니다. 운영팀 사용자가 Slack List 작업의 시작·상태 확인·재개·완료를 요청할 때 사용합니다.
 ---
 
-# Start Slack Task
+# Start Operate Task
 
 Slack은 에이전트 대화를 중계하는 곳이 아니라 다음 사람이 다시 쓸 조직 기억을 남기는 곳입니다.
 
@@ -11,7 +11,7 @@ Slack은 에이전트 대화를 중계하는 곳이 아니라 다음 사람이 �
 
 ## 시작
 
-1. 사용자가 준 Slack List 작업 행 URL을 `start_slack_list_task`에 전달합니다.
+1. 사용자가 준 Slack List 작업 행 URL을 `start-slack-list-task`에 전달합니다.
 2. 반환된 List 필드에서 완료 여부·담당자·마감일을 확인하고, `source_threads`와 기존 `work_thread`를 읽어 요청 배경, 앞선 선택과 결과, 남은 작업을 파악합니다.
 3. `작업 기록` 열이 없다는 오류가 나오면 message 타입의 `작업 기록` 열을 List에 한 번 추가하도록 안내합니다. 다른 열을 대신 쓰지 않습니다.
 4. 새 작업 스레드가 필요한 행은 `요청 맥락`에 유효한 Slack 메시지 링크가 있어야 합니다. 이 링크의 채널에 작업 스레드를 만들므로, 링크가 없거나 깨졌다는 오류가 나오면 원본 Slack 메시지를 먼저 연결하도록 안내합니다.

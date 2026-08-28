@@ -37,7 +37,7 @@ flowchart LR
     KM --> KD["사내 지식 DB"]
 
     U["운영팀 구성원"] --> A["Claude 또는 Codex<br/>운영 플러그인 설치"]
-    A --> S["start-slack-task 스킬<br/>시작·종료 요약"]
+    A --> S["start-operate-task 스킬<br/>시작·종료 요약"]
     S --> M["운영팀 전용 Slack Task MCP<br/>별도 배포·allowlist"]
     M --> L["Slack List 행<br/>상태와 연결의 유일한 원장"]
     L --> C["요청 맥락<br/>왜 생겼는지"]
@@ -107,7 +107,7 @@ CREATE_SCHEMA = [
 
 ## 운영팀 MCP 동작
 
-### `start_slack_list_task`
+### `start-slack-list-task`
 
 - 입력: `list_url`
 - List 전체 스키마와 해당 행을 Slack에서 직접 읽는다.
@@ -146,7 +146,7 @@ CREATE_SCHEMA = [
 | 배포 단위 | 대상 | 노출 도구 | 권한·비밀값 |
 |---|---|---|---|
 | Knowledge MCP | 전사 | `query_knowledge` | 기존 사내 OAuth, Slack 쓰기 토큰 불필요 |
-| Operations Slack Task MCP | 운영팀 | `start_slack_list_task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
+| Operations Slack Task MCP | 운영팀 | `start-slack-list-task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
 | TMN Operating Plugin | 운영팀의 Claude·Codex | 두 MCP 연결 + 사내 스킬 | 운영팀에게 설치·업데이트 배포 |
 
 두 MCP는 코드 저장소, 이미지, 공개 도메인과 OAuth 메타데이터를 재사용할 수 있지만 MCP 서버 객체, 경로, 프로세스, 환경 변수, 배포 서비스는 분리한다.
