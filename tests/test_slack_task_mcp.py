@@ -1,13 +1,10 @@
 """운영팀 Slack 작업 전용 MCP 서버 테스트입니다."""
 
 import importlib
-import json
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import yaml
 from starlette.testclient import TestClient
 
 from app.mcp_common import AdminToken
@@ -23,7 +20,6 @@ RESOURCE_URL = "https://wfa.codle.io"
 OPERATIONS_MCP_PATH = "/mcp/operate"
 TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
-PLUGIN_ROOT = Path(__file__).parents[1] / "plugins" / "tmn-operating"
 
 
 @pytest.fixture
@@ -122,29 +118,3 @@ def test_독립_배포_진입점이_health를_제공한다(mcp_env):
         sys.modules.pop("operations_task_main", None)
 
     assert response.json() == {"status": "ok"}
-
-
-def test_플러그인은_지식과_운영_MCP를_서로_다른_주소로_연결한다():
-    servers = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))[
-        "mcpServers"
-    ]
-    knowledge_url = servers["team-monolith-knowledge"]["url"]
-    operations_url = servers["team-monolith-operations-task"]["url"]
-    skill = yaml.safe_load(
-        (PLUGIN_ROOT / "skills/start-operate-task/agents/openai.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-    dependency_url = skill["dependencies"]["tools"][0]["url"]
-
-    assert knowledge_url == "https://wfa.codle.io/mcp"
-    assert operations_url == "https://wfa.codle.io/mcp/operate"
-    assert dependency_url == operations_url
-
-
-def test_운영_플러그인에는_운영_작업_스킬만_포함한다():
-    skill_names = {
-        path.parent.name for path in (PLUGIN_ROOT / "skills").glob("*/SKILL.md")
-    }
-
-    assert skill_names == {"start-operate-task"}

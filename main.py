@@ -19,6 +19,7 @@ import uvicorn
 from app.common import notion_page_to_markdown
 from app.knowledge_mcp import build_mcp, build_mcp_app
 from app.knowledge_notion import router as knowledge_notion_router
+from app.plugin_marketplace import router as plugin_marketplace_router
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -78,6 +79,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.include_router(plugin_marketplace_router)
 
 
 # ============================================================================
