@@ -15,6 +15,8 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 ### 4. TMN Operating Plugin (`plugins/tmn-operating`)
 전사 지식 검색 MCP, 운영팀 Slack List 작업 MCP, Slack 작업 스킬과 Rails OOM 분석 스킬을 하나로 배포합니다. 두 MCP 서버는 플러그인 안에서 함께 보이지만 서버와 접근 권한은 분리됩니다.
 
+Knowledge MCP는 `https://wfa.codle.io/mcp`를 사용합니다. Operations MCP는 같은 URL을 중복 등록하지 않고, 별도 운영 주소가 배포되면 플러그인의 두 번째 MCP 연결로 활성화합니다.
+
 ## 환경 변수
 
 ### 공통

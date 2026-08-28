@@ -151,7 +151,9 @@ CREATE_SCHEMA = [
 
 두 MCP는 코드 저장소와 이미지를 재사용할 수 있지만 프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리한다.
 
-현재 플러그인의 MCP URL은 비라우팅 `.invalid` 주소다. 운영 서비스의 소유·DNS·TLS·라우팅이 승인된 뒤 실제 주소로 교체해야 설치가 활성화된다.
+플러그인은 운영팀에게 두 MCP 연결을 한 번에 설치한다. 확정된 Knowledge MCP는 `https://wfa.codle.io/mcp`를 사용한다. Operations MCP는 같은 URL을 재사용하지 않는다. 같은 URL을 두 서버 이름에 넣으면 Operations 도구가 생기는 것이 아니라 Knowledge MCP가 중복 연결되기 때문이다.
+
+Operations 주소는 별도 서비스의 소유·DNS·TLS·라우팅이 확정될 때까지 비라우팅 `.invalid` 주소로 막아 둔다. 배포 후 `.mcp.json`과 `start-slack-task/agents/openai.yaml`을 같은 실제 주소로 교체해야 한다.
 
 ## 예외와 실패 원칙
 

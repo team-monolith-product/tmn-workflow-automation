@@ -2,7 +2,7 @@
   "mcpServers": {
     "team-monolith-knowledge": {
       "type": "http",
-      "url": "https://knowledge-mcp.invalid/mcp"
+      "url": "https://wfa.codle.io/mcp"
     },
     "team-monolith-operations-task": {
       "type": "http",
