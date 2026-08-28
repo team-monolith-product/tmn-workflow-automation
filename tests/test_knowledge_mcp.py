@@ -27,7 +27,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 def mcp_env(monkeypatch):
     """build_mcp와 build_mcp_app이 읽는 환경 변수를 채웁니다."""
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
-    monkeypatch.setenv("KNOWLEDGE_MCP_RESOURCE_URL", RESOURCE_URL)
+    monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
 
 
 @pytest.mark.asyncio
