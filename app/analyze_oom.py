@@ -22,12 +22,23 @@ from app.tools.oom_tools import (
 )
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 
-OOM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "oom_analysis.md"
+SKILL_DIR = Path(__file__).parent.parent / ".claude" / "skills" / "oom-analyzer"
+
+
+def _strip_frontmatter(content: str) -> str:
+    """YAML frontmatter 제거 (--- 로 둘러싸인 부분)"""
+    if content.startswith("---"):
+        end_index = content.find("---", 3)
+        if end_index != -1:
+            return content[end_index + 3 :].strip()
+    return content
 
 
 def _load_system_prompt() -> str:
-    """애플리케이션 전용 OOM 분석 프롬프트를 읽습니다."""
-    return OOM_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    """SKILL.md 파일에서 시스템 프롬프트 로드"""
+    skill_md = SKILL_DIR / "SKILL.md"
+    content = skill_md.read_text(encoding="utf-8")
+    return _strip_frontmatter(content)
 
 
 async def analyze_oom_alert(slack_client, body, say):

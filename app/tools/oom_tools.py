@@ -3,23 +3,33 @@ OOM 분석을 위한 LangChain Tools
 """
 
 import asyncio
+import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Annotated
 
 import boto3
 from langchain_core.tools import tool
 
-from service.oom_log_analysis import (
-    extract_request_id,
-    extract_request_info,
-    fetch_logs_from_cloudwatch,
-    format_time,
+SCRIPTS_PATH = (
+    Path(__file__).parent.parent.parent
+    / ".claude"
+    / "skills"
+    / "oom-analyzer"
+    / "scripts"
+)
+sys.path.insert(0, str(SCRIPTS_PATH))
+
+from list_log_streams import list_streams, format_time
+from find_incomplete_requests import (
     get_stream_last_timestamp,
-    is_completed_request,
-    is_started_request,
-    list_streams,
+    fetch_logs_from_cloudwatch,
     parse_log_message,
+    extract_request_id,
+    is_started_request,
+    is_completed_request,
+    extract_request_info,
     should_exclude_path,
 )
 
