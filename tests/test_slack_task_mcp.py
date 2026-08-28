@@ -66,21 +66,42 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
 
 
 @pytest.mark.asyncio
-async def test_작업_도구만_등록하고_중간기록은_두지_않는다(mcp_env):
+async def test_작업과_조사근거_도구만_등록한다(mcp_env):
     tools = await build_mcp().list_tools()
 
     assert [tool.name for tool in tools] == [
         "start-slack-list-task",
+        "record_slack_task_references",
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
     start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
     assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    reference_tool = next(
+        tool for tool in tools if tool.name == "record_slack_task_references"
+    )
+    assert set(reference_tool.input_schema["properties"]) == {
+        "list_url",
+        "reason",
+        "references",
+    }
     publish_tool = next(
         tool for tool in tools if tool.name == "publish_slack_task_result"
     )
     assert "outputs" in publish_tool.input_schema["required"]
     assert "learnings" not in publish_tool.input_schema["required"]
+    assert "references" in publish_tool.input_schema["properties"]
+    assert {
+        "model",
+        "reasoning_effort",
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_tokens",
+        "conversation_turns",
+    } <= set(publish_tool.input_schema["properties"])
+    assert "context" not in publish_tool.input_schema["properties"]
 
 
 @pytest.mark.parametrize(
@@ -100,8 +121,16 @@ def test_MCP_클라이언트_이름을_사람이_읽을_수_있게_표시한다(
     assert _client_display_name(context) == expected
 
 
-def test_MCP_초기화_정보가_없으면_클라이언트_이름을_알_수_없음으로_표시한다():
+def test_MCP_초기화_정보가_없으면_일반_클라이언트로_표시한다():
     context = Mock()
     context.session.client_params = None
 
-    assert _client_display_name(context) == "알 수 없음"
+    assert _client_display_name(context) == "MCP 클라이언트"
+
+
+def test_MCP_초기화_정보가_없어도_user_agent에서_codex를_찾는다():
+    context = Mock()
+    context.session.client_params = None
+    context.headers = {"user-agent": "codex-mcp-client/1.0"}
+
+    assert _client_display_name(context) == "Codex"
