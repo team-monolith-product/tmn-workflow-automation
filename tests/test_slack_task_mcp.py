@@ -61,35 +61,32 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
 
     assert response.status_code == 200
     assert "start-slack-list-task" in response.text
+    assert "publish-operational-postmortem" in response.text
     assert "publish_slack_task_result" in response.text
     assert '"name":"query_knowledge"' not in response.text
 
 
 @pytest.mark.asyncio
-async def test_작업과_조사근거_도구만_등록한다(mcp_env):
+async def test_작업과_포스트모템_도구와_레거시_무기록_도구를_등록한다(mcp_env):
     tools = await build_mcp().list_tools()
 
     assert [tool.name for tool in tools] == [
         "start-slack-list-task",
         "record_slack_task_references",
         "publish_slack_task_result",
+        "publish-operational-postmortem",
     ]
-    assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
     start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
     assert set(start_tool.input_schema["properties"]) == {"list_url"}
-    reference_tool = next(
-        tool for tool in tools if tool.name == "record_slack_task_references"
-    )
-    assert set(reference_tool.input_schema["properties"]) == {
-        "list_url",
-        "reason",
-        "references",
-    }
     publish_tool = next(
         tool for tool in tools if tool.name == "publish_slack_task_result"
     )
+    assert "user_approved_completion" in publish_tool.input_schema["required"]
     assert "outputs" in publish_tool.input_schema["required"]
-    assert "learnings" not in publish_tool.input_schema["required"]
+    assert "status" not in publish_tool.input_schema["properties"]
+    assert "learnings" not in publish_tool.input_schema["properties"]
+    assert "validation" not in publish_tool.input_schema["properties"]
+    assert "mark_completed" not in publish_tool.input_schema["properties"]
     assert "references" in publish_tool.input_schema["properties"]
     assert {
         "model",
@@ -102,6 +99,28 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
         "conversation_turns",
     } <= set(publish_tool.input_schema["properties"])
     assert "context" not in publish_tool.input_schema["properties"]
+
+    postmortem_tool = next(
+        tool for tool in tools if tool.name == "publish-operational-postmortem"
+    )
+    assert {
+        "list_url",
+        "incident_key",
+        "target_thread_url",
+        "title",
+        "expected",
+        "actual",
+    } <= set(postmortem_tool.input_schema["required"])
+    assert {
+        "confirmed_causes",
+        "hypotheses",
+        "investigation_items",
+        "improvement_task_title",
+        "improvement_target",
+        "completion_criteria",
+        "related_thread_url",
+        "references",
+    } <= set(postmortem_tool.input_schema["properties"])
 
 
 @pytest.mark.parametrize(

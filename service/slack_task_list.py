@@ -18,7 +18,9 @@ channel_task_list 표는 기존 Slack 봇의 라우팅 설정입니다. 채널�
 
 import asyncio
 from dataclasses import asdict, dataclass, fields
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -41,6 +43,13 @@ ITEM_PAGE_SIZE = 100
 
 # 커서가 끝나지 않을 때 호출이 무한히 이어지지 않도록 둔 상한
 MAX_ITEM_PAGES = 20
+KST = ZoneInfo("Asia/Seoul")
+DEFAULT_DUE_DAYS = 7
+
+
+def default_due_date() -> str:
+    """대화나 자동화에 마감 단서가 없을 때 사용할 KST 날짜입니다."""
+    return (datetime.now(KST) + timedelta(days=DEFAULT_DUE_DAYS)).strftime("%Y-%m-%d")
 
 
 def _read_cell(item: dict, column_id: str, value_key: str):
