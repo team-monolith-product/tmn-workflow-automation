@@ -38,7 +38,7 @@ def build_mcp(
         token_verifier=AdminRailsTokenVerifier(),
         auth=admin_auth_settings(resource_url),
     )
-    slack = slack_client or AsyncWebClient(token=os.environ["SLACK_TASK_MCP_BOT_TOKEN"])
+    slack = slack_client or AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
     @mcp.tool(
         name="start-slack-list-task",

@@ -45,7 +45,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 Operations Slack Task MCP도 같은 서버에서 실행됩니다. 로컬 주소는 `http://localhost:8000/mcp/operate`이고, 운영 환경에서는 `https://wfa.codle.io/mcp/operate`입니다.
 
-필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `MCP_RESOURCE_URL`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. 운영 환경의 `MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`이며 두 MCP가 공유합니다. 기존 `KNOWLEDGE_MCP_RESOURCE_URL`은 `MCP_RESOURCE_URL`로 이름을 바꿉니다. Operations MCP는 별도 이메일 허용 목록 없이 admin-rails 인증에 성공한 사내 계정을 허용합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
+필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `MCP_RESOURCE_URL`, `SLACK_BOT_TOKEN`입니다. 운영 환경의 `MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`이며 두 MCP가 공유합니다. 기존 `KNOWLEDGE_MCP_RESOURCE_URL`은 `MCP_RESOURCE_URL`로 이름을 바꿉니다. Operations MCP는 기존 Team Monolith Slack 봇 토큰(`SLACK_BOT_TOKEN`)을 사용하며, 별도 이메일 허용 목록 없이 admin-rails 인증에 성공한 사내 계정을 허용합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
 
 ## FastAPI 웹훅 사용법
 

@@ -26,7 +26,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 def test_한_앱에서_두_MCP_경로와_공용_OAuth_메타데이터를_연다(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
-    monkeypatch.setenv("SLACK_TASK_MCP_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     knowledge_mcp = build_knowledge_mcp()
     operations_mcp = build_operations_mcp()

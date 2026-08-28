@@ -23,7 +23,7 @@ MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 def mcp_env(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
-    monkeypatch.setenv("SLACK_TASK_MCP_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
 
 def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
