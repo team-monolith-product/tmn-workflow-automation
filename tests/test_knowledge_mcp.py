@@ -9,6 +9,7 @@ from starlette.testclient import TestClient
 
 from app.knowledge_mcp import build_mcp, build_mcp_app
 from app.mcp_common import AdminRailsTokenVerifier, AdminToken
+from app.plugin_marketplace import router as plugin_marketplace_router
 
 ADMIN = {
     "id": 7,
@@ -99,6 +100,7 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
             yield
 
     api = FastAPI(lifespan=lifespan)
+    api.include_router(plugin_marketplace_router)
 
     @api.get("/health")
     async def health() -> dict[str, str]:
@@ -109,6 +111,11 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
     with TestClient(api, base_url=RESOURCE_URL) as client:
         assert client.get("/health").json() == {"status": "ok"}
         assert client.get("/.well-known/oauth-protected-resource").status_code == 200
+        marketplace = client.get(
+            "/plugins/tmn-operating.git/info/refs?service=git-upload-pack",
+            follow_redirects=False,
+        )
+        assert marketplace.status_code == 307
 
         response = client.post("/mcp", json=TOOLS_LIST, headers=MCP_HEADERS)
         assert response.status_code == 401
