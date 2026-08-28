@@ -149,11 +149,11 @@ CREATE_SCHEMA = [
 | Operations Slack Task MCP | 운영팀 | `start_slack_list_task`, `publish_slack_task_result` | 사내 OAuth + 운영팀 이메일 allowlist + Slack bot token |
 | TMN Operating Plugin | 운영팀의 Claude·Codex | 두 MCP 연결 + 사내 스킬 | 운영팀에게 설치·업데이트 배포 |
 
-두 MCP는 코드 저장소와 이미지를 재사용할 수 있지만 프로세스, 공개 리소스 URL, 환경 변수, 배포 서비스는 분리한다.
+두 MCP는 코드 저장소, 이미지, 공개 도메인과 OAuth 메타데이터를 재사용할 수 있지만 MCP 서버 객체, 경로, 프로세스, 환경 변수, 배포 서비스는 분리한다.
 
-플러그인은 운영팀에게 두 MCP 연결을 한 번에 설치한다. 확정된 Knowledge MCP는 `https://wfa.codle.io/mcp`를 사용한다. Operations MCP는 같은 URL을 재사용하지 않는다. 같은 URL을 두 서버 이름에 넣으면 Operations 도구가 생기는 것이 아니라 Knowledge MCP가 중복 연결되기 때문이다.
+플러그인은 운영팀에게 두 MCP 연결을 한 번에 설치한다. Knowledge MCP는 `https://wfa.codle.io/mcp`, Operations MCP는 `https://wfa.codle.io/mcp/operate`를 사용한다. 공개 도메인과 로그인 흐름은 공유하지만 서로 다른 MCP 엔드포인트이므로 전사 검색과 운영팀 쓰기 권한은 섞이지 않는다.
 
-Operations 주소는 별도 서비스의 소유·DNS·TLS·라우팅이 확정될 때까지 비라우팅 `.invalid` 주소로 막아 둔다. 배포 후 `.mcp.json`과 `start-slack-task/agents/openai.yaml`을 같은 실제 주소로 교체해야 한다.
+Knowledge 서비스는 `/mcp`, Operations 서비스는 `/mcp/operate`를 직접 제공한다. Ingress는 같은 `wfa.codle.io` 호스트에서 경로에 따라 두 서비스로 라우팅한다. 두 서비스의 `*_MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`로 두어 공용 `/.well-known/oauth-protected-resource` 메타데이터를 사용한다.
 
 ## 예외와 실패 원칙
 

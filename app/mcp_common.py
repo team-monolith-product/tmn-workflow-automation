@@ -43,13 +43,19 @@ def admin_auth_settings(resource_url: str) -> AuthSettings:
     )
 
 
-def build_streamable_http_app(mcp: MCPServer, resource_url: str) -> Starlette:
+def build_streamable_http_app(
+    mcp: MCPServer,
+    resource_url: str,
+    *,
+    streamable_http_path: str = "/mcp",
+) -> Starlette:
     """하나의 공개 호스트에서 MCP와 OAuth 메타데이터를 제공하는 앱을 만듭니다."""
     parsed = urlparse(resource_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("MCP resource URL에는 http(s) scheme과 호스트가 필요합니다.")
 
     return mcp.streamable_http_app(
+        streamable_http_path=streamable_http_path,
         stateless_http=True,
         transport_security=TransportSecuritySettings(
             allowed_hosts=[parsed.netloc],

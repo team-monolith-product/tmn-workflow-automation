@@ -19,7 +19,8 @@ ADMIN = {
     "permissions": ["Role"],
     "tenants": ["test_class"],
 }
-RESOURCE_URL = "https://ops-wfa.codle.io"
+RESOURCE_URL = "https://wfa.codle.io"
+OPERATIONS_MCP_PATH = "/mcp/operate"
 TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 PLUGIN_ROOT = Path(__file__).parents[1] / "plugins" / "tmn-operating"
@@ -57,12 +58,25 @@ def test_allowlist가_비면_서버가_시작되지_않는다(mcp_env, monkeypat
         build_mcp()
 
 
-def test_운영팀_호스트에_mcp와_메타데이터를_연다(mcp_env):
+def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
     mcp = build_mcp()
     paths = {route.path for route in build_mcp_app(mcp).routes}
 
-    assert "/mcp" in paths
+    assert OPERATIONS_MCP_PATH in paths
     assert "/.well-known/oauth-protected-resource" in paths
+
+
+def test_운영팀_경로의_401은_공용_OAuth_메타데이터를_가리킨다(mcp_env):
+    mcp = build_mcp()
+    with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
+        response = client.post(
+            OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=MCP_HEADERS
+        )
+
+    assert response.status_code == 401
+    advertised = response.headers["www-authenticate"].split('resource_metadata="')[1]
+    advertised = advertised.rstrip('"')
+    assert advertised == f"{RESOURCE_URL}/.well-known/oauth-protected-resource"
 
 
 def test_허용된_운영팀_계정에만_작업_도구를_노출한다(mcp_env):
@@ -71,7 +85,7 @@ def test_허용된_운영팀_계정에만_작업_도구를_노출한다(mcp_env)
 
     with patch("app.mcp_common.get_me", AsyncMock(return_value=ADMIN)):
         with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
-            allowed = client.post("/mcp", json=TOOLS_LIST, headers=headers)
+            allowed = client.post(OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers)
 
     assert allowed.status_code == 200
     assert "start_slack_list_task" in allowed.text
@@ -81,7 +95,7 @@ def test_허용된_운영팀_계정에만_작업_도구를_노출한다(mcp_env)
     outside = ADMIN | {"email": "outside@team-mono.com"}
     with patch("app.mcp_common.get_me", AsyncMock(return_value=outside)):
         with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
-            denied = client.post("/mcp", json=TOOLS_LIST, headers=headers)
+            denied = client.post(OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers)
 
     assert denied.status_code == 401
 
@@ -124,5 +138,5 @@ def test_플러그인은_지식과_운영_MCP를_서로_다른_주소로_연결�
     dependency_url = skill["dependencies"]["tools"][0]["url"]
 
     assert knowledge_url == "https://wfa.codle.io/mcp"
-    assert operations_url != knowledge_url
+    assert operations_url == "https://wfa.codle.io/mcp/operate"
     assert dependency_url == operations_url

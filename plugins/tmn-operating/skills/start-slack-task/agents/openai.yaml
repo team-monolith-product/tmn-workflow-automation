@@ -8,6 +8,6 @@ dependencies:
       value: "team-monolith-operations-task"
       description: "운영팀 Slack List 작업을 시작·재개하고 상태·이전 맥락을 읽으며 종료 결과를 게시하는 전용 MCP"
       transport: "streamable_http"
-      url: "https://slack-task-mcp.invalid/mcp"
+      url: "https://wfa.codle.io/mcp/operate"
 policy:
   allow_implicit_invocation: true

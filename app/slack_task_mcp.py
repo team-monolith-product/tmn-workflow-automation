@@ -120,5 +120,9 @@ def build_mcp(
 
 
 def build_mcp_app(mcp: MCPServer) -> Starlette:
-    """운영팀 전용 호스트에 mount할 MCP 앱을 만듭니다."""
-    return build_streamable_http_app(mcp, os.environ["SLACK_TASK_MCP_RESOURCE_URL"])
+    """공용 호스트의 운영팀 전용 경로에 mount할 MCP 앱을 만듭니다."""
+    return build_streamable_http_app(
+        mcp,
+        os.environ["SLACK_TASK_MCP_RESOURCE_URL"],
+        streamable_http_path="/mcp/operate",
+    )
