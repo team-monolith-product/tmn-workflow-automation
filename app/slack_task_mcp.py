@@ -4,7 +4,6 @@ import os
 from typing import Literal, cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver import MCPServer
 from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
@@ -27,45 +26,15 @@ INSTRUCTIONS = """
 """.strip()
 
 
-def allowed_emails_from_env() -> frozenset[str]:
-    """쉼표로 구분한 운영팀 이메일 allowlist를 읽습니다."""
-    emails = frozenset(
-        item.strip().casefold()
-        for item in os.environ.get("SLACK_TASK_MCP_ALLOWED_EMAILS", "").split(",")
-        if item.strip()
-    )
-    if not emails:
-        raise RuntimeError("SLACK_TASK_MCP_ALLOWED_EMAILS가 비어 있습니다.")
-    return emails
-
-
-class OperationsTokenVerifier(AdminRailsTokenVerifier):
-    """유효한 사내 계정 중 운영팀 allowlist에 속한 사용자만 허용합니다."""
-
-    def __init__(self, allowed_emails: frozenset[str]):
-        self.allowed_emails = frozenset(email.casefold() for email in allowed_emails)
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        verified = await super().verify_token(token)
-        if not isinstance(verified, AdminToken):
-            return None
-        if verified.email.casefold() not in self.allowed_emails:
-            return None
-        return verified
-
-
 def build_mcp(
     slack_client: AsyncWebClient | None = None,
-    allowed_emails: frozenset[str] | None = None,
 ) -> MCPServer:
     """운영팀 Slack 작업 MCP 서버를 만듭니다."""
     resource_url = os.environ["SLACK_TASK_MCP_RESOURCE_URL"]
     mcp: MCPServer = MCPServer(
         "team-monolith-operations-task",
         instructions=INSTRUCTIONS,
-        token_verifier=OperationsTokenVerifier(
-            allowed_emails if allowed_emails is not None else allowed_emails_from_env()
-        ),
+        token_verifier=AdminRailsTokenVerifier(),
         auth=admin_auth_settings(resource_url),
     )
     slack = slack_client or AsyncWebClient(token=os.environ["SLACK_TASK_MCP_BOT_TOKEN"])

@@ -12,10 +12,12 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 ### 3. Operations Slack Task MCP (`operations_task_main.py`)
 운영팀 Slack List 작업의 시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리하는 독립 MCP 서버. 전사용 Knowledge MCP와 별도 프로세스로 배포하고 같은 도메인의 `/mcp/operate` 경로로 라우팅합니다.
 
-### 4. TMN Operating Plugin (`plugins/tmn-operating`)
-전사 지식 검색 MCP, 운영팀 Slack List 작업 MCP와 `start-operate-task` 스킬을 하나로 배포합니다. 두 MCP 서버는 플러그인 안에서 함께 보이지만 서버와 접근 권한은 분리됩니다.
+### 4. TMN Operating Plugin
+사내 플러그인 원문은 비공개 Marketplace에서 관리합니다. Codex·Claude에서 다음 HTTPS Git Marketplace URL을 최초 한 번 등록한 뒤 `TMN Operating`을 설치합니다.
 
-Knowledge MCP는 `https://wfa.codle.io/mcp`, Operations MCP는 `https://wfa.codle.io/mcp/operate`를 사용합니다. 공개 도메인과 OAuth 메타데이터는 공유하지만 MCP 서버, 도구, 권한 검증은 분리합니다.
+```text
+https://wfa.codle.io/plugins/tmn-operating.git
+```
 
 ## 환경 변수
 
@@ -48,7 +50,7 @@ uvicorn operations_task_main:app --host 0.0.0.0 --port 8001 --reload
 
 로컬 Operations MCP 주소는 `http://localhost:8001/mcp/operate`입니다. 운영 환경에서는 `https://wfa.codle.io/mcp/operate` 요청을 이 서비스에 경로 변경 없이 라우팅합니다.
 
-필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_ALLOWED_EMAILS`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. 운영 환경의 `SLACK_TASK_MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`이고, `SLACK_TASK_MCP_ALLOWED_EMAILS`는 운영팀 이메일을 쉼표로 구분합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
+필수 환경 변수는 `ADMIN_RAILS_BASE_URL`, `KNOWLEDGE_DATABASE_URL`, `SLACK_TASK_MCP_RESOURCE_URL`, `SLACK_TASK_MCP_BOT_TOKEN`입니다. 운영 환경의 `SLACK_TASK_MCP_RESOURCE_URL`은 경로를 제외한 `https://wfa.codle.io`입니다. Operations MCP는 별도 이메일 허용 목록 없이 admin-rails 인증에 성공한 사내 계정을 허용합니다. `KNOWLEDGE_DATABASE_URL`은 같은 Slack List 행의 작업 스레드가 동시에 두 개 생기지 않도록 advisory lock을 잡는 데만 쓰며, 작업과 스레드의 관계는 저장하지 않습니다.
 
 ## FastAPI 웹훅 사용법
 
