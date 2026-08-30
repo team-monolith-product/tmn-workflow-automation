@@ -10,7 +10,12 @@ write 로 추가되어 있어야 한다. fast-forward 가 아니라서 develop r
 이 있는 레포에서는 bypass 도 필요하고, Bot 팀이 그 bypass 대상이다.
 
 로컬 develop 은 각자 손으로 정리해야 하므로 초기화 후 안내에서 열린 PR 의 담당자를
-멘션한다. 담당자는 PR → 노션 작업 → 담당자 → 이메일 → 슬랙 사용자로 찾는다.
+멘션한다. 담당자는 두 경로로 찾아 합친다.
+1. PR → 노션 작업 → 담당자 → 이메일 → 슬랙 사용자
+2. PR 작성자(GitHub) → 첫 커밋 author 이메일 → 슬랙 사용자
+
+두 경로 모두 슬랙 사용자를 찾지 못한 PR은 조용히 빠뜨리지 않고, 안내문에 별도로
+나열해 PR을 노션 작업에 연결하거나 담당자를 지정해 달라고 요청한다.
 
 사용법:
     python scripts/reset_develop.py <repo> [--dry-run]
@@ -23,10 +28,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 import dotenv
 from github import Github, UnknownObjectException
+from github.PullRequest import PullRequest
 from github.Repository import Repository
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
@@ -50,17 +56,55 @@ LOCAL_CLEANUP_COMMAND = (
 )
 
 
-def get_open_pull_urls(repo: Repository) -> dict[int, str]:
+class UnmentionedPull(NamedTuple):
+    number: int
+    url: str
+    author_login: str
+
+
+def get_open_pulls(repo: Repository) -> list[PullRequest]:
     """
-    열린 PR 의 번호와 URL 을 모읍니다.
+    열린 PR 목록을 가져옵니다.
 
     Args:
         repo: 대상 리포지토리
 
     Returns:
+        list[PullRequest]: 열린 PR 목록
+    """
+    return list(repo.get_pulls(state="open"))
+
+
+def get_open_pull_urls(pulls: list[PullRequest]) -> dict[int, str]:
+    """
+    열린 PR 의 번호와 URL 을 모읍니다.
+
+    Args:
+        pulls: 열린 PR 목록
+
+    Returns:
         dict[int, str]: PR 번호 → PR URL
     """
-    return {pull.number: pull.html_url for pull in repo.get_pulls(state="open")}
+    return {pull.number: pull.html_url for pull in pulls}
+
+
+def get_pull_author_email(pull: PullRequest) -> str | None:
+    """
+    PR 작성자의 이메일을 가져옵니다.
+
+    GitHub 계정의 이메일은 비공개일 수 있어, PR 의 첫 커밋 author 이메일을 대신 쓴다.
+    이 이메일은 개인 이메일일 수 있어 슬랙 계정을 찾는 용도로만 쓰고, 찾지 못했을 때
+    노션 담당자 이메일처럼 안내문에 그대로 노출하지는 않는다.
+    커밋이 없거나 이메일을 알 수 없으면 None.
+
+    Args:
+        pull: 대상 PR
+
+    Returns:
+        str | None: 작성자 이메일
+    """
+    first_commit = next(iter(pull.get_commits()), None)
+    return first_commit.commit.author.email if first_commit else None
 
 
 def _query_pr_pages(notion: NotionClient, numbers: list[int]) -> Iterator[dict]:
@@ -160,9 +204,57 @@ def to_mentions(emails: list[str], email_to_user_id: dict[str, str]) -> list[str
     ]
 
 
+def build_open_pull_report(
+    pulls: list[PullRequest],
+    notion: NotionClient,
+    email_to_user_id: dict[str, str],
+) -> tuple[list[str], list[UnmentionedPull]]:
+    """
+    열린 PR 마다 담당자를 찾아 멘션 목록과, 끝내 찾지 못한 PR 목록으로 나눕니다.
+
+    담당자는 PR 별로 노션 작업 담당자를 먼저 찾고, 못 찾으면 PR 작성자로 대신한다.
+    작성자 커밋 이메일 조회는 GitHub API 호출이라, 노션 경로로 이미 찾은 PR 에는
+    시도하지 않는다. 그래도 슬랙 사용자를 찾지 못한 PR 만 미해결로 남긴다.
+
+    Args:
+        pulls: 열린 PR 목록
+        notion: 노션 클라이언트
+        email_to_user_id: 이메일 → 슬랙 사용자 ID
+
+    Returns:
+        tuple[list[str], list[UnmentionedPull]]:
+            - 중복 없는 슬랙 멘션(또는 슬랙 계정 없는 담당자의 이메일) 목록
+            - 담당자를 찾지 못한 PR 목록
+    """
+    task_page_ids = get_task_page_ids(notion, get_open_pull_urls(pulls))
+
+    mentions: list[str] = []
+    unmentioned: list[UnmentionedPull] = []
+    for pull in pulls:
+        task_emails = get_assignee_emails(notion, task_page_ids.get(pull.number, []))
+        pull_mentions = to_mentions(task_emails, email_to_user_id)
+
+        if not pull_mentions:
+            author_user_id = email_to_user_id.get(get_pull_author_email(pull))
+            if author_user_id:
+                pull_mentions = [f"<@{author_user_id}>"]
+
+        if not pull_mentions:
+            unmentioned.append(
+                UnmentionedPull(pull.number, pull.html_url, pull.user.login)
+            )
+            continue
+        for mention in pull_mentions:
+            if mention not in mentions:
+                mentions.append(mention)
+
+    return mentions, unmentioned
+
+
 def build_announcement(
     repo_name: str,
     mentions: list[str],
+    unmentioned: list[UnmentionedPull],
     caller_slack_user_id: str | None,
 ) -> str:
     """
@@ -171,6 +263,7 @@ def build_announcement(
     Args:
         repo_name: 레포 이름
         mentions: 열린 PR 담당자의 슬랙 멘션 목록
+        unmentioned: 담당자를 찾지 못한 PR 목록
         caller_slack_user_id: 명령을 실행한 사람
 
     Returns:
@@ -185,6 +278,16 @@ def build_announcement(
     ]
     if mentions:
         lines += ["", f"열린 PR 이 있는 분들 {' '.join(mentions)}"]
+    if unmentioned:
+        lines += [
+            "",
+            "담당자를 찾지 못한 PR입니다. 다음부터 누락되지 않도록 PR을 노션 작업에 "
+            "연결하거나 작업 담당자를 지정해 주세요.",
+        ]
+        lines += [
+            f"- #{pull.number} ({pull.url}, 작성자: {pull.author_login})"
+            for pull in unmentioned
+        ]
     return "\n".join(lines)
 
 
@@ -228,14 +331,11 @@ def main(
 
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     notion = NotionClient(auth=os.environ["NOTION_TOKEN"], notion_version="2025-09-03")
-    task_page_ids = get_task_page_ids(notion, get_open_pull_urls(repo))
-    emails = get_assignee_emails(
-        notion, [page_id for ids in task_page_ids.values() for page_id in ids]
+    mentions, unmentioned = build_open_pull_report(
+        get_open_pulls(repo), notion, get_email_to_user_id(slack_client)
     )
     announcement = build_announcement(
-        repo_name,
-        to_mentions(emails, get_email_to_user_id(slack_client)),
-        caller_slack_user_id,
+        repo_name, mentions, unmentioned, caller_slack_user_id
     )
 
     # 되돌리려면 초기화 전 커밋이 필요하다. force 이동이라 ref 이력이 남지 않는다.
