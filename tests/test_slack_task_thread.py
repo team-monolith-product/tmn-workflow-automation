@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from slack_sdk.errors import SlackApiError, SlackRequestError
 
+from service.slack_task_message import result_client_msg_id
 from service.slack_task_thread import (
     _actor_mention,
     find_work_thread_column_id,
@@ -29,23 +30,6 @@ ROOT_URL = "https://example.slack.com/archives/C0ABCDE1234/p1700000000000100"
 SOURCE_TS = "1699999999.000000"
 SOURCE_URL = "https://example.slack.com/archives/C0ABCDE1234/p1699999999000000"
 SOURCE_REF = {"value": SOURCE_URL, "channel_id": CHANNEL, "ts": SOURCE_TS}
-
-
-@pytest.fixture(autouse=True)
-def avoid_task_result_database(monkeypatch):
-    """Slack 단위 테스트는 결과 상태 DB와 advisory lock을 메모리로 대신합니다."""
-    monkeypatch.setattr(
-        "service.slack_task_result.find_result_message", Mock(return_value=None)
-    )
-    monkeypatch.setattr(
-        "service.slack_task_result.save_result_message", Mock(return_value=None)
-    )
-    monkeypatch.setattr(
-        "service.slack_task_thread.acquire_task_record_lock", Mock(return_value=Mock())
-    )
-    monkeypatch.setattr(
-        "service.slack_task_thread.release_task_record_lock", Mock(return_value=None)
-    )
 
 
 SCHEMA = [
@@ -93,6 +77,15 @@ def info(item: dict, schema: list[dict] | None = None) -> dict:
         "list": {"list_metadata": {"schema": schema or SCHEMA}},
         "record": item,
     }
+
+
+def publishing_client() -> AsyncMock:
+    client = AsyncMock()
+    client.conversations_replies.return_value = {
+        "messages": [],
+        "response_metadata": {"next_cursor": ""},
+    }
+    return client
 
 
 def test_list_url_parser_uses_list_and_record_ids():
@@ -378,7 +371,7 @@ async def test_start_reports_broken_source_when_work_thread_already_exists():
 
 
 async def test_publish_posts_curated_learnings_and_marks_completed():
-    client = AsyncMock()
+    client = publishing_client()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
     )
@@ -423,6 +416,7 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
 
     sent = client.chat_postMessage.await_args.kwargs
     assert sent["thread_ts"] == ROOT_TS
+    assert sent["client_msg_id"] == result_client_msg_id(LIST_ID, RECORD_ID)
     assert "시행착오·경험:" in sent["text"]
     assert "승인 여부로 먼저 나눴습니다" in sent["text"]
     assert "일반 탐색" not in sent["text"]
@@ -462,6 +456,40 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
     assert result["completion_reaction_added"] is True
 
 
+async def test_publish_updates_existing_result_in_work_thread():
+    client = publishing_client()
+    client.slackLists_items_info.return_value = info(
+        record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
+    )
+    message_ts = "1700000004.000200"
+    client.conversations_replies.return_value = {
+        "messages": [
+            {
+                "ts": message_ts,
+                "client_msg_id": result_client_msg_id(LIST_ID, RECORD_ID),
+            }
+        ],
+        "response_metadata": {"next_cursor": ""},
+    }
+    client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
+
+    result = json.loads(
+        await publish_task_result(
+            client,
+            LIST_URL,
+            "owner@example.com",
+            "completed",
+            "기존 결과 메시지를 최신 내용으로 갱신했습니다.",
+            outputs=[],
+        )
+    )
+
+    client.chat_postMessage.assert_not_awaited()
+    client.chat_update.assert_awaited_once()
+    assert client.chat_update.await_args.kwargs["ts"] == message_ts
+    assert result["message_action"] == "updated"
+
+
 async def test_record_references_posts_one_curated_gate_log():
     client = AsyncMock()
     client.slackLists_items_info.return_value = info(
@@ -496,7 +524,7 @@ async def test_record_references_posts_one_curated_gate_log():
 
 
 async def test_publish_keeps_blocked_task_open_by_default():
-    client = AsyncMock()
+    client = publishing_client()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
     )
@@ -533,7 +561,7 @@ async def test_publish_keeps_blocked_task_open_by_default():
 async def test_publish_keeps_completed_result_when_check_reaction_fails(
     reaction_error,
 ):
-    client = AsyncMock()
+    client = publishing_client()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
     )
@@ -561,7 +589,7 @@ async def test_publish_keeps_completed_result_when_check_reaction_fails(
 
 
 async def test_publish_returns_partial_success_when_only_list_update_fails():
-    client = AsyncMock()
+    client = publishing_client()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
     )

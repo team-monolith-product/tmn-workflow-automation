@@ -1,11 +1,15 @@
 """Slack 메시지 위치와 permalink 변환을 제공합니다."""
 
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from slack_sdk.web.async_client import AsyncWebClient
+
+MAX_THREAD_PAGES = 5
+THREAD_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -61,3 +65,35 @@ async def get_permalink(
         channel=location.channel_id, message_ts=message_ts
     )
     return response["permalink"]
+
+
+def result_client_msg_id(list_id: str, record_id: str) -> str:
+    """Slack List 행마다 고정된 종료 결과 메시지 ID를 만듭니다."""
+    key = f"https://wfa.codle.io/slack-task-result/{list_id}/{record_id}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+
+async def find_message_ts(
+    client: AsyncWebClient,
+    location: SlackMessageLocation,
+    client_msg_id: str,
+) -> str | None:
+    """스레드에서 client_msg_id가 일치하는 메시지를 찾습니다."""
+    cursor = None
+    for _ in range(MAX_THREAD_PAGES):
+        response = await client.conversations_replies(
+            channel=location.channel_id,
+            ts=location.root_ts,
+            limit=THREAD_PAGE_SIZE,
+            cursor=cursor,
+        )
+        for message in response.get("messages", []):
+            if message.get("client_msg_id") == client_msg_id:
+                return str(message["ts"])
+
+        cursor = response.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            return None
+
+    # ponytail: 작업 스레드가 이 상한을 넘길 때만 별도 인덱스를 검토한다.
+    return None

@@ -22,10 +22,11 @@ from service.db import get_dsn
 from service.slack_task_list import build_completion_cells
 from service.slack_task_message import (
     SlackMessageLocation,
+    find_message_ts,
     get_permalink as _permalink,
     message_location,
+    result_client_msg_id,
 )
-from service.slack_task_result import publish_result_message
 
 SOURCE_THREAD_COLUMN_NAME = "요청 맥락"
 SOURCE_THREAD_COLUMN_KEY = "slack_thread"
@@ -893,62 +894,78 @@ async def publish_task_result(
     )
     details = _detail_section(execution_metadata, curated_references)
     text = f"{body}\n\n{details}"
-    lock = await asyncio.to_thread(acquire_task_record_lock, reference)
-    try:
-        message, message_action = await publish_result_message(
-            client,
-            list_id=reference.list_id,
-            record_id=reference.record_id,
-            channel_id=location.channel_id,
-            thread_ts=location.root_ts,
+    blocks = _message_blocks(body, details)
+    client_msg_id = result_client_msg_id(reference.list_id, reference.record_id)
+    message_ts = await find_message_ts(client, location, client_msg_id)
+    if message_ts:
+        await client.chat_update(
+            channel=location.channel_id,
+            ts=message_ts,
             text=text,
-            blocks=_message_blocks(body, details),
+            blocks=blocks,
         )
-        list_should_be_completed = mark_completed and status == "completed"
-        list_marked_completed = False
-        list_update_error = None
-        if list_should_be_completed:
-            try:
-                await client.slackLists_items_update(
-                    list_id=reference.list_id,
-                    cells=build_completion_cells(
-                        task_schema.completed_column_id, [reference.record_id]
-                    ),
-                )
-                list_marked_completed = True
-            except (SlackApiError, SlackRequestError) as exc:
-                list_update_error = (
-                    str(exc.response.get("error", "slack_api_error"))
-                    if isinstance(exc, SlackApiError)
-                    else "slack_request_error"
-                )
-
-        completion_reaction_added = False
-        if list_marked_completed:
-            try:
-                await client.reactions_add(
-                    channel=location.channel_id,
-                    timestamp=location.root_ts,
-                    name="white_check_mark",
-                )
-                completion_reaction_added = True
-            except (SlackApiError, SlackRequestError):
-                # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
-                pass
-
-        return json.dumps(
-            {
-                "posted": True,
-                "status": status,
-                "outcome": "partial_success" if list_update_error else "success",
-                "message_action": message_action,
-                "permalink": message.permalink,
-                "list_marked_completed": list_marked_completed,
-                "list_update_error": list_update_error,
-                "retry_post": False,
-                "completion_reaction_added": completion_reaction_added,
-            },
-            ensure_ascii=False,
+        message_action = "updated"
+    else:
+        posted = await client.chat_postMessage(
+            channel=location.channel_id,
+            thread_ts=location.root_ts,
+            client_msg_id=client_msg_id,
+            text=text,
+            blocks=blocks,
         )
-    finally:
-        await asyncio.to_thread(release_task_record_lock, lock)
+        message_ts = str(posted["ts"])
+        message_action = "created"
+
+    result_location = SlackMessageLocation(
+        channel_id=location.channel_id,
+        ts=message_ts,
+        root_ts=location.root_ts,
+    )
+    permalink = await _permalink(client, result_location)
+
+    list_should_be_completed = mark_completed and status == "completed"
+    list_marked_completed = False
+    list_update_error = None
+    if list_should_be_completed:
+        try:
+            await client.slackLists_items_update(
+                list_id=reference.list_id,
+                cells=build_completion_cells(
+                    task_schema.completed_column_id, [reference.record_id]
+                ),
+            )
+            list_marked_completed = True
+        except (SlackApiError, SlackRequestError) as exc:
+            list_update_error = (
+                str(exc.response.get("error", "slack_api_error"))
+                if isinstance(exc, SlackApiError)
+                else "slack_request_error"
+            )
+
+    completion_reaction_added = False
+    if list_marked_completed:
+        try:
+            await client.reactions_add(
+                channel=location.channel_id,
+                timestamp=location.root_ts,
+                name="white_check_mark",
+            )
+            completion_reaction_added = True
+        except (SlackApiError, SlackRequestError):
+            # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
+            pass
+
+    return json.dumps(
+        {
+            "posted": True,
+            "status": status,
+            "outcome": "partial_success" if list_update_error else "success",
+            "message_action": message_action,
+            "permalink": permalink,
+            "list_marked_completed": list_marked_completed,
+            "list_update_error": list_update_error,
+            "retry_post": False,
+            "completion_reaction_added": completion_reaction_added,
+        },
+        ensure_ascii=False,
+    )
