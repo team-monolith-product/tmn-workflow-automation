@@ -15,10 +15,17 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 import psycopg
-from slack_sdk.errors import SlackApiError
+from slack_sdk.errors import SlackApiError, SlackRequestError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
+from service.slack_task_list import build_completion_cells
+from service.slack_task_message import (
+    SlackMessageLocation,
+    get_permalink as _permalink,
+    message_location,
+)
+from service.slack_task_result import publish_result_message
 
 SOURCE_THREAD_COLUMN_NAME = "요청 맥락"
 SOURCE_THREAD_COLUMN_KEY = "slack_thread"
@@ -56,16 +63,6 @@ class SlackListTaskReference:
     list_url: str
     list_id: str
     record_id: str
-
-
-@dataclass(frozen=True)
-class SlackMessageLocation:
-    """Slack 메시지와 그 메시지가 속한 루트 스레드 위치입니다."""
-
-    channel_id: str
-    ts: str
-    root_ts: str
-    permalink: str | None = None
 
 
 def _read_cell(
@@ -130,16 +127,6 @@ class SlackTaskListSchema:
             else:
                 raise ValueError("Slack message 셀의 형식을 해석할 수 없습니다.")
         return normalized
-
-    def completion_cells(self, row_ids: list[str]) -> list[dict[str, Any]]:
-        return [
-            {
-                "row_id": row_id,
-                "column_id": self.completed_column_id,
-                "checkbox": [True],
-            }
-            for row_id in row_ids
-        ]
 
 
 def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
@@ -247,38 +234,6 @@ def task_list_schema(schema: list[dict[str, Any]]) -> SlackTaskListSchema:
     )
 
 
-def message_location(reference: dict[str, Any]) -> SlackMessageLocation:
-    """List message 셀의 참조를 Slack API 호출 위치로 바꿉니다."""
-    permalink = reference.get("value") or reference.get("permalink")
-    channel_id = reference.get("channel_id")
-    ts = reference.get("ts")
-    thread_ts = reference.get("thread_ts")
-
-    if permalink:
-        parsed = urlparse(str(permalink))
-        segments = [segment for segment in parsed.path.split("/") if segment]
-        if len(segments) >= 3 and re.fullmatch(r"[CDG][A-Z0-9]+", segments[-2]):
-            channel_id = channel_id or segments[-2]
-            path_ts = segments[-1]
-            if path_ts.startswith("p") and path_ts[1:].isdigit():
-                digits = path_ts[1:]
-                if len(digits) > 6:
-                    ts = ts or f"{digits[:-6]}.{digits[-6:]}"
-        query = parse_qs(parsed.query)
-        thread_ts = thread_ts or (query.get("thread_ts") or [None])[0]
-        channel_id = channel_id or (query.get("cid") or [None])[0]
-
-    if not channel_id or not ts:
-        raise ValueError("List의 Slack 메시지 링크에서 채널과 시각을 읽지 못했습니다.")
-
-    return SlackMessageLocation(
-        channel_id=str(channel_id),
-        ts=str(ts),
-        root_ts=str(thread_ts or ts),
-        permalink=str(permalink) if permalink else None,
-    )
-
-
 def acquire_task_record_lock(
     reference: SlackListTaskReference,
 ) -> psycopg.Connection:
@@ -303,18 +258,6 @@ async def _read_record(
     )
     schema = task_list_schema(response["list"]["list_metadata"]["schema"])
     return schema, response["record"]
-
-
-async def _permalink(
-    client: AsyncWebClient, location: SlackMessageLocation, root: bool = False
-) -> str:
-    if location.permalink and not root:
-        return location.permalink
-    message_ts = location.root_ts if root else location.ts
-    response = await client.chat_getPermalink(
-        channel=location.channel_id, message_ts=message_ts
-    )
-    return response["permalink"]
 
 
 async def _read_thread(
@@ -950,45 +893,62 @@ async def publish_task_result(
     )
     details = _detail_section(execution_metadata, curated_references)
     text = f"{body}\n\n{details}"
-    posted = await client.chat_postMessage(
-        channel=location.channel_id,
-        thread_ts=location.root_ts,
-        text=text,
-        blocks=_message_blocks(body, details),
-    )
-
-    list_marked_completed = mark_completed and status == "completed"
-    if list_marked_completed:
-        await client.slackLists_items_update(
+    lock = await asyncio.to_thread(acquire_task_record_lock, reference)
+    try:
+        message, message_action = await publish_result_message(
+            client,
             list_id=reference.list_id,
-            cells=task_schema.completion_cells([reference.record_id]),
+            record_id=reference.record_id,
+            channel_id=location.channel_id,
+            thread_ts=location.root_ts,
+            text=text,
+            blocks=_message_blocks(body, details),
         )
-        try:
-            await client.reactions_add(
-                channel=location.channel_id,
-                timestamp=location.root_ts,
-                name="white_check_mark",
-            )
-            completion_reaction_added = True
-        except SlackApiError:
-            # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
-            completion_reaction_added = False
-    else:
-        completion_reaction_added = False
+        list_should_be_completed = mark_completed and status == "completed"
+        list_marked_completed = False
+        list_update_error = None
+        if list_should_be_completed:
+            try:
+                await client.slackLists_items_update(
+                    list_id=reference.list_id,
+                    cells=build_completion_cells(
+                        task_schema.completed_column_id, [reference.record_id]
+                    ),
+                )
+                list_marked_completed = True
+            except (SlackApiError, SlackRequestError) as exc:
+                list_update_error = (
+                    str(exc.response.get("error", "slack_api_error"))
+                    if isinstance(exc, SlackApiError)
+                    else "slack_request_error"
+                )
 
-    reply_location = SlackMessageLocation(
-        channel_id=str(posted.get("channel", location.channel_id)),
-        ts=str(posted["ts"]),
-        root_ts=location.root_ts,
-    )
-    permalink = await _permalink(client, reply_location)
-    return json.dumps(
-        {
-            "posted": True,
-            "status": status,
-            "permalink": permalink,
-            "list_marked_completed": list_marked_completed,
-            "completion_reaction_added": completion_reaction_added,
-        },
-        ensure_ascii=False,
-    )
+        completion_reaction_added = False
+        if list_marked_completed:
+            try:
+                await client.reactions_add(
+                    channel=location.channel_id,
+                    timestamp=location.root_ts,
+                    name="white_check_mark",
+                )
+                completion_reaction_added = True
+            except (SlackApiError, SlackRequestError):
+                # 결과 댓글과 List 완료는 이미 반영됐으므로, 장식용 반응 실패로 종료를 막지 않는다.
+                pass
+
+        return json.dumps(
+            {
+                "posted": True,
+                "status": status,
+                "outcome": "partial_success" if list_update_error else "success",
+                "message_action": message_action,
+                "permalink": message.permalink,
+                "list_marked_completed": list_marked_completed,
+                "list_update_error": list_update_error,
+                "retry_post": False,
+                "completion_reaction_added": completion_reaction_added,
+            },
+            ensure_ascii=False,
+        )
+    finally:
+        await asyncio.to_thread(release_task_record_lock, lock)

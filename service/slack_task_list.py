@@ -43,6 +43,14 @@ ITEM_PAGE_SIZE = 100
 MAX_ITEM_PAGES = 20
 
 
+def build_completion_cells(column_id: str, row_ids: list[str]) -> list[dict]:
+    """Slack List 행을 완료로 표시할 boolean 셀을 만듭니다."""
+    return [
+        {"row_id": row_id, "column_id": column_id, "checkbox": True}
+        for row_id in row_ids
+    ]
+
+
 def _read_cell(item: dict, column_id: str, value_key: str):
     """항목에서 특정 열의 값을 읽습니다.
 
@@ -174,14 +182,7 @@ class ChannelTaskList:
         Returns:
             list[dict]: slackLists.items.update 의 cells
         """
-        return [
-            {
-                "row_id": row_id,
-                "column_id": self.completed_column_id,
-                "checkbox": [True],
-            }
-            for row_id in row_ids
-        ]
+        return build_completion_cells(self.completed_column_id, row_ids)
 
 
 # 표의 열 이름은 dataclass 필드에서 딴다. 손으로 나열하면 필드를 추가했을 때

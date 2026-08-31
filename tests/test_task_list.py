@@ -145,12 +145,12 @@ def test_empty_cells_are_omitted():
 
 
 def test_completion_cells_carry_row_ids():
-    """완료 셀은 행마다 row_id 를 달고 배열 값을 쓴다"""
+    """완료 셀은 행마다 row_id와 boolean 값을 쓴다"""
     cells = TASK_LIST.completion_cells(["Rec01", "Rec02"])
 
     assert cells == [
-        {"row_id": "Rec01", "column_id": "Col00", "checkbox": [True]},
-        {"row_id": "Rec02", "column_id": "Col00", "checkbox": [True]},
+        {"row_id": "Rec01", "column_id": "Col00", "checkbox": True},
+        {"row_id": "Rec02", "column_id": "Col00", "checkbox": True},
     ]
 
 
