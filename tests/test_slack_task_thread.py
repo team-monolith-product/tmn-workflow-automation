@@ -349,7 +349,7 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
     release.assert_called_once_with(lock)
 
 
-async def test_start_uses_default_channel_for_task_created_without_source():
+async def test_start_uses_fallback_channel_for_task_created_without_source():
     client = AsyncMock()
     client.slackLists_items_info.side_effect = [info(record()), info(record())]
     client.chat_postMessage.return_value = {"channel": CHANNEL, "ts": ROOT_TS}
@@ -368,7 +368,7 @@ async def test_start_uses_default_channel_for_task_created_without_source():
                 client,
                 LIST_URL,
                 "owner@example.com",
-                default_channel_id=CHANNEL,
+                fallback_channel_id=CHANNEL,
             )
         )
 

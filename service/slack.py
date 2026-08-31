@@ -4,9 +4,7 @@ Slack API를 활용하는 Service Layer입니다.
 
 import time
 from typing import Any
-
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 
@@ -98,17 +96,6 @@ async def get_email_to_user_id_async(slack_client: AsyncWebClient) -> dict[str, 
             break
 
     return email_to_user_id
-
-
-async def find_user_id_by_email(slack_client: AsyncWebClient, email: str) -> str | None:
-    """이메일에 연결된 Slack 사용자 ID를 찾습니다."""
-    try:
-        user = (await slack_client.users_lookupByEmail(email=email)).get("user") or {}
-    except SlackApiError as exc:
-        if exc.response.get("error") == "users_not_found":
-            return None
-        raise
-    return user.get("id")
 
 
 def get_user_id_to_user_info(

@@ -12,11 +12,11 @@ import pytest
 from pydantic import ValidationError
 
 from app import general
-from app.task_list import TaskInput, default_due_date, get_task_list_write_tools
+from app.task_list import TaskInput, get_task_list_write_tools
 from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
-    create_task_item,
+    default_due_date,
     list_all_items,
     to_task_list,
     validate_task_list_channel,
@@ -233,13 +233,12 @@ async def test_list_all_items_reports_truncation():
 # --- 리스트 생성 ---
 
 
-async def test_create_task_item_returns_record_url():
+async def test_create_task_returns_record_url():
     client = AsyncMock()
     client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
 
-    result = await create_task_item(
+    result = await TASK_LIST.create_task(
         client,
-        TASK_LIST,
         " 계정 생성 ",
         assignee=REQUESTER,
         due_date="2026-09-02",
@@ -252,20 +251,20 @@ async def test_create_task_item_returns_record_url():
     ]
 
 
-async def test_create_task_item_rejects_blank_title_before_slack_call():
+async def test_create_task_rejects_blank_title_before_slack_call():
     client = AsyncMock()
 
     with pytest.raises(ValueError, match="제목"):
-        await create_task_item(client, TASK_LIST, "  ")
+        await TASK_LIST.create_task(client, "  ")
 
     client.slackLists_items_create.assert_not_awaited()
 
 
-async def test_create_task_item_rejects_invalid_due_date_before_slack_call():
+async def test_create_task_rejects_invalid_due_date_before_slack_call():
     client = AsyncMock()
 
     with pytest.raises(ValueError, match="YYYY-MM-DD"):
-        await create_task_item(client, TASK_LIST, "작업", due_date="2026-99-99")
+        await TASK_LIST.create_task(client, "작업", due_date="2026-99-99")
 
     client.slackLists_items_create.assert_not_awaited()
 

@@ -6,13 +6,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from starlette.testclient import TestClient
 
-from app.slack_task_mcp import (
-    INSTRUCTIONS,
-    _client_display_name,
-    build_mcp,
-    build_mcp_app,
-)
-from service.slack_task_list import ChannelTaskList
+from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
+from service.slack_task_list import ChannelTaskList, default_due_date
 
 ADMIN = {
     "id": 7,
@@ -115,9 +110,33 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
     assert "context" not in publish_tool.input_schema["properties"]
 
 
+async def test_운영_mcp는_요청_맥락이_없는_행도_운영_채널에서_시작한다(mcp_env):
+    client = AsyncMock()
+    start = AsyncMock(return_value='{"work_thread_created": true}')
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch("app.slack_task_mcp.start_task_from_slack_list", start):
+        result = await build_mcp(client).call_tool(
+            "start-slack-list-task", {"list_url": "https://example.slack.com/task"}
+        )
+
+    assert result.content[0].text == '{"work_thread_created": true}'
+    start.assert_awaited_once_with(
+        client,
+        "https://example.slack.com/task",
+        "operator@team-mono.com",
+        fallback_channel_id="C077CABKVSQ",
+    )
+
+
 async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
     client = AsyncMock()
-    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
+    client.users_list.return_value = {
+        "members": [{"id": "U01OWNER", "profile": {"email": "operator@team-mono.com"}}],
+        "response_metadata": {"next_cursor": ""},
+    }
     client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
     task_list = ChannelTaskList(
         list_id="F01LIST",
@@ -133,30 +152,15 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
         "app.slack_task_mcp.get_access_token",
         return_value=SimpleNamespace(email="operator@team-mono.com"),
     ), patch("app.slack_task_mcp.find_channel_task_list", return_value=task_list):
-        with patch(
-            "app.slack_task_mcp.start_task_from_slack_list",
-            AsyncMock(return_value='{"work_thread_created": true}'),
-        ) as start:
-            result = await build_mcp(client).call_tool(
-                "create_slack_list_task",
-                {"title": "계정 생성", "due_date": "2026-09-02"},
-            )
+        result = await build_mcp(client).call_tool(
+            "create_slack_list_task",
+            {"title": "계정 생성"},
+        )
 
-    assert result.content[0].text == '{"work_thread_created": true}'
+    assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
-    assert {"column_id": "ColDue", "date": ["2026-09-02"]} in fields
-    start.assert_awaited_once_with(
-        client,
-        f"{task_list.list_url}?record_id=Rec01",
-        "operator@team-mono.com",
-        default_channel_id="C077CABKVSQ",
-    )
-
-
-def test_링크가_없으면_생성_여부를_먼저_묻도록_지시한다():
-    assert "행을\n새로 만들지 먼저 물어보고 답을 기다립니다" in INSTRUCTIONS
-    assert "명시적으로 동의한 경우에만" in INSTRUCTIONS
+    assert {"column_id": "ColDue", "date": [default_due_date()]} in fields
 
 
 @pytest.mark.parametrize(
