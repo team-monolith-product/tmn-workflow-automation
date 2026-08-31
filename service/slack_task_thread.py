@@ -20,6 +20,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
 from service.slack_task_list import build_completion_cells
+from service.slack_task_execution import TaskExecutionMetrics, record_task_execution
 from service.slack_task_message import (
     SlackMessageLocation,
     find_message_ts,
@@ -489,15 +490,6 @@ async def start_task_from_slack_list(
             "reference_tool": "record_slack_task_references",
             "ask_starter_if_no_references": True,
             "clarify_ambiguity_before_work": True,
-            "runtime_metadata_at_finish": [
-                "tool",
-                "model",
-                "reasoning_effort",
-                "token_usage",
-                "elapsed_time",
-                "conversation_turns",
-            ],
-            "runtime_metadata_only_if_verified": True,
             "starter": actor,
         },
         "recording_rule": (
@@ -603,112 +595,10 @@ def _message_blocks(body: str, details: str) -> list[dict[str, Any]]:
     return blocks
 
 
-def _format_elapsed(seconds: int) -> str:
-    """초 단위 경과시간을 사람에게 필요한 정밀도로 줄입니다."""
-    seconds = max(0, seconds)
-    days, remainder = divmod(seconds, 86_400)
-    hours, remainder = divmod(remainder, 3_600)
-    minutes, seconds = divmod(remainder, 60)
-    parts = []
-    if days:
-        parts.append(f"{days}일")
-    if hours:
-        parts.append(f"{hours}시간")
-    if minutes:
-        parts.append(f"{minutes}분")
-    if not parts:
-        parts.append(f"{seconds}초")
-    return " ".join(parts)
-
-
-def _clean_runtime_label(
-    name: str, value: str | None, maximum: int = 100
-) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        return None
-    if len(cleaned) > maximum:
-        raise ValueError(f"{name}은 {maximum}자 이내로 작성해주세요.")
-    return cleaned
-
-
-def _clean_usage_value(name: str, value: int | None) -> int | None:
-    if value is not None and value < 0:
-        raise ValueError(f"{name}은 0 이상의 정수여야 합니다.")
-    return value
-
-
-def _token_usage_text(
-    input_tokens: int | None,
-    cached_input_tokens: int | None,
-    output_tokens: int | None,
-    reasoning_output_tokens: int | None,
-    total_tokens: int | None,
-) -> str:
-    values = {
-        "입력": input_tokens,
-        "캐시 입력": cached_input_tokens,
-        "출력": output_tokens,
-        "추론 출력": reasoning_output_tokens,
-    }
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-    parts = [
-        f"{label} {value:,}" for label, value in values.items() if value is not None
-    ]
-    if total_tokens is not None:
-        total = f"총 {total_tokens:,}"
-        return f"{total} ({' / '.join(parts)})" if parts else total
-    return " / ".join(parts) if parts else "수집되지 않음"
-
-
-def _execution_metadata(
-    started_at: str,
-    finished_at: float,
-    client_name: str | None,
-    model: str | None,
-    reasoning_effort: str | None,
-    input_tokens: int | None,
-    cached_input_tokens: int | None,
-    output_tokens: int | None,
-    reasoning_output_tokens: int | None,
-    total_tokens: int | None,
-    conversation_turns: int | None,
-) -> str:
-    try:
-        elapsed = round(finished_at - float(started_at))
-    except ValueError:
-        elapsed = 0
-    token_usage = _token_usage_text(
-        input_tokens,
-        cached_input_tokens,
-        output_tokens,
-        reasoning_output_tokens,
-        total_tokens,
-    )
-    turns = (
-        f"{conversation_turns:,}" if conversation_turns is not None else "수집되지 않음"
-    )
-    return "\n".join(
-        [
-            "실행 메타 정보:",
-            f"• 도구: {_escape(client_name or '수집되지 않음')}",
-            f"• 모델: {_escape(model or '수집되지 않음')}",
-            f"• Effort: {_escape(reasoning_effort or '수집되지 않음')}",
-            f"• 토큰: {token_usage}",
-            f"• 전체 시간: {_format_elapsed(elapsed)}",
-            f"• 대화 턴: {turns}",
-        ]
-    )
-
-
-def _detail_section(execution_metadata: str, references: list[tuple[str, str]]) -> str:
-    sections = ["상세 기록", "", execution_metadata]
-    if references:
-        sections.extend(["", _reference_section(references)])
-    return "\n".join(sections)
+def _detail_section(references: list[tuple[str, str]]) -> str:
+    if not references:
+        return ""
+    return f"상세 기록\n\n{_reference_section(references)}"
 
 
 def _reference_message(reason: str, references: list[tuple[str, str]]) -> str:
@@ -815,15 +705,7 @@ async def publish_task_result(
     validation: list[str] | None = None,
     remaining: list[str] | None = None,
     references: list[str] | None = None,
-    client_name: str | None = None,
-    model: str | None = None,
-    reasoning_effort: str | None = None,
-    input_tokens: int | None = None,
-    cached_input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    reasoning_output_tokens: int | None = None,
-    total_tokens: int | None = None,
-    conversation_turns: int | None = None,
+    execution_metrics: TaskExecutionMetrics | None = None,
     mark_completed: bool = True,
 ) -> str:
     """작업 스레드에 선별한 종료 요약 한 건을 게시합니다."""
@@ -837,17 +719,6 @@ async def publish_task_result(
     curated_references = _clean_references(references)
     curated_validation = _clean_list("검증", validation, 5)
     curated_remaining = _clean_list("남은 일", remaining, 5)
-    client_name = _clean_runtime_label("도구", client_name)
-    model = _clean_runtime_label("모델", model)
-    reasoning_effort = _clean_runtime_label("Effort", reasoning_effort, maximum=50)
-    input_tokens = _clean_usage_value("입력 토큰", input_tokens)
-    cached_input_tokens = _clean_usage_value("캐시 입력 토큰", cached_input_tokens)
-    output_tokens = _clean_usage_value("출력 토큰", output_tokens)
-    reasoning_output_tokens = _clean_usage_value(
-        "추론 출력 토큰", reasoning_output_tokens
-    )
-    total_tokens = _clean_usage_value("전체 토큰", total_tokens)
-    conversation_turns = _clean_usage_value("대화 턴", conversation_turns)
     _validate_publishable(
         [
             summary,
@@ -857,7 +728,6 @@ async def publish_task_result(
             *[f"{name}: {url}" for name, url in curated_references],
             *curated_validation,
             *curated_remaining,
-            *(value for value in (client_name, model, reasoning_effort) if value),
         ],
         max_chars=24_000,
     )
@@ -869,18 +739,17 @@ async def publish_task_result(
         raise ValueError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
 
     location = message_location(work_references[0])
-    execution_metadata = _execution_metadata(
-        location.root_ts,
-        time.time(),
-        client_name,
-        model,
-        reasoning_effort,
-        input_tokens,
-        cached_input_tokens,
-        output_tokens,
-        reasoning_output_tokens,
-        total_tokens,
-        conversation_turns,
+    finished_at = time.time()
+    await asyncio.to_thread(
+        record_task_execution,
+        list_id=reference.list_id,
+        record_id=reference.record_id,
+        list_url=reference.list_url,
+        actor=actor,
+        status=status,
+        task_started_ts=location.root_ts,
+        task_finished_ts=finished_at,
+        metrics=execution_metrics or TaskExecutionMetrics(),
     )
     body = _result_message(
         task_schema.title_of(record),
@@ -892,8 +761,8 @@ async def publish_task_result(
         curated_validation,
         curated_remaining,
     )
-    details = _detail_section(execution_metadata, curated_references)
-    text = f"{body}\n\n{details}"
+    details = _detail_section(curated_references)
+    text = f"{body}\n\n{details}" if details else body
     blocks = _message_blocks(body, details)
     client_msg_id = result_client_msg_id(reference.list_id, reference.record_id)
     message_ts = await find_message_ts(client, location, client_msg_id)
