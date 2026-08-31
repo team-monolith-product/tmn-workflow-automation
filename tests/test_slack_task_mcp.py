@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from starlette.testclient import TestClient
 
-from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
+from app.slack_task_mcp import (
+    INSTRUCTIONS,
+    _client_display_name,
+    build_mcp,
+    build_mcp_app,
+)
+from service.slack_task_list import ChannelTaskList
 
 ADMIN = {
     "id": 7,
@@ -61,6 +67,7 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
 
     assert response.status_code == 200
     assert "start-slack-list-task" in response.text
+    assert "create_slack_list_task" in response.text
     assert "publish_slack_task_result" in response.text
     assert '"name":"query_knowledge"' not in response.text
 
@@ -71,12 +78,16 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
 
     assert [tool.name for tool in tools] == [
         "start-slack-list-task",
+        "create_slack_list_task",
         "record_slack_task_references",
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
     start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
     assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    create_tool = next(tool for tool in tools if tool.name == "create_slack_list_task")
+    assert set(create_tool.input_schema["properties"]) == {"title", "due_date"}
+    assert create_tool.input_schema["required"] == ["title"]
     reference_tool = next(
         tool for tool in tools if tool.name == "record_slack_task_references"
     )
@@ -102,6 +113,50 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
         "conversation_turns",
     } <= set(publish_tool.input_schema["properties"])
     assert "context" not in publish_tool.input_schema["properties"]
+
+
+async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
+    client = AsyncMock()
+    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
+    client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
+    task_list = ChannelTaskList(
+        list_id="F01LIST",
+        list_url="https://example.slack.com/lists/T1/F01LIST",
+        name_column_id="ColTitle",
+        completed_column_id="ColDone",
+        assignee_column_id="ColOwner",
+        due_date_column_id="ColDue",
+        thread_column_id="ColSource",
+    )
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch("app.slack_task_mcp.find_channel_task_list", return_value=task_list):
+        with patch(
+            "app.slack_task_mcp.start_task_from_slack_list",
+            AsyncMock(return_value='{"work_thread_created": true}'),
+        ) as start:
+            result = await build_mcp(client).call_tool(
+                "create_slack_list_task",
+                {"title": "계정 생성", "due_date": "2026-09-02"},
+            )
+
+    assert result.content[0].text == '{"work_thread_created": true}'
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
+    assert {"column_id": "ColDue", "date": ["2026-09-02"]} in fields
+    start.assert_awaited_once_with(
+        client,
+        f"{task_list.list_url}?record_id=Rec01",
+        "operator@team-mono.com",
+        default_channel_id="C077CABKVSQ",
+    )
+
+
+def test_링크가_없으면_생성_여부를_먼저_묻도록_지시한다():
+    assert "행을\n새로 만들지 먼저 물어보고 답을 기다립니다" in INSTRUCTIONS
+    assert "명시적으로 동의한 경우에만" in INSTRUCTIONS
 
 
 @pytest.mark.parametrize(

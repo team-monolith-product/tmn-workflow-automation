@@ -1,5 +1,6 @@
 """운영팀 Slack List 작업만 제공하는 독립 MCP 서버입니다."""
 
+import asyncio
 import os
 from collections.abc import Mapping
 from typing import Literal, cast
@@ -15,17 +16,28 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
+from service.slack import find_user_id_by_email
+from service.slack_task_list import create_task_item, find_channel_task_list
 from service.slack_task_thread import (
     publish_task_result,
     record_task_references,
     start_task_from_slack_list,
 )
 
+OPERATIONS_TASK_CHANNEL_ID = os.environ.get(
+    "SLACK_OPERATIONS_TASK_CHANNEL_ID", "C077CABKVSQ"
+)
+
 INSTRUCTIONS = """
 운영팀의 Slack List 작업을 시작하거나 재개하고, 현재 상태와 요청 맥락,
 이전 작업 기록을 읽어 공용 작업 스레드로 연결합니다.
-새 작업 스레드는 요청 맥락 메시지의 채널에 만들며, 관계와 상태는 Slack List에만
-저장합니다.
+사용자가 작업 시작을 요청했지만 Slack List 작업 행 링크를 주지 않았다면, 행을
+새로 만들지 먼저 물어보고 답을 기다립니다. 사용자가 명시적으로 동의한 경우에만
+create_slack_list_task로 행을 만들고 작업을 시작합니다. 동의를 추정하거나 생성과
+질문을 한 번에 처리하지 않습니다.
+새 작업 스레드는 요청 맥락 메시지의 채널에 만듭니다. create_slack_list_task로
+직접 만든 행은 요청 맥락이 없으므로 운영 작업 채널에 만듭니다. 관계와 상태는
+Slack List에만 저장합니다.
 작업 중 일반 대화는 에이전트 안에 둡니다. 다만 초기 조사와 진행 중 재조사 게이트를
 통과할 때마다 실제 판단에 사용한 자료를 record_slack_task_references로 작업 스레드에
 한 번 남기고, 실제 작업이 끝났을 때 결과를 한 번 게시합니다.
@@ -119,6 +131,40 @@ def build_mcp(
             slack,
             list_url,
             token.email,
+        )
+
+    @mcp.tool(
+        description=(
+            "운영팀 Slack List에 작업 행을 만들고 작업 스레드를 시작합니다. "
+            "작업 시작 요청에 행 링크가 없을 때, 사용자에게 새 행을 만들지 물어보고 "
+            "명시적으로 동의받은 뒤에만 호출합니다. 반환값은 start-slack-list-task와 "
+            "같은 작업 맥락입니다. due_date는 사용자가 마감일을 지정했을 때만 "
+            "YYYY-MM-DD 형식으로 전달합니다."
+        )
+    )
+    async def create_slack_list_task(
+        title: str,
+        due_date: str | None = None,
+    ) -> str:
+        token = cast(AdminToken, get_access_token())
+        task_list = await asyncio.to_thread(
+            find_channel_task_list, OPERATIONS_TASK_CHANNEL_ID
+        )
+        if task_list is None:
+            raise ValueError("운영 채널에 연결된 Slack 작업 List가 없습니다.")
+
+        list_url = await create_task_item(
+            slack,
+            task_list,
+            title=title,
+            assignee=await find_user_id_by_email(slack, token.email),
+            due_date=due_date,
+        )
+        return await start_task_from_slack_list(
+            slack,
+            list_url,
+            token.email,
+            default_channel_id=OPERATIONS_TASK_CHANNEL_ID,
         )
 
     @mcp.tool(

@@ -349,6 +349,34 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
     release.assert_called_once_with(lock)
 
 
+async def test_start_uses_default_channel_for_task_created_without_source():
+    client = AsyncMock()
+    client.slackLists_items_info.side_effect = [info(record()), info(record())]
+    client.chat_postMessage.return_value = {"channel": CHANNEL, "ts": ROOT_TS}
+    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
+    client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
+    client.conversations_replies.return_value = {
+        "messages": [{"bot_id": "B01", "ts": ROOT_TS, "text": "[시작]"}]
+    }
+    lock = Mock()
+
+    with patch(
+        "service.slack_task_thread.acquire_task_record_lock", return_value=lock
+    ), patch("service.slack_task_thread.release_task_record_lock"):
+        result = json.loads(
+            await start_task_from_slack_list(
+                client,
+                LIST_URL,
+                "owner@example.com",
+                default_channel_id=CHANNEL,
+            )
+        )
+
+    assert client.chat_postMessage.await_args_list[0].kwargs["channel"] == CHANNEL
+    assert result["source_threads"] == []
+    assert result["work_thread_created"] is True
+
+
 async def test_start_reports_broken_source_when_work_thread_already_exists():
     client = AsyncMock()
     work_ref = {"value": ROOT_URL, "channel_id": CHANNEL, "ts": ROOT_TS}

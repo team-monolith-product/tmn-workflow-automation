@@ -19,6 +19,7 @@ from slack_sdk.errors import SlackApiError, SlackRequestError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
+from service.slack import find_user_id_by_email
 from service.slack_task_list import build_completion_cells
 from service.slack_task_message import (
     SlackMessageLocation,
@@ -338,13 +339,17 @@ async def _read_source_thread(
     }
 
 
-def _work_thread_channel(source_references: list[dict[str, Any]]) -> str:
+def _work_thread_channel(
+    source_references: list[dict[str, Any]], default_channel_id: str | None = None
+) -> str:
     """새 작업 스레드를 만들 첫 번째 유효한 요청 맥락의 채널을 고릅니다."""
     for source_reference in source_references:
         try:
             return message_location(source_reference).channel_id
         except ValueError:
             continue
+    if default_channel_id:
+        return default_channel_id
     raise ValueError(
         "작업 기록을 새로 만들려면 요청 맥락 열에 읽을 수 있는 Slack 메시지 링크가 "
         "하나 이상 있어야 합니다."
@@ -366,12 +371,7 @@ def _start_message(list_url: str, title: str) -> str:
 
 async def _actor_mention(client: AsyncWebClient, actor: str) -> str:
     """인증된 이메일을 Slack 멘션으로 바꾸고, 찾지 못하면 이메일을 남깁니다."""
-    try:
-        user = (await client.users_lookupByEmail(email=actor)).get("user") or {}
-    except SlackApiError:
-        return _escape(actor)
-
-    user_id = user.get("id")
+    user_id = await find_user_id_by_email(client, actor)
     return f"<@{user_id}>" if user_id else _escape(actor)
 
 
@@ -383,7 +383,10 @@ def _start_reply_message(actor: str, started_at: str) -> str:
 
 
 async def start_task_from_slack_list(
-    client: AsyncWebClient, list_url: str, actor: str
+    client: AsyncWebClient,
+    list_url: str,
+    actor: str,
+    default_channel_id: str | None = None,
 ) -> str:
     """List 행의 맥락을 읽고 공용 작업 스레드를 만들거나 재사용합니다."""
     reference = parse_slack_list_task_url(list_url)
@@ -405,7 +408,7 @@ async def start_task_from_slack_list(
 
             if not work_references:
                 source_references = task_schema.source_thread_references_of(record)
-                channel_id = _work_thread_channel(source_references)
+                channel_id = _work_thread_channel(source_references, default_channel_id)
                 posted = await client.chat_postMessage(
                     channel=channel_id,
                     text=_start_message(

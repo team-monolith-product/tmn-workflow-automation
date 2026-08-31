@@ -16,6 +16,7 @@ from app.task_list import TaskInput, default_due_date, get_task_list_write_tools
 from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
+    create_task_item,
     list_all_items,
     to_task_list,
     validate_task_list_channel,
@@ -144,6 +145,18 @@ def test_empty_cells_are_omitted():
     ]
 
 
+def test_task_without_source_thread_keeps_message_cell_empty():
+    """MCP 대화에서 직접 만든 작업은 요청 Slack 메시지가 없어도 된다."""
+    fields = TASK_LIST.initial_fields("작업", REQUESTER, None, None)
+
+    assert [field["column_id"] for field in fields] == [
+        "Col012A3BCDE4",
+        "Col01",
+    ]
+    elements = fields[0]["rich_text"][0]["elements"][0]["elements"]
+    assert elements == [{"type": "text", "text": "작업"}]
+
+
 def test_completion_cells_carry_row_ids():
     """완료 셀은 행마다 row_id와 boolean 값을 쓴다"""
     cells = TASK_LIST.completion_cells(["Rec01", "Rec02"])
@@ -218,6 +231,43 @@ async def test_list_all_items_reports_truncation():
 
 
 # --- 리스트 생성 ---
+
+
+async def test_create_task_item_returns_record_url():
+    client = AsyncMock()
+    client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
+
+    result = await create_task_item(
+        client,
+        TASK_LIST,
+        " 계정 생성 ",
+        assignee=REQUESTER,
+        due_date="2026-09-02",
+    )
+
+    assert result == f"{TASK_LIST.list_url}?record_id=Rec01"
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert fields[0]["rich_text"][0]["elements"][0]["elements"] == [
+        {"type": "text", "text": "계정 생성"}
+    ]
+
+
+async def test_create_task_item_rejects_blank_title_before_slack_call():
+    client = AsyncMock()
+
+    with pytest.raises(ValueError, match="제목"):
+        await create_task_item(client, TASK_LIST, "  ")
+
+    client.slackLists_items_create.assert_not_awaited()
+
+
+async def test_create_task_item_rejects_invalid_due_date_before_slack_call():
+    client = AsyncMock()
+
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        await create_task_item(client, TASK_LIST, "작업", due_date="2026-99-99")
+
+    client.slackLists_items_create.assert_not_awaited()
 
 
 async def test_create_saves_before_sharing():

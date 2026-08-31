@@ -21,6 +21,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
+    create_task_item,
     delete_channel_task_list,
     list_all_items,
     validate_task_list_channel,
@@ -152,14 +153,13 @@ def get_task_list_write_tools(
             추가 결과와 리스트 URL
         """
         for task in tasks:
-            await client.slackLists_items_create(
-                list_id=task_list.list_id,
-                initial_fields=task_list.initial_fields(
-                    task.title,
-                    task.assignee or requester_id,
-                    task.due_date or default_due_date(),
-                    thread_url,
-                ),
+            await create_task_item(
+                client,
+                task_list,
+                task.title,
+                task.assignee or requester_id,
+                task.due_date or default_due_date(),
+                thread_url,
             )
 
         return f"{len(tasks)}개의 작업을 추가했습니다: {task_list.list_url}"

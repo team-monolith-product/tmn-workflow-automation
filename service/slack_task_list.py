@@ -18,6 +18,7 @@ channel_task_list 표는 기존 Slack 봇의 라우팅 설정입니다. 채널�
 
 import asyncio
 from dataclasses import asdict, dataclass, fields
+from datetime import date
 from typing import Any
 
 from slack_sdk.web.async_client import AsyncWebClient
@@ -91,7 +92,7 @@ class ChannelTaskList:
         title: str,
         assignee: str | None,
         due_date: str | None,
-        thread_url: str,
+        thread_url: str | None,
     ) -> list[dict]:
         """작업 하나를 slackLists.items.create 의 initial_fields 로 만듭니다.
 
@@ -111,7 +112,7 @@ class ChannelTaskList:
         Returns:
             list[dict]: 셀 목록
         """
-        if self.thread_column_id:
+        if self.thread_column_id or not thread_url:
             title_elements = [{"type": "text", "text": title}]
         else:
             title_elements = [
@@ -136,7 +137,7 @@ class ChannelTaskList:
             }
         ]
 
-        if self.thread_column_id:
+        if self.thread_column_id and thread_url:
             cells.append({"column_id": self.thread_column_id, "message": [thread_url]})
 
         if assignee:
@@ -337,6 +338,37 @@ async def list_all_items(
             return items, False
 
     return items, True
+
+
+async def create_task_item(
+    client: AsyncWebClient,
+    task_list: ChannelTaskList,
+    title: str,
+    assignee: str | None = None,
+    due_date: str | None = None,
+    thread_url: str | None = None,
+) -> str:
+    """기존 Slack List에 작업 행을 만들고 행 URL을 반환합니다."""
+    title = title.strip()
+    if not title:
+        raise ValueError("작업 제목이 비어 있습니다.")
+    if due_date:
+        try:
+            date.fromisoformat(due_date)
+        except ValueError as exc:
+            raise ValueError("마감일은 YYYY-MM-DD 형식이어야 합니다.") from exc
+
+    created = await client.slackLists_items_create(
+        list_id=task_list.list_id,
+        initial_fields=task_list.initial_fields(
+            title,
+            assignee,
+            due_date,
+            thread_url,
+        ),
+    )
+    record_id = str(created["item"]["id"])
+    return f"{task_list.list_url}?record_id={record_id}"
 
 
 async def create_channel_task_list(
