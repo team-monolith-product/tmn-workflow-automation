@@ -192,6 +192,16 @@ async def test_start_actor_falls_back_to_email_when_slack_user_is_not_found():
     assert await _actor_mention(client, "owner@example.com") == "owner@example.com"
 
 
+async def test_start_raises_clear_error_when_record_is_not_found():
+    client = AsyncMock()
+    client.slackLists_items_info.side_effect = SlackApiError(
+        "list_not_found", {"error": "list_not_found"}
+    )
+
+    with pytest.raises(ValueError, match="list_not_found"):
+        await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+
+
 async def test_start_creates_one_root_and_stores_its_permalink():
     client = AsyncMock()
     client.slackLists_items_info.side_effect = [

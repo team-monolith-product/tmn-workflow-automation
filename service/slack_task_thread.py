@@ -254,9 +254,16 @@ async def _read_record(
     client: AsyncWebClient,
     reference: SlackListTaskReference,
 ) -> tuple[SlackTaskListSchema, dict[str, Any]]:
-    response = await client.slackLists_items_info(
-        list_id=reference.list_id, id=reference.record_id
-    )
+    try:
+        response = await client.slackLists_items_info(
+            list_id=reference.list_id, id=reference.record_id
+        )
+    except SlackApiError as exc:
+        error = exc.response.get("error", "slack_api_error")
+        raise ValueError(
+            f"Slack List 작업 항목을 읽지 못했습니다({error}). 항목이 삭제되었거나 "
+            "다른 List로 이동했을 수 있습니다."
+        ) from exc
     schema = task_list_schema(response["list"]["list_metadata"]["schema"])
     return schema, response["record"]
 
