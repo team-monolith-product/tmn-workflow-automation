@@ -6,8 +6,8 @@ channel_task_list 표는 기존 Slack 봇의 라우팅 설정입니다. 채널�
 유지합니다. Slack List 행과 작업 스레드의 관계는 저장하지 않습니다.
 
 열 ID는 새 행을 만들 때 기존 행 ID가 없어 items.info를 호출할 수 없는 봇
-경로를 위해 저장합니다. List 행 링크로 시작하는 운영 MCP는 이 표를 사용하지
-않고 items.info 응답의 스키마를 직접 읽습니다.
+경로를 위해 저장합니다. 운영 MCP도 새 행의 대상 채널을 고르고 요청 맥락 없는
+행의 작업 채널을 찾을 때 이 라우팅을 사용합니다.
 
 셀을 읽고 쓰는 방법도 여기 둡니다. 열 ID를 아는 곳과 그 열에 무엇을 써넣는지
 아는 곳이 갈리면 슬랙이 표기를 바꿀 때 두 계층을 같이 고쳐야 합니다.
@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from slack_sdk.web.async_client import AsyncWebClient
 
-from service.db import connect, fetch_one
+from service.db import connect, fetch_all, fetch_one
 
 # 리스트를 만들 때 우리가 정의하는 열. todo_mode 가 완료·담당자·마감일 셋을
 # 뒤에 알아서 붙이므로 여기에는 제목과 두 스레드 열만 둔다.
@@ -233,6 +233,12 @@ FROM channel_task_list
 WHERE channel_id = %(channel_id)s
 """
 
+SELECT_TASK_LIST_CHANNELS = """
+SELECT channel_id, list_id
+FROM channel_task_list
+ORDER BY channel_id
+"""
+
 INSERT_TASK_LIST = f"""
 INSERT INTO channel_task_list (channel_id, {", ".join(TASK_LIST_COLUMNS)})
 VALUES (%(channel_id)s, {", ".join(f"%({name})s" for name in TASK_LIST_COLUMNS)})
@@ -313,6 +319,25 @@ def find_channel_task_list(channel_id: str) -> ChannelTaskList | None:
     with connect(read_only=True) as conn:
         row = fetch_one(conn, SELECT_TASK_LIST, {"channel_id": channel_id})
     return ChannelTaskList(**row) if row else None
+
+
+def list_task_list_channels() -> dict[str, str]:
+    """등록된 채널 ID와 각 채널의 Slack List ID를 반환합니다."""
+    with connect(read_only=True) as conn:
+        rows = fetch_all(conn, SELECT_TASK_LIST_CHANNELS)
+    return {row["channel_id"]: row["list_id"] for row in rows}
+
+
+def find_task_list_channel_id(list_id: str) -> str | None:
+    """List가 연결된 채널을 반환하고, 여러 채널이면 모호함을 드러냅니다."""
+    channels = [
+        channel_id
+        for channel_id, registered_list_id in list_task_list_channels().items()
+        if registered_list_id == list_id
+    ]
+    if len(channels) > 1:
+        raise ValueError("하나의 Slack 작업 List가 여러 채널에 연결되어 있습니다.")
+    return channels[0] if channels else None
 
 
 def save_channel_task_list(channel_id: str, task_list: ChannelTaskList) -> None:

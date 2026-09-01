@@ -17,6 +17,7 @@ from service.slack_task_list import (
     ChannelTaskList,
     create_channel_task_list,
     default_due_date,
+    find_task_list_channel_id,
     list_all_items,
     to_task_list,
     validate_task_list_channel,
@@ -102,6 +103,23 @@ def test_external_shared_channel_is_rejected():
     assert validate_task_list_channel({"is_im": True}) is not None
     assert validate_task_list_channel({"is_mpim": True}) is not None
     assert validate_task_list_channel({"is_channel": True}) is None
+
+
+def test_list_id로_등록된_채널을_찾는다():
+    with patch(
+        "service.slack_task_list.list_task_list_channels",
+        return_value={"C01": "F01", "C02": "F02"},
+    ):
+        assert find_task_list_channel_id("F02") == "C02"
+
+
+def test_하나의_list가_여러_채널에_등록되면_모호함을_알린다():
+    with patch(
+        "service.slack_task_list.list_task_list_channels",
+        return_value={"C01": "F01", "C02": "F01"},
+    ):
+        with pytest.raises(ValueError, match="여러 채널"):
+            find_task_list_channel_id("F01")
 
 
 # --- 셀 조립 ---
