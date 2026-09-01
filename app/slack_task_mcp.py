@@ -15,6 +15,7 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
+from service.slack_task_execution import TaskExecutionMetrics
 from service.slack_task_thread import (
     publish_task_result,
     record_task_references,
@@ -54,10 +55,9 @@ query_knowledge를 반복 사용해 같은 사업·동일 업무, 유사 사업�
 새로운 사실이나 판단이 더 나오지 않을 때까지 탐색합니다.
 각 조사 게이트에는 검색 결과 전체가 아니라 실제 판단·계획·산출물에 사용한 문서와
 Knowledge 원문 링크를 이름과 함께 남깁니다. 종료 결과에도 사용한 참고 자료 전체를
-중복 없이 다시 전달합니다. 시작 댓글에는 실행 도구를 표시하지 않습니다. 종료할 때
-도구, 모델, Effort, 토큰, 전체 시간, 대화 턴과 참고 자료를 하나의 접힌 상세 영역에
-모읍니다. 모델·Effort·토큰·대화 턴은 런타임에서 확인된 값만 전달하고 설정값이나
-추측값으로 채우지 않습니다.
+중복 없이 다시 전달합니다. 실행 서비스·모델·Effort·토큰·전체 시간은 분석 DB에만
+자동 기록하며 Slack 결과에는 표시하지 않습니다. 실행 메타 입력은 플러그인 훅 전용이므로
+에이전트가 설정값이나 추측값으로 직접 채우지 않습니다.
 """.strip()
 
 
@@ -155,11 +155,9 @@ def build_mcp(
             "반복할 수 있습니다. 당연한 선택, 통상적인 품질 확인, List에 이미 보이는 상태는 "
             "반복하지 않습니다. references에는 각 조사 게이트에서 실제로 사용한 참고 자료 "
             "전체를 '자료 이름: https://공유링크' 형식으로 중복 없이 넣습니다. 서버는 "
-            "실행 도구와 작업 시작부터 종료까지의 전체 시간을 자동 기록합니다. model, "
-            "reasoning_effort, 토큰 항목, conversation_turns에는 런타임에서 직접 확인한 값만 "
-            "넣고, 알 수 없으면 생략합니다. 생략된 값은 '수집되지 않음'으로 표시합니다. "
-            "실행 메타 정보와 참고 자료는 최종 메시지에서 하나의 접힐 수 있는 상세 영역으로 "
-            "표시됩니다. "
+            "실행 서비스·모델·Effort·메인 및 서브에이전트 토큰·전체 시간은 플러그인 훅과 "
+            "서버가 분석 DB에 자동 기록합니다. 실행 메타 관련 선택 입력은 훅 전용이므로 "
+            "직접 채우거나 추측하지 않습니다. Slack 결과에는 이 실행 메타를 표시하지 않습니다. "
             "completed는 요청 산출물과 검증이 끝나고 사용자 승인·결정이나 외부 처리 대기가 "
             "없을 때만 사용하며, 기본으로 List도 완료 처리합니다. List 갱신만 실패해 "
             "outcome이 partial_success이면 permalink의 결과가 이미 게시된 것이므로 별도 "
@@ -177,21 +175,19 @@ def build_mcp(
         validation: list[str] | None = None,
         remaining: list[str] | None = None,
         references: list[str] | None = None,
+        execution_id: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
-        input_tokens: int | None = None,
-        cached_input_tokens: int | None = None,
-        output_tokens: int | None = None,
-        reasoning_output_tokens: int | None = None,
         total_tokens: int | None = None,
-        conversation_turns: int | None = None,
+        collector_version: str | None = None,
+        collection_status: Literal[
+            "complete", "partial", "unavailable"
+        ] = "unavailable",
         mark_completed: bool = True,
     ) -> str:
-        token = cast(AdminToken, get_access_token())
         return await publish_task_result(
             client=slack,
             list_url=list_url,
-            actor=token.email,
             status=status,
             summary=summary,
             learnings=learnings,
@@ -200,15 +196,15 @@ def build_mcp(
             validation=validation,
             remaining=remaining,
             references=references,
-            client_name=_client_display_name(context),
-            model=model,
-            reasoning_effort=reasoning_effort,
-            input_tokens=input_tokens,
-            cached_input_tokens=cached_input_tokens,
-            output_tokens=output_tokens,
-            reasoning_output_tokens=reasoning_output_tokens,
-            total_tokens=total_tokens,
-            conversation_turns=conversation_turns,
+            execution_metrics=TaskExecutionMetrics(
+                service=_client_display_name(context),
+                execution_id=execution_id,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                total_tokens=total_tokens,
+                collector_version=collector_version,
+                collection_status=collection_status,
+            ),
             mark_completed=mark_completed,
         )
 

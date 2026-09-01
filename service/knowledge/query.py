@@ -62,6 +62,13 @@ SCHEMA_GUIDE = """
   content는 치환 전 원문이라 [*이름*] 태그가 그대로 있고, change_word는
   {"var1": "1기"} 꼴로 키 var1~var8이 문안의 [*1*]~[*8*]에 대응한다.
   project는 발송 시점에 박은 사업명이고 매핑에 없는 채널이면 NULL이다.
+- task_execution_usage(list_url, execution_id, status, service, model,
+  reasoning_effort, total_tokens, task_started_at, task_finished_at, collector_version,
+  collection_status): 운영팀 Slack List 작업의 모델 실행 사용량. 한 행은
+  작업의 에이전트 실행 하나이며 model/reasoning_effort는 대표 루트 모델, 토큰 열은
+  루트와 모든 서브에이전트의 합계다. 전체 작업 시간은
+  task_finished_at-task_started_at이며 자리비움도 포함한다. 모델 효율 비교에서는
+  collection_status='complete'를 기본으로 사용하고 blocked/handoff를 완료와 섞지 않는다.
 
 구글 시트 찾기:
 - data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트

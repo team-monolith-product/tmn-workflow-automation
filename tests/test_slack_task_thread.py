@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from slack_sdk.errors import SlackApiError, SlackRequestError
 
+from service.slack_task_execution import TaskExecutionMetrics
 from service.slack_task_message import result_client_msg_id
 from service.slack_task_thread import (
     _actor_mention,
@@ -88,11 +89,24 @@ def publishing_client() -> AsyncMock:
     return client
 
 
+@pytest.fixture(autouse=True)
+def record_execution():
+    """Slack 단위 테스트에서는 외부 DB 대신 적재 호출만 검증합니다."""
+    with patch("service.slack_task_thread.record_task_execution") as record:
+        yield record
+
+
 def test_list_url_parser_uses_list_and_record_ids():
     parsed = parse_slack_list_task_url(LIST_URL)
 
     assert parsed.list_id == LIST_ID
     assert parsed.record_id == RECORD_ID
+
+
+def test_list_url_parser_normalizes_the_task_identity():
+    parsed = parse_slack_list_task_url(f"{LIST_URL}&view=compact#details")
+
+    assert parsed.list_url == LIST_URL
 
 
 @pytest.mark.parametrize(
@@ -264,15 +278,6 @@ async def test_start_creates_one_root_and_stores_its_permalink():
         "reference_tool": "record_slack_task_references",
         "ask_starter_if_no_references": True,
         "clarify_ambiguity_before_work": True,
-        "runtime_metadata_at_finish": [
-            "tool",
-            "model",
-            "reasoning_effort",
-            "token_usage",
-            "elapsed_time",
-            "conversation_turns",
-        ],
-        "runtime_metadata_only_if_verified": True,
         "starter": "owner@example.com",
     }
 
@@ -370,7 +375,9 @@ async def test_start_reports_broken_source_when_work_thread_already_exists():
     assert result["work_thread"]["messages"][0]["text"] == "[시작]"
 
 
-async def test_publish_posts_curated_learnings_and_marks_completed():
+async def test_publish_posts_curated_learnings_and_records_metrics_in_db(
+    record_execution,
+):
     client = publishing_client()
     client.slackLists_items_info.return_value = info(
         record(work={"channel_id": CHANNEL, "ts": ROOT_TS})
@@ -390,7 +397,6 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
             await publish_task_result(
                 client,
                 LIST_URL,
-                "owner@example.com",
                 "completed",
                 "계정 68개를 생성하고 로그인을 확인했습니다.",
                 outputs=["계정 생성 결과: https://docs.example.com/account-result"],
@@ -403,14 +409,15 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
                 references=[
                     "이전 계정 생성 작업: https://example.slack.com/archives/C01/p1"
                 ],
-                client_name="Codex",
-                model="gpt-5.6-sol",
-                reasoning_effort="high",
-                input_tokens=12_000,
-                cached_input_tokens=8_000,
-                output_tokens=3_500,
-                reasoning_output_tokens=1_200,
-                conversation_turns=7,
+                execution_metrics=TaskExecutionMetrics(
+                    service="Codex",
+                    execution_id="execution-123",
+                    model="gpt-5.6-sol",
+                    reasoning_effort="high",
+                    total_tokens=15_500,
+                    collector_version="tmn-operating/0.1.3",
+                    collection_status="complete",
+                ),
             )
         )
 
@@ -425,20 +432,34 @@ async def test_publish_posts_curated_learnings_and_marks_completed():
         "산출물: <https://docs.example.com/account-result|계정 생성 결과>"
         in sent["text"]
     )
-    assert "• 도구: Codex" in sent["text"]
-    assert "• 모델: gpt-5.6-sol" in sent["text"]
-    assert "• Effort: high" in sent["text"]
-    assert "• 토큰: 총 15,500" in sent["text"]
-    assert "• 전체 시간: 1시간" in sent["text"]
-    assert "• 대화 턴: 7" in sent["text"]
+    assert "Codex" not in sent["text"]
+    assert "gpt-5.6-sol" not in sent["text"]
+    assert "Effort" not in sent["text"]
+    assert "토큰" not in sent["text"]
+    assert "전체 시간" not in sent["text"]
+    assert "대화 턴" not in sent["text"]
     assert (
         "<https://example.slack.com/archives/C01/p1|이전 계정 생성 작업>"
         in sent["text"]
     )
-    assert "실행 메타 정보:" not in sent["blocks"][0]["text"]["text"]
-    assert "실행 메타 정보:" in sent["blocks"][-1]["text"]["text"]
+    assert "실행 메타 정보:" not in sent["text"]
     assert "참고 자료 (1건):" in sent["blocks"][-1]["text"]["text"]
     assert sent["blocks"][-1]["expand"] is False
+    record_execution.assert_called_once_with(
+        list_url=LIST_URL,
+        status="completed",
+        task_started_ts=ROOT_TS,
+        task_finished_ts=1700003600.0001,
+        metrics=TaskExecutionMetrics(
+            service="Codex",
+            execution_id="execution-123",
+            model="gpt-5.6-sol",
+            reasoning_effort="high",
+            total_tokens=15_500,
+            collector_version="tmn-operating/0.1.3",
+            collection_status="complete",
+        ),
+    )
     client.slackLists_items_update.assert_awaited_once_with(
         list_id=LIST_ID,
         cells=[{"row_id": RECORD_ID, "column_id": "ColDone", "checkbox": True}],
@@ -477,7 +498,6 @@ async def test_publish_updates_existing_result_in_work_thread():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "기존 결과 메시지를 최신 내용으로 갱신했습니다.",
             outputs=[],
@@ -538,7 +558,6 @@ async def test_publish_keeps_blocked_task_open_by_default():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "blocked",
             "외부 승인 확인이 없어 계정 생성을 진행하지 못했습니다.",
             outputs=[],
@@ -576,7 +595,6 @@ async def test_publish_keeps_completed_result_when_check_reaction_fails(
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "계정 생성 결과를 확인해 완료 처리했습니다.",
             outputs=[],
@@ -606,7 +624,6 @@ async def test_publish_returns_partial_success_when_only_list_update_fails():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "결과 댓글은 게시됐지만 List 완료 갱신은 실패했습니다.",
             outputs=[],
@@ -634,7 +651,6 @@ async def test_publish_rejects_too_many_learnings_before_slack_call():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "충분히 구체적인 완료 요약입니다.",
             outputs=[],
@@ -651,7 +667,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "토큰 xoxb-abcdefghijklmnopqrstuvwxyz 를 사용했습니다.",
             outputs=[],
@@ -661,7 +676,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "결과는 /Users/name/report.md 에 저장했습니다.",
             outputs=[],
@@ -675,7 +689,6 @@ async def test_publish_rejects_output_without_shareable_link():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "확정된 연수 안내문을 작성했습니다.",
             outputs=["최종 연수 안내문"],

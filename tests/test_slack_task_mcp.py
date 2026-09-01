@@ -92,14 +92,12 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
     assert "learnings" not in publish_tool.input_schema["required"]
     assert "references" in publish_tool.input_schema["properties"]
     assert {
+        "execution_id",
         "model",
         "reasoning_effort",
-        "input_tokens",
-        "cached_input_tokens",
-        "output_tokens",
-        "reasoning_output_tokens",
         "total_tokens",
-        "conversation_turns",
+        "collector_version",
+        "collection_status",
     } <= set(publish_tool.input_schema["properties"])
     assert "context" not in publish_tool.input_schema["properties"]
 
