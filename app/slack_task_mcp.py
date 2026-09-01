@@ -6,7 +6,6 @@ from typing import Literal, cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
-from pydantic import BaseModel, Field
 from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
@@ -60,22 +59,6 @@ Knowledge 원문 링크를 이름과 함께 남깁니다. 종료 결과에도 �
 자동 기록하며 Slack 결과에는 표시하지 않습니다. 실행 메타 입력은 플러그인 훅 전용이므로
 에이전트가 설정값이나 추측값으로 직접 채우지 않습니다.
 """.strip()
-
-
-class ExecutionModelUsage(BaseModel):
-    """플러그인 훅이 수집한 모델·역할별 사용량입니다."""
-
-    model: str | None = None
-    reasoning_effort: str | None = None
-    is_subagent: bool = False
-    agent_count: int = Field(default=1, ge=1)
-    input_tokens: int | None = Field(default=None, ge=0)
-    cached_input_tokens: int | None = Field(default=None, ge=0)
-    cache_write_input_tokens: int | None = Field(default=None, ge=0)
-    output_tokens: int | None = Field(default=None, ge=0)
-    reasoning_output_tokens: int | None = Field(default=None, ge=0)
-    total_tokens: int | None = Field(default=None, ge=0)
-    conversation_turns: int | None = Field(default=None, ge=0)
 
 
 def _client_display_name(context: Context) -> str:
@@ -195,25 +178,16 @@ def build_mcp(
         execution_id: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
-        input_tokens: int | None = None,
-        cached_input_tokens: int | None = None,
-        cache_write_input_tokens: int | None = None,
-        output_tokens: int | None = None,
-        reasoning_output_tokens: int | None = None,
         total_tokens: int | None = None,
-        conversation_turns: int | None = None,
-        usage_by_model: list[ExecutionModelUsage] | None = None,
         collector_version: str | None = None,
         collection_status: Literal[
             "complete", "partial", "unavailable"
         ] = "unavailable",
         mark_completed: bool = True,
     ) -> str:
-        token = cast(AdminToken, get_access_token())
         return await publish_task_result(
             client=slack,
             list_url=list_url,
-            actor=token.email,
             status=status,
             summary=summary,
             learnings=learnings,
@@ -227,18 +201,7 @@ def build_mcp(
                 execution_id=execution_id,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                input_tokens=input_tokens,
-                cached_input_tokens=cached_input_tokens,
-                cache_write_input_tokens=cache_write_input_tokens,
-                output_tokens=output_tokens,
-                reasoning_output_tokens=reasoning_output_tokens,
                 total_tokens=total_tokens,
-                conversation_turns=conversation_turns,
-                usage_by_model=(
-                    [usage.model_dump() for usage in usage_by_model]
-                    if usage_by_model
-                    else []
-                ),
                 collector_version=collector_version,
                 collection_status=collection_status,
             ),

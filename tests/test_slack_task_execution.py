@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from psycopg.types.json import Jsonb
 
 from service.slack_task_execution import (
     TaskExecutionMetrics,
@@ -13,11 +12,11 @@ from service.slack_task_execution import (
 
 
 def test_fallback_execution_id_is_stable_per_task_and_service():
-    first = fallback_execution_id("F01", "Rec01", "Codex")
-    second = fallback_execution_id("F01", "Rec01", "Codex")
+    first = fallback_execution_id("https://slack.example/task", "Codex")
+    second = fallback_execution_id("https://slack.example/task", "Codex")
 
     assert first == second
-    assert first != fallback_execution_id("F01", "Rec01", "Claude Code")
+    assert first != fallback_execution_id("https://slack.example/task", "Claude Code")
 
 
 def test_metrics_reject_negative_usage():
@@ -25,51 +24,30 @@ def test_metrics_reject_negative_usage():
         TaskExecutionMetrics(total_tokens=-1)
 
 
-def test_record_upserts_one_execution_with_model_details():
+def test_complete_metrics_require_collected_usage():
+    with pytest.raises(ValueError, match="전체 토큰"):
+        TaskExecutionMetrics(collection_status="complete")
+
+
+def test_record_upserts_one_execution():
     cursor = MagicMock()
     connection = MagicMock()
     connection.cursor.return_value.__enter__.return_value = cursor
     connect_context = MagicMock()
     connect_context.__enter__.return_value = connection
-    connect_context.__exit__.return_value = False
-    usage = [
-        {
-            "model": "gpt-5.6-sol",
-            "reasoning_effort": "high",
-            "is_subagent": False,
-            "agent_count": 1,
-            "total_tokens": 120,
-        },
-        {
-            "model": "gpt-5.6-luna",
-            "reasoning_effort": "medium",
-            "is_subagent": True,
-            "agent_count": 3,
-            "total_tokens": 48,
-        },
-    ]
     metrics = TaskExecutionMetrics(
         service="Codex",
         execution_id="run-1",
         model="gpt-5.6-sol",
         reasoning_effort="high",
-        input_tokens=140,
-        cached_input_tokens=90,
-        output_tokens=28,
-        reasoning_output_tokens=7,
         total_tokens=168,
-        conversation_turns=2,
-        usage_by_model=usage,
         collector_version="tmn-operating/0.1.3",
         collection_status="complete",
     )
 
     with patch("service.slack_task_execution.connect", return_value=connect_context):
         execution_id = record_task_execution(
-            list_id="F01",
-            record_id="Rec01",
-            list_url="https://example.slack.com/lists/T/F01?record_id=Rec01",
-            actor="owner@example.com",
+            list_url="https://slack.example/task",
             status="completed",
             task_started_ts="1700000000.000000",
             task_finished_ts=1700003600.0,
@@ -79,7 +57,6 @@ def test_record_upserts_one_execution_with_model_details():
     assert execution_id == "run-1"
     cursor.execute.assert_called_once()
     sql, values = cursor.execute.call_args.args
-    assert "ON CONFLICT (list_id, record_id, execution_id)" in sql
-    assert values["model"] == "gpt-5.6-sol"
+    assert "ON CONFLICT (list_url, execution_id)" in sql
+    assert values["total_tokens"] == 168
     assert (values["task_finished_at"] - values["task_started_at"]).seconds == 3600
-    assert isinstance(values["usage_by_model"], Jsonb)

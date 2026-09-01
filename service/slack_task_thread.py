@@ -12,7 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import psycopg
 from slack_sdk.errors import SlackApiError, SlackRequestError
@@ -160,8 +160,13 @@ def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
     if not re.fullmatch(r"Rec[A-Z0-9]+", record_id):
         raise ValueError("Slack List 링크의 record_id 형식이 올바르지 않습니다.")
 
+    canonical_url = parsed._replace(
+        path=f"/lists/{segments[1]}/{list_id}",
+        query=urlencode({"record_id": record_id}),
+        fragment="",
+    ).geturl()
     return SlackListTaskReference(
-        list_url=list_url.strip(), list_id=list_id, record_id=record_id
+        list_url=canonical_url, list_id=list_id, record_id=record_id
     )
 
 
@@ -696,7 +701,6 @@ def _result_message(
 async def publish_task_result(
     client: AsyncWebClient,
     list_url: str,
-    actor: str,
     status: TaskResultStatus,
     summary: str,
     outputs: list[str],
@@ -742,10 +746,7 @@ async def publish_task_result(
     finished_at = time.time()
     await asyncio.to_thread(
         record_task_execution,
-        list_id=reference.list_id,
-        record_id=reference.record_id,
         list_url=reference.list_url,
-        actor=actor,
         status=status,
         task_started_ts=location.root_ts,
         task_finished_ts=finished_at,

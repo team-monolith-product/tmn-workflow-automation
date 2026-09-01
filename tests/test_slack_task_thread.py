@@ -103,6 +103,12 @@ def test_list_url_parser_uses_list_and_record_ids():
     assert parsed.record_id == RECORD_ID
 
 
+def test_list_url_parser_normalizes_the_task_identity():
+    parsed = parse_slack_list_task_url(f"{LIST_URL}&view=compact#details")
+
+    assert parsed.list_url == LIST_URL
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -391,7 +397,6 @@ async def test_publish_posts_curated_learnings_and_records_metrics_in_db(
             await publish_task_result(
                 client,
                 LIST_URL,
-                "owner@example.com",
                 "completed",
                 "계정 68개를 생성하고 로그인을 확인했습니다.",
                 outputs=["계정 생성 결과: https://docs.example.com/account-result"],
@@ -409,13 +414,7 @@ async def test_publish_posts_curated_learnings_and_records_metrics_in_db(
                     execution_id="execution-123",
                     model="gpt-5.6-sol",
                     reasoning_effort="high",
-                    input_tokens=12_000,
-                    cached_input_tokens=8_000,
-                    cache_write_input_tokens=500,
-                    output_tokens=3_500,
-                    reasoning_output_tokens=1_200,
                     total_tokens=15_500,
-                    conversation_turns=7,
                     collector_version="tmn-operating/0.1.3",
                     collection_status="complete",
                 ),
@@ -447,10 +446,7 @@ async def test_publish_posts_curated_learnings_and_records_metrics_in_db(
     assert "참고 자료 (1건):" in sent["blocks"][-1]["text"]["text"]
     assert sent["blocks"][-1]["expand"] is False
     record_execution.assert_called_once_with(
-        list_id=LIST_ID,
-        record_id=RECORD_ID,
         list_url=LIST_URL,
-        actor="owner@example.com",
         status="completed",
         task_started_ts=ROOT_TS,
         task_finished_ts=1700003600.0001,
@@ -459,13 +455,7 @@ async def test_publish_posts_curated_learnings_and_records_metrics_in_db(
             execution_id="execution-123",
             model="gpt-5.6-sol",
             reasoning_effort="high",
-            input_tokens=12_000,
-            cached_input_tokens=8_000,
-            cache_write_input_tokens=500,
-            output_tokens=3_500,
-            reasoning_output_tokens=1_200,
             total_tokens=15_500,
-            conversation_turns=7,
             collector_version="tmn-operating/0.1.3",
             collection_status="complete",
         ),
@@ -508,7 +498,6 @@ async def test_publish_updates_existing_result_in_work_thread():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "기존 결과 메시지를 최신 내용으로 갱신했습니다.",
             outputs=[],
@@ -569,7 +558,6 @@ async def test_publish_keeps_blocked_task_open_by_default():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "blocked",
             "외부 승인 확인이 없어 계정 생성을 진행하지 못했습니다.",
             outputs=[],
@@ -607,7 +595,6 @@ async def test_publish_keeps_completed_result_when_check_reaction_fails(
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "계정 생성 결과를 확인해 완료 처리했습니다.",
             outputs=[],
@@ -637,7 +624,6 @@ async def test_publish_returns_partial_success_when_only_list_update_fails():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "결과 댓글은 게시됐지만 List 완료 갱신은 실패했습니다.",
             outputs=[],
@@ -665,7 +651,6 @@ async def test_publish_rejects_too_many_learnings_before_slack_call():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "충분히 구체적인 완료 요약입니다.",
             outputs=[],
@@ -682,7 +667,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "토큰 xoxb-abcdefghijklmnopqrstuvwxyz 를 사용했습니다.",
             outputs=[],
@@ -692,7 +676,6 @@ async def test_publish_rejects_secrets_and_local_paths():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "결과는 /Users/name/report.md 에 저장했습니다.",
             outputs=[],
@@ -706,7 +689,6 @@ async def test_publish_rejects_output_without_shareable_link():
         await publish_task_result(
             client,
             LIST_URL,
-            "owner@example.com",
             "completed",
             "확정된 연수 안내문을 작성했습니다.",
             outputs=["최종 연수 안내문"],
