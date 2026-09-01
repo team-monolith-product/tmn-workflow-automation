@@ -19,7 +19,7 @@ from slack_sdk.errors import SlackApiError, SlackRequestError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from service.db import get_dsn
-from service.slack_task_list import build_completion_cells
+from service.slack_task_list import build_completion_cells, find_task_list_channel_id
 from service.slack_task_message import (
     SlackMessageLocation,
     find_message_ts,
@@ -338,17 +338,14 @@ async def _read_source_thread(
     }
 
 
-def _work_thread_channel(source_references: list[dict[str, Any]]) -> str:
-    """새 작업 스레드를 만들 첫 번째 유효한 요청 맥락의 채널을 고릅니다."""
+def _work_thread_channel(source_references: list[dict[str, Any]]) -> str | None:
+    """첫 번째 유효한 요청 맥락의 채널을 반환합니다."""
     for source_reference in source_references:
         try:
             return message_location(source_reference).channel_id
         except ValueError:
             continue
-    raise ValueError(
-        "작업 기록을 새로 만들려면 요청 맥락 열에 읽을 수 있는 Slack 메시지 링크가 "
-        "하나 이상 있어야 합니다."
-    )
+    return None
 
 
 def _escape(value: str) -> str:
@@ -383,7 +380,9 @@ def _start_reply_message(actor: str, started_at: str) -> str:
 
 
 async def start_task_from_slack_list(
-    client: AsyncWebClient, list_url: str, actor: str
+    client: AsyncWebClient,
+    list_url: str,
+    actor: str,
 ) -> str:
     """List 행의 맥락을 읽고 공용 작업 스레드를 만들거나 재사용합니다."""
     reference = parse_slack_list_task_url(list_url)
@@ -406,6 +405,14 @@ async def start_task_from_slack_list(
             if not work_references:
                 source_references = task_schema.source_thread_references_of(record)
                 channel_id = _work_thread_channel(source_references)
+                if channel_id is None:
+                    channel_id = await asyncio.to_thread(
+                        find_task_list_channel_id, reference.list_id
+                    )
+                if channel_id is None:
+                    raise ValueError(
+                        "요청 맥락이 없고 Slack 작업 List에 연결된 채널도 없습니다."
+                    )
                 posted = await client.chat_postMessage(
                     channel=channel_id,
                     text=_start_message(

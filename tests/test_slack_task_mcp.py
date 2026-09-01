@@ -1,5 +1,6 @@
 """운영팀 Slack 작업 전용 MCP 서버 테스트입니다."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -7,6 +8,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
+from service.slack_task_list import ChannelTaskList
 
 ADMIN = {
     "id": 7,
@@ -61,6 +63,8 @@ def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다
 
     assert response.status_code == 200
     assert "start-slack-list-task" in response.text
+    assert "list_slack_task_channels" in response.text
+    assert "create_slack_list_task" in response.text
     assert "publish_slack_task_result" in response.text
     assert '"name":"query_knowledge"' not in response.text
 
@@ -71,12 +75,25 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
 
     assert [tool.name for tool in tools] == [
         "start-slack-list-task",
+        "list_slack_task_channels",
+        "create_slack_list_task",
         "record_slack_task_references",
         "publish_slack_task_result",
     ]
     assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
     start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
     assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    create_tool = next(tool for tool in tools if tool.name == "create_slack_list_task")
+    assert set(create_tool.input_schema["properties"]) == {
+        "channel_id",
+        "title",
+        "due_date",
+    }
+    assert create_tool.input_schema["required"] == [
+        "channel_id",
+        "title",
+        "due_date",
+    ]
     reference_tool = next(
         tool for tool in tools if tool.name == "record_slack_task_references"
     )
@@ -102,6 +119,88 @@ async def test_작업과_조사근거_도구만_등록한다(mcp_env):
         "conversation_turns",
     } <= set(publish_tool.input_schema["properties"])
     assert "context" not in publish_tool.input_schema["properties"]
+
+
+async def test_운영_mcp는_list_행으로_작업을_시작한다(mcp_env):
+    client = AsyncMock()
+    start = AsyncMock(return_value='{"work_thread_created": true}')
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch("app.slack_task_mcp.start_task_from_slack_list", start):
+        result = await build_mcp(client).call_tool(
+            "start-slack-list-task", {"list_url": "https://example.slack.com/task"}
+        )
+
+    assert result.content[0].text == '{"work_thread_created": true}'
+    start.assert_awaited_once_with(
+        client,
+        "https://example.slack.com/task",
+        "operator@team-mono.com",
+    )
+
+
+async def test_작업_list가_등록된_채널_목록을_이름순으로_반환한다(mcp_env):
+    client = AsyncMock()
+    client.conversations_info.side_effect = [
+        {"channel": {"name": "제타사업"}},
+        {"channel": {"name": "알파사업"}},
+    ]
+
+    with patch(
+        "app.slack_task_mcp.list_task_list_channels",
+        return_value={"C02": "F02", "C01": "F01"},
+    ):
+        result = await build_mcp(client).call_tool("list_slack_task_channels", {})
+
+    assert json.loads(result.content[0].text) == [
+        {"channel_id": "C01", "channel_name": "알파사업"},
+        {"channel_id": "C02", "channel_name": "제타사업"},
+    ]
+    assert [call.kwargs for call in client.conversations_info.await_args_list] == [
+        {"channel": "C02"},
+        {"channel": "C01"},
+    ]
+
+
+async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
+    client = AsyncMock()
+    client.users_list.return_value = {
+        "members": [{"id": "U01OWNER", "profile": {"email": "operator@team-mono.com"}}],
+        "response_metadata": {"next_cursor": ""},
+    }
+    client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
+    task_list = ChannelTaskList(
+        list_id="F01LIST",
+        list_url="https://example.slack.com/lists/T1/F01LIST",
+        name_column_id="ColTitle",
+        completed_column_id="ColDone",
+        assignee_column_id="ColOwner",
+        due_date_column_id="ColDue",
+        thread_column_id="ColSource",
+    )
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch(
+        "app.slack_task_mcp.find_channel_task_list", return_value=task_list
+    ) as find_task_list:
+        result = await build_mcp(client).call_tool(
+            "create_slack_list_task",
+            {
+                "channel_id": "C01TASK",
+                "title": "계정 생성",
+                "due_date": "2026-09-12",
+            },
+        )
+
+    assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
+    find_task_list.assert_called_once_with("C01TASK")
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
+    assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
 
 
 @pytest.mark.parametrize(

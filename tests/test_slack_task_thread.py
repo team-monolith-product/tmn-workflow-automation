@@ -341,12 +341,44 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
 
     with patch(
         "service.slack_task_thread.acquire_task_record_lock", return_value=lock
-    ), patch("service.slack_task_thread.release_task_record_lock") as release:
+    ), patch(
+        "service.slack_task_thread.find_task_list_channel_id", return_value=None
+    ), patch(
+        "service.slack_task_thread.release_task_record_lock"
+    ) as release:
         with pytest.raises(ValueError, match="요청 맥락"):
             await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
 
     client.chat_postMessage.assert_not_awaited()
     release.assert_called_once_with(lock)
+
+
+async def test_start_uses_channel_registered_to_list_without_source():
+    client = AsyncMock()
+    client.slackLists_items_info.side_effect = [info(record()), info(record())]
+    client.chat_postMessage.return_value = {"channel": CHANNEL, "ts": ROOT_TS}
+    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
+    client.chat_getPermalink.return_value = {"permalink": ROOT_URL}
+    client.conversations_replies.return_value = {
+        "messages": [{"bot_id": "B01", "ts": ROOT_TS, "text": "[시작]"}]
+    }
+    lock = Mock()
+
+    with patch(
+        "service.slack_task_thread.acquire_task_record_lock", return_value=lock
+    ), patch(
+        "service.slack_task_thread.find_task_list_channel_id", return_value=CHANNEL
+    ) as find_channel, patch(
+        "service.slack_task_thread.release_task_record_lock"
+    ):
+        result = json.loads(
+            await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
+        )
+
+    find_channel.assert_called_once_with(LIST_ID)
+    assert client.chat_postMessage.await_args_list[0].kwargs["channel"] == CHANNEL
+    assert result["source_threads"] == []
+    assert result["work_thread_created"] is True
 
 
 async def test_start_reports_broken_source_when_work_thread_already_exists():
