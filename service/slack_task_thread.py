@@ -93,8 +93,12 @@ class SlackTaskListSchema:
         return _read_cell(record, self.name_column_id, "text") or ""
 
     def is_completed(self, record: dict[str, Any]) -> bool:
-        values = _read_cell(record, self.completed_column_id, "checkbox")
-        return bool(values and values[0])
+        """완료 칸 값은 보통 `[true]` 처럼 배열로 오지만, 슬랙이 단일 bool로
+        돌려줄 때도 있습니다."""
+        value = _read_cell(record, self.completed_column_id, "checkbox")
+        if isinstance(value, list):
+            value = value[0] if value else False
+        return bool(value)
 
     def assignees_of(self, record: dict[str, Any]) -> list[str]:
         return _read_cell(record, self.assignee_column_id, "user") or []

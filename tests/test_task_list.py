@@ -196,6 +196,12 @@ def test_unchecked_item_is_not_completed():
     assert TASK_LIST.is_completed(item("R")) is False
 
 
+def test_completed_item_reads_bare_bool_checkbox():
+    """슬랙이 완료 칸을 배열이 아닌 단일 bool 로 돌려줄 때도 있다 (WORKFLOW-AUTOMATION-73/74)"""
+    assert TASK_LIST.is_completed(item("R", checkbox=True)) is True
+    assert TASK_LIST.is_completed(item("R", checkbox=False)) is False
+
+
 def test_reading_item_without_fields_key():
     """셀이 하나도 없는 항목은 fields 자체가 없을 수 있다"""
     assert TASK_LIST.title_of({"id": "Rec01"}) == ""
