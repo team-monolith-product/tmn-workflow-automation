@@ -154,6 +154,20 @@ def test_schema_reads_message_objects_arrays_and_legacy_urls():
     ]
 
 
+def test_is_completed_reads_bare_bool_checkbox():
+    """슬랙이 완료 칸을 배열이 아닌 단일 bool 로 돌려줄 때도 있다 (WORKFLOW-AUTOMATION-73/74)"""
+    schema = task_list_schema(SCHEMA)
+    item = {"id": RECORD_ID, "fields": [{"column_id": "ColDone", "checkbox": True}]}
+
+    assert schema.is_completed(item) is True
+    assert (
+        schema.is_completed(
+            {**item, "fields": [{"column_id": "ColDone", "checkbox": False}]}
+        )
+        is False
+    )
+
+
 def test_message_permalink_uses_thread_root():
     location = message_location(
         {
