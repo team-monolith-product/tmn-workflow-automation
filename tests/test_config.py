@@ -36,6 +36,14 @@ def test_load_config():
     assert len(config.task_alerts.pipelines) == 2
 
 
+def test_recovery_mail_jobs():
+    config = load_config(CONFIG_PATH)
+    jobs = {job.name: job for job in config.scheduled_jobs}
+
+    assert jobs["sync_recovery_mail"].cron == {"minute": "*/5"}
+    assert jobs["renew_recovery_mail_watch"].cron == {"hour": 3, "minute": 40}
+
+
 def test_squad_references_notion_db():
     """스쿼드가 올바른 NotionDBConfig를 참조하는지 검증"""
     config = load_config(CONFIG_PATH)

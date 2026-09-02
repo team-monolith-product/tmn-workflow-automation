@@ -87,6 +87,39 @@ curl -X POST http://localhost:8000/webhook \
 }
 ```
 
+## 복구 계정 인증메일 전달
+
+Gmail mailbox watch가 INBOX 변경을 Google Cloud Pub/Sub topic으로 보냅니다.
+Pub/Sub push subscription은 `POST /webhooks/recovery-mail`을 호출하고, 서버는
+OIDC token의 audience와 service account email을 확인합니다. 5분마다 Gmail
+history를 다시 확인하며 mailbox watch는 하루에 한 번 갱신합니다.
+
+Google Cloud에는 Gmail API와 Pub/Sub API를 활성화하고 topic을 만든 뒤
+`gmail-api-push@system.gserviceaccount.com`에 publisher 권한을 줍니다. Push
+subscription에는 인증용 service account와 아래 endpoint를 등록합니다.
+
+```text
+https://wfa.codle.io/webhooks/recovery-mail
+```
+
+기능 설정은 환경 변수로 주입합니다.
+
+- `RECOVERY_MAIL_ENABLED`
+- `RECOVERY_MAILBOX_EMAIL`
+- `RECOVERY_MAIL_ALLOWED_SENDERS`: 쉼표로 나눈 정확한 sender email 목록
+- `RECOVERY_MAIL_CODE_PATTERN`: 본문에서 인증번호를 찾는 정규식
+- `RECOVERY_MAIL_SLACK_CHANNEL_ID`
+- `GMAIL_PUBSUB_TOPIC`
+- `GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT`
+- `GMAIL_PUBSUB_OIDC_AUDIENCE`
+- `GMAIL_OAUTH_CLIENT_ID`
+- `GMAIL_OAUTH_CLIENT_SECRET`
+- `GMAIL_OAUTH_REFRESH_TOKEN`
+
+OAuth scope는 `gmail.readonly`입니다. Redis에는 마지막 Gmail history ID와 동시
+실행을 막는 lock만 저장합니다. 메일 본문과 인증번호는 저장하거나 로그로 남기지
+않습니다. Slack에는 sender, subject, 추출한 인증번호만 보냅니다.
+
 ## 배포
 
 본 애플리케이션은 `jce-service-helm/workflow-automation-slack` Helm Chart를 통해 배포됩니다.

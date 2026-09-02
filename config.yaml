@@ -177,6 +177,21 @@ sms_projects:
   C0BRF9XJ40N: "26기업연계정보교원연수"
 
 scheduled_jobs:
+  - name: sync_recovery_mail
+    module: scripts.sync_recovery_mail
+    function: main
+    cron:
+      minute: "*/5"
+    business_day_only: false
+
+  - name: renew_recovery_mail_watch
+    module: scripts.renew_recovery_mail_watch
+    function: main
+    cron:
+      hour: 3
+      minute: 40
+    business_day_only: false
+
   # 구글 시트 카탈로그. 셀 값이 아니라 이름·탭·머리행만 넣는다.
   # 지난번 수정 시각과 대조해 **바뀐 시트만** 읽으므로 보통 실행은 몇 초다.
   # 다만 첫 실행(또는 --full)은 전량이라 6분쯤 걸린다 -- Sheets 읽기 쿼터의

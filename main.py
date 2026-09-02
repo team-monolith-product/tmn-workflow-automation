@@ -24,6 +24,7 @@ from app.knowledge_mcp import (
 from app.knowledge_notion import router as knowledge_notion_router
 from app.mcp_dispatcher import MCPPathDispatcher
 from app.plugin_marketplace import router as plugin_marketplace_router
+from app.recovery_mail import router as recovery_mail_router
 from app.slack_task_mcp import (
     build_mcp as build_operations_task_mcp,
     build_mcp_app as build_operations_task_mcp_app,
@@ -31,6 +32,11 @@ from app.slack_task_mcp import (
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
+from service.recovery_mail import (
+    RecoveryMailSyncBusy,
+    recovery_mail_enabled,
+    renew_recovery_mail_watch,
+)
 
 load_dotenv()
 
@@ -79,6 +85,16 @@ async def lifespan(_app: FastAPI):
 
     mount만 하고 이걸 빠뜨리면 /mcp 요청이 전부 실패합니다.
     """
+    if recovery_mail_enabled():
+        try:
+            await renew_recovery_mail_watch()
+        except RecoveryMailSyncBusy:
+            logger.info(
+                "복구 메일 동기화가 실행 중이어서 시작 시 감시 갱신을 건너뜁니다."
+            )
+        except Exception as exc:
+            logger.error("복구 메일 감시 초기화 실패: %s", type(exc).__name__)
+
     async with (
         knowledge_mcp.session_manager.run(),
         operations_task_mcp.session_manager.run(),
@@ -93,6 +109,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(plugin_marketplace_router)
+app.include_router(recovery_mail_router)
 
 
 # ============================================================================
