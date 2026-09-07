@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 from langchain_core.tools import tool
 from slack_sdk.web.async_client import AsyncWebClient
 
-from service.knowledge.db import connect
+from service.db import connect
 from service.knowledge.ingest import build_thread_row, upsert_item
 from service.knowledge.register import (
     disable_source,

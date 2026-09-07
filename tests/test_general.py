@@ -83,6 +83,41 @@ def mock_answer():
         yield answer
 
 
+class TestRunWaJob:
+    """`/wa` 작업 결과 회신 테스트"""
+
+    async def test_returns_string_to_caller(self):
+        """작업이 문자열을 반환하면 실행한 사람에게 되돌려준다"""
+        respond = AsyncMock()
+
+        await general._run_wa_job(
+            lambda: "이미 main 과 같습니다.", [], {}, "설명", respond
+        )
+
+        respond.assert_awaited_once_with("이미 main 과 같습니다.")
+
+    async def test_keeps_non_string_result_silent(self):
+        """문자열이 아닌 반환값은 회신 대상이 아니다"""
+        respond = AsyncMock()
+
+        await general._run_wa_job(lambda: True, [], {}, "설명", respond)
+
+        assert not respond.called
+
+    async def test_reports_failure_to_caller(self):
+        """작업이 실패하면 파드 로그가 아니라 실행한 사람에게 알린다"""
+        respond = AsyncMock()
+
+        def fail():
+            raise RuntimeError("404 Not Found")
+
+        await general._run_wa_job(fail, [], {}, "develop 을 main 으로 초기화", respond)
+
+        text = respond.await_args.args[0]
+        assert "develop 을 main 으로 초기화 에 실패했습니다." in text
+        assert "404 Not Found" in text
+
+
 class TestGeneralBotDirectMessage:
     """DM 질문 처리 테스트 (실제 Bolt 미들웨어 경유)"""
 

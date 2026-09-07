@@ -45,12 +45,16 @@ class NotionDBConfig:
 
 @dataclass(frozen=True)
 class Squad:
-    """조직 단위 스쿼드"""
+    """조직 단위 스쿼드
+
+    slack_usergroup_id 와 notion_db 는 선택이다. 스크럼 껍데기 메시지만 받고
+    멘션·태스크 요약은 받지 않는 스쿼드는 둘 다 없이 등록한다.
+    """
 
     handle: str
     display_name: str
-    slack_usergroup_id: str
-    notion_db: NotionDBConfig
+    slack_usergroup_id: str | None = None
+    notion_db: NotionDBConfig | None = None
     pm_slack_user_id: str | None = None
 
 
@@ -166,6 +170,7 @@ class AppConfig:
     task_alerts: TaskAlertsConfig
     education_bid_crawler: EducationBidCrawlerConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
+    sms_projects: dict[str, str] = field(default_factory=dict)
 
 
 def _parse_config(raw: dict) -> AppConfig:
@@ -194,8 +199,8 @@ def _parse_config(raw: dict) -> AppConfig:
     squads = []
     squad_by_handle: dict[str, Squad] = {}
     for squad_raw in raw.get("squads", []):
-        db_name = squad_raw["notion_db"]
-        if db_name not in notion_databases:
+        db_name = squad_raw.get("notion_db")
+        if db_name is not None and db_name not in notion_databases:
             raise ValueError(
                 f"스쿼드 '{squad_raw['handle']}'가 참조하는 "
                 f"notion_db '{db_name}'가 notion_databases에 없습니다."
@@ -203,8 +208,8 @@ def _parse_config(raw: dict) -> AppConfig:
         squad = Squad(
             handle=squad_raw["handle"],
             display_name=squad_raw.get("display_name", squad_raw["handle"]),
-            slack_usergroup_id=squad_raw["slack_usergroup_id"],
-            notion_db=notion_databases[db_name],
+            slack_usergroup_id=squad_raw.get("slack_usergroup_id"),
+            notion_db=notion_databases[db_name] if db_name else None,
             pm_slack_user_id=squad_raw.get("pm_slack_user_id"),
         )
         squads.append(squad)
@@ -260,6 +265,11 @@ def _parse_config(raw: dict) -> AppConfig:
                     f"task_alerts pipeline '{pl_raw['name']}'의 "
                     f"squad handle '{handle}'이 squads에 없습니다."
                 )
+            if squad_by_handle[handle].notion_db is None:
+                raise ValueError(
+                    f"task_alerts pipeline '{pl_raw['name']}'의 "
+                    f"squad '{handle}'에 notion_db가 없어 작업 알림을 만들 수 없습니다."
+                )
             pipeline_squads.append(
                 PipelineSquad(
                     squad=squad_by_handle[handle],
@@ -313,6 +323,7 @@ def _parse_config(raw: dict) -> AppConfig:
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
         scheduled_jobs=scheduled_jobs,
+        sms_projects=raw.get("sms_projects") or {},
     )
 
 

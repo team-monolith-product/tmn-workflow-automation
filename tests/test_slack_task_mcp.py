@@ -1,0 +1,235 @@
+"""운영팀 Slack 작업 전용 MCP 서버 테스트입니다."""
+
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+from starlette.testclient import TestClient
+
+from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
+from service.slack_task_list import ChannelTaskList
+
+ADMIN = {
+    "id": 7,
+    "email": "operator@team-mono.com",
+    "permissions": ["Role"],
+    "tenants": ["test_class"],
+}
+RESOURCE_URL = "https://wfa.codle.io"
+OPERATIONS_MCP_PATH = "/mcp/operate"
+TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
+
+
+@pytest.fixture
+def mcp_env(monkeypatch):
+    monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
+    monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+
+
+def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
+    mcp = build_mcp()
+    paths = {route.path for route in build_mcp_app(mcp).routes}
+
+    assert OPERATIONS_MCP_PATH in paths
+    assert "/.well-known/oauth-protected-resource" in paths
+
+
+def test_운영팀_경로의_401은_공용_OAuth_메타데이터를_가리킨다(mcp_env):
+    mcp = build_mcp()
+    with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
+        response = client.post(
+            OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=MCP_HEADERS
+        )
+
+    assert response.status_code == 401
+    advertised = response.headers["www-authenticate"].split('resource_metadata="')[1]
+    advertised = advertised.rstrip('"')
+    assert advertised == f"{RESOURCE_URL}/.well-known/oauth-protected-resource"
+
+
+def test_admin_rails가_인증한_사내_계정에_작업_도구를_노출한다(mcp_env):
+    mcp = build_mcp()
+    headers = MCP_HEADERS | {"Authorization": "Bearer valid-token"}
+    internal_user = ADMIN | {"email": "outside@team-mono.com"}
+
+    with patch("app.mcp_common.get_me", AsyncMock(return_value=internal_user)):
+        with TestClient(build_mcp_app(mcp), base_url=RESOURCE_URL) as client:
+            response = client.post(
+                OPERATIONS_MCP_PATH, json=TOOLS_LIST, headers=headers
+            )
+
+    assert response.status_code == 200
+    assert "start-slack-list-task" in response.text
+    assert "list_slack_task_channels" in response.text
+    assert "create_slack_list_task" in response.text
+    assert "publish_slack_task_result" in response.text
+    assert '"name":"query_knowledge"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_작업과_조사근거_도구만_등록한다(mcp_env):
+    tools = await build_mcp().list_tools()
+
+    assert [tool.name for tool in tools] == [
+        "start-slack-list-task",
+        "list_slack_task_channels",
+        "create_slack_list_task",
+        "record_slack_task_references",
+        "publish_slack_task_result",
+    ]
+    assert "post_slack_task_checkpoint" not in {tool.name for tool in tools}
+    start_tool = next(tool for tool in tools if tool.name == "start-slack-list-task")
+    assert set(start_tool.input_schema["properties"]) == {"list_url"}
+    create_tool = next(tool for tool in tools if tool.name == "create_slack_list_task")
+    assert set(create_tool.input_schema["properties"]) == {
+        "channel_id",
+        "title",
+        "due_date",
+    }
+    assert create_tool.input_schema["required"] == [
+        "channel_id",
+        "title",
+        "due_date",
+    ]
+    reference_tool = next(
+        tool for tool in tools if tool.name == "record_slack_task_references"
+    )
+    assert set(reference_tool.input_schema["properties"]) == {
+        "list_url",
+        "reason",
+        "references",
+    }
+    publish_tool = next(
+        tool for tool in tools if tool.name == "publish_slack_task_result"
+    )
+    assert "outputs" in publish_tool.input_schema["required"]
+    assert "learnings" not in publish_tool.input_schema["required"]
+    assert "references" in publish_tool.input_schema["properties"]
+    assert {
+        "model",
+        "reasoning_effort",
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_tokens",
+        "conversation_turns",
+    } <= set(publish_tool.input_schema["properties"])
+    assert "context" not in publish_tool.input_schema["properties"]
+
+
+async def test_운영_mcp는_list_행으로_작업을_시작한다(mcp_env):
+    client = AsyncMock()
+    start = AsyncMock(return_value='{"work_thread_created": true}')
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch("app.slack_task_mcp.start_task_from_slack_list", start):
+        result = await build_mcp(client).call_tool(
+            "start-slack-list-task", {"list_url": "https://example.slack.com/task"}
+        )
+
+    assert result.content[0].text == '{"work_thread_created": true}'
+    start.assert_awaited_once_with(
+        client,
+        "https://example.slack.com/task",
+        "operator@team-mono.com",
+    )
+
+
+async def test_작업_list가_등록된_채널_목록을_이름순으로_반환한다(mcp_env):
+    client = AsyncMock()
+    client.conversations_info.side_effect = [
+        {"channel": {"name": "제타사업"}},
+        {"channel": {"name": "알파사업"}},
+    ]
+
+    with patch(
+        "app.slack_task_mcp.list_task_list_channels",
+        return_value={"C02": "F02", "C01": "F01"},
+    ):
+        result = await build_mcp(client).call_tool("list_slack_task_channels", {})
+
+    assert json.loads(result.content[0].text) == [
+        {"channel_id": "C01", "channel_name": "알파사업"},
+        {"channel_id": "C02", "channel_name": "제타사업"},
+    ]
+    assert [call.kwargs for call in client.conversations_info.await_args_list] == [
+        {"channel": "C02"},
+        {"channel": "C01"},
+    ]
+
+
+async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
+    client = AsyncMock()
+    client.users_list.return_value = {
+        "members": [{"id": "U01OWNER", "profile": {"email": "operator@team-mono.com"}}],
+        "response_metadata": {"next_cursor": ""},
+    }
+    client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
+    task_list = ChannelTaskList(
+        list_id="F01LIST",
+        list_url="https://example.slack.com/lists/T1/F01LIST",
+        name_column_id="ColTitle",
+        completed_column_id="ColDone",
+        assignee_column_id="ColOwner",
+        due_date_column_id="ColDue",
+        thread_column_id="ColSource",
+    )
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch(
+        "app.slack_task_mcp.find_channel_task_list", return_value=task_list
+    ) as find_task_list:
+        result = await build_mcp(client).call_tool(
+            "create_slack_list_task",
+            {
+                "channel_id": "C01TASK",
+                "title": "계정 생성",
+                "due_date": "2026-09-12",
+            },
+        )
+
+    assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
+    find_task_list.assert_called_once_with("C01TASK")
+    fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
+    assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
+    assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
+
+
+@pytest.mark.parametrize(
+    ("name", "title", "expected"),
+    [
+        ("codex-mcp-client", None, "Codex"),
+        ("claude-code", None, "Claude Code"),
+        ("codex-mcp-client", "AI coding agent", "Codex"),
+        ("custom-client", "사내 에이전트", "사내 에이전트"),
+    ],
+)
+def test_MCP_클라이언트_이름을_사람이_읽을_수_있게_표시한다(name, title, expected):
+    client_info = SimpleNamespace(name=name, title=title)
+    context = Mock()
+    context.session.client_params.client_info = client_info
+
+    assert _client_display_name(context) == expected
+
+
+def test_MCP_초기화_정보가_없으면_일반_클라이언트로_표시한다():
+    context = Mock()
+    context.session.client_params = None
+
+    assert _client_display_name(context) == "MCP 클라이언트"
+
+
+def test_MCP_초기화_정보가_없어도_user_agent에서_codex를_찾는다():
+    context = Mock()
+    context.session.client_params = None
+    context.headers = {"user-agent": "codex-mcp-client/1.0"}
+
+    assert _client_display_name(context) == "Codex"

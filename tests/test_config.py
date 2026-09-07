@@ -30,8 +30,8 @@ def test_load_config():
 
     assert isinstance(config, AppConfig)
     assert len(config.notion_databases) == 5
-    assert len(config.squads) == 5
-    assert len(config.scrum.squads) == 4
+    assert len(config.squads) == 6
+    assert len(config.scrum.squads) == 5
     assert len(config.scrum.personal_scrums) == 1
     assert len(config.task_alerts.pipelines) == 2
 
@@ -46,6 +46,8 @@ def test_squad_references_notion_db():
     assert squad_map["ie"].notion_db.name == "infra"
     assert squad_map["탐색"].notion_db.name == "explore"
     assert squad_map["콘텐츠"].notion_db.name == "contents"
+    assert squad_map["게임"].notion_db is None
+    assert squad_map["게임"].slack_usergroup_id is None
 
 
 def test_notion_db_properties():
@@ -75,7 +77,7 @@ def test_scrum_config():
     config = load_config(CONFIG_PATH)
 
     handles = [s.squad.handle for s in config.scrum.squads]
-    assert handles == ["코들", "해커톤", "탐색", "ie"]
+    assert handles == ["코들", "해커톤", "탐색", "ie", "게임"]
 
     codle = config.scrum.squads[0]
     assert codle.squad.display_name == ":codle_bird: 코들 스쿼드"
@@ -112,6 +114,48 @@ def test_task_alert_pipelines():
     assert contents.name == "콘텐츠 본부"
     assert [ps.squad.handle for ps in contents.pipeline_squads] == ["콘텐츠"]
     assert "alert_schedule_feasibility" not in contents.pipeline_squads[0].alerts
+
+
+def test_squad_without_usergroup_and_db():
+    """유저그룹·Notion DB 없는 스쿼드도 스크럼에 참여할 수 있다"""
+    raw = {
+        "notion_databases": {},
+        "squads": [{"handle": "게임", "display_name": ":video_game: 게임 스쿼드"}],
+        "scrum": {"squads": [{"handle": "게임", "channel_id": "C0"}]},
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(raw, f)
+        f.flush()
+        config = load_config(f.name)
+    os.unlink(f.name)
+
+    squad = config.squads[0]
+    assert squad.slack_usergroup_id is None
+    assert squad.notion_db is None
+    assert config.scrum.squads[0].squad is squad
+
+
+def test_task_alert_squad_requires_notion_db():
+    """notion_db 없는 스쿼드를 작업 알림 파이프라인에 넣으면 ValueError"""
+    raw = {
+        "notion_databases": {},
+        "squads": [{"handle": "게임"}],
+        "task_alerts": {
+            "pipelines": [
+                {
+                    "name": "제품 본부",
+                    "channel_id": "C0",
+                    "squads": [{"handle": "게임", "alerts": ["alert_no_tasks"]}],
+                }
+            ]
+        },
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(raw, f)
+        f.flush()
+        with pytest.raises(ValueError, match="notion_db"):
+            load_config(f.name)
+    os.unlink(f.name)
 
 
 def test_squad_overrides():

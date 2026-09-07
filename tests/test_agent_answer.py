@@ -67,3 +67,60 @@ class TestAnswer:
 
         text = say.call_args.args[0]["blocks"][0]["text"]["text"]
         assert text == "부산 연수는 벡스코입니다."
+
+    async def test_empty_answer_falls_back_to_placeholder(self, slack_client):
+        """reasoning 블록만 있어 본문이 비면 빈 문자열 대신 안내 문구를 보낸다 (Slack invalid_blocks 방지)"""
+        executor = MagicMock()
+        executor.ainvoke = AsyncMock(
+            return_value={
+                "messages": [
+                    AIMessage(
+                        content=[{"id": "rs_1", "summary": [], "type": "reasoning"}]
+                    )
+                ]
+            }
+        )
+        say = AsyncMock()
+
+        with patch("app.common.ChatOpenAI"), patch(
+            "app.common.create_react_agent", return_value=executor
+        ):
+            await common.answer(
+                "1786006902.904459",
+                "C0AP8CG1Y6N",
+                "U1",
+                "질문",
+                say,
+                slack_client,
+                [],
+            )
+
+        text = say.call_args.args[0]["blocks"][0]["text"]["text"]
+        assert text
+
+    async def test_long_answer_splits_into_chunks(self, slack_client):
+        """3000자를 넘는 응답은 여러 블록으로 나눠 보낸다 (Slack invalid_blocks 방지)"""
+        long_text = "가" * 7000
+        executor = MagicMock()
+        executor.ainvoke = AsyncMock(
+            return_value={"messages": [AIMessage(content=long_text)]}
+        )
+        say = AsyncMock()
+
+        with patch("app.common.ChatOpenAI"), patch(
+            "app.common.create_react_agent", return_value=executor
+        ):
+            await common.answer(
+                "1786006902.904459",
+                "C0AP8CG1Y6N",
+                "U1",
+                "질문",
+                say,
+                slack_client,
+                [],
+            )
+
+        assert say.call_count == 3
+        for call in say.call_args_list:
+            text = call.args[0]["blocks"][0]["text"]["text"]
+            assert len(text) <= 3000

@@ -11,3 +11,6 @@ backup_*.json
 
 # 교육 입찰 API 원본 캐시 (날짜·소스 단위)
 .cache/
+
+# 사내 플러그인 원문은 비공개 Marketplace 저장소에서만 관리한다.
+plugins/tmn-operating/

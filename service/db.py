@@ -1,5 +1,9 @@
 """
-지식베이스 Postgres 연결을 제공하는 Service Layer입니다.
+사내 Postgres 연결을 제공하는 Service Layer입니다.
+
+지식베이스가 처음 쓴 접속이라 DSN 환경 변수 이름은 KNOWLEDGE_DATABASE_URL
+그대로지만, 이 모듈에는 도메인 지식이 없습니다. 채널 작업 리스트도 같은
+접속을 씁니다.
 """
 
 import os

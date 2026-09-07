@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 import psycopg
 
-from service.knowledge.db import connect
+from service.db import connect
 
 # 옛 검색 도구가 스니펫 20건으로 돌려주던 분량이다.
 DEFAULT_CHAR_LIMIT = 8_000
@@ -44,6 +44,38 @@ SCHEMA_GUIDE = """
   distilled_text, metadata jsonb, indexed_at): 슬랙 스레드 하나가 한 행.
   raw_text가 스레드 원문이고 평균 1,148자다. distilled_text는 아직 전부 비어 있다.
 - query_log(actor, tool, query, filters, latency_ms, created_at): 이 도구의 실행 기록.
+- sms_log(id, ref_key, message_key, channel_id, project, thread_ts, sender,
+  content, message_type, approved_by, sent_at, scheduled_at, phone, name,
+  change_word jsonb): 문자 발송 이력. 슬랙 [보내기] 승인으로 나간 것만 있다.
+  틀리기 쉬운 자리 넷:
+  (1) 한 행이 "발송 × 받는 사람"이다. 148명에게 보낸 문자는 148행이고 content가
+      148번 반복된다. 발송 건수는 count(*)가 아니라 count(distinct ref_key).
+  (2) "언제 나갔나"는 coalesce(scheduled_at, sent_at). sent_at은 뿌리오가 접수한
+      시각이고, 예약 발송이면 실제로 나가는 시각은 scheduled_at에 있다.
+      둘 다 timestamptz이고 세션 타임존이 UTC라 그대로 뽑으면 09:00 KST가
+      00:00+00:00으로 보인다. 사람에게 보일 값은 AT TIME ZONE 'Asia/Seoul'.
+  (3) name은 문안이 [*이름*]을 쓰는데 값이 없으면 빈 문자열, 문안이 아예 안 쓰면
+      NULL이라 둘 다 봐야 한다. phone은 하이픈 없는 숫자다.
+  (4) 채널 이름으로 찾으려면 sms_log.channel_id = data_source.external_id AND
+      data_source.source = 'slack' 로 잇는다. 지식 수집에 등록되지 않은 채널은
+      data_source에 없어 이 조인이 조용히 0행을 내므로, 못 찾으면 channel_id로 직접.
+  content는 치환 전 원문이라 [*이름*] 태그가 그대로 있고, change_word는
+  {"var1": "1기"} 꼴로 키 var1~var8이 문안의 [*1*]~[*8*]에 대응한다.
+  project는 발송 시점에 박은 사업명이고 매핑에 없는 채널이면 NULL이다.
+
+구글 시트 찾기:
+- data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트
+  하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
+  않다 -- 응답이 계속 쌓여 곧 낡기 때문이다.
+- 그래서 여기서 답할 수 있는 것은 "그런 시트가 어디 있나"까지다. 행수·집계·명단은
+  **execute_python 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
+- metadata->'tabs' 에 탭별 gid 와 columns 가 있다. 시트를 찾은 뒤
+  external_id(=스프레드시트 ID)와 탭 이름(또는 gid)을 그 코드에 넘긴다.
+- 예: 출석 열이 있는 시트 찾기
+  SELECT i.title, i.external_id, i.url
+  FROM item i JOIN data_source d ON d.id = i.data_source_id
+  WHERE d.source = 'drive_sheet' AND lower(i.raw_text) LIKE lower('%출석%')
+  ORDER BY i.source_updated_at DESC
 
 규약:
 - 어휘를 찾을 때는 lower(raw_text) LIKE lower('%키워드%')로 쓴다. GIN(pg_bigm)

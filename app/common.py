@@ -802,12 +802,17 @@ async def answer(
     )
 
     agent_answer = extract_text(response["messages"][-1].content)
+    if not agent_answer:
+        agent_answer = "(응답할 내용이 없습니다.)"
 
-    await say(
-        {
-            "blocks": [
-                {"type": "section", "text": {"type": "mrkdwn", "text": agent_answer}}
-            ]
-        },
-        thread_ts=thread_ts,
-    )
+    # Slack 메시지 길이 제한(3000자) 대응: 길면 여러 블록으로 분할
+    chunks = [agent_answer[i : i + 3000] for i in range(0, len(agent_answer), 3000)]
+    for chunk in chunks:
+        await say(
+            {
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
+                ]
+            },
+            thread_ts=thread_ts,
+        )

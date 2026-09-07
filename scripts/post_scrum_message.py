@@ -56,6 +56,8 @@ def main():
 
     # 스쿼드별 태스크 요약 답글
     for squad in scrum.squads:
+        if squad.squad.slack_usergroup_id is None or squad.squad.notion_db is None:
+            continue
         try:
             reply_team_scrum_tasks(
                 notion,
