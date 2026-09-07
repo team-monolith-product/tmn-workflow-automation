@@ -199,8 +199,9 @@ class ChannelTaskList:
     def is_completed(self, item: dict) -> bool:
         """항목이 완료됐는지 봅니다.
 
-        완료 칸의 값은 `[true]` 처럼 배열로 옵니다. 배열을 그대로 참거짓으로
-        쓰면 체크를 풀어 `[false]` 가 된 항목까지 완료로 읽습니다.
+        완료 칸의 값은 보통 `[true]` 처럼 배열로 오지만, 슬랙이 단일 bool로
+        돌려줄 때도 있습니다. 배열을 그대로 참거짓으로 쓰면 체크를 풀어
+        `[false]` 가 된 항목까지 완료로 읽습니다.
 
         Args:
             item: slackLists.items.list 의 항목 하나
@@ -208,8 +209,10 @@ class ChannelTaskList:
         Returns:
             bool: 완료됐으면 True
         """
-        values = _read_cell(item, self.completed_column_id, "checkbox")
-        return bool(values and values[0])
+        value = _read_cell(item, self.completed_column_id, "checkbox")
+        if isinstance(value, list):
+            value = value[0] if value else False
+        return bool(value)
 
     def completion_cells(self, row_ids: list[str]) -> list[dict]:
         """여러 행을 한 번에 완료로 표시할 셀 목록을 만듭니다.
