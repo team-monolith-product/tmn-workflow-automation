@@ -566,7 +566,12 @@ def _clean_references(values: list[str] | None) -> list[tuple[str, str]]:
 
 def _validate_publishable(parts: list[str], max_chars: int = 6_000) -> None:
     text = "\n".join(parts)
-    if len(text) > max_chars:
+    # Slack mrkdwn은 &, <, > 를 이스케이프해서 보내므로(html.escape), 이런 문자가
+    # 많은 입력(URL 쿼리스트링의 & 등)은 실제 전송 길이가 원문보다 훨씬 길어져
+    # 이 검증을 통과해도 Slack에서 msg_too_long으로 거부될 수 있다. 실제로 보낼
+    # 길이 기준으로 검증한다.
+    escaped_length = len(html.escape(text, quote=False))
+    if escaped_length > max_chars:
         raise ValueError(f"Slack 기록은 전체 {max_chars:,}자 이내로 요약해주세요.")
     if SECRET_PATTERN.search(text):
         raise ValueError("Slack 결과에 토큰이나 비밀값으로 보이는 문자열이 있습니다.")

@@ -728,3 +728,28 @@ async def test_publish_rejects_output_without_shareable_link():
         )
 
     client.chat_postMessage.assert_not_awaited()
+
+
+async def test_publish_rejects_content_that_would_grow_past_slack_limit_after_escaping():
+    """'&', '<', '>' 는 Slack mrkdwn 전송 시 이스케이프되어 원문보다 길어진다.
+    각 항목은 600자 이내라 개별 검증은 통과해도, '&'가 많아 실제 전송 길이가
+    부풀면 Slack의 msg_too_long 한도를 넘을 수 있으므로 전송될 길이를 기준으로
+    미리 막는다."""
+    client = AsyncMock()
+    references = [
+        f"참고{i}: https://example.com/a?idx={i}&" + "x=1&" * 135 for i in range(30)
+    ]
+
+    with pytest.raises(ValueError, match="이내로 요약"):
+        await publish_task_result(
+            client,
+            LIST_URL,
+            "owner@example.com",
+            "completed",
+            "충분히 구체적인 완료 요약입니다.",
+            outputs=[],
+            references=references,
+        )
+
+    client.chat_postMessage.assert_not_awaited()
+    client.chat_update.assert_not_awaited()
