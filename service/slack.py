@@ -5,6 +5,7 @@ Slack API를 활용하는 Service Layer입니다.
 import time
 from typing import Any
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 
@@ -96,6 +97,29 @@ async def get_email_to_user_id_async(slack_client: AsyncWebClient) -> dict[str, 
             break
 
     return email_to_user_id
+
+
+async def get_user_id_by_email_async(
+    slack_client: AsyncWebClient, email: str
+) -> str | None:
+    """
+    이메일 하나만 필요한 경우 워크스페이스 전체를 페이지네이션하는
+    `get_email_to_user_id_async` 대신 사용합니다. `users.list` 반복 호출은
+    워크스페이스 규모에 비례해 요청 수가 늘어나 rate limit(429)에 걸리기 쉽습니다.
+
+    Args:
+        slack_client (AsyncWebClient): Slack WebClient
+        email (str): 조회할 이메일
+    Returns:
+        str | None: 이메일에 해당하는 Slack User ID (없으면 None)
+    """
+    try:
+        response = await slack_client.users_lookupByEmail(email=email)
+    except SlackApiError as e:
+        if e.response.get("error") == "users_not_found":
+            return None
+        raise
+    return response["user"]["id"]
 
 
 def get_user_id_to_user_info(

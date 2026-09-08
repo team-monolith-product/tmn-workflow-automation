@@ -17,7 +17,7 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
-from service.slack import get_email_to_user_id_async
+from service.slack import get_user_id_by_email_async
 from service.slack_task_list import find_channel_task_list, list_task_list_channels
 from service.slack_task_thread import (
     publish_task_result,
@@ -169,11 +169,11 @@ def build_mcp(
         if task_list is None:
             raise ValueError("선택한 채널에 연결된 Slack 작업 List가 없습니다.")
 
-        assignees = await get_email_to_user_id_async(slack)
+        assignee = await get_user_id_by_email_async(slack, token.email)
         return await task_list.create_task(
             slack,
             title=title,
-            assignee=assignees.get(token.email),
+            assignee=assignee,
             due_date=due_date,
         )
 

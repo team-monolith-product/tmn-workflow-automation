@@ -166,10 +166,7 @@ async def test_작업_list가_등록된_채널_목록을_이름순으로_반환�
 
 async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
     client = AsyncMock()
-    client.users_list.return_value = {
-        "members": [{"id": "U01OWNER", "profile": {"email": "operator@team-mono.com"}}],
-        "response_metadata": {"next_cursor": ""},
-    }
+    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
     client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
     task_list = ChannelTaskList(
         list_id="F01LIST",
@@ -198,6 +195,7 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
 
     assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
     find_task_list.assert_called_once_with("C01TASK")
+    client.users_lookupByEmail.assert_awaited_once_with(email="operator@team-mono.com")
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
     assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
