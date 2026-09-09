@@ -109,10 +109,6 @@ scrum:
       channel_id: "C09277NGUET"
       pr_warning: true
 
-    - handle: "해커톤"
-      channel_id: "C09277NGUET"
-      pr_warning: true
-
     - handle: "탐색"
       channel_id: "C09277NGUET"
       pr_warning: false
