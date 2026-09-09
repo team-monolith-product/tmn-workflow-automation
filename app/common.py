@@ -23,6 +23,7 @@ from langchain_community.tools import TavilySearchResults
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
+from service.slack import slack_users_list
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 from service.notion_transport import build_client as build_notion_http_client
 from .tool_status_handler import ToolStatusHandler
@@ -134,21 +135,8 @@ def notion_page_to_markdown(page_id: str) -> str:
     return md_string_dict.get("parent", "")
 
 
-_cache_slack_users = TTLCache(maxsize=100, ttl=3600)
 _cache_notion_users = TTLCache(maxsize=100, ttl=3600)
 _cache_database_schema = TTLCache(maxsize=10, ttl=3600)
-
-
-async def slack_users_list(client: AsyncWebClient):
-    """
-    슬랙 사용자 목록을 조회한다.
-    """
-    if "slack_users_list" in _cache_slack_users:
-        return _cache_slack_users["slack_users_list"]
-
-    resp = await client.users_list()
-    _cache_slack_users["slack_users_list"] = resp
-    return resp
 
 
 async def notion_users_list(client: NotionClient):

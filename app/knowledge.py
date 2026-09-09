@@ -32,7 +32,7 @@ from service.knowledge.query import (
     QUERY_TOOL_DESCRIPTION,
     run_query,
 )
-from service.knowledge.users import fetch_user_emails
+from service.slack import slack_users_list
 
 SLACK_WORKSPACE_DOMAIN = "monolith-keb2010.slack.com"
 
@@ -107,7 +107,11 @@ async def ingest_message_event(client: AsyncWebClient, body: dict[str, Any]) -> 
         messages=replies["messages"],
         workspace_domain=SLACK_WORKSPACE_DOMAIN,
         distill_delay_seconds=DISTILL_DELAY_SECONDS,
-        user_emails=await fetch_user_emails(client),
+        user_emails={
+            member["id"]: member["profile"]["email"]
+            for member in (await slack_users_list(client))["members"]
+            if (member.get("profile") or {}).get("email")
+        },
     )
     await asyncio.to_thread(_upsert_item, row)
 
@@ -129,8 +133,16 @@ def get_knowledge_query_tools(client: AsyncWebClient, user_id: str | None) -> li
 
     @tool(description=QUERY_TOOL_DESCRIPTION)
     async def query_knowledge(sql: str, char_limit: int = DEFAULT_CHAR_LIMIT) -> str:
-        emails = await fetch_user_emails(client)
-        actor = emails.get(user_id, f"slack:{user_id}")
+        users = await slack_users_list(client)
+        actor = next(
+            (
+                member["profile"]["email"]
+                for member in users["members"]
+                if member["id"] == user_id
+                and (member.get("profile") or {}).get("email")
+            ),
+            f"slack:{user_id}",
+        )
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, actor, "slack", char_limit)
 

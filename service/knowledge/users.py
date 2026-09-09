@@ -13,12 +13,6 @@ import json
 import pathlib
 from typing import Any
 
-from cachetools import TTLCache
-from slack_sdk.web.async_client import AsyncWebClient
-
-# 입퇴사 반영은 하루면 충분하다.
-_cache: TTLCache = TTLCache(maxsize=1, ttl=86400)
-
 
 def _to_email_map(members: list[dict[str, Any]]) -> dict[str, str]:
     """users.list 응답에서 UID → 이메일 매핑을 만듭니다.
@@ -47,29 +41,3 @@ def load_from_export(export_root: pathlib.Path) -> dict[str, str]:
     """
     members = json.loads((export_root / "users.json").read_text(encoding="utf-8"))
     return _to_email_map(members)
-
-
-async def fetch_user_emails(client: AsyncWebClient) -> dict[str, str]:
-    """워크스페이스 사용자 매핑을 받아옵니다. 하루 동안 캐시합니다.
-
-    Args:
-        client: Slack 클라이언트
-
-    Returns:
-        dict[str, str]: UID → 이메일
-    """
-    if "map" in _cache:
-        return _cache["map"]
-
-    members: list[dict[str, Any]] = []
-    cursor = None
-    while True:
-        response = await client.users_list(limit=200, cursor=cursor)
-        members.extend(response["members"])
-        cursor = (response.get("response_metadata") or {}).get("next_cursor")
-        if not cursor:
-            break
-
-    emails = _to_email_map(members)
-    _cache["map"] = emails
-    return emails

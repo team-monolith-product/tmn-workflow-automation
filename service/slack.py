@@ -4,8 +4,8 @@ Slack API를 활용하는 Service Layer입니다.
 
 import time
 from typing import Any
+from cachetools import TTLCache
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 
@@ -72,54 +72,49 @@ def get_email_to_user_id(slack_client: WebClient) -> dict[str, str]:
     return email_to_user_id
 
 
-async def get_email_to_user_id_async(slack_client: AsyncWebClient) -> dict[str, str]:
-    """
+# 입퇴사 등 사용자 정보 변경은 하루 단위로 반영합니다.
+_cache_slack_users = TTLCache(maxsize=1, ttl=86400)
+
+
+async def slack_users_list(client: AsyncWebClient) -> dict[str, Any]:
+    """전체 Slack 사용자 목록을 조회하고 24시간 캐시합니다.
+
     Args:
-        slack_client (WebClient): Slack WebClient
+        client: Slack 클라이언트
     Returns:
-        dict[str, str]: 이메일과 Slack User ID 매핑
+        dict[str, Any]: 모든 페이지의 사용자를 합친 members 목록
     """
-    email_to_user_id = {}
+    if "slack_users_list" in _cache_slack_users:
+        return _cache_slack_users["slack_users_list"]
+
+    members = []
     cursor = None
-
     while True:
-        response = await slack_client.users_list(cursor=cursor)
-        members = response["members"]
-
-        for member in members:
-            profile = member.get("profile", {})
-            email = profile.get("email")
-            if email:
-                email_to_user_id[email] = member["id"]
-
-        cursor = response.get("response_metadata", {}).get("next_cursor")
+        response = await client.users_list(limit=200, cursor=cursor)
+        members.extend(response["members"])
+        cursor = (response.get("response_metadata") or {}).get("next_cursor")
         if not cursor:
             break
 
-    return email_to_user_id
+    result = {"members": members}
+    _cache_slack_users["slack_users_list"] = result
+    return result
 
 
-async def get_user_id_by_email_async(
-    slack_client: AsyncWebClient, email: str
-) -> str | None:
-    """
-    이메일 하나만 필요한 경우 워크스페이스 전체를 페이지네이션하는
-    `get_email_to_user_id_async` 대신 사용합니다. `users.list` 반복 호출은
-    워크스페이스 규모에 비례해 요청 수가 늘어나 rate limit(429)에 걸리기 쉽습니다.
+async def get_email_to_user_id_async(slack_client: AsyncWebClient) -> dict[str, str]:
+    """캐시된 전체 사용자 목록에서 이메일 → Slack UID 매핑을 만듭니다.
 
     Args:
-        slack_client (AsyncWebClient): Slack WebClient
-        email (str): 조회할 이메일
+        slack_client: Slack 클라이언트
     Returns:
-        str | None: 이메일에 해당하는 Slack User ID (없으면 None)
+        dict[str, str]: 이메일과 Slack User ID 매핑
     """
-    try:
-        response = await slack_client.users_lookupByEmail(email=email)
-    except SlackApiError as e:
-        if e.response.get("error") == "users_not_found":
-            return None
-        raise
-    return response["user"]["id"]
+    users = await slack_users_list(slack_client)
+    return {
+        member["profile"]["email"]: member["id"]
+        for member in users["members"]
+        if (member.get("profile") or {}).get("email")
+    }
 
 
 def get_user_id_to_user_info(

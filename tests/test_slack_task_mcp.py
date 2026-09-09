@@ -27,6 +27,7 @@ def mcp_env(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr("service.slack._cache_slack_users", {})
 
 
 def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
@@ -166,7 +167,10 @@ async def test_작업_list가_등록된_채널_목록을_이름순으로_반환�
 
 async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_env):
     client = AsyncMock()
-    client.users_lookupByEmail.return_value = {"user": {"id": "U01OWNER"}}
+    client.users_list.return_value = {
+        "members": [{"id": "U01OWNER", "profile": {"email": "operator@team-mono.com"}}],
+        "response_metadata": {"next_cursor": ""},
+    }
     client.slackLists_items_create.return_value = {"item": {"id": "Rec01"}}
     task_list = ChannelTaskList(
         list_id="F01LIST",
@@ -195,7 +199,7 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
 
     assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
     find_task_list.assert_called_once_with("C01TASK")
-    client.users_lookupByEmail.assert_awaited_once_with(email="operator@team-mono.com")
+    client.users_list.assert_awaited_once_with(limit=200, cursor=None)
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
     assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
