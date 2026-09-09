@@ -27,6 +27,7 @@ def mcp_env(monkeypatch):
     monkeypatch.setenv("ADMIN_RAILS_BASE_URL", "https://admin-rails.codle.io")
     monkeypatch.setenv("MCP_RESOURCE_URL", RESOURCE_URL)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr("service.slack._cache_slack_users", {})
 
 
 def test_공용_호스트의_운영팀_경로에_mcp와_메타데이터를_연다(mcp_env):
@@ -198,6 +199,7 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
 
     assert result.content[0].text == f"{task_list.list_url}?record_id=Rec01"
     find_task_list.assert_called_once_with("C01TASK")
+    client.users_list.assert_awaited_once_with(limit=200, cursor=None)
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
     assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
