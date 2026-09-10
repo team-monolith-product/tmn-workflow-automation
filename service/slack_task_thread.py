@@ -15,6 +15,7 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 import psycopg
+from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.errors import SlackApiError, SlackRequestError
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -130,7 +131,7 @@ class SlackTaskListSchema:
             elif isinstance(value, dict):
                 normalized.append(value)
             else:
-                raise ValueError("Slack message 셀의 형식을 해석할 수 없습니다.")
+                raise ToolError("Slack message 셀의 형식을 해석할 수 없습니다.")
         return normalized
 
 
@@ -148,20 +149,20 @@ def parse_slack_list_task_url(list_url: str) -> SlackListTaskReference:
     if parsed.scheme != "https" or not (
         hostname == "slack.com" or hostname.endswith(".slack.com")
     ):
-        raise ValueError("https Slack List 링크를 사용해주세요.")
+        raise ToolError("https Slack List 링크를 사용해주세요.")
 
     segments = [segment for segment in parsed.path.split("/") if segment]
     if len(segments) != 3 or segments[0] != "lists":
-        raise ValueError("Slack List의 작업 행 링크가 아닙니다.")
+        raise ToolError("Slack List의 작업 행 링크가 아닙니다.")
 
     list_id = segments[2]
     record_ids = parse_qs(parsed.query).get("record_id", [])
     if not re.fullmatch(r"F[A-Z0-9]+", list_id) or len(record_ids) != 1:
-        raise ValueError("Slack List 링크에 올바른 list_id와 record_id가 필요합니다.")
+        raise ToolError("Slack List 링크에 올바른 list_id와 record_id가 필요합니다.")
 
     record_id = record_ids[0]
     if not re.fullmatch(r"Rec[A-Z0-9]+", record_id):
-        raise ValueError("Slack List 링크의 record_id 형식이 올바르지 않습니다.")
+        raise ToolError("Slack List 링크의 record_id 형식이 올바르지 않습니다.")
 
     return SlackListTaskReference(
         list_url=list_url.strip(), list_id=list_id, record_id=record_id
@@ -179,7 +180,7 @@ def _find_message_column_id(
         and (column.get("key") == key or str(column.get("name", "")).strip() == name)
     ]
     if len(candidates) > 1:
-        raise ValueError(
+        raise ToolError(
             f'message 타입의 "{name}" 열이 여러 개입니다. 하나만 남겨주세요.'
         )
     if not candidates:
@@ -200,7 +201,7 @@ def find_work_thread_column_id(schema: list[dict[str, Any]]) -> str:
         schema, WORK_THREAD_COLUMN_KEY, WORK_THREAD_COLUMN_NAME
     )
     if column_id is None:
-        raise ValueError(
+        raise ToolError(
             f'이 List에 message 타입의 "{WORK_THREAD_COLUMN_NAME}" 열을 먼저 추가해주세요.'
         )
     return column_id
@@ -223,7 +224,7 @@ def task_list_schema(schema: list[dict[str, Any]]) -> SlackTaskListSchema:
     missing = required - columns.keys()
     if missing:
         names = ", ".join(sorted(missing))
-        raise ValueError(f"Slack List 작업 열이 부족합니다: {names}")
+        raise ToolError(f"Slack List 작업 열이 부족합니다: {names}")
 
     return SlackTaskListSchema(
         name_column_id=columns["name"],
@@ -393,7 +394,7 @@ async def start_task_from_slack_list(
     task_schema, record = await _read_record(client, reference)
     work_references = task_schema.work_thread_references_of(record)
     if len(work_references) > 1:
-        raise ValueError("작업 기록 셀에는 Slack 스레드 링크가 하나만 있어야 합니다.")
+        raise ToolError("작업 기록 셀에는 Slack 스레드 링크가 하나만 있어야 합니다.")
 
     created = False
     if not work_references:
@@ -402,7 +403,7 @@ async def start_task_from_slack_list(
             task_schema, record = await _read_record(client, reference)
             work_references = task_schema.work_thread_references_of(record)
             if len(work_references) > 1:
-                raise ValueError(
+                raise ToolError(
                     "작업 기록 셀에는 Slack 스레드 링크가 하나만 있어야 합니다."
                 )
 
@@ -414,7 +415,7 @@ async def start_task_from_slack_list(
                         find_task_list_channel_id, reference.list_id
                     )
                 if channel_id is None:
-                    raise ValueError(
+                    raise ToolError(
                         "요청 맥락이 없고 Slack 작업 List에 연결된 채널도 없습니다."
                     )
                 posted = await client.chat_postMessage(
@@ -525,9 +526,9 @@ async def start_task_from_slack_list(
 def _clean_list(name: str, values: list[str] | None, maximum: int) -> list[str]:
     cleaned = [value.strip() for value in (values or []) if value.strip()]
     if len(cleaned) > maximum:
-        raise ValueError(f"{name}은 최대 {maximum}개만 남겨주세요.")
+        raise ToolError(f"{name}은 최대 {maximum}개만 남겨주세요.")
     if any(len(value) > 600 for value in cleaned):
-        raise ValueError(f"{name}의 각 항목은 600자 이내로 요약해주세요.")
+        raise ToolError(f"{name}의 각 항목은 600자 이내로 요약해주세요.")
     return cleaned
 
 
@@ -538,7 +539,7 @@ def _clean_outputs(values: list[str]) -> list[tuple[str, str]]:
     for output in outputs:
         match = OUTPUT_PATTERN.fullmatch(output)
         if not match:
-            raise ValueError(
+            raise ToolError(
                 '산출물은 각각 "산출물 이름: https://공유링크" 형식으로 작성해주세요.'
             )
         parsed.append((match.group(1).strip(), match.group(2)))
@@ -553,7 +554,7 @@ def _clean_references(values: list[str] | None) -> list[tuple[str, str]]:
     for reference in references:
         match = OUTPUT_PATTERN.fullmatch(reference)
         if not match:
-            raise ValueError(
+            raise ToolError(
                 '참고 자료는 각각 "자료 이름: https://공유링크" 형식으로 작성해주세요.'
             )
         name, url = match.group(1).strip(), match.group(2)
@@ -572,11 +573,11 @@ def _validate_publishable(parts: list[str], max_chars: int = 6_000) -> None:
     # 길이 기준으로 검증한다.
     escaped_length = len(html.escape(text, quote=False))
     if escaped_length > max_chars:
-        raise ValueError(f"Slack 기록은 전체 {max_chars:,}자 이내로 요약해주세요.")
+        raise ToolError(f"Slack 기록은 전체 {max_chars:,}자 이내로 요약해주세요.")
     if SECRET_PATTERN.search(text):
-        raise ValueError("Slack 결과에 토큰이나 비밀값으로 보이는 문자열이 있습니다.")
+        raise ToolError("Slack 결과에 토큰이나 비밀값으로 보이는 문자열이 있습니다.")
     if LOCAL_PATH_PATTERN.search(text):
-        raise ValueError("Slack 결과에는 로컬 절대경로를 넣지 말고 공유 링크를 쓰세요.")
+        raise ToolError("Slack 결과에는 로컬 절대경로를 넣지 말고 공유 링크를 쓰세요.")
 
 
 def _reference_section(references: list[tuple[str, str]]) -> str:
@@ -646,13 +647,13 @@ def _clean_runtime_label(
     if not cleaned:
         return None
     if len(cleaned) > maximum:
-        raise ValueError(f"{name}은 {maximum}자 이내로 작성해주세요.")
+        raise ToolError(f"{name}은 {maximum}자 이내로 작성해주세요.")
     return cleaned
 
 
 def _clean_usage_value(name: str, value: int | None) -> int | None:
     if value is not None and value < 0:
-        raise ValueError(f"{name}은 0 이상의 정수여야 합니다.")
+        raise ToolError(f"{name}은 0 이상의 정수여야 합니다.")
     return value
 
 
@@ -740,10 +741,10 @@ async def record_task_references(
     """조사 게이트에서 실제 판단에 사용한 자료를 작업 스레드에 남깁니다."""
     reason = reason.strip()
     if len(reason) < 2 or len(reason) > 200:
-        raise ValueError("조사 이유는 2자 이상 200자 이내로 작성해주세요.")
+        raise ToolError("조사 이유는 2자 이상 200자 이내로 작성해주세요.")
     curated_references = _clean_references(references)
     if not curated_references:
-        raise ValueError("실제로 참고한 자료를 하나 이상 남겨주세요.")
+        raise ToolError("실제로 참고한 자료를 하나 이상 남겨주세요.")
     _validate_publishable(
         [reason, *[f"{name}: {url}" for name, url in curated_references]],
         max_chars=20_000,
@@ -753,7 +754,7 @@ async def record_task_references(
     task_schema, record = await _read_record(client, reference)
     work_references = task_schema.work_thread_references_of(record)
     if len(work_references) != 1:
-        raise ValueError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
+        raise ToolError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
 
     location = message_location(work_references[0])
     text = _reference_message(reason, curated_references)
@@ -845,7 +846,7 @@ async def publish_task_result(
     """작업 스레드에 선별한 종료 요약 한 건을 게시합니다."""
     summary = summary.strip()
     if len(summary) < 5 or len(summary) > 1_200:
-        raise ValueError("결과 요약은 5자 이상 1,200자 이내로 작성해주세요.")
+        raise ToolError("결과 요약은 5자 이상 1,200자 이내로 작성해주세요.")
 
     curated_learnings = _clean_list("시행착오·경험", learnings, 3)
     curated_findings = _clean_list("재사용할 정보", reusable_findings, 5)
@@ -882,7 +883,7 @@ async def publish_task_result(
     task_schema, record = await _read_record(client, reference)
     work_references = task_schema.work_thread_references_of(record)
     if len(work_references) != 1:
-        raise ValueError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
+        raise ToolError("먼저 start-slack-list-task로 작업 스레드를 연결해주세요.")
 
     location = message_location(work_references[0])
     execution_metadata = _execution_metadata(

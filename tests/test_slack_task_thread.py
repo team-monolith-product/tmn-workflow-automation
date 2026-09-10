@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.errors import SlackApiError, SlackRequestError
 
 from service.slack_task_message import result_client_msg_id
@@ -104,7 +105,7 @@ def test_list_url_parser_uses_list_and_record_ids():
     ],
 )
 def test_list_url_parser_rejects_non_record_links(value):
-    with pytest.raises(ValueError):
+    with pytest.raises(ToolError):
         parse_slack_list_task_url(value)
 
 
@@ -131,7 +132,7 @@ def test_duplicate_work_columns_are_rejected():
         }
     ]
 
-    with pytest.raises(ValueError, match="여러 개"):
+    with pytest.raises(ToolError, match="여러 개"):
         find_work_thread_column_id(duplicate)
 
 
@@ -360,7 +361,7 @@ async def test_start_requires_valid_source_when_creating_work_thread(source):
     ), patch(
         "service.slack_task_thread.release_task_record_lock"
     ) as release:
-        with pytest.raises(ValueError, match="요청 맥락"):
+        with pytest.raises(ToolError, match="요청 맥락"):
             await start_task_from_slack_list(client, LIST_URL, "owner@example.com")
 
     client.chat_postMessage.assert_not_awaited()
@@ -676,7 +677,7 @@ async def test_publish_returns_partial_success_when_only_list_update_fails():
 async def test_publish_rejects_too_many_learnings_before_slack_call():
     client = AsyncMock()
 
-    with pytest.raises(ValueError, match="최대 3개"):
+    with pytest.raises(ToolError, match="최대 3개"):
         await publish_task_result(
             client,
             LIST_URL,
@@ -693,7 +694,7 @@ async def test_publish_rejects_too_many_learnings_before_slack_call():
 async def test_publish_rejects_secrets_and_local_paths():
     client = AsyncMock()
 
-    with pytest.raises(ValueError, match="비밀값"):
+    with pytest.raises(ToolError, match="비밀값"):
         await publish_task_result(
             client,
             LIST_URL,
@@ -703,7 +704,7 @@ async def test_publish_rejects_secrets_and_local_paths():
             outputs=[],
         )
 
-    with pytest.raises(ValueError, match="로컬 절대경로"):
+    with pytest.raises(ToolError, match="로컬 절대경로"):
         await publish_task_result(
             client,
             LIST_URL,
@@ -717,7 +718,7 @@ async def test_publish_rejects_secrets_and_local_paths():
 async def test_publish_rejects_output_without_shareable_link():
     client = AsyncMock()
 
-    with pytest.raises(ValueError, match="산출물 이름"):
+    with pytest.raises(ToolError, match="산출물 이름"):
         await publish_task_result(
             client,
             LIST_URL,
@@ -740,7 +741,7 @@ async def test_publish_rejects_content_that_would_grow_past_slack_limit_after_es
         f"참고{i}: https://example.com/a?idx={i}&" + "x=1&" * 135 for i in range(30)
     ]
 
-    with pytest.raises(ValueError, match="이내로 요약"):
+    with pytest.raises(ToolError, match="이내로 요약"):
         await publish_task_result(
             client,
             LIST_URL,
