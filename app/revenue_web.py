@@ -208,8 +208,8 @@ async def revenue_logout() -> RedirectResponse:
 
 @router.get("/assets/{name}")
 async def revenue_asset(name: str) -> Response:
-    """로고 같은 정적 파일. 디렉터리 밖으로는 못 나간다."""
-    path = (ASSETS_DIR / name).resolve()
-    if path.parent != ASSETS_DIR.resolve() or not path.is_file():
+    """로고 같은 정적 파일. 요청한 이름으로 경로를 만들지 않고 디렉터리 목록에서 고른다."""
+    files = {entry.name: entry for entry in ASSETS_DIR.iterdir() if entry.is_file()}
+    if name not in files:
         return Response("Not Found", status_code=404)
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+    return FileResponse(files[name], headers={"Cache-Control": "public, max-age=86400"})
