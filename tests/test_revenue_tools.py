@@ -9,7 +9,7 @@ from app.knowledge_mcp import build_mcp, build_mcp_app
 from scripts.validate_revenue_ledger import format_alert
 from scripts.validate_revenue_ledger import main as validate_main
 from service.revenue import facts as facts_module
-from tests.test_revenue_build import build
+from revenue_fixture import build
 
 ADMIN = {"id": 7, "email": "lch@team-mono.com", "permissions": [], "tenants": []}
 RESOURCE_URL = "https://wfa.codle.io"
