@@ -1,0 +1,1274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>팀모노리스 매출 현황</title>
+<style>
+/* ── 클레이모피즘 (2026-09-11 대표 지시, 리퀴드 글래스 전면 교체) ─────────────────
+      레시피(Hype4 Malewicz · superdesign.dev · clay.css): 큰 모서리(20~40px) +
+      안쪽 그림자 두 개(위 = 밝게, 아래 = 어둡게 -> 부풀어 오른 부피감) +
+      부드러운 바깥 그림자(색조가 있는, 검정 아님). 파스텔 면 + 진한 무채 잉크.
+      규칙: 그림자 3종 풀세트는 누를 수 있는 것에만. 카드는 약하게. box-shadow 는
+      애니메이션하지 않는다(대형 블러 리페인트). 다크는 토큰 반전이 아니라 재도출.
+      시리즈 색은 항목 수에 맞춰 JS 가 OKLCH 로 만든다(seriesColors). 개수·이름·색을 고정하지 않는다. */
+:root{
+  color-scheme: light;
+  /* 로고 = 크림 바탕 위 클레이 모노리스. 스펙트럼: 하늘 → 민트 → 크림 → 살구 → 산호 */
+  --g1:#4FC8F2; --g2:#7CE2B2; --g3:#F6E7B4; --g4:#FFAC85; --g5:#FF6F7F;
+  --mono:linear-gradient(180deg,var(--g1) 0%,var(--g2) 28%,var(--g3) 50%,var(--g4) 74%,var(--g5) 100%);
+  --mono-x:linear-gradient(90deg,var(--g1) 0%,var(--g2) 28%,var(--g3) 50%,var(--g4) 74%,var(--g5) 100%);
+  /* 왕복형: 끝이 처음과 같아 background-position 을 흘려도 이음새가 없다 */
+  --mono-loop:linear-gradient(90deg,var(--g1),var(--g2),var(--g3),var(--g4),var(--g5),var(--g4),var(--g3),var(--g2),var(--g1));
+  --bg:#F3EEE8; --card:#FCFAF7; --card-2:#F5F1EB; --groove:#E7E1D9;
+  --t-ink:#1F2340; --t-ink-2:rgba(31,35,64,.72); --t-ink-3:rgba(31,35,64,.55);
+  --ink:#1F2340; --ink-2:rgba(31,35,64,.68); --ink-3:rgba(31,35,64,.48);
+  --accent:#1E9BD7; --accent-2:#4FC8F2; --accent-dim:rgba(30,155,215,.14);
+  --line:rgba(31,35,64,.08); --line-2:rgba(31,35,64,.16);
+  --warn-bg:#FFF1DA; --warn-line:#E0A24A; --warn-ink:#6B4A00;
+  --tint:120,100,88;                                  /* 그림자 색조 = 따뜻한 갈색 회색 */
+  --hi:255,255,255;
+  --clay-card:0 22px 44px -14px rgba(var(--tint),.28), inset 0 -6px 12px rgba(var(--tint),.14), inset 0 6px 12px rgba(var(--hi),.85);
+  --clay-tile:0 22px 44px -12px color-mix(in srgb,var(--tc,#FF6F7F) 55%,transparent), inset 0 -8px 16px rgba(0,0,0,.12), inset 0 8px 16px rgba(255,255,255,.45);
+  --clay-btn:0 8px 16px -6px rgba(var(--tint),.38), inset 0 -3px 6px rgba(var(--tint),.22), inset 0 3px 6px rgba(var(--hi),.85);
+  --clay-press:inset 0 4px 10px rgba(var(--tint),.38), inset 0 -2px 4px rgba(var(--hi),.35);
+  --clay-groove:inset 0 3px 6px rgba(var(--tint),.24), inset 0 -1px 2px rgba(var(--hi),.7);
+  --clay-mark:inset 0 -3px 6px rgba(0,0,0,.18), inset 0 3px 6px rgba(255,255,255,.45);
+  /* 시리즈 색은 CSS 에 두지 않는다. 항목 수에 맞춰 JS(seriesColors)가 만든다 — 분류마스터에
+     항목이 늘거나 줄어도 그대로 따라온다. 여기엔 중립색(미기재·그 외)만 둔다 */
+  --s0:#CBC4BA;   /* 중립 = 따뜻한 회색 */
+  --series-l:0.72; --series-c:0.14;   /* 시리즈 색의 밝기·채도(OKLCH). 브랜드 톤 */
+  --gap:#F3EEE8;
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0F1B3B; --card:#182A55; --card-2:#1E325F; --groove:#0B142E;
+  --t-ink:#1F2340; --t-ink-2:rgba(31,35,64,.72); --t-ink-3:rgba(31,35,64,.55);
+  --ink:#F4F1FF; --ink-2:rgba(244,241,255,.70); --ink-3:rgba(244,241,255,.48);
+  --accent:#4FC8F2; --accent-2:#7CE2B2; --accent-dim:rgba(79,200,242,.18);
+  --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.16);
+  --warn-bg:rgba(201,133,0,.14); --warn-line:#C98500; --warn-ink:#F0D9A8;
+  --tint:0,0,0; --hi:255,255,255;
+  --clay-card:0 22px 44px -14px rgba(0,0,0,.55), inset 0 -6px 12px rgba(0,0,0,.35), inset 0 6px 12px rgba(255,255,255,.07);
+  --clay-tile:0 20px 40px -12px rgba(0,0,0,.6), inset 0 -8px 16px rgba(0,0,0,.35), inset 0 8px 16px rgba(255,255,255,.12);
+  --clay-btn:0 8px 16px -6px rgba(0,0,0,.6), inset 0 -3px 6px rgba(0,0,0,.4), inset 0 3px 6px rgba(255,255,255,.09);
+  --clay-press:inset 0 4px 10px rgba(0,0,0,.55), inset 0 -2px 4px rgba(255,255,255,.06);
+  --clay-groove:inset 0 3px 6px rgba(0,0,0,.55), inset 0 -1px 2px rgba(255,255,255,.06);
+  --clay-mark:inset 0 -3px 6px rgba(0,0,0,.35), inset 0 3px 6px rgba(255,255,255,.22);
+  --s0:#5A6078;
+  --series-l:0.70; --series-c:0.15;
+  --gap:#0F1B3B;
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink); min-height:100vh;
+  font-family:Pretendard,"Pretendard Variable",-apple-system,BlinkMacSystemFont,
+    system-ui,"Apple SD Gothic Neo","Malgun Gothic",Roboto,sans-serif;
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.wrap{position:relative;max-width:1180px;margin:0 auto;padding:40px 22px 100px}
+.mono,.num{font-variant-numeric:tabular-nums}
+.num{text-align:right;white-space:nowrap}
+
+/* ── 움직임: transform 만. box-shadow 는 건드리지 않는다 ── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes rise{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes unfold{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes bloom{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+header,.tiles,.panel{animation:fadeUp .6s cubic-bezier(.2,.8,.2,1) both}
+.tiles{animation-delay:.08s}
+.panel:nth-of-type(1){animation-delay:.16s}
+.panel:nth-of-type(2){animation-delay:.24s}
+.panel:nth-of-type(3){animation-delay:.32s}
+
+.eyebrow{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+h1{font-size:34px;font-weight:800;letter-spacing:-.035em;line-height:1.1;margin:0}
+h2{font-size:21px;font-weight:800;letter-spacing:-.02em;margin:0}
+
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:24px}
+.brand{display:flex;gap:22px;align-items:center}
+.mono-mark{width:70px;height:112px;object-fit:contain;flex:none;filter:drop-shadow(0 14px 18px rgba(255,111,127,.35))}
+.sub{color:var(--ink-2);font-size:13px;margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.badge{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--card);
+  box-shadow:var(--clay-btn);font-size:12px;font-weight:600;color:var(--ink-2)}
+.badge.on{background:var(--card);color:var(--ink);font-weight:800;box-shadow:var(--clay-btn)}
+
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tab{padding:10px 20px;border-radius:999px;background:var(--card);box-shadow:var(--clay-btn);
+  color:var(--ink-2);font-size:14px;font-weight:700;transition:transform .12s;white-space:nowrap}
+.tab:hover{color:var(--ink);transform:translateY(-1px)}
+.tab:active{transform:translateY(2px) scale(.98)}
+.tab[aria-pressed="true"]{background:var(--card);color:var(--ink);font-weight:800;box-shadow:var(--clay-btn);
+  position:relative}
+.tab[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:6px;width:16px;height:3px;border-radius:2px;
+  transform:translateX(-50%);background:var(--accent)}
+.tab:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+/* 세그먼트 = 파인 홈 안에 알약들. 선택된 것만 튀어나온다 */
+/* 다크/라이트 스위치: 파인 홈 + 클레이 손잡이. 왼쪽 해, 오른쪽 달 */
+.switch{position:relative;width:78px;height:40px;border-radius:999px;background:var(--groove);box-shadow:var(--clay-groove);
+  display:inline-flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:15px;color:var(--ink-3);transition:none}
+.switch .knob{position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;background:var(--card);
+  box-shadow:var(--clay-btn);transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.switch[aria-checked="true"] .knob{transform:translateX(38px);background:var(--ink)}
+.switch .sun,.switch .moon{position:relative;z-index:0;line-height:1}
+.switch[aria-checked="false"] .sun{color:var(--ink)}
+.switch[aria-checked="true"] .moon{color:var(--ink)}
+.switch:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--groove);border-radius:999px;padding:5px;gap:4px;
+  box-shadow:var(--clay-groove)}
+.seg .tab{background:transparent;box-shadow:none;padding:8px 17px}
+.seg .tab:hover{background:rgba(var(--hi),.35);transform:none}
+.seg .tab[aria-pressed="true"]{background:var(--card);color:var(--ink);font-weight:800;box-shadow:var(--clay-btn)}
+
+.warn{background:var(--warn-bg);border-radius:22px;box-shadow:var(--clay-card);
+  padding:16px 20px;margin:0 0 22px;color:var(--warn-ink);font-size:13.5px}
+.warn strong{display:block;margin-bottom:5px}
+.warn ul{margin:0;padding-left:18px}
+
+/* ── KPI 타일: 파스텔 클레이. 타일마다 다른 색 ── */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;margin:22px 0 28px}
+.tile{border-radius:28px;padding:22px 24px 20px;position:relative;overflow:hidden;
+  background:var(--card);box-shadow:var(--clay-tile);transition:transform .16s ease-out}
+.tile:hover{transform:translateY(-3px)}
+.tile{color:var(--t-ink)}
+/* 타일 4장이 이어 붙으면 로고의 스펙트럼이 된다: 하늘·민트 / 민트·크림 / 크림·살구 / 살구·산호 */
+/* 타일 4장 = 스펙트럼 단색 4개. 하늘 / 민트 / 살구 / 산호 (그라데이션 없음, 대표 지시) */
+.tile:nth-child(1){--tc:var(--g1);background:var(--g1)}
+.tile:nth-child(2){--tc:var(--g2);background:var(--g2)}
+.tile:nth-child(3){--tc:var(--g4);background:var(--g4)}
+.tile:nth-child(4){--tc:var(--g5);background:var(--g5)}
+.tile .lbl{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t-ink-3);margin-bottom:10px}
+.tile .val{font-size:40px;font-weight:800;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.tile .val small{font-size:15px;font-weight:600;color:var(--t-ink-2);margin-left:3px;letter-spacing:0}
+.tile .foot{font-size:12px;color:var(--t-ink-3);margin-top:10px;font-variant-numeric:tabular-nums}
+.tile.quiet .val{color:var(--t-ink-2);font-size:32px}
+.spark{position:absolute;right:16px;bottom:14px;width:92px;height:30px}
+.spark path{fill:none;stroke:var(--t-ink);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round;opacity:.8}
+.spark .area{fill:rgba(31,35,64,.14);stroke:none}
+
+.panel{background:var(--card);border-radius:28px;box-shadow:var(--clay-card);padding:26px 28px;margin-bottom:24px}
+.panel-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
+.panel-head .right{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.note{font-size:13.5px;color:var(--ink-3);line-height:1.55}
+.stats{display:flex;flex-wrap:wrap;gap:10px 12px;font-size:14.5px;color:var(--ink-2);margin:0 0 20px;font-variant-numeric:tabular-nums}
+.stats>span{background:var(--card-2);border-radius:999px;padding:9px 18px;box-shadow:var(--clay-btn)}
+.stats b{color:var(--ink);font-weight:700}
+
+/* ── 툴팁: 작은 클레이 카드 ── */
+#tip{position:fixed;pointer-events:none;opacity:0;z-index:50;background:var(--card);border-radius:16px;
+  padding:12px 15px;font-size:13.5px;white-space:nowrap;box-shadow:var(--clay-tile);transition:opacity .1s}
+#tip.on{opacity:1}
+#tip dl{margin:0;display:grid;grid-template-columns:auto auto;gap:2px 14px}
+#tip dt{color:var(--ink-3)}
+#tip dd{margin:0;font-variant-numeric:tabular-nums;font-weight:700;text-align:right}
+#tip .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+/* ── 클레이 마크(.gm): 차트 요소. 시리즈 색 --c 그대로, 위 밝고 아래 어두운 부피감 ── */
+.gm{--c:var(--accent);background:var(--c);
+  box-shadow:var(--clay-mark),0 6px 12px -4px color-mix(in srgb,var(--c) 55%,transparent)}
+.groove{background:var(--groove);box-shadow:var(--clay-groove)}
+
+/* ── 월별 막대 ── */
+.legend{display:flex;gap:16px;align-items:center;font-size:14px;font-weight:600;color:var(--ink-2);flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:5px;margin-right:7px;vertical-align:-2px}
+.legend .cur i{background:var(--accent);box-shadow:var(--clay-mark)}
+.legend .prev i{background:var(--s0);box-shadow:var(--clay-mark)}
+
+.chart{position:relative;display:grid;grid-template-columns:48px 1fr;gap:0 10px}
+.yaxis{position:relative;height:200px}
+.yaxis span{position:absolute;right:0;transform:translateY(50%);font-size:12.5px;font-weight:600;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.plot{position:relative;height:200px}
+.grid{position:absolute;inset:0;pointer-events:none}
+.grid i{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--line-2)}
+.grid i.zero{border-top:2px solid var(--line-2)}
+.bars{position:absolute;inset:0;display:flex;align-items:flex-end}
+.mcol{flex:1;height:100%;display:flex;align-items:flex-end;justify-content:center;gap:4px;position:relative;cursor:default;border-radius:12px}
+.mcol:hover{background:rgba(var(--tint),.06)}
+.mcol b{position:absolute;left:50%;transform:translateX(-50%);font-size:13px;font-weight:800;color:var(--ink);white-space:nowrap;
+  font-variant-numeric:tabular-nums;padding-bottom:5px;animation:pop .4s .75s cubic-bezier(.2,.8,.2,1) both}
+.bar{width:36%;min-height:4px;border-radius:9px 9px 4px 4px;transform-origin:bottom center;
+  animation:rise .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 45ms)}
+.bar.cur{--c:var(--accent)}
+/* 전년 막대 = 회색 클레이. 색으로 계열을 가르고 범례가 이름을 붙인다 */
+.bar.prev{--c:var(--s0);animation-delay:calc(var(--i,0) * 45ms + 120ms)}
+.mcol:hover .bar.cur{filter:brightness(1.12)}
+/* 발행 없는 달은 nil. 예전 이름 empty는 빈 상태 문구 클래스(.empty{padding:16px})와 겹쳐 막대가 떠 있었다 */
+.mcol.nil .bar.cur{background:var(--groove);box-shadow:var(--clay-groove)}
+.xaxis{grid-column:2;display:flex;margin-top:10px}
+.xaxis span{flex:1;text-align:center;font-size:13px;font-weight:600;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.xaxis span.peak{color:var(--ink);font-weight:800}
+
+/* ── SVG 선 차트(누적·파레토): 둥근 굵은 선 + 부드러운 그림자 + 클레이 구슬 ── */
+svg.lc{display:block;width:100%;height:auto;overflow:visible}
+svg.lc text{font-size:12.5px;font-weight:600;fill:var(--ink-3);font-variant-numeric:tabular-nums}
+svg.lc text.lbl{fill:var(--ink);font-weight:800}
+svg.lc .grid{stroke:var(--line-2);stroke-width:1.5;stroke-dasharray:3 5}
+svg.lc .zero{stroke:var(--line-2);stroke-width:2}
+svg.lc .l-cur,svg.lc .l-par{fill:none;stroke:url(#gLine);stroke-width:5;stroke-linejoin:round;stroke-linecap:round;
+  stroke-dasharray:1;animation:draw 1.1s cubic-bezier(.2,.8,.2,1) both;filter:drop-shadow(0 6px 8px rgba(var(--tint),.35))}
+svg.lc .l-glow{display:none}
+svg.lc .l-prev{fill:none;stroke:var(--s0);stroke-width:3;stroke-dasharray:1 7;stroke-linecap:round;stroke-linejoin:round}
+svg.lc .a-cur,svg.lc .a-par{fill:url(#gArea);animation:fadeIn .8s .4s both}
+svg.lc .dot{fill:url(#gBead);stroke:none;filter:drop-shadow(0 3px 4px rgba(var(--tint),.4))}
+svg.lc .dot.prev{fill:var(--s0);filter:none}
+svg.lc .cross{stroke:var(--line-2);stroke-width:1.5;stroke-dasharray:3 4;opacity:0}
+svg.lc .cross.on{opacity:1}
+svg.lc .hit{fill:transparent}
+svg.lc .mark{stroke:var(--line-2);stroke-width:1.5;stroke-dasharray:3 4}
+
+/* ── 연도별 구성비 스택: 홈 안의 클레이 조각들 ── */
+.mix{display:flex;flex-direction:column;gap:10px;margin:6px 0 14px}
+.mix .row{display:grid;grid-template-columns:52px 1fr 78px;gap:12px;align-items:center}
+.mix .yr{font-size:15px;font-weight:800;color:var(--ink-2)}
+.mix .row.on .yr{color:var(--ink)}
+.mix .stack{display:flex;height:40px;border-radius:14px;overflow:hidden;gap:3px;padding:3px}
+.mix .sg{height:100%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;
+  overflow:hidden;white-space:nowrap;border-radius:9px;text-shadow:0 1px 1px rgba(0,0,0,.25);cursor:pointer;min-width:0;
+  transform-origin:left center;animation:grow .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 60ms);transition:filter .12s}
+.mix .sg:hover{filter:brightness(1.1)}
+.mix .sg.gray{color:var(--ink)}
+/* 글자색은 배경 밝기로 JS 가 정한다(--tx). 슬롯 번호로 고정하지 않는다 */
+.mix .sg[data-tx="dark"],.tm[data-tx="dark"]{color:#1F2340;text-shadow:none}
+.mix .tot{font-size:14.5px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
+.keys{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:14px;font-weight:600;color:var(--ink-2);margin-bottom:22px}
+.keys i{display:inline-block;width:14px;height:14px;border-radius:5px;margin-right:7px;vertical-align:-2px;box-shadow:var(--clay-mark)}
+
+/* ── 트리맵: 클레이 타일 ── */
+.tmap{position:relative;height:360px;border-radius:20px;overflow:hidden;padding:0}
+.tm{position:absolute;border-radius:16px;padding:10px 12px;overflow:hidden;cursor:pointer;color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.3);outline:4px solid var(--card);transition:filter .12s,transform .12s;
+  animation:bloom .5s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 40ms)}
+.tm:hover{filter:brightness(1.08);z-index:2}
+.tm.gray{color:var(--ink)}
+.tm .n{font-size:13px;font-weight:800;line-height:1.3;letter-spacing:-.01em}
+.tm .v{font-size:11.5px;opacity:.9;margin-top:2px;font-variant-numeric:tabular-nums}
+.tm.sm .v{display:none}
+.tm.xs .n,.tm.xs .v{display:none}
+
+/* ── 분류별 목록 ── */
+.cats{display:flex;flex-direction:column;gap:6px}
+.cat{border-radius:18px}
+.cat.open{background:var(--card-2);box-shadow:var(--clay-groove)}
+.catbtn{display:grid;grid-template-columns:minmax(170px,1.5fr) minmax(90px,2.2fr) auto;gap:18px;align-items:center;
+  width:100%;text-align:left;padding:14px 16px;border-radius:18px}
+.catbtn:hover{background:rgba(var(--tint),.06)}
+.catname{font-size:16.5px;font-weight:800;display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
+.chev{color:var(--ink-3);font-size:11px;width:11px;flex:none;transition:.15s}
+.cat.open .chev{transform:rotate(90deg)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:5px;flex:none;box-shadow:var(--clay-mark)}
+.track{display:block;border-radius:10px;height:18px;padding:2px}
+.fill{display:block;--c:var(--accent);height:100%;border-radius:6px;min-width:6px;transform-origin:left center;transition:.13s}
+#cats[data-fresh="1"] .fill{animation:grow .6s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 40ms)}
+.cat.open .fill,.catbtn:hover .fill{filter:brightness(1.1)}
+.catnums{text-align:right;white-space:nowrap;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.catnums .pct{color:var(--ink-3);font-size:13.5px;font-weight:600;margin-left:10px;display:inline-block;min-width:52px}
+.catnums .yoy{display:block;font-size:12.5px;font-weight:600;color:var(--ink-3);margin-top:3px}
+.subs{display:flex;flex-direction:column;gap:4px;padding:0 6px 4px 10px}
+.cat.sub .catbtn{padding:8px 12px;grid-template-columns:minmax(130px,1.5fr) minmax(80px,2.2fr) auto;border-radius:14px}
+.cat.sub .catname{font-size:14.5px;font-weight:700}
+.cat.sub .track{height:14px}
+.cat.sub.open{background:var(--card);box-shadow:var(--clay-btn)}
+.cat.sub .drill{padding:0 4px 10px}
+
+.drill{padding:6px 14px 16px;animation:unfold .22s ease-out both}
+.drill-meta{font-size:13.5px;font-weight:600;color:var(--ink-2);margin:2px 0 12px;font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-weight:700;color:var(--ink-3);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:8px 10px;border-bottom:2px solid var(--line-2);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(var(--tint),.05)}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.item{color:var(--ink-2)}
+.tag{display:inline-block;padding:3px 11px;border-radius:999px;background:var(--card-2);box-shadow:var(--clay-btn);
+  font-size:12px;font-weight:700;color:var(--ink-3);margin-left:6px;white-space:nowrap}
+.ctx{font-size:11.5px;color:var(--ink-3);margin-top:4px;line-height:1.5}
+.dot{opacity:.45}
+.linkbox{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--ink-2);
+  word-break:break-all;line-height:1.45;padding:2px 0}
+.split{margin:18px 0 6px;padding-top:14px;border-top:2px dashed var(--line-2);font-size:12px;color:var(--ink-3)}
+.cat.muted .catname,.cat.muted .catnums{color:var(--ink-2)}
+
+/* ── 고객 집중도 ── */
+.two{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:26px;align-items:start}
+.hbars{display:flex;flex-direction:column;gap:6px}
+.hb{display:grid;grid-template-columns:26px minmax(120px,1fr) minmax(60px,1.4fr) auto;gap:12px;align-items:center;
+  padding:7px 10px;border-radius:14px;text-align:left;width:100%}
+.hb:hover{background:rgba(var(--tint),.06)}
+.hb .rk{font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums;font-weight:800}
+.hb .nm{font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb .nums{font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:800}
+.hb .nums small{color:var(--ink-3);margin-left:7px;font-size:12.5px;font-weight:600}
+.hb .fill{animation:grow .6s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 40ms)}
+/* 고객 순위 막대: 로고 스펙트럼을 10단계로 잘라 순위마다 다른 단색 */
+/* 막대 색은 순위에 따라 로고 스펙트럼(--g1→--g5)을 JS(spectrumColor)가 보간한다. 개수를 고정하지 않는다 */
+
+
+/* ── 거래 규모 분포 ── */
+.dist{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.dist h3{font-size:14.5px;font-weight:800;color:var(--ink-2);margin:0 0 12px}
+.cols{display:flex;align-items:flex-end;gap:8px;height:156px;border-bottom:2px solid var(--line-2);padding-top:18px}
+.col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+.col b{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:5px;font-variant-numeric:tabular-nums;animation:fadeIn .4s .5s both;white-space:nowrap}
+.col .cb{width:70%;border-radius:9px 9px 4px 4px;min-height:4px;transform-origin:bottom center;
+  animation:rise .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0) * 50ms)}
+.col .cb.neg{background:var(--groove);box-shadow:var(--clay-groove)}
+.col:hover .cb{filter:brightness(1.1)}
+.cx{display:flex;gap:8px;margin-top:8px}
+.cx span{flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--ink-3);line-height:1.3}
+
+/* ── 파이프라인 불릿 ── */
+.bullet{margin:26px 0 18px;font-variant-numeric:tabular-nums}
+.bullet .bar-t{position:relative;height:36px;border-radius:12px;overflow:visible;padding:3px}
+/* 발행분 = 로고 클레이 색이 천천히 흘러간다. background-position 만 움직이므로 가볍다 */
+@keyframes flow{to{background-position:-200% 0}}   /* 음수 = 이미지가 오른쪽으로 이동 = 좌→우 흐름 */
+.bullet .seg{position:absolute;top:3px;height:calc(100% - 6px);border-radius:9px 4px 4px 9px;transform-origin:left center;
+  animation:grow .8s cubic-bezier(.2,.8,.2,1) both}
+.bullet .seg.gm{background:var(--mono-loop);background-size:200% 100%;
+  animation:grow .8s cubic-bezier(.2,.8,.2,1) both,flow 9s linear .8s infinite}
+.bullet .seg.pipe{background:repeating-linear-gradient(135deg,var(--accent-dim) 0 6px,transparent 6px 12px);
+  border:2px dashed var(--g5);border-left:none;border-radius:4px 9px 9px 4px;animation-delay:.5s;box-shadow:none}
+.bullet .mk{position:absolute;top:-8px;bottom:-8px;width:4px;border-radius:2px;background:var(--ink);animation:fadeIn .4s 1s both}
+.bullet .mk span{position:absolute;top:-22px;left:50%;transform:translateX(-50%);font-size:13px;font-weight:800;color:var(--ink);white-space:nowrap}
+.bullet .lbls{display:flex;gap:20px;flex-wrap:wrap;font-size:14.5px;font-weight:600;color:var(--ink-2);margin-top:30px}
+.bullet .lbls b{color:var(--ink);font-weight:800}
+.bullet .lbls i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:6px;vertical-align:-1px}
+.bullet .lbls .a i{background:var(--mono-x);box-shadow:var(--clay-mark)}
+.bullet .lbls .p i{border:2px dashed var(--accent);background:repeating-linear-gradient(135deg,var(--accent-dim) 0 3px,transparent 3px 6px)}
+
+/* 입력 = 파인 홈 */
+input[type=search]{background:var(--groove);border:none;border-radius:999px;padding:10px 16px;font:inherit;font-size:13px;
+  color:var(--ink);min-width:220px;box-shadow:var(--clay-groove)}
+input[type=search]::placeholder{color:var(--ink-3)}
+input[type=search]:focus{outline:3px solid var(--accent);outline-offset:2px}
+
+footer{margin-top:40px;padding-top:22px;border-top:2px dashed var(--line-2);font-size:12.5px;color:var(--ink-3);
+  display:flex;flex-wrap:wrap;gap:18px;align-items:center}
+footer a{color:var(--ink-2);text-decoration:none;font-weight:600;border-bottom:2px solid var(--line-2)}
+footer a:hover{color:var(--ink);border-color:var(--accent)}
+.empty{color:var(--ink-3);font-size:13px;padding:16px 2px}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+@media (max-width:820px){ .two,.dist{grid-template-columns:1fr} }
+@media (max-width:720px){
+  .wrap{padding:24px 15px 60px}
+  h1{font-size:26px}
+  .tile .val{font-size:30px}
+  .spark{display:none}
+  .catbtn{grid-template-columns:1fr auto;gap:10px}
+  .track{display:none}
+  .hb{grid-template-columns:22px 1fr auto}
+  .chart{grid-template-columns:36px 1fr}
+  .tmap{height:300px}
+  .panel{padding:20px 18px;border-radius:22px}
+}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip"></div>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <img class="mono-mark" src="assets/logo-monolith.png" alt="Team Monolith" width="70" height="112">
+    <div>
+    <h1>매출 현황</h1>
+    <div class="sub">
+      <span class="badge on" id="basisBadge"></span>
+      <span class="badge">공급가액 · 부가세 제외</span>
+      <span id="stamp"></span>
+    </div>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="switch" id="themeBtn" role="switch" aria-checked="false" aria-label="다크 모드">
+      <span class="sun">☀</span><span class="moon">☾</span><i class="knob"></i>
+    </button>
+  </div>
+</header>
+
+<div id="warnings"></div>
+
+<div class="seg" id="yearTabs" role="group" aria-label="연도 선택"></div>
+<div class="tiles" id="tiles"></div>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">Monthly</div><h2>월별 매출</h2></div>
+    <div class="right">
+      <div class="legend" id="legend"></div>
+      <div class="seg" id="mMode" role="group" aria-label="월별 보기 방식">
+        <button class="tab" data-mode="bars" aria-pressed="true">막대</button>
+        <button class="tab" data-mode="cum" aria-pressed="false">누적</button>
+        <button class="tab" data-mode="table" aria-pressed="false">표</button>
+      </div>
+    </div>
+  </div>
+  <div id="monthly"></div>
+  <div id="monthlyCum" hidden></div>
+  <div id="monthlyTable" hidden></div>
+  <div class="note" style="margin-top:12px" id="monthlyNote"></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">Breakdown</div><h2>분류별 매출</h2></div>
+    <div class="right">
+      <div class="seg" id="cMode" role="group" aria-label="분류 보기 방식">
+        <button class="tab" data-mode="list" aria-pressed="true">목록</button>
+        <button class="tab" data-mode="tmap" aria-pressed="false">트리맵</button>
+      </div>
+      <input type="search" id="q" placeholder="고객명·품목 검색" aria-label="고객명 또는 품목 검색">
+    </div>
+  </div>
+  <div class="seg" id="viewTabs" role="group" aria-label="분류 기준 선택"></div>
+  <div class="note" id="viewNote" style="margin:12px 0 16px"></div>
+  <div class="eyebrow">연도별 구성비 · 조각을 누르면 그 항목이 펼쳐진다</div>
+  <div class="mix" id="mix"></div>
+  <div class="keys" id="keys"></div>
+  <div class="eyebrow" id="catsHead"></div>
+  <div class="cats" id="cats"></div>
+  <div class="tmap" id="tmap" hidden></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">Concentration</div><h2>고객 집중도</h2></div>
+    <span class="note">고객별 순액 기준. 감액으로 순액이 0 이하인 고객은 제외. 고객을 누르면 위 목록에서 검색된다</span>
+  </div>
+  <div class="stats" id="custStats"></div>
+  <div class="two">
+    <div class="hbars" id="custBars"></div>
+    <div id="pareto"></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div><div class="eyebrow">Ticket size</div><h2>거래 규모 분포</h2></div>
+    <span class="note">계산서 한 장의 공급가액 구간별. 건수와 금액을 따로 본다</span>
+  </div>
+  <div class="stats" id="sizeStats"></div>
+  <div class="dist" id="dist"></div>
+</section>
+
+<section class="panel" id="pipePanel" hidden>
+  <div class="panel-head">
+    <div><div class="eyebrow">Pipeline</div><h2>계약됐으나 계산서 미발행</h2></div>
+    <span class="note">위 매출 총계에 들어 있지 않다</span>
+  </div>
+  <div class="bullet" id="bullet"></div>
+  <div class="scroll"><table id="pipeTable"></table></div>
+</section>
+
+<footer>
+  <span>원천 매출장 구글시트 · 매일 1회 자동 갱신</span>
+  <a href="data/summary.json">summary.json</a>
+  <a href="data/facts.json">facts.json</a>
+  <a href="data/transactions.csv">transactions.csv</a>
+  <a href="REVENUE.md">REVENUE.md</a>
+  <a href="AGENTS.md">에이전트용 안내</a>
+</footer>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const CUST = DATA.customers || {};
+const PROG = DATA.programs || {};
+
+const won = n => n.toLocaleString('ko-KR');
+const eok = n => (n/1e8).toFixed(2) + '억';
+const manwon = n => Math.round(n/1e4).toLocaleString('ko-KR') + '만';
+const signPct = d => (d >= 0 ? '+' : '') + d.toFixed(1) + '%';
+const pct1 = v => v.toFixed(1) + '%';
+const MONTHS = Array.from({length:12}, (_,i) => i+1);
+
+const years = Object.keys(DATA.aggregates.by_year).sort().reverse();
+const viewNames = Object.keys(DATA.meta.views);
+
+/* ── 색 생성. 항목·분류·색을 하드코딩하지 않는다 ──
+   시리즈 색: OKLCH 색상환을 항목 수만큼 등분한다. 브랜드 파랑에서 출발하고 밝기를 번갈아 조금씩 바꿔
+   이웃 항목이 갈리게 한다. 항목이 9개든 12개든 저마다 색을 받고, 회색은 「미기재·그 외」에만 쓴다.
+   막대 색: 로고 스펙트럼(--g1..--g5)을 순위 비율로 보간한다. */
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function oklchToRgb(L, C, h){
+  const a = C * Math.cos(h * Math.PI / 180), b = C * Math.sin(h * Math.PI / 180);
+  const l_ = L + 0.3963377774*a + 0.2158037573*b, m_ = L - 0.1055613458*a - 0.0638541728*b, s_ = L - 0.0894841775*a - 1.2914855480*b;
+  const l = l_**3, m = m_**3, s3 = s_**3;
+  const lin = [4.0767416621*l - 3.3077115913*m + 0.2309699292*s3,
+               -1.2684380046*l + 2.6097574011*m - 0.3413193965*s3,
+               -0.0041960863*l - 0.7034186147*m + 1.7076147010*s3];
+  return lin.map(v => { v = Math.max(0, Math.min(1, v)); return Math.round(255 * (v <= 0.0031308 ? 12.92*v : 1.055*v**(1/2.4) - 0.055)); });
+}
+const rgbStr = ([r,g,b]) => `rgb(${r},${g},${b})`;
+const hexToRgb = hex => [1,3,5].map(i => parseInt(hex.slice(i, i+2), 16));
+/* 배경 위 글자색. 상대휘도 기준 — 슬롯 번호로 고정하지 않는다 */
+function textOn([r,g,b]){
+  const lum = [r,g,b].map(v => { v /= 255; return v <= 0.03928 ? v/12.92 : ((v+0.055)/1.055)**2.4; });
+  return 0.2126*lum[0] + 0.7152*lum[1] + 0.0722*lum[2] > 0.42 ? 'dark' : 'light';
+}
+function seriesColors(n){
+  const L = parseFloat(cssVar('--series-l')) || 0.72, C = parseFloat(cssVar('--series-c')) || 0.14;
+  const step = 360 / Math.max(n, 4), start = 262;   /* 브랜드 파랑(#5B8CFF)의 OKLCH 색상 */
+  return Array.from({length: n}, (_, i) => oklchToRgb(L + (i % 2 ? -0.06 : 0), C, (start + i * step) % 360));
+}
+function spectrumColor(i, n){
+  const stops = ['--g1','--g2','--g3','--g4','--g5'].map(v => hexToRgb(cssVar(v)));
+  const t = n > 1 ? i / (n - 1) : 0, pos = t * (stops.length - 1), k = Math.min(Math.floor(pos), stops.length - 2), f = pos - k;
+  return rgbStr(stops[k].map((v, j) => Math.round(v + (stops[k+1][j] - v) * f)));
+}
+let curYear = years[0];
+let curView = DATA.meta.default_view in DATA.meta.views ? DATA.meta.default_view : viewNames[0];
+let query = '';
+let mMode = 'bars';    // 월별: bars | cum | table
+let cMode = 'list';    // 분류: list | tmap
+const open = new Set();
+let COLOR = {};        // 분류명 -> 색. 뷰마다 다시 만든다. 순위가 아니라 이름을 따라간다
+let TEXT = {};         // 분류명 -> 글자색(dark|light). 배경 밝기로 정한다
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ── 공용 툴팁 ── */
+const tipEl = document.getElementById('tip');
+function showTip(html, e){
+  tipEl.innerHTML = html; tipEl.classList.add('on');
+  const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = e.clientY - h - 14;
+  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+}
+function hideTip(){ tipEl.classList.remove('on'); }
+const dl = rows => '<dl>' + rows.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') + '</dl>';
+
+/* 숫자 카운트업 — 최종값은 반드시 정확한 값으로 끝낸다 */
+const FMT = { eok: v => eok(v), int: v => String(Math.round(v)), pct: v => signPct(v) };
+const lastVals = {};
+function countUp(el){
+  const to = Number(el.dataset.v), key = el.dataset.k, fmt = FMT[el.dataset.fmt] || FMT.eok;
+  const from = key in lastVals ? lastVals[key] : 0;
+  lastVals[key] = to;
+  const target = el.querySelector('.n') || el;
+  if (REDUCED || from === to) { target.textContent = fmt(to); return; }
+  const t0 = performance.now(), dur = 900;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    target.textContent = fmt(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step); else target.textContent = fmt(to);
+  };
+  requestAnimationFrame(step);
+}
+
+/* 헤더 */
+document.getElementById('basisBadge').textContent = DATA.meta.basis_label;
+document.getElementById('stamp').textContent =
+  '갱신 ' + DATA.meta.generated_at.replace('T',' ').slice(0,16);
+
+const themeBtn = document.getElementById('themeBtn');
+/* 기본 라이트(대표 지시 09-11 17:20). 다크는 스위치로 */
+const startDark = false;
+document.documentElement.setAttribute('data-theme', startDark ? 'dark' : 'light');
+themeBtn.setAttribute('aria-checked', String(startDark));
+themeBtn.onclick = () => {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+  themeBtn.setAttribute('aria-checked', String(!dark));
+};
+
+
+if (DATA.meta.problems.length) {
+  document.getElementById('warnings').innerHTML =
+    '<div class="warn"><strong>검증 경고 ' + DATA.meta.problems.length + '건 — 아래 숫자를 확정으로 쓰지 않는다</strong><ul>' +
+    DATA.meta.problems.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul></div>';
+}
+
+/* 탭들 */
+const yearTabs = document.getElementById('yearTabs');
+yearTabs.innerHTML = years.map(y =>
+  `<button class="tab" data-y="${y}" aria-pressed="${y===curYear}">${y}년</button>`).join('');
+yearTabs.onclick = e => {
+  const b = e.target.closest('[data-y]'); if (!b) return;
+  curYear = b.dataset.y; open.clear(); render();
+};
+const viewTabs = document.getElementById('viewTabs');
+viewTabs.innerHTML = viewNames.map(v =>
+  `<button class="tab" data-v="${esc(v)}" aria-pressed="${v===curView}">${esc(DATA.meta.views[v].label)}</button>`).join('');
+viewTabs.onclick = e => {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  curView = b.dataset.v; open.clear(); render();
+};
+document.getElementById('q').oninput = e => {
+  query = e.target.value.trim();
+  render();
+  document.getElementById('cats').dataset.fresh = '0';
+};
+function setSeg(id, mode){
+  for (const x of document.querySelectorAll(`#${id} [data-mode]`)) x.setAttribute('aria-pressed', String(x.dataset.mode === mode));
+}
+function segToggle(id, onChange){
+  document.getElementById(id).onclick = e => {
+    const b = e.target.closest('[data-mode]'); if (!b) return;
+    setSeg(id, b.dataset.mode); onChange(b.dataset.mode);
+  };
+}
+segToggle('mMode', m => { mMode = m; showMonthly(); });
+segToggle('cMode', m => { cMode = m; showCats(); });
+function showMonthly(){
+  document.getElementById('monthly').hidden = mMode !== 'bars';
+  document.getElementById('monthlyCum').hidden = mMode !== 'cum';
+  document.getElementById('monthlyTable').hidden = mMode !== 'table';
+  if (mMode === 'cum') renderCum();
+}
+function showCats(){
+  document.getElementById('cats').hidden = cMode !== 'list';
+  document.getElementById('tmap').hidden = cMode !== 'tmap';
+  document.getElementById('catsHead').textContent = cMode === 'list' ? `${curYear}년 항목별` : `${curYear}년 트리맵 · 면적 = 금액`;
+  if (cMode === 'tmap') renderTreemap();
+}
+/* 다른 차트에서 「이 항목을 목록에서 펼쳐라」 */
+function openInList(name, scrollTo){
+  cMode = 'list'; setSeg('cMode', 'list');
+  open.add(name);
+  document.getElementById('cats').dataset.fresh = '0';
+  const tx = yearTx();
+  renderCats(tx, tx.reduce((s,t) => s + t.amount, 0)); showCats();
+  const target = scrollTo ? document.querySelector(`#cats [data-b="${CSS.escape(name)}"]`) : null;
+  if (target) target.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
+}
+
+function yearTx(y){ return DATA.transactions.filter(t => String(t.year) === (y || curYear)); }
+function matches(t){
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (t.counterparty + ' ' + t.item + ' ' + (t.note||'')).toLowerCase().includes(q);
+}
+function monthlyTotals(y){
+  const by = {}; for (const m of MONTHS) by[m] = {amount:0, count:0};
+  for (const t of yearTx(y)) {
+    if (!t.month) continue;
+    const m = Number(t.month.slice(5,7));
+    if (!by[m]) continue;
+    by[m].amount += t.amount; by[m].count += 1;
+  }
+  return by;
+}
+function lastMonthOf(y){ return Math.max(0, ...yearTx(y).filter(t => t.month).map(t => Number(t.month.slice(5,7)))); }
+function isPartialYear(y){ const lm = lastMonthOf(y); return y === years[0] && lm > 0 && lm < 12; }
+function niceMax(v){
+  if (v <= 0) return 1;
+  const exp = Math.pow(10, Math.floor(Math.log10(v)));
+  // 4등분 눈금이 소수 한 자리 안에서 떨어지는 값만 고른다 (60억 → 15·30·45·60)
+  for (const m of [1, 1.2, 1.6, 2, 2.4, 4, 6, 8, 10]) if (v <= m * exp) return m * exp;
+  return 10 * exp;
+}
+const tickLabel = t => t === 0 ? '0' : (t/1e8 < 1 ? (t/1e8).toFixed(1) : Math.round(t/1e8)) + '억';
+
+/* 작은 스파크라인 — 타일 안에서 그 해 월별 흐름을 훑는다 */
+function spark(y){
+  const m = monthlyTotals(y), vals = MONTHS.map(k => m[k].amount);
+  const max = Math.max(...vals, 1), lm = lastMonthOf(y) || 12;
+  const pts = vals.slice(0, lm).map((v, i) => [i / 11 * 92, 28 - Math.max(0, v) / max * 26]);
+  if (pts.length < 2) return '';
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+  return `<svg class="spark" viewBox="0 0 92 30" aria-hidden="true">
+    <path class="area" d="${d}L${pts[pts.length-1][0].toFixed(1)} 30L0 30Z"/><path d="${d}"/></svg>`;
+}
+
+/* ═══════════════════════ 메인 렌더 ═══════════════════════ */
+function render(){
+  for (const b of yearTabs.querySelectorAll('[data-y]')) b.setAttribute('aria-pressed', String(b.dataset.y === curYear));
+  for (const b of viewTabs.querySelectorAll('[data-v]')) b.setAttribute('aria-pressed', String(b.dataset.v === curView));
+
+  const tx = yearTx();
+  const total = tx.reduce((s,t) => s + t.amount, 0);
+  const custs = new Set(tx.map(t => t.customer_key)).size;
+
+  const prevY = String(Number(curYear) - 1);
+  const prevTx = yearTx(prevY);
+  const lastMonth = lastMonthOf(curYear);
+  const isPartial = isPartialYear(curYear);
+  const prevCut = isPartial ? prevTx.filter(t => t.month && Number(t.month.slice(5,7)) <= lastMonth) : prevTx;
+  const prev = prevCut.reduce((s,t) => s + t.amount, 0);
+
+  const tilesEl = document.getElementById('tiles');
+  tilesEl.innerHTML = `
+    <div class="tile"><div class="lbl">${curYear} 매출</div>
+      <div class="val" data-k="total" data-fmt="eok" data-v="${total}">${eok(total)}</div>
+      <div class="foot">${won(total)}원</div>${spark(curYear)}</div>
+    <div class="tile"><div class="lbl">전년 대비</div>
+      <div class="val"${prev ? ` data-k="yoy" data-fmt="pct" data-v="${(total-prev)/prev*100}"` : ''}>${
+        prev ? signPct((total-prev)/prev*100) : '—'}</div>
+      <div class="foot">${prev
+        ? (isPartial ? `${prevY} 1~${lastMonth}월 동기 ${eok(prev)}` : `${prevY} ${eok(prev)}`)
+        : '비교 대상 없음'}</div>${prev ? spark(prevY) : ''}</div>
+    <div class="tile"><div class="lbl">계산서 · 거래처</div>
+      <div class="val" data-k="count" data-fmt="int" data-v="${tx.length}"><span class="n">${tx.length}</span><small>건</small></div>
+      <div class="foot">거래처 ${custs}곳 · 건당 평균 ${manwon(tx.length ? total/tx.length : 0)}원</div></div>
+    <div class="tile quiet"><div class="lbl">파이프라인 · 매출 아님</div>
+      <div class="val" data-k="pipe" data-fmt="eok" data-v="${DATA.pipeline.total}">${eok(DATA.pipeline.total)}</div>
+      <div class="foot">예정 ${DATA.pipeline.count}건 · 계산서 미발행</div></div>`;
+  tilesEl.querySelectorAll('.val[data-v]').forEach(countUp);
+
+  renderMonthly(prevY);
+  showMonthly();
+  renderMix();
+  document.getElementById('cats').dataset.fresh = '1';
+  renderCats(tx, total);
+  showCats();
+  renderCust(tx);
+  renderSizes(tx);
+  renderPipeline(total, prevY);
+}
+
+/* ═══════════════════════ 월별: 막대 · 누적 · 표 ═══════════════════════ */
+function renderMonthly(prevY){
+  const cur = monthlyTotals(curYear);
+  const hasPrev = DATA.aggregates.by_year[prevY] !== undefined;
+  const prv = hasPrev ? monthlyTotals(prevY) : null;
+  const all = Object.values(cur).map(v => v.amount).concat(prv ? Object.values(prv).map(v => v.amount) : []);
+  const max = niceMax(Math.max(...all, 1));
+  const ticks = [0, .25, .5, .75, 1].map(f => f * max);
+  const peakEntry = Object.entries(cur).sort((a,b) => b[1].amount - a[1].amount)[0];
+  const peakMonth = peakEntry && peakEntry[1].amount > 0 ? Number(peakEntry[0]) : null;
+
+  document.getElementById('legend').innerHTML = hasPrev
+    ? `<span class="cur"><i></i>${curYear}</span><span class="prev"><i></i>${prevY}</span>`
+    : `<span class="cur"><i></i>${curYear}</span>`;
+
+  const bars = MONTHS.map(m => {
+    const v = cur[m], p = prv ? prv[m].amount : 0;
+    const h = v.amount > 0 ? Math.max(1.5, v.amount / max * 100) : 0.9;
+    const ph = p > 0 ? Math.max(1.5, p / max * 100) : 0;
+    return `<div class="mcol${v.amount ? '' : ' nil'}" data-m="${m}">
+      ${m === peakMonth ? `<b style="bottom:${h}%">${eok(v.amount)}</b>` : ''}
+      ${prv && ph ? `<span class="bar prev gm" style="height:${ph}%;--i:${m-1}"></span>` : ''}
+      <span class="bar cur gm" style="height:${h}%;--i:${m-1}"></span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('monthly').innerHTML = `
+    <div class="chart">
+      <div class="yaxis">${ticks.map(t => `<span style="bottom:${t/max*100}%">${tickLabel(t)}</span>`).join('')}</div>
+      <div class="plot">
+        <div class="grid">${ticks.map(t => `<i class="${t===0?'zero':''}" style="bottom:${t/max*100}%"></i>`).join('')}</div>
+        <div class="bars">${bars}</div>
+      </div>
+      <div class="xaxis">${MONTHS.map(m => `<span class="${m===peakMonth?'peak':''}">${m}</span>`).join('')}</div>
+    </div>`;
+
+  const plot = document.querySelector('.plot');
+  plot.onmousemove = e => {
+    const col = e.target.closest('.mcol'); if (!col) { hideTip(); return; }
+    const m = col.dataset.m, v = cur[m], p = prv ? prv[m].amount : null;
+    const rows = [[`${curYear}년 ${m}월`, v.amount ? won(v.amount) + '원' : '발행 없음']];
+    if (v.count) rows.push(['건수', v.count + '건']);
+    if (p !== null) {
+      rows.push([`${prevY}년 ${m}월`, p ? won(p) + '원' : '발행 없음']);
+      if (p > 0 && v.amount > 0) rows.push(['증감', signPct((v.amount - p) / p * 100)]);
+    }
+    showTip(dl(rows), e);
+  };
+  plot.onmouseleave = hideTip;
+
+  let c = 0;
+  document.getElementById('monthlyTable').innerHTML =
+    `<div class="scroll"><table><thead><tr><th>월</th><th class="num">${curYear}</th>` +
+    (prv ? `<th class="num">${prevY}</th><th class="num">증감</th>` : '') +
+    `<th class="num">건수</th><th class="num">${curYear} 누적</th></tr></thead><tbody>` +
+    MONTHS.map(m => {
+      const v = cur[m], p = prv ? prv[m].amount : null;
+      c += v.amount;
+      const d = (p && v.amount) ? signPct((v.amount - p) / p * 100) : '—';
+      return `<tr><td>${m}월</td><td class="num">${won(v.amount)}</td>` +
+        (prv ? `<td class="num">${won(p)}</td><td class="num">${d}</td>` : '') +
+        `<td class="num">${v.count}</td><td class="num">${won(c)}</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+
+  const live = Object.values(cur).filter(v => v.amount !== 0).length;
+  document.getElementById('monthlyNote').textContent =
+    `가로선은 금액 눈금이고 굵은 숫자는 최대 월이다. 매출이 잡힌 달 ${live}개.` +
+    (prv ? ` 회색 막대·점선이 ${prevY}년이다.` : '') +
+    ' 「누적」은 1월부터 더한 값이라 연말 높이가 그 해 총액이다. 발행일 기준이라 사업 수행 시점과 다를 수 있다. 마우스를 올리면 정확한 금액이 나온다.';
+}
+
+/* 누적 곡선 — 올해가 전년 궤적의 어디쯤인지 한눈에 */
+function renderCum(){
+  const el = document.getElementById('monthlyCum');
+  const prevY = String(Number(curYear) - 1);
+  const hasPrev = DATA.aggregates.by_year[prevY] !== undefined;
+  const cum = y => { const m = monthlyTotals(y); let s = 0; return MONTHS.map(k => (s += m[k].amount)); };
+  const cc = cum(curYear), pc = hasPrev ? cum(prevY) : null;
+  const lm = isPartialYear(curYear) ? lastMonthOf(curYear) : 12;
+  const W = Math.max(320, el.clientWidth || 900), H = 230, L = 52, R = 24, T = 20, B = 28;
+  const max = niceMax(Math.max(cc[lm-1], pc ? pc[11] : 0, 1));
+  const x = i => L + i / 11 * (W - L - R);
+  const y = v => T + (H - T - B) * (1 - Math.max(0, v) / max);
+  const path = (arr, n) => arr.slice(0, n).map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
+  const ticks = [0, .25, .5, .75, 1].map(f => f * max);
+
+  el.innerHTML = `<svg class="lc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${'<defs><linearGradient id="gLine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--g1)"/><stop offset=".5" stop-color="var(--g3)"/><stop offset="1" stop-color="var(--g5)"/></linearGradient><linearGradient id="gArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--g1)" stop-opacity=".35"/><stop offset=".6" stop-color="var(--g4)" stop-opacity=".18"/><stop offset="1" stop-color="var(--g5)" stop-opacity="0"/></linearGradient><radialGradient id="gBead" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".5" stop-color="var(--g4)"/><stop offset="1" stop-color="var(--g5)"/></radialGradient></defs>'}
+    ${ticks.map(t => `<line class="${t ? 'grid' : 'zero'}" x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}"/>
+      <text x="${L-8}" y="${y(t)+4}" text-anchor="end">${tickLabel(t)}</text>`).join('')}
+    ${MONTHS.map((m,i) => `<text x="${x(i)}" y="${H-8}" text-anchor="middle">${m}</text>`).join('')}
+    ${pc ? `<path class="l-prev" d="${path(pc, 12)}"/>
+      <circle class="dot prev" r="3.5" cx="${x(11)}" cy="${y(pc[11])}"/>
+      <text class="lbl" x="${x(11)}" y="${y(pc[11]) - 9}" text-anchor="end">${prevY} ${eok(pc[11])}</text>
+      ${lm < 12 ? `<circle class="dot prev" r="3.5" cx="${x(lm-1)}" cy="${y(pc[lm-1])}"/>` : ''}` : ''}
+    <path class="a-cur" d="${path(cc, lm)}L${x(lm-1)} ${y(0)}L${x(0)} ${y(0)}Z"/>
+    <path class="l-glow" pathLength="1" d="${path(cc, lm)}"/>
+    <path class="l-cur" pathLength="1" d="${path(cc, lm)}"/>
+    <circle class="dot" r="4" cx="${x(lm-1)}" cy="${y(cc[lm-1])}"/>
+    <text class="lbl" x="${x(lm-1) + (lm < 10 ? 8 : -8)}" y="${y(cc[lm-1]) + 4}" text-anchor="${lm < 10 ? 'start' : 'end'}">${curYear} ${eok(cc[lm-1])}</text>
+    <line class="cross" id="cumCross" x1="0" x2="0" y1="${T}" y2="${H-B}"/>
+    <rect class="hit" x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}"/>
+  </svg>`;
+
+  const svg = el.querySelector('svg'), cross = el.querySelector('#cumCross');
+  svg.onmousemove = e => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(11, Math.round(((e.clientX - r.left) / r.width * W - L) / (W - L - R) * 11)));
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.classList.add('on');
+    const rows = [];
+    if (i < lm) rows.push([`${curYear} 1~${i+1}월 누적`, won(cc[i]) + '원']);
+    if (pc) {
+      rows.push([`${prevY} 1~${i+1}월 누적`, won(pc[i]) + '원']);
+      if (i < lm && pc[i] > 0) rows.push(['차이', signPct((cc[i] - pc[i]) / pc[i] * 100)]);
+    }
+    showTip(dl(rows.length ? rows : [[`${i+1}월`, '아직 발행 없음']]), e);
+  };
+  svg.onmouseleave = () => { cross.classList.remove('on'); hideTip(); };
+}
+
+/* ═══════════════════════ 분류 공통 ═══════════════════════ */
+function bucketize(rows, viewName){
+  const out = {};
+  for (const t of rows) {
+    const b = t.views[viewName];
+    (out[b] = out[b] || {amount:0, rows:[]});
+    out[b].amount += t.amount; out[b].rows.push(t);
+  }
+  return out;
+}
+function sortNames(names, buckets, order){
+  const ord = order || [];
+  return [...names].sort((a,b) => {
+    const ia = ord.indexOf(a), ib = ord.indexOf(b);
+    if (ia >= 0 && ib >= 0) return ia - ib;
+    if (ia >= 0) return -1;
+    if (ib >= 0) return 1;
+    return buckets[b].amount - buckets[a].amount;
+  });
+}
+/* 색은 뷰 안에서 이름에 고정된다. 연도를 바꿔도, 순위가 바뀌어도 같은 항목은 같은 색.
+   순서는 마스터 순서, 없으면 전 연도 합계 내림차순. 항목 수만큼 색을 만들고 회색은 empty 에만 */
+function assignColors(conf){
+  const allB = bucketize(DATA.transactions, curView);
+  const names = sortNames(Object.keys(allB), allB, conf.order).filter(n => n !== (conf.empty || ''));
+  COLOR = {}; TEXT = {};
+  const rgbs = seriesColors(names.length);
+  names.forEach((n, i) => { COLOR[n] = rgbStr(rgbs[i]); TEXT[n] = textOn(rgbs[i]); });
+  if (conf.empty) { COLOR[conf.empty] = 'var(--s0)'; TEXT[conf.empty] = 'dark'; }
+  return names;
+}
+const isGray = n => COLOR[n] === 'var(--s0)';
+
+/* 연도별 100% 스택 — 구성이 어떻게 옮겨갔는지 */
+function renderMix(){
+  const conf = DATA.meta.views[curView];
+  const names = assignColors(conf);
+  const emptyName = conf.empty || '';
+  const rows = years.map(y => {
+    const b = bucketize(yearTx(y), curView);
+    const tot = Object.values(b).filter(v => v.amount > 0).reduce((s,v) => s + v.amount, 0);
+    const order = [...names, emptyName].filter(n => b[n] && b[n].amount > 0);
+    return { y, tot, segs: order.map(n => ({ n, a: b[n].amount, p: b[n].amount / tot * 100 })) };
+  });
+  document.getElementById('mix').innerHTML = rows.map(r => `
+    <div class="row${r.y === curYear ? ' on' : ''}">
+      <div class="yr">${r.y}</div>
+      <div class="stack groove">${r.segs.map((s, i) => `<div class="sg gm${isGray(s.n) ? ' gray' : ''}" data-n="${esc(s.n)}" data-y="${r.y}" data-tx="${TEXT[s.n] || 'light'}"
+        style="flex:0 0 calc(${s.p.toFixed(2)}% - 2px);--c:${COLOR[s.n]};--i:${i}">${s.p >= 7 ? pct1(s.p) : ''}</div>`).join('')}</div>
+      <div class="tot">${eok(r.tot)}</div>
+    </div>`).join('');
+  const present = new Set(rows.flatMap(r => r.segs.map(s => s.n)));
+  const grayN = [...present].filter(isGray);
+  document.getElementById('keys').innerHTML =
+    names.filter(n => present.has(n) && !isGray(n)).map(n => `<span><i style="background:${COLOR[n]}"></i>${esc(n)}</span>`).join('') +
+    (grayN.length ? `<span><i style="background:var(--s0)"></i>그 외 ${grayN.length}종: ${grayN.map(esc).join(' · ')}</span>` : '');
+
+  const mix = document.getElementById('mix');
+  mix.onmousemove = e => {
+    const s = e.target.closest('.sg'); if (!s) { hideTip(); return; }
+    const r = rows.find(x => x.y === s.dataset.y), g = r.segs.find(x => x.n === s.dataset.n);
+    showTip(`<div style="margin-bottom:4px"><span class="sw" style="background:${COLOR[g.n]}"></span><b>${esc(g.n)}</b></div>` +
+      dl([[`${r.y}년`, won(g.a) + '원'], ['비중', pct1(g.p)]]), e);
+  };
+  mix.onmouseleave = hideTip;
+  mix.onclick = e => { const s = e.target.closest('.sg'); if (!s) return;
+    hideTip();
+    if (s.dataset.y !== curYear) { curYear = s.dataset.y; open.clear(); open.add(s.dataset.n); cMode = 'list'; setSeg('cMode', 'list'); render();
+      const t = document.querySelector(`#cats [data-b="${CSS.escape(s.dataset.n)}"]`);
+      if (t) t.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
+    } else openInList(s.dataset.n, true);
+  };
+}
+
+/* 트리맵 — squarified. 면적이 금액이라 큰 덩어리가 바로 보인다 */
+function squarify(items, x, y, w, h){
+  const out = []; let list = items.filter(it => it.v > 0);
+  const total = list.reduce((s,it) => s + it.v, 0); if (!total) return out;
+  const scale = w * h / total;
+  let rx = x, ry = y, rw = w, rh = h;
+  const worst = (row, len) => {
+    const s = row.reduce((a,b) => a + b.v * scale, 0);
+    const mx = Math.max(...row.map(r => r.v * scale)), mn = Math.min(...row.map(r => r.v * scale));
+    return Math.max(len*len*mx/(s*s), s*s/(len*len*mn));
+  };
+  while (list.length) {
+    const vertical = rw >= rh, len = vertical ? rh : rw;
+    if (len <= 0) break;
+    let row = [list[0]], i = 1;
+    while (i < list.length && worst(row.concat(list[i]), len) <= worst(row, len)) row.push(list[i++]);
+    const s = row.reduce((a,b) => a + b.v * scale, 0), thick = s / len;
+    let off = 0;
+    for (const it of row) {
+      const l = it.v * scale / thick;
+      out.push(vertical ? { it, x: rx, y: ry + off, w: thick, h: l } : { it, x: rx + off, y: ry, w: l, h: thick });
+      off += l;
+    }
+    if (vertical) { rx += thick; rw -= thick; } else { ry += thick; rh -= thick; }
+    list = list.slice(row.length);
+  }
+  return out;
+}
+function renderTreemap(){
+  const el = document.getElementById('tmap');
+  const tx = yearTx(), b = bucketize(tx, curView);
+  const tot = Object.values(b).filter(v => v.amount > 0).reduce((s,v) => s + v.amount, 0);
+  const items = Object.entries(b).filter(([,v]) => v.amount > 0).map(([n, v]) => ({ n, v: v.amount, c: v.rows.length })).sort((a,b) => b.v - a.v);
+  const W = el.clientWidth || 900, H = el.clientHeight || 360;
+  const rects = squarify(items, 0, 0, W, H);
+  el.innerHTML = rects.map((r, i) => {
+    const area = r.w * r.h, cls = area < 3200 ? ' xs' : area < 9000 ? ' sm' : '';
+    return `<div class="tm gm${isGray(r.it.n) ? ' gray' : ''}${cls}" data-n="${esc(r.it.n)}" data-tx="${TEXT[r.it.n] || 'light'}" style="left:${r.x/W*100}%;top:${r.y/H*100}%;width:${r.w/W*100}%;height:${r.h/H*100}%;--c:${COLOR[r.it.n]};--i:${i}">
+      <div class="n">${esc(r.it.n)}</div><div class="v">${eok(r.it.v)} · ${pct1(r.it.v/tot*100)}</div></div>`;
+  }).join('') || '<div class="empty">표시할 항목 없음</div>';
+  el.onmousemove = e => {
+    const c = e.target.closest('.tm'); if (!c) { hideTip(); return; }
+    const it = items.find(x => x.n === c.dataset.n);
+    showTip(`<div style="margin-bottom:4px"><span class="sw" style="background:${COLOR[it.n]}"></span><b>${esc(it.n)}</b></div>` +
+      dl([[`${curYear}년`, won(it.v) + '원'], ['비중', pct1(it.v/tot*100)], ['건수', it.c + '건']]), e);
+  };
+  el.onmouseleave = hideTip;
+  el.onclick = e => { const c = e.target.closest('.tm'); if (!c) return; hideTip(); openInList(c.dataset.n, true); };
+}
+
+/* 목록 */
+function renderCats(tx, total){
+  const conf = DATA.meta.views[curView];
+  document.getElementById('viewNote').textContent = conf.note || '';
+  const buckets = bucketize(tx, curView);
+  const prevYear = String(Number(curYear) - 1);
+  const prevBuckets = bucketize(yearTx(prevYear), curView);
+  const names = sortNames(Object.keys(buckets), buckets, conf.order);
+  const emptyName = conf.empty || '';
+  const main = names.filter(n => n !== emptyName);
+  const rest = names.filter(n => n === emptyName);
+  const max = Math.max(...(main.length ? main : names).map(n => Math.abs(buckets[n].amount)), 1);
+  const el = document.getElementById('cats');
+
+  let rowIdx = 0;
+  const row = (n, muted) => {
+    const b = buckets[n];
+    const i = rowIdx++;
+    const shown = b.rows.filter(matches);
+    if (query && !shown.length) return '';
+    const isOpen = open.has(n);
+    const pct = total ? (b.amount/total*100).toFixed(1) : '0.0';
+    const p = prevBuckets[n] ? prevBuckets[n].amount : 0;
+    const yoy = (p > 0 && b.amount !== 0)
+      ? `<span class="yoy">${prevYear} ${eok(p)} · ${signPct((b.amount - p)/p*100)}</span>` : '';
+    return `<div class="cat${isOpen?' open':''}${muted?' muted':''}">
+      <button class="catbtn" data-b="${esc(n)}" aria-expanded="${isOpen}">
+        <span class="catname"><span class="chev">▶</span><span class="sw" style="background:${COLOR[n] || 'var(--s0)'}"></span>${esc(n)}${
+          muted ? '<span class="tag">척도 제외</span>' : ''}</span>
+        <span class="track groove">${muted ? '' :
+          `<span class="fill gm" style="width:${Math.abs(b.amount)/max*100}%;--i:${i};--c:${COLOR[n] || 'var(--accent)'}"></span>`}</span>
+        <span class="catnums">${won(b.amount)}<span class="pct">${pct}%</span>${yoy}</span>
+      </button>
+      ${isOpen ? expand(n, shown, b.rows.length, conf) : ''}
+    </div>`;
+  };
+  const body = main.map(n => row(n, false)).join('');
+  const tail = rest.length
+    ? `<div class="split">${esc(emptyName)} — 이 축으로 나눌 수 없는 거래다. 막대 척도에서 뺐다.</div>` + rest.map(n => row(n, true)).join('')
+    : '';
+  el.innerHTML = (body + tail) || '<div class="empty">검색어와 맞는 거래가 없다.</div>';
+  el.onclick = e => {
+    const b = e.target.closest('[data-b],[data-s]'); if (!b) return;
+    const k = b.dataset.b !== undefined ? b.dataset.b : b.dataset.s;
+    open.has(k) ? open.delete(k) : open.add(k);
+    el.dataset.fresh = '0';
+    renderCats(yearTx(), total);
+  };
+}
+
+function expand(name, rows, allCount, conf){
+  const childName = conf.child;
+  if (!childName || !DATA.meta.views[childName]) return drill(name, rows, allCount);
+  const childConf = DATA.meta.views[childName];
+  const kids = bucketize(rows, childName);
+  const kidNames = Object.keys(kids);
+  if (kidNames.length <= 1 && (kidNames.length === 0 || kidNames[0] === childConf.empty)) return drill(name, rows, allCount);
+  const master = (DATA.meta.taxonomy_master || {})[name];
+  const ordered = sortNames(kidNames, kids, master || childConf.order);
+  const kidMax = Math.max(...ordered.map(n => Math.abs(kids[n].amount)), 1);
+  const sum = rows.reduce((s,t) => s + t.amount, 0);
+  return `<div class="drill">
+    <div class="drill-meta">${rows.length}건 · ${won(sum)}원 · 세부분류 ${ordered.length}종${
+      query && rows.length !== allCount ? ` · 전체 ${allCount}건 중 검색 일치분` : ''}</div>
+    <div class="subs">${ordered.map(sn => {
+      const k = kids[sn];
+      const key = name + ' :: ' + sn;
+      const isOpen = open.has(key);
+      const share = sum ? (k.amount/sum*100).toFixed(1) : '0.0';
+      return `<div class="cat sub${isOpen?' open':''}">
+        <button class="catbtn" data-s="${esc(key)}" aria-expanded="${isOpen}">
+          <span class="catname"><span class="chev">▶</span>${esc(sn)}<span class="tag">${k.rows.length}건</span></span>
+          <span class="track groove"><span class="fill gm" style="width:${Math.abs(k.amount)/kidMax*100}%;--c:${COLOR[name] || 'var(--accent)'}"></span></span>
+          <span class="catnums">${won(k.amount)}<span class="pct">${share}%</span></span>
+        </button>
+        ${isOpen ? drill(sn, k.rows, k.rows.length, name) : ''}
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+}
+
+function context(t){
+  const bits = [];
+  const c = CUST[t.customer_key];
+  if (c) {
+    if (c.school_level) bits.push(esc(c.school_level));
+    if (c.edu_office) bits.push(esc(c.edu_office));
+    if (c.budget_source && c.budget_source.length) bits.push(esc(c.budget_source.join('·')));
+    if (c.terms && c.terms.length) bits.push(esc(c.terms.join('·')));
+  }
+  const p = t.program_key ? PROG[t.program_key] : null;
+  if (p) {
+    const seg = [esc(p.name)];
+    if (p.client) seg.push('발주 ' + esc(p.client));
+    if (p.total_budget) seg.push('사업비 ' + eok(p.total_budget));
+    if (p.our_revenue) seg.push('우리 몫 ' + eok(p.our_revenue));
+    if (p.stage) seg.push(esc(p.stage));
+    bits.push(seg.join(' · '));
+  } else if (t.program_key) bits.push(esc(t.program_key));
+  return bits.length ? `<div class="ctx">${bits.join(' <span class="dot">·</span> ')}</div>` : '';
+}
+
+function drill(name, rows, allCount, parent){
+  if (!rows.length) return '<div class="drill"><div class="empty">해당 거래 없음</div></div>';
+  const sorted = [...rows].sort((a,b) => b.amount - a.amount);
+  const sum = rows.reduce((s,t) => s + t.amount, 0);
+  const custs = new Set(rows.map(t => t.customer_key)).size;
+  const seats = rows.reduce((s,t) => s + (t.qty > 1 ? t.qty : 0), 0);
+  const filtered = query && rows.length !== allCount;
+  return `<div class="drill">
+    <div class="drill-meta">${rows.length}건 · 고객 ${custs}곳 · ${won(sum)}원${seats ? ` · 수량 합 ${won(seats)}` : ''}${
+      filtered ? ` · 전체 ${allCount}건 중 검색 일치분` : ''}</div>
+    <div class="scroll"><table>
+      <thead><tr><th>발행일</th><th>고객</th><th>품목 · 배경</th>
+        <th class="num">수량</th><th class="num">단가</th><th class="num">금액</th></tr></thead>
+      <tbody>${sorted.map(t => `<tr>
+        <td class="mono">${esc(t.date || '—')}</td>
+        <td>${esc(t.counterparty || '—')}${(t.category_raw !== name && t.category_raw !== parent) ? `<span class="tag">${esc(t.category_raw)}</span>` : ''}</td>
+        <td class="item">${esc(t.item || '—')}${t.note ? `<span class="tag">${esc(t.note)}</span>` : ''}${context(t)}</td>
+        <td class="num">${t.qty ? won(t.qty) : '—'}</td>
+        <td class="num">${t.unit_price ? won(t.unit_price) : '—'}</td>
+        <td class="num">${won(t.amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+/* ═══════════════════════ 고객 집중도 ═══════════════════════ */
+let PARETO = null;   // 리사이즈 때 다시 그리려고 보관
+function renderCust(tx){
+  const agg = {};
+  for (const t of tx) {
+    const a = (agg[t.customer_key] = agg[t.customer_key] || { key: t.customer_key, name: t.counterparty, amount: 0, count: 0, big: -Infinity });
+    a.amount += t.amount; a.count += 1;
+    if (t.amount > a.big) { a.big = t.amount; a.name = t.counterparty; }
+  }
+  const all = Object.values(agg);
+  const pos = all.filter(a => a.amount > 0).sort((a,b) => b.amount - a.amount);
+  const posTot = pos.reduce((s,a) => s + a.amount, 0);
+  const excluded = all.length - pos.length;
+  let run = 0; const cum = pos.map(a => (run += a.amount) / posTot * 100);
+  const share = n => pos.length >= n ? pct1(cum[n-1]) : '—';
+  const k50 = cum.findIndex(c => c >= 50) + 1, k80 = cum.findIndex(c => c >= 80) + 1;
+  document.getElementById('custStats').innerHTML = pos.length ? `
+    <span>거래처 <b>${pos.length}곳</b>${excluded ? ` · 순액 0 이하 ${excluded}곳 제외` : ''}</span>
+    <span>상위 1곳 <b>${share(1)}</b></span><span>상위 5곳 <b>${share(5)}</b></span><span>상위 10곳 <b>${share(10)}</b></span>
+    <span>매출 절반까지 <b>${k50}곳</b></span><span>80%까지 <b>${k80}곳</b></span>` : '<span>거래 없음</span>';
+
+  const top = pos.slice(0, 10), mx = top.length ? top[0].amount : 1;
+  document.getElementById('custBars').innerHTML = top.map((a, i) => `
+    <button class="hb" data-n="${esc(a.name)}" title="위 목록에서 검색">
+      <span class="rk">${i+1}</span><span class="nm">${esc(a.name)}</span>
+      <span class="track groove"><span class="fill gm" style="width:${a.amount/mx*100}%;--i:${i};--c:${spectrumColor(i, top.length)}"></span></span>
+      <span class="nums">${eok(a.amount)}<small>${pct1(a.amount/posTot*100)} · ${a.count}건</small></span>
+    </button>`).join('') || '<div class="empty">거래 없음</div>';
+  document.getElementById('custBars').onclick = e => {
+    const b = e.target.closest('.hb'); if (!b) return;
+    document.getElementById('q').value = b.dataset.n; query = b.dataset.n;
+    cMode = 'list'; setSeg('cMode', 'list');
+    open.clear();
+    for (const n of Object.keys(bucketize(yearTx().filter(matches), curView))) open.add(n);
+    document.getElementById('cats').dataset.fresh = '0';
+    const all = yearTx();
+    renderCats(all, all.reduce((s,t) => s + t.amount, 0)); showCats();
+    document.getElementById('catsHead').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' });
+  };
+  PARETO = { pos, cum, k50, k80 };
+  renderPareto();
+}
+function renderPareto(){
+  const el = document.getElementById('pareto'); if (!PARETO || !PARETO.pos.length) { el.innerHTML = ''; return; }
+  const { pos, cum, k50, k80 } = PARETO, N = pos.length;
+  const W = Math.max(280, el.clientWidth || 480), H = 220, L = 40, R = 16, T = 18, B = 30;
+  const x = i => L + (N === 1 ? 0.5 : i / (N - 1)) * (W - L - R);
+  const y = p => T + (H - T - B) * (1 - p / 100);
+  const pts = cum.map((c, i) => [x(i), y(c)]);
+  const d = 'M' + x(0) + ' ' + y(0) + pts.map(p => 'L' + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+  const marks = [[k50, 50, '절반'], [k80, 80, '80%']].filter(m => m[0] > 0);
+  el.innerHTML = `<svg class="lc" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${'<defs><linearGradient id="gLine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--g1)"/><stop offset=".5" stop-color="var(--g3)"/><stop offset="1" stop-color="var(--g5)"/></linearGradient><linearGradient id="gArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--g1)" stop-opacity=".35"/><stop offset=".6" stop-color="var(--g4)" stop-opacity=".18"/><stop offset="1" stop-color="var(--g5)" stop-opacity="0"/></linearGradient><radialGradient id="gBead" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".5" stop-color="var(--g4)"/><stop offset="1" stop-color="var(--g5)"/></radialGradient></defs>'}
+    ${[0,25,50,75,100].map(p => `<line class="${p ? 'grid' : 'zero'}" x1="${L}" x2="${W-R}" y1="${y(p)}" y2="${y(p)}"/>
+      <text x="${L-6}" y="${y(p)+4}" text-anchor="end">${p}%</text>`).join('')}
+    <text x="${x(0)}" y="${H-8}" text-anchor="start">1위</text>
+    <text x="${x(N-1)}" y="${H-8}" text-anchor="end">${N}위</text>
+    <text x="${(L + W - R)/2}" y="${H-8}" text-anchor="middle" class="lbl">고객 순위 → 누적 매출 비중</text>
+    <path class="a-par" d="${d}L${x(N-1)} ${y(0)}Z"/>
+    <path class="l-glow" pathLength="1" d="${d}"/>
+    <path class="l-par" pathLength="1" d="${d}"/>
+    ${marks.map(([k, p, lb]) => `<line class="mark" x1="${x(k-1)}" x2="${x(k-1)}" y1="${y(p)}" y2="${y(0)}"/>
+      <circle class="dot" r="4" cx="${x(k-1)}" cy="${y(cum[k-1])}"/>
+      <text class="lbl" x="${x(k-1) + 7}" y="${y(cum[k-1]) + 4}">${lb} ${k}곳</text>`).join('')}
+    <line class="cross" id="parCross" x1="0" x2="0" y1="${T}" y2="${H-B}"/>
+    <rect class="hit" x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}"/>
+  </svg>`;
+  const svg = el.querySelector('svg'), cross = el.querySelector('#parCross');
+  svg.onmousemove = e => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(N-1, Math.round(((e.clientX - r.left) / r.width * W - L) / (W - L - R) * (N - 1))));
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.classList.add('on');
+    showTip(`<div style="margin-bottom:4px"><b>${i+1}위 ${esc(pos[i].name)}</b></div>` +
+      dl([['이 고객', eok(pos[i].amount)], [`상위 ${i+1}곳 누적`, pct1(cum[i])]]), e);
+  };
+  svg.onmouseleave = () => { cross.classList.remove('on'); hideTip(); };
+}
+
+/* ═══════════════════════ 거래 규모 분포 ═══════════════════════ */
+const BINS = [
+  { label:'감액<br>수정계산서', test: a => a < 0 },
+  { label:'100만<br>미만', lo:0, hi:1e6 }, { label:'100만~<br>500만', lo:1e6, hi:5e6 },
+  { label:'500만~<br>1천만', lo:5e6, hi:1e7 }, { label:'1천만~<br>5천만', lo:1e7, hi:5e7 },
+  { label:'5천만~<br>1억', lo:5e7, hi:1e8 }, { label:'1억<br>이상', lo:1e8, hi:Infinity },
+];
+function renderSizes(tx){
+  const bins = BINS.map(b => ({ ...b, n: 0, sum: 0 }));
+  for (const t of tx) {
+    const b = bins.find(b => b.test ? b.test(t.amount) : (t.amount >= b.lo && t.amount < b.hi));
+    if (b) { b.n += 1; b.sum += t.amount; }
+  }
+  const amounts = tx.map(t => t.amount).sort((a,b) => a - b);
+  const med = amounts.length ? amounts[Math.floor(amounts.length / 2)] : 0;
+  const mean = amounts.length ? amounts.reduce((s,a) => s + a, 0) / amounts.length : 0;
+  const big = tx.reduce((m,t) => t.amount > (m ? m.amount : -Infinity) ? t : m, null);
+  const posSum = bins.slice(1).reduce((s,b) => s + b.sum, 0);
+  const bigN = bins.slice(4).reduce((s,b) => s + b.n, 0), bigSum = bins.slice(4).reduce((s,b) => s + b.sum, 0);
+  document.getElementById('sizeStats').innerHTML = tx.length ? `
+    <span>중앙값 <b>${manwon(med)}원</b></span><span>평균 <b>${manwon(mean)}원</b></span>
+    <span>최대 <b>${eok(big.amount)}</b> ${esc(big.counterparty)}</span>
+    <span>1천만 이상 <b>${bigN}건</b>이 발행액의 <b>${pct1(posSum ? bigSum / posSum * 100 : 0)}</b></span>` : '<span>거래 없음</span>';
+
+  const nMax = Math.max(1, ...bins.map(b => b.n)), sMax = Math.max(1, ...bins.map(b => b.sum));
+  const chart = (title, val, fmt, max) => `<div><h3>${title}</h3>
+    <div class="cols">${bins.map((b, i) => { const v = val(b);
+      return `<div class="col" data-i="${i}"><b>${v ? fmt(v) : ''}</b>
+        <span class="cb gm${v < 0 ? ' neg' : ''}" style="height:${v > 0 ? Math.max(1.5, v / max * 100) : (v < 0 ? 6 : 0.9)}%;--i:${i}"></span></div>`; }).join('')}</div>
+    <div class="cx">${bins.map(b => `<span>${b.label}</span>`).join('')}</div></div>`;
+  const el = document.getElementById('dist');
+  el.innerHTML = chart('건수', b => b.n, v => v + '건', nMax) + chart('금액 합', b => b.sum, v => eok(v), sMax);
+  el.onmousemove = e => {
+    const c = e.target.closest('.col'); if (!c) { hideTip(); return; }
+    const b = bins[Number(c.dataset.i)];
+    showTip(`<div style="margin-bottom:4px"><b>${b.label.replace('<br>', ' ')}</b></div>` +
+      dl([['건수', b.n + '건'], ['금액 합', won(b.sum) + '원'], ['건당 평균', b.n ? manwon(b.sum / b.n) + '원' : '—']]), e);
+  };
+  el.onmouseleave = hideTip;
+}
+
+/* ═══════════════════════ 파이프라인: 불릿 + 표 ═══════════════════════ */
+function renderPipeline(total, prevY){
+  const p = DATA.pipeline.transactions;
+  if (!p.length) return;
+  document.getElementById('pipePanel').hidden = false;
+
+  const bul = document.getElementById('bullet');
+  const pipeYears = new Set(p.map(t => String(t.year)));
+  if (pipeYears.has(curYear)) {
+    const pipe = DATA.pipeline.total, prevFull = DATA.aggregates.by_year[prevY] || 0;
+    const scale = niceMax(Math.max(total + pipe, prevFull) * 1.02);
+    const w = v => (v / scale * 100).toFixed(2) + '%';
+    bul.hidden = false;
+    bul.innerHTML = `
+      <div class="bar-t groove">
+        <div class="seg gm" style="width:${w(total)}"></div>
+        <div class="seg pipe" style="left:${w(total)};width:${w(pipe)}"></div>
+        ${prevFull ? `<div class="mk" style="left:${w(prevFull)}"><span>${prevY} 전체 ${eok(prevFull)}</span></div>` : ''}
+      </div>`;
+    bul.innerHTML += `
+      <div class="lbls">
+        <span class="a"><i></i>${curYear} 발행 <b>${eok(total)}</b></span>
+        <span class="p"><i></i>예정 <b>${eok(pipe)}</b> · 매출 아님</span>
+        <span>둘을 더하면 <b>${eok(total + pipe)}</b>${prevFull ? ` · ${prevY} 전체의 ${pct1((total + pipe) / prevFull * 100)}` : ''}</span>
+      </div>`;
+  } else { bul.hidden = true; bul.innerHTML = ''; }
+
+  const sorted = [...p].sort((a,b) => b.amount - a.amount);
+  document.getElementById('pipeTable').innerHTML =
+    `<thead><tr><th>건명</th><th>품목</th><th>분류</th><th class="num">금액</th></tr></thead>
+     <tbody>${sorted.map(t => `<tr>
+       <td>${esc(t.counterparty || '—')}</td>
+       <td class="item">${esc(t.item || '—')}${t.note ? `<span class="tag">${esc(t.note)}</span>` : ''}${context(t)}</td>
+       <td>${esc(t.views[DATA.meta.default_view] || t.category_raw)}</td>
+       <td class="num">${won(t.amount)}</td>
+     </tr>`).join('')}
+     <tr><td colspan="3" style="font-weight:600">합계</td>
+         <td class="num" style="font-weight:600">${won(DATA.pipeline.total)}</td></tr></tbody>`;
+}
+
+/* 너비가 바뀌면 SVG·트리맵만 다시 잰다 */
+let rsT = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(rsT);
+  rsT = setTimeout(() => { if (mMode === 'cum') renderCum(); renderPareto(); if (cMode === 'tmap') renderTreemap(); }, 150);
+});
+
+render();
+</script>
+</body>
+</html>
