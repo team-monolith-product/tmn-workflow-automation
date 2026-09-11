@@ -1,0 +1,65 @@
+# 매출 facts 데이터 소스 정의
+#
+# 이 파일과 taxonomy.yml 만 고치면 코드를 건드리지 않고 기준을 바꿀 수 있다.
+# 읽는 계정은 GOOGLE_SERVICE_ACCOUNT_JSON(DEFAULT_ACCOUNT)이다. 매출장은 그 계정에
+# **뷰어로만** 공유한다. OPERATING 계정에 공유하면 sync_sheet_catalog 가 훑어
+# 카탈로그에 실리고 read_sheet 로 누구나 읽게 되므로 그쪽에는 공유하지 않는다.
+
+ledger:
+  # 매출장 정본. 로컬 xlsx 사본은 stale 이므로 항상 이 시트에서 읽는다.
+  spreadsheet_id: "1apSjdsEY2mE-KQe3p0jCBypdc5ZKbA4g-6QACPxK7-4"
+  spreadsheet_name: "매출장"
+  # 탭 이름 -> 회계연도 + 그 탭에만 다른 열 배치.
+  #
+  # 2026-09-10 매출장이 개편됐다. 「26년 매출장」이 (구)·(신)으로 갈렸고 「분류마스터」 탭이 생겼다.
+  # (신) 탭은 I열이 대분류, J열이 세부분류로 바뀌었고 비고가 K열로 밀렸다.
+  # (신) = (구) + 신규 2건이며 삭제·변경은 없다(2026-09-10 전건 대사). (신)을 정본으로 쓴다.
+  # 2025년 이하 탭은 옛 16종 분류 그대로다. 그래서 열 배치를 탭별로 따로 잡는다.
+  tabs:
+    "23년 매출장": {year: 2023}
+    "24년 매출장": {year: 2024}
+    "25년 매출장": {year: 2025}
+    "26년 매출장(신)":
+      year: 2026
+      columns: {subcategory_raw: 9, note: 10}
+  # 분류 정본. 매출장 안의 「분류마스터」 탭이 대분류와 그 아래 세부분류를 정의한다.
+  # 여기서는 그 표를 그대로 읽는다. 분류가 늘거나 이름이 바뀌면 시트만 고치면 된다.
+  #   A열  = 대분류 목록 (A3부터 아래로)
+  #   C열~ = 대분류별 세부분류 열. 2행이 그 열의 대분류 이름
+  taxonomy_tab:
+    name: "분류마스터"
+    range: "A1:L40"
+    major_col: 0        # A열 = 대분류 목록
+    major_start_row: 3  # 1-based. 3행부터 대분류가 나온다
+    detail_header_row: 2
+    detail_first_col: 2 # C열
+    detail_last_col: 10 # K열. 대분류가 늘면 이 값만 키운다
+    detail_start_row: 3
+
+  # 읽을 열 범위. 그 뒤 열은 시트 안에서 쓰는 집계 수식이라 읽지 않는다.
+  range: "A1:K1200"
+  # 기본 열 인덱스(0-based). 탭별 columns 가 있으면 그것이 덮어쓴다.
+  columns:
+    date: 0             # 계산서 발행일자 (카드 결제일자)
+    counterparty: 1     # 거래처
+    item: 2             # 품목명
+    qty: 3              # 수량
+    unit_price: 4       # 단가
+    amount: 5           # 공급가액  <- 모든 집계의 기준 금액
+    tax: 6              # 세액
+    total: 7            # 합계
+    category_raw: 8     # 분류 (2025 이하 = 옛 16종 / 2026 = 대분류)
+    subcategory_raw: -1 # 세부분류. 2026(신) 탭에만 있다. -1 = 그 탭에는 없음
+    note: 9             # 비고
+
+# 인식 기준. 대표 결정 2026-09-09.
+basis:
+  mode: "issued"           # issued = 세금계산서 발행 실적만 매출로 계상
+  amount_field: "amount"   # 공급가액 기준 (부가세 제외)
+  # A열이 아래 값이면 발행분이 아니라 파이프라인으로 분리한다.
+  pipeline_markers: ["예정", "예정분", "계약확정 예정"]
+
+# 보강 데이터. 빌드는 조인만 하고, 값은 사람이 검토해 커밋한다.
+# 갱신은 scripts/enrich_revenue_customers.py 를 손으로 돌린다. 매일 빌드에서는 부르지 않는다.
+enrichment:
+  file: "knowledge/revenue/enrichment.yml"

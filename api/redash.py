@@ -115,3 +115,69 @@ async def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict
     params = {"q": query, "page": str(page), "page_size": str(page_size)}
 
     return await _get_json(url, params)
+
+
+async def _post_json(url: str, payload: dict) -> dict:
+    """
+    Redash API에 JSON 본문으로 POST 요청을 보내고 JSON 응답을 반환합니다.
+
+    Args:
+        url: 요청할 전체 URL
+        payload: 요청 본문
+
+    Returns:
+        dict: 응답 JSON
+    """
+    async with aiohttp.ClientSession(headers=get_headers()) as session:
+        async with session.post(url, json=payload) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+async def create_query_result(
+    query: str, data_source_id: int, max_age: int = 0
+) -> dict:
+    """
+    저장하지 않은 SQL 을 데이터 소스에 바로 실행합니다.
+
+    결과가 캐시에 있으면 query_result 가, 아니면 job 이 옵니다. job 이면
+    get_job 으로 status 3(성공)이 될 때까지 기다린 뒤 get_query_result 로 받습니다.
+
+    Args:
+        query: 실행할 SQL
+        data_source_id: Redash 데이터 소스 ID
+        max_age: 이 초 안의 캐시를 허용. 0 이면 항상 새로 실행
+
+    Returns:
+        dict: {"query_result": ...} 또는 {"job": ...} (원본 Redash 응답)
+    """
+    url = f"{get_base_url()}/api/query_results"
+    return await _post_json(
+        url, {"query": query, "data_source_id": data_source_id, "max_age": max_age}
+    )
+
+
+async def get_job(job_id: str) -> dict:
+    """
+    실행 중인 작업의 상태를 조회합니다. status 3 = 성공, 4 = 실패.
+
+    Args:
+        job_id: create_query_result 가 돌려준 job.id
+
+    Returns:
+        dict: 작업 상태 (원본 Redash 응답)
+    """
+    return await _get_json(f"{get_base_url()}/api/jobs/{job_id}")
+
+
+async def get_query_result(query_result_id: int) -> dict:
+    """
+    완료된 쿼리 결과를 조회합니다.
+
+    Args:
+        query_result_id: job.query_result_id
+
+    Returns:
+        dict: 쿼리 결과 (원본 Redash 응답). 행은 query_result.data.rows
+    """
+    return await _get_json(f"{get_base_url()}/api/query_results/{query_result_id}")

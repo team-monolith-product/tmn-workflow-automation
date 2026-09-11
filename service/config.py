@@ -142,6 +142,20 @@ class EducationBidCrawlerConfig:
     batch_size: int = 20
 
 
+# --- 매출 facts ---
+
+
+@dataclass(frozen=True)
+class RevenueConfig:
+    """매출장 검증 결과를 보낼 곳.
+
+    매출 데이터의 위치·열 배치·분류 규칙은 여기가 아니라 knowledge/revenue/ 에 있다.
+    config.yaml 에는 슬랙으로 어디에 알릴지만 둔다.
+    """
+
+    alert_channel_id: str
+
+
 # --- 스케줄 작업 ---
 
 
@@ -169,6 +183,7 @@ class AppConfig:
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
     education_bid_crawler: EducationBidCrawlerConfig | None = None
+    revenue: RevenueConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
     sms_projects: dict[str, str] = field(default_factory=dict)
 
@@ -303,6 +318,14 @@ def _parse_config(raw: dict) -> AppConfig:
             batch_size=ebc_raw.get("batch_size", 20),
         )
 
+    # Revenue facts
+    revenue_raw = raw.get("revenue")
+    revenue = (
+        RevenueConfig(alert_channel_id=revenue_raw["alert_channel_id"])
+        if revenue_raw
+        else None
+    )
+
     # Scheduled jobs
     scheduled_jobs = [
         ScheduledJobConfig(
@@ -322,6 +345,7 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum=scrum,
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
+        revenue=revenue,
         scheduled_jobs=scheduled_jobs,
         sms_projects=raw.get("sms_projects") or {},
     )

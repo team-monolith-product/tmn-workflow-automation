@@ -28,6 +28,8 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
+from app.revenue_tools import INSTRUCTIONS as REVENUE_INSTRUCTIONS
+from app.revenue_tools import register_revenue_tools
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
@@ -38,7 +40,10 @@ INSTRUCTIONS = """
 팀모노리스 사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스입니다.
 읽기 전용 SQL로 질의합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
-""".strip()
+
+매출(revenue_*) 도구도 이 서버에 있습니다. 매출 숫자는 query_knowledge 가 아니라
+그 도구로만 봅니다 — 지식베이스에는 매출이 없습니다.
+""".strip() + "\n\n" + REVENUE_INSTRUCTIONS
 
 
 def build_mcp() -> MCPServer:
@@ -65,6 +70,7 @@ def build_mcp() -> MCPServer:
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
+    register_revenue_tools(mcp)
     return mcp
 
 

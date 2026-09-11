@@ -28,6 +28,7 @@ from app.slack_task_mcp import (
     build_mcp as build_operations_task_mcp,
     build_mcp_app as build_operations_task_mcp_app,
 )
+from service.revenue.facts import get_facts
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -464,6 +465,23 @@ async def handle_webhook(
 app.include_router(knowledge_notion_router)
 
 
+@app.get("/revenue/facts.json")
+async def revenue_facts(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """
+    매출 facts 전체. 사람이 보는 매출 대시보드(별도 저장소, Cloudflare Pages)가
+    빌드 때 이것을 받아 HTML 을 굽는다. 숫자를 여기 말고 다른 데서 다시 계산하지
+    않게 하려는 것이다.
+
+    직원 개인이 부르는 길이 아니다. 사람과 에이전트는 MCP revenue_* 도구를 쓴다.
+
+    Headers:
+        X-API-Key: 인증용 API Key (필수)
+    """
+    await verify_api_key(x_api_key)
+    # 시트 읽기와 빌드는 동기라 스레드에서 실행한다.
+    return await asyncio.to_thread(get_facts)
+
+
 @app.get("/")
 async def root():
     """루트 엔드포인트 - API 정보 반환"""
@@ -474,6 +492,7 @@ async def root():
             "health": "/health",
             "webhook": "/webhook",
             "knowledge_notion_events": "/knowledge/notion/events",
+            "revenue_facts": "/revenue/facts.json",
             "docs": "/docs",
         },
     }

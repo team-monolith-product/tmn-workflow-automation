@@ -12,7 +12,15 @@ Notion 등 외부 서비스에서 발생한 이벤트를 수신하여 자동화 
 ### 3. Operations Slack Task MCP (`main.py`)
 운영팀 Slack List 작업의 생성·시작·재개, 상태·요청 맥락·이전 작업 기록 조회, 종료 결과 게시를 처리합니다. Knowledge MCP와 같은 FastAPI 프로세스에서 `/mcp/operate` 경로를 제공합니다.
 
-### 4. TMN Operating Plugin
+### 4. 매출 facts (Knowledge MCP `revenue_*` 도구 · `GET /revenue/facts.json`)
+매출장 구글시트를 읽어 분류·집계·검증한 결과를 세 곳에 낸다. 자세한 것은 `knowledge/revenue/README.md`.
+- Knowledge MCP(`/mcp`)의 `revenue_summary` · `revenue_transactions` · `revenue_health` — 사람과 에이전트가 쓰는 길
+- `GET /revenue/facts.json` (`X-API-Key`) — 별도 저장소의 매출 대시보드가 HTML 을 구울 때 받아 간다
+- `scripts/validate_revenue_ledger.py` — 매일 07:10 KST 검증. 경고가 있을 때만 슬랙 `t_관리_매출`에 올린다
+
+매출장은 `GOOGLE_SERVICE_ACCOUNT_JSON` 계정에 **뷰어로만** 공유한다. `OPERATING_SHEET_SERVICE_ACCOUNT_JSON` 에는 공유하지 않는다 — 그쪽에 공유하면 `sync_sheet_catalog` 가 훑어 카탈로그에 실리고 `read_sheet` 로 누구나 읽게 된다.
+
+### 5. TMN Operating Plugin
 사내 플러그인 원문은 비공개 Marketplace에서 관리합니다. Codex·Claude에서 다음 HTTPS Git Marketplace URL을 최초 한 번 등록한 뒤 `TMN Operating`을 설치합니다.
 
 ```text

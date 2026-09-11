@@ -1,0 +1,2454 @@
+generated_at: '2026-09-09T15:10:16+09:00'
+source: notion_prd (Athena) via Redash · organizations + deals + government_contracts
+how_to_edit: customers·programs·unmatched는 자동 갱신되니 손대지 않는다. 고칠 값은 manual 아래에 같은 거래처 키로 적는다. manual이 언제나 이긴다. 새 사업은 program_aliases에 한 줄 더한다.
+coverage:
+  ledger_counterparties: 334
+  matched: 248
+  level_derived_from_name: 44
+  non_school_in_school_category: 9
+  ambiguous: 0
+  alias_targets_missing_from_master: []
+  caveat: notion_prd.organizations는 10,000행에서 잘려 있다(고등학교 1,909 · 실제 약 2,380). 빠진 학교는 학교급만 이름에서 도출하고 교육청·지역은 비워 둔다.
+manual: {}
+program_aliases:
+  찾아가는 학교 컨설팅: 2026 찾아가는 학교 컨설팅
+  찾학컨: 2026 찾아가는 학교 컨설팅
+  디지털새싹: 2026 디지털새싹
+  AI 동행: 2026 AI 동행 프로젝트
+  AI동행: 2026 AI 동행 프로젝트
+  SW동행: SW 동행프로젝트
+  SW 동행: SW 동행프로젝트
+  성동광진: 2026 성동광진 중등  AI 디지털 기반 교육혁신 연수
+  K-STEM: 2026「K-STEM 과학교육 활성화 지원사업(연수)」위탁 운영 용역
+  센스쿨: 2026 센스쿨 등록사업
+  기업연계 정보교사: 2026 기업 연계 정보교원 역량강화 프로젝트
+  기업 연계 정보교원: 2026 기업 연계 정보교원 역량강화 프로젝트
+  선도교사 연수 1권역: 2026  인공지능 선도교사 연수사업(서울대)
+  AI선도교사 1권역: 2026  인공지능 선도교사 연수사업(서울대)
+  선도교사 연수 2권역: 2026 인공지능 선도교사 연수 사업(춘천교대)
+  AI선도교사 2권역: 2026 인공지능 선도교사 연수 사업(춘천교대)
+  디지털튜터: 2026 디지털튜터
+customers:
+  갈산고등학교:
+    name: 갈산고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Basic+
+    - Master
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 200
+  강원중학교:
+    name: 강원중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  거성중학교:
+    name: 거성중학교
+    school_level: 중학교
+    edu_office: 부산광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 200
+  거제중학교:
+    name: 거제중학교
+    school_level: 중학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 50
+  경산과학고등학교:
+    name: 경산과학고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 3
+    crm_seats: 340
+  경산여자고등학교:
+    name: 경산여자고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 310
+  경상고등학교:
+    name: 경상고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+  경원고등학교:
+    name: 경원고등학교
+    school_level: 고등학교
+    edu_office: 부산광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 280
+  경화여자고등학교:
+    name: 경화여자고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Basic+
+    - Master
+    crm_deals: 3
+    crm_seats: 825
+  경희여자고등학교:
+    name: 경희여자고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 104
+  고산중학교:
+    name: 고산중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 208
+  고창북고등학교:
+    name: 고창북고등학교
+    school_level: 고등학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - 씨마스 인기초
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 20
+  고창영선중:
+    name: 고창 영선중
+    crm_school_name: 영선중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 2
+  고촌고등학교:
+    name: 고촌고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 36
+  공주고등학교:
+    name: 공주고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  공주금성여자고등학교:
+    name: 공주금성여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  과천고등학교:
+    name: 과천고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Basic+
+    crm_deals: 1
+  광동고등학교:
+    name: 광동고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    - 마스터
+    crm_deals: 3
+    crm_seats: 68
+  광명광문고등학교:
+    name: 광명광문고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  광양용강중학교:
+    name: 광양용강중학교
+    school_level: 중학교
+    edu_office: 전라남도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 400
+  광주경신여자고등학교:
+    name: 광주경신여자고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 2
+    crm_seats: 400
+  광주동신여자고등학교:
+    name: 광주동신여자고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 247
+  광주동신여자중학교:
+    name: 광주동신여자중학교
+    school_level: 중학교
+    edu_office: 광주광역시교육청
+    models:
+    - Pro
+    - 해커톤
+    budget_source:
+    - 선도학교
+    crm_deals: 3
+    crm_seats: 160
+  광주수일중학교:
+    name: 광주수일중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  광주인성고등학교:
+    name: 광주인성고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 2
+    crm_seats: 52
+  광탄고등학교:
+    name: 광탄고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    - 마스터
+    crm_deals: 2
+    crm_seats: 34
+  광혜원중학교:
+    name: 광혜원중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 260
+  구미고등학교:
+    name: 구미고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 3
+    crm_seats: 420
+  군산대성중학교:
+    name: 군산대성중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 60
+  글벗중학교:
+    name: 글벗중학교
+    school_level: 중학교
+    edu_office: 세종특별자치시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 10
+  금산고등학교:
+    name: 금산고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 180
+  금천고등학교:
+    name: 금천고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 125
+  김해가야고등학교:
+    name: 김해가야고등학교
+    school_level: 고등학교
+    edu_office: 경상남도교육청
+    models:
+    - Master
+    crm_deals: 3
+    crm_seats: 60
+  김해모산초:
+    name: 김해모산초
+    crm_school_name: 김해모산초등학교
+    school_level: 초등학교
+    edu_office: 경상남도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 150
+  김해삼방고등학교:
+    name: 김해삼방고등학교
+    school_level: 고등학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    crm_deals: 4
+    crm_seats: 402
+  남대전고등학교:
+    name: 남대전고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 200
+  남문중학교:
+    name: 남문중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 52
+  남산중학교:
+    name: 남산중학교
+    school_level: 중학교
+    edu_office: 부산광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 130
+  남성중학교:
+    name: 남성중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 4
+    crm_seats: 470
+  남원성원고:
+    name: 남원 성원고
+    crm_school_name: 성원고등학교
+    school_level: 고등학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 1
+  남춘천중학교:
+    name: 남춘천중학교
+    school_level: 중학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 28
+  논산대건고등학교:
+    name: 논산대건고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    crm_deals: 4
+    crm_seats: 1040
+  논산대건중학교:
+    name: 논산대건중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 219
+  다정고등학교:
+    name: 다정고등학교
+    school_level: 고등학교
+    edu_office: 세종특별자치시교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 81
+  단양중학교:
+    name: 단양중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 13
+  달서고등학교:
+    name: 달서고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 3
+    crm_seats: 421
+  달서중고등학교:
+    name: 달서중고등학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  담양금성중:
+    name: 담양금성중
+    crm_school_name: 담양금성중학교
+    school_level: 중학교
+    edu_office: 전라남도교육청
+    crm_deals: 1
+  대건고등학교:
+    name: 대건고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 3
+    crm_seats: 278
+  대구경상고등학교:
+    name: 대구경상고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  대구경일여자고등학교:
+    name: 대구경일여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  대구구암고등학교:
+    name: 대구구암고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  대구오성고등학교:
+    name: 대구오성고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  대구제일고등학교:
+    name: 대구제일고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 2
+    crm_seats: 473
+  대륜중학교:
+    name: 대륜중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 280
+  대명중학교:
+    name: 대명중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 4
+    crm_seats: 450
+  대성여자고등학교:
+    name: 대성여자고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Master
+    - 마스터
+    - 인기초(추가)
+    budget_source:
+    - 선도학교
+    crm_deals: 3
+    crm_seats: 367
+  대원고등학교:
+    name: 대원고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 7
+    crm_seats: 180
+  대원국제중학교:
+    name: 대원국제중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - AI
+    - Master
+    - Pro
+    budget_source:
+    - 선도학교
+    crm_deals: 4
+    crm_seats: 504
+  대원여자고등학교:
+    name: 대원여자고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - 마스터
+    budget_source:
+    - 선도학교
+    crm_deals: 2
+    crm_seats: 50
+  대인고등학교:
+    name: 대인고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 256
+  대전노은중학교:
+    name: 대전노은중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+  대전대성고등학교:
+    name: 대전대성고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 36
+  대전도안고등학교:
+    name: 대전도안고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - 씨마스 인기초
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 15
+  대전동화중학교:
+    name: 대전동화중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 990
+  대전둔산여자고등학교:
+    name: 대전둔산여자고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 400
+  대전만년고등학교:
+    name: 대전만년고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 214
+  대전변동중학교:
+    name: 대전변동중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 125
+  대전새미래중학교:
+    name: 대전새미래중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    crm_deals: 4
+    crm_seats: 690
+  대전여자고등학교:
+    name: 대전여자고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Master
+    - Pro
+    - 마스터
+    budget_source:
+    - 선도학교
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    crm_deals: 10
+    crm_seats: 509
+  대전이문고등학교:
+    name: 대전이문고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 321
+  대전체육고등학교:
+    name: 대전체육고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+  대평중학교:
+    name: 대평중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    crm_deals: 1
+  덕현고등학교:
+    name: 덕현고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 136
+  덕화중학교:
+    name: 덕화중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Basic+
+    crm_deals: 1
+  도계전산정보고등학교:
+    name: 도계전산정보고등학교
+    school_level: 고등학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 29
+  도담고:
+    name: 도담고
+    crm_school_name: 도담고등학교
+    school_level: 고등학교
+    edu_office: 세종특별자치시교육청
+    crm_deals: 2
+  도당고등학교:
+    name: 도당고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 225
+  도원중학교:
+    name: 도원중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 2
+    crm_seats: 10
+  동국대학교사범대학부속고등학교:
+    name: 동국대학교사범대학부속고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - AI
+    - Master
+    budget_source:
+    - AI중점학교
+    - 선도학교
+    crm_deals: 3
+    crm_seats: 636
+  동덕여자고등학교:
+    name: 동덕여자고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - AI
+    - 인기초(추가)
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 226
+  동덕여자중학교:
+    name: 동덕여자중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 505
+  동방고등학교:
+    name: 동방고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 20
+  동아고등학교:
+    name: 동아고등학교
+    school_level: 고등학교
+    edu_office: 부산광역시교육청
+    models:
+    - 마스터
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 40
+  동아여고:
+    name: 동아여고
+    crm_school_name: 동아여자고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Basic+
+    - Master
+    crm_deals: 4
+    crm_seats: 520
+  동우여자고등학교:
+    name: 동우여자고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 30
+  동원동우고등학교:
+    name: 동원동우고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 220
+  동평중학교:
+    name: 동평중학교
+    school_level: 중학교
+    edu_office: 울산광역시교육청
+    models:
+    - AI
+    - Master
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 1382
+  동해삼육고등학교:
+    name: 동해삼육고등학교
+    school_level: 고등학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 60
+  면목고등학교:
+    name: 면목고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - 마스터
+    crm_deals: 1
+    crm_seats: 164
+  목포임성초등학교:
+    name: 목포임성초등학교
+    school_level: 초등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  무안행복중학교:
+    name: 무안행복중학교
+    school_level: 중학교
+    edu_office: 전라남도교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 1020
+  문명중학교:
+    name: 문명중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  백석고등학교:
+    name: 백석고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+  보은고등학교:
+    name: 보은고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 400
+  복자여자고등학교:
+    name: 복자여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  봉담고등학교:
+    name: 봉담고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - AI
+    - Pro
+    terms:
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 300
+  봉화고등학교:
+    name: 봉화고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 90
+  부산덕원중학교:
+    name: 부산덕원중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  부산동성고등학교:
+    name: 부산동성고등학교
+    school_level: 고등학교
+    edu_office: 부산광역시교육청
+    models:
+    - AI
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 11
+  부산여자상업고등학교:
+    name: 부산여자상업고등학교
+    school_level: 고등학교
+    edu_office: 부산광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 250
+  부산일과학고등학교:
+    name: 부산일과학고등학교
+    school_level: 고등학교
+    edu_office: 부산광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 34
+  부석고등학교:
+    name: 부석고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 4
+    crm_seats: 290
+  부안중학교:
+    name: 부안중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 186
+  부여고등학교:
+    name: 부여고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  부천부곡중학교:
+    name: 부천부곡중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  북일여자고등학교:
+    name: 북일여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  사곡고등학교:
+    name: 사곡고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - AI
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 231
+  사동고등학교:
+    name: 사동고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 80
+  사천고등학교:
+    name: 사천고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  삼룡초등학교:
+    name: 삼룡초등학교
+    school_level: 초등학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 360
+  삼우중학교:
+    name: 삼우중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  상암고등학교:
+    name: 상암고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 75
+  상원중학교:
+    name: 상원중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 260
+  상인천중학교:
+    name: 상인천중학교
+    school_level: 중학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    crm_deals: 2
+  새론중학교:
+    name: 새론중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 300
+  서대전고등학교:
+    name: 서대전고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 204
+  서령고등학교:
+    name: 서령고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    - Pro
+    budget_source:
+    - 선도학교
+    crm_deals: 5
+    crm_seats: 983
+  서야고등학교:
+    name: 서야고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 3
+    crm_seats: 180
+  서울디자인고등학교:
+    name: 서울디자인고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    - 마스터
+    budget_source:
+    - 선도학교
+    crm_deals: 2
+    crm_seats: 240
+  서울성남고등학교:
+    name: 서울성남고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  서울양원숲초등학교:
+    name: 서울양원숲초등학교
+    school_level: 초등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 61
+  선주고등학교:
+    name: 선주고등학교
+    school_level: 고등학교
+    edu_office: 경상북도교육청
+    models:
+    - Master
+    - 인기초(추가)
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 266
+  성남고등학교:
+    name: 성남고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 90
+  성연초등학교:
+    name: 성연초등학교
+    school_level: 초등학교
+    edu_office: 충청남도교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    crm_deals: 2
+    crm_seats: 260
+  성일중학교:
+    name: 성일중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 3
+    crm_seats: 125
+  세종종촌중:
+    name: 세종 종촌중
+    crm_school_name: 종촌중학교
+    school_level: 중학교
+    edu_office: 세종특별자치시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 4
+    crm_seats: 110
+  솔터고등학교:
+    name: 솔터고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 165
+  송정중앙초등학교:
+    name: 송정중앙초등학교
+    school_level: 초등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 2
+  수리고등학교:
+    name: 수리고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 276
+  숭덕고등학교:
+    name: 숭덕고등학교
+    school_level: 고등학교
+    edu_office: 광주광역시교육청
+    models:
+    - Basic+
+    - Master
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 174
+  숭덕여자고등학교:
+    name: 숭덕여자고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 165
+  승영중학교:
+    name: 승영중학교
+    school_level: 중학교
+    edu_office: 인천광역시교육청
+    models:
+    - 마스터
+    crm_deals: 1
+    crm_seats: 65
+  신도고등학교:
+    name: 신도고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+  신목중학교:
+    name: 신목중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 180
+  신성고등학교:
+    name: 신성고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 2
+    crm_seats: 294
+  심원중학교:
+    name: 심원중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+  심인중학교:
+    name: 심인중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 337
+  쌘뽈여자고등학교:
+    name: 쌘뽈여자고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 3
+    crm_seats: 660
+  아름고등학교:
+    name: 아름고등학교
+    school_level: 고등학교
+    edu_office: 세종특별자치시교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 26
+  양산남부고등학교:
+    name: 양산남부고등학교
+    school_level: 고등학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 195
+  양산중학교:
+    name: 양산중학교
+    school_level: 중학교
+    edu_office: 광주광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 교사 연구비
+    crm_deals: 4
+    crm_seats: 307
+  여산고등학교:
+    name: 여산고등학교
+    school_level: 고등학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 12
+  연수여자고등학교:
+    name: 연수여자고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - 마스터
+    crm_deals: 1
+    crm_seats: 27
+  영광여자고등학교:
+    name: 영광여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  영송여자고등학교:
+    name: 영송여자고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 2
+    crm_seats: 10
+  영종국제물류고등학교:
+    name: 영종국제물류고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    crm_deals: 1
+    crm_seats: 80
+  영천영동중학교:
+    name: 영천영동중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  영파여자중학교:
+    name: 영파여자중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 440
+  예산중앙초등학교:
+    name: 예산중앙초등학교
+    school_level: 초등학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 40
+  오송고등학교:
+    name: 오송고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    crm_deals: 3
+    crm_seats: 60
+  옥계동부중학교:
+    name: 옥계동부중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  옥빛중학교:
+    name: 옥빛중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 5
+    crm_seats: 570
+  옥산중학교:
+    name: 옥산중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 25
+  온양고등학교:
+    name: 온양고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  와부중학교:
+    name: 와부중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Basic+
+    crm_deals: 1
+  완산중학교:
+    name: 완산중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 140
+  우석여자고등학교:
+    name: 우석여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  우석중학교:
+    name: 우석중학교
+    school_level: 중학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 230
+  운호고등학교:
+    name: 운호고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  울진중학교:
+    name: 울진중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  유구중학교:
+    name: 유구중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 40
+  의령여자고등학교:
+    name: 의령여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  의왕고등학교:
+    name: 의왕고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    - 인기초(추가)
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 56
+  이리남중학교:
+    name: 이리남중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 1
+  이리동중학교:
+    name: 이리동중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 1
+  이리중학교:
+    name: 이리중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 125
+  이일여자중학교:
+    name: 이일여자중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 280
+  인성여자고등학교:
+    name: 인성여자고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 45
+  인천간재울초등학교:
+    name: 인천간재울초등학교
+    school_level: 초등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  인천남동고등학교:
+    name: 인천남동고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Basic+
+    - 마스터
+    crm_deals: 2
+    crm_seats: 31
+  인천산곡고등학교:
+    name: 인천산곡고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Basic+
+    - Master
+    - Pro
+    crm_deals: 6
+    crm_seats: 635
+  인천상정고등학교:
+    name: 인천상정고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 288
+  인천성리중학교:
+    name: 인천성리중학교
+    school_level: 중학교
+    edu_office: 인천광역시교육청
+    crm_deals: 1
+  인천소양초:
+    name: 인천소양초
+    crm_school_name: 인천소양초등학교
+    school_level: 초등학교
+    edu_office: 인천광역시교육청
+    crm_deals: 1
+  인천연송고등학교:
+    name: 인천연송고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Basic+
+    - Pro
+    crm_deals: 5
+    crm_seats: 435
+  인천용현여자중학교:
+    name: 인천용현여자중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  인천초은고등학교:
+    name: 인천초은고등학교
+    school_level: 고등학교
+    edu_office: 인천광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 75
+  인하대학교사범대학부속중학교:
+    name: 인하대학교 사범대학 부속중학교
+    crm_school_name: 인하대학교사범대학부속중학교
+    school_level: 중학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    crm_deals: 2
+    crm_seats: 540
+  인하사대부고:
+    name: 인하사대부고
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  일산대진고등학교:
+    name: 일산대진고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 5
+    crm_seats: 770
+  임실동중학교:
+    name: 임실동중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 3
+    crm_seats: 340
+  잠실중학교:
+    name: 잠실중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    crm_deals: 1
+  전남대학교사범대학부설중학교:
+    name: 전남대학교 사범대학 부설중학교
+    crm_school_name: 전남대학교사범대학부설중학교
+    school_level: 중학교
+    edu_office: 교육부
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 5
+  전동중학교:
+    name: 전동중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    crm_deals: 1
+  전주근영중학교:
+    name: 전주근영중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 1
+  전주서신중학교:
+    name: 전주 서신 중학교
+    crm_school_name: 서신중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+  전주서중학교:
+    name: 전주서중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 6
+    crm_seats: 180
+  전주솔빛중학교:
+    name: 전주솔빛중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    crm_deals: 1
+  전주온고을중학교:
+    name: 전주온고을중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - AI
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 800
+  전주온빛중학교:
+    name: 전주온빛중학교
+    school_level: 중학교
+    edu_office: 전북특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 3
+    crm_seats: 276
+  제물포중학교:
+    name: 제물포중학교
+    school_level: 중학교
+    edu_office: 인천광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 159
+  제주고등학교:
+    name: 제주고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  종촌중학교:
+    name: 종촌중학교
+    school_level: 중학교
+    edu_office: 세종특별자치시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 4
+    crm_seats: 110
+  중흥중학교:
+    name: 중흥중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  지산중학교:
+    name: 지산중학교
+    school_level: 중학교
+    edu_office: 대구광역시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 2
+    crm_seats: 154
+  진교중학교:
+    name: 진교중학교
+    school_level: 중학교
+    edu_office: 경상남도교육청
+    models:
+    - AI
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 40
+  진장중학교:
+    name: 진장중학교
+    school_level: 중학교
+    edu_office: 울산광역시교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    crm_deals: 1
+    crm_seats: 135
+  진천고등학교:
+    name: 진천고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  진해신항초등학교:
+    name: 진해신항초등학교
+    school_level: 초등학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 600
+  창덕여자고등학교:
+    name: 창덕여자고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 150
+  창신고등학교:
+    name: 창신고등학교
+    school_level: 고등학교
+    edu_office: 경상남도교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 4
+    crm_seats: 560
+  창원성민여자고등학교:
+    name: 창원성민여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  창원용호고등학교:
+    name: 창원용호고등학교
+    school_level: 고등학교
+    edu_office: 경상남도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 200
+  천안성정중학교:
+    name: 천안성정중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 770
+  천안오성고등학교:
+    name: 천안오성고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  천안중학교:
+    name: 천안중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    models:
+    - AI
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기 체험활동
+    crm_deals: 1
+    crm_seats: 420
+  철원고등학교:
+    name: 철원고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  청란여자중학교:
+    name: 청란여자중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 11
+  청석고등학교:
+    name: 청석고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    - Pro
+    - 마스터
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 7
+    crm_seats: 270
+  청주고등학교:
+    name: 청주고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - AI
+    - Basic+
+    crm_deals: 3
+    crm_seats: 120
+  청주대성고등학교:
+    name: 청주대성고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  청주수곡중:
+    name: 청주 수곡중
+    crm_school_name: 수곡중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    crm_deals: 1
+  청주오송고:
+    name: 청주 오송고
+    crm_school_name: 오송고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    crm_deals: 3
+    crm_seats: 60
+  초전중학교:
+    name: 초전중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  충남여자고등학교:
+    name: 충남여자고등학교
+    school_level: 고등학교
+    edu_office: 대전광역시교육청
+    models:
+    - Master
+    - Pro
+    - 마스터
+    budget_source:
+    - AI중점학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 4
+    crm_seats: 550
+  충남중학교:
+    name: 충남중학교
+    school_level: 중학교
+    edu_office: 대전광역시교육청
+    models:
+    - Pro
+    crm_deals: 2
+    crm_seats: 530
+  충대사대부설고등학교:
+    name: 충대사대부설고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  충북과학고등학교:
+    name: 충북과학고등학교
+    school_level: 고등학교
+    edu_office: 충청북도교육청
+    models:
+    - Master
+    crm_deals: 2
+    crm_seats: 110
+  충의중학교:
+    name: 충의중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 276
+  충주대소원초중:
+    name: 충주대소원초중
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  충현고등학교:
+    name: 충현고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    budget_source:
+    - 자체 예산
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 50
+  충현중학교:
+    name: 충현중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 9
+  칠성고등학교:
+    name: 칠성고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 140
+  태릉고등학교:
+    name: 태릉고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+  통영여자중학교:
+    name: 통영여자중학교
+    school_level: 중학교
+    edu_office: 경상남도교육청
+    models:
+    - AI
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-2학기
+    crm_deals: 1
+    crm_seats: 25
+  파주고등학교:
+    name: 파주고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 100
+  평원초등학교:
+    name: 평원초등학교
+    school_level: 초등학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 160
+  포항제철중학교:
+    name: 포항제철중학교
+    school_level: 중학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  포항중앙여자고등학교:
+    name: 포항중앙여자고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  풍산고등학교:
+    name: 풍산고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+  하남고등학교:
+    name: 하남고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 3
+    crm_seats: 334
+  학남고등학교:
+    name: 학남고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Master
+    - 마스터
+    crm_deals: 2
+    crm_seats: 32
+  학산중학교:
+    name: 학산중학교
+    school_level: 중학교
+    edu_office: 충청북도교육청
+    crm_deals: 1
+  한영중학교:
+    name: 한영중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    - Pro
+    crm_deals: 2
+    crm_seats: 265
+  함창고등학교:
+    name: 함창고등학교
+    school_level: 고등학교
+    level_source: 이름 접미사에서 도출 (CRM 마스터에 없음)
+  해마루초등학교:
+    name: 해마루초등학교
+    school_level: 초등학교
+    edu_office: 경상북도교육청
+    models:
+    - AI
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 2
+    crm_seats: 580
+  해성중학교:
+    name: 해성중학교
+    school_level: 중학교
+    edu_office: 경상남도교육청
+    models:
+    - AI
+    budget_source:
+    - 선도학교
+    crm_deals: 1
+    crm_seats: 219
+  행정초등학교:
+    name: 행정초등학교
+    school_level: 초등학교
+    edu_office: 충청북도교육청
+  향동고등학교:
+    name: 향동고등학교
+    school_level: 고등학교
+    edu_office: 경기도교육청
+  향동중학교:
+    name: 향동중학교
+    school_level: 중학교
+    edu_office: 경기도교육청
+    models:
+    - Pro
+    crm_deals: 3
+    crm_seats: 230
+  호서고등학교:
+    name: 호서고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Basic+
+    - Pro
+    budget_source:
+    - 선도학교
+    terms:
+    - 2026-1학기
+    - 2026-2학기
+    crm_deals: 5
+    crm_seats: 275
+  홍북중학교:
+    name: 홍북중학교
+    school_level: 중학교
+    edu_office: 충청남도교육청
+    crm_deals: 1
+  홍성고등학교:
+    name: 홍성고등학교
+    school_level: 고등학교
+    edu_office: 충청남도교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 110
+  화계중학교:
+    name: 화계중학교
+    school_level: 중학교
+    edu_office: 서울특별시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 119
+  환일고등학교:
+    name: 환일고등학교
+    school_level: 고등학교
+    edu_office: 서울특별시교육청
+    models:
+    - Master
+    crm_deals: 1
+    crm_seats: 61
+  효성여자고등학교:
+    name: 효성여자고등학교
+    school_level: 고등학교
+    edu_office: 대구광역시교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 200
+  흥업초등학교:
+    name: 흥업초등학교
+    school_level: 초등학교
+    edu_office: 강원특별자치도교육청
+    models:
+    - Pro
+    crm_deals: 1
+    crm_seats: 48
+programs:
+  울산교육청 - 2026년 AI 디지털 활용 수업혁신 역량강화(실습형) 연수 운영 위탁 용역:
+    name: 울산교육청 - 2026년 AI 디지털 활용 수업혁신 역량강화(실습형) 연수 운영 위탁 용역
+    client: 서울시융합과학교육원
+    year: '2026'
+    total_budget: 74000000
+    stage: 운영 준비
+    position: 공동 수행
+  2026「K-STEM 과학교육 활성화 지원사업(연수)」위탁 운영 용역:
+    name: 2026「K-STEM 과학교육 활성화 지원사업(연수)」위탁 운영 용역
+    year: '2026'
+    total_budget: 83054790
+    position: 단독
+  2026 성동광진 중등  AI 디지털 기반 교육혁신 연수:
+    name: 2026 성동광진 중등  AI 디지털 기반 교육혁신 연수
+    client: 서울특별시성동광진교육지원청
+    year: '2026'
+    total_budget: 83763000
+    our_revenue: 82167200
+    period_start: '2026-06-26'
+    stage: 운영 중
+    scale: 430
+    position: 단독
+  2026 디지털새싹 C:
+    name: 2026 디지털새싹 C
+  2026 찾아가는 학교 컨설팅:
+    name: 2026 찾아가는 학교 컨설팅
+    client: 한국과학창의재단
+    year: '2026'
+    total_budget: 2442000000
+    our_revenue: 732600000
+    stage: 운영 중
+    position: 공동 수행
+  2026 인공지능 선도교사 연수 사업(춘천교대):
+    name: 2026 인공지능 선도교사 연수 사업(춘천교대)
+    client: 한국교육학술정보원
+    year: '2026'
+    total_budget: 1594000000
+    our_revenue: 398500000
+    stage: 운영 준비
+    scale: 1740
+    position: 공동 수행
+  2026  인공지능 선도교사 연수사업(서울대):
+    name: 2026  인공지능 선도교사 연수사업(서울대)
+    client: 한국교육학술정보원
+    year: '2026'
+    total_budget: 1594000000
+    our_revenue: 382560000
+    stage: 운영 준비
+    scale: 2742
+    position: 공동 수행
+  2026 인공지능 선도교사 연수 사업(부산대):
+    name: 2026 인공지능 선도교사 연수 사업(부산대)
+    client: 한국교육학술정보원
+    year: '2026'
+    total_budget: 1594000000
+    stage: 실주
+    scale: 1934
+    position: 공동 수행
+  2026 한양대 해커톤:
+    name: 2026 한양대 해커톤
+    client: 한양대학교
+    year: '2026'
+    total_budget: 12500000
+    our_revenue: 12500000
+    period_start: '2026-03-23'
+    stage: 운영 중
+    scale: 2000
+    position: 단독
+  2026 센스쿨 등록사업:
+    name: 2026 센스쿨 등록사업
+    client: 서울시교육정보원
+    year: '2026'
+    total_budget: 54500000
+    our_revenue: 54500000
+    period_start: '2026-03-16'
+    stage: 운영 중
+    position: 단독
+  2026 기업 연계 정보교원 역량강화 프로젝트:
+    name: 2026 기업 연계 정보교원 역량강화 프로젝트
+    client: 한국과학창의재단
+    year: '2026'
+    total_budget: 400000000
+    our_revenue: 400000000
+    stage: 제안서 작성
+    scale: 200
+    position: 주관사
+  2026 디지털새싹:
+    name: 2026 디지털새싹
+    client: 한국과학창의재단
+    year: '2026'
+    total_budget: 1000000000
+    stage: 실주
+    scale: 4000
+    position: 주관사
+  2026 디지털튜터:
+    name: 2026 디지털튜터
+    client: 한국과학창의재단
+    year: '2026'
+    total_budget: 273000000
+    stage: 실주
+    scale: 200
+    position: 주관사
+  디지털 새싹 2023-2025:
+    name: 디지털 새싹 2023-2025
+    client: 한국과학창의재단
+    year: '2025'
+    total_budget: 1200000000
+    our_revenue: 240000000
+    period_start: '2025-03-01'
+    stage: 운영 완료
+    scale: 1200
+    position: 공동 수행
+  SW 동행프로젝트:
+    name: SW 동행프로젝트
+    client: 한국과학창의재단
+    year: '2025'
+    total_budget: 350000000
+    our_revenue: 350000000
+    period_start: '2025-04-01'
+    stage: 운영 완료
+    scale: 800
+    position: 단독
+  2026 AI 동행 프로젝트:
+    name: 2026 AI 동행 프로젝트
+    client: 한국과학창의재단
+    year: '2026'
+    total_budget: 600000000
+    our_revenue: 600000000
+    stage: 운영 중
+    scale: 960
+    position: 주관사
+needs_research:
+- ledger_name: 강원중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 공주고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 공주금성여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 광명광문고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 광주수일중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 달서중고등학교
+  derived_level: 중학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 대구경상고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 대구경일여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 대구구암고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 대구오성고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 목포임성초등학교
+  derived_level: 초등학교
+  ledger_categories:
+  - 초등
+  needs: 교육청·지역·예산출처
+- ledger_name: 문명중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 복자여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 부산덕원중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 부여고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 부천부곡중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 북일여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 사천고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 삼우중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 서울성남고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 영광여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 영천영동중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 옥계동부중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 온양고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 우석여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 운호고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 울진중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 의령여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 인천간재울초등학교
+  derived_level: 초등학교
+  ledger_categories:
+  - 초등
+  needs: 교육청·지역·예산출처
+- ledger_name: 인천용현여자중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 인하사대부고
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 제주고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 중흥중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 진천고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 창원성민여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 천안오성고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 철원고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 청주대성고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 짓다
+  needs: 교육청·지역·예산출처
+- ledger_name: 초전중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 충대사대부설고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 충주대소원초중
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 포항제철중학교
+  derived_level: 중학교
+  ledger_categories:
+  - 중등
+  needs: 교육청·지역·예산출처
+- ledger_name: 포항중앙여자고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+- ledger_name: 함창고등학교
+  derived_level: 고등학교
+  ledger_categories:
+  - 고등
+  needs: 교육청·지역·예산출처
+non_school_in_school_category:
+- ledger_name: (주)금성출판사
+  ledger_categories:
+  - 고등
+  - 기타
+- ledger_name: 주식회사 아이티존
+  ledger_categories:
+  - 고등
+  - 기관
+  - 중등
+- ledger_name: 주식회사 잇플(ITPLE)
+  ledger_categories:
+  - 초등
+- ledger_name: 전남대 해커톤
+  ledger_categories:
+  - 짓다
+- ledger_name: 전북특별자치도교육청
+  ledger_categories:
+  - 교육용역
+  - 기관
+  - 짓다
+- ledger_name: 충북대학교 부설고등학교
+  ledger_categories:
+  - 고등
+- ledger_name: 풍동고등학교교
+  ledger_categories:
+  - 고등
+- ledger_name: 한국교원대학교산학협력단
+  ledger_categories:
+  - 고등
+- ledger_name: 한양대학교 에리카산학협력단
+  ledger_categories:
+  - 대학
+  - 짓다
+ambiguous: []
