@@ -1,5 +1,3 @@
-"""매출장 정규화와 CRM 보강. 외부 서비스는 합성 데이터로 대체한다."""
-
 from datetime import date
 from decimal import Decimal
 

@@ -1,5 +1,3 @@
-"""배치에서 CRM을 조회해 거래처·사업 배경을 붙인다. 중간 파일은 만들지 않는다."""
-
 import asyncio
 import json
 import re
@@ -40,7 +38,6 @@ LEVEL_SUFFIX = [
 NOT_A_SCHOOL = ("대학교", "산학협력단", "산단", "교육청", "교육원", "연구정보원")
 
 
-# 같은 이름의 학교가 여러 곳이면 임의로 합치지 않고 매칭을 생략한다.
 SQL_ORGS = """
 SELECT school_name AS school, school_level AS level, edu_office AS office
 FROM notion_prd.organizations
@@ -63,7 +60,6 @@ WHERE "이름" IS NOT NULL AND "이름" <> ''
 
 
 async def run_sql(sql: str, timeout_seconds: int = 300) -> list[dict[str, Any]]:
-    """Redash 로 Athena 에 SQL 을 실행하고 행 목록을 돌려준다."""
     response = await create_query_result(sql, DATA_SOURCE_ID, max_age=0)
     if "query_result" in response:
         return response["query_result"]["data"]["rows"]
@@ -82,10 +78,6 @@ async def run_sql(sql: str, timeout_seconds: int = 300) -> list[dict[str, Any]]:
 
 
 def school_variants(name: str) -> list[str]:
-    """매출장에 적힌 약칭에서 정식 학교명 후보를 만든다.
-
-    「도담고」-> 도담고등학교 · 「고창 영선중」-> 영선중학교 · 「세종 종촌중」-> 종촌중학교
-    """
     base = re.sub(r"\s+", " ", name).strip()
     stripped = REGION_PREFIX.sub("", base)
     candidates = [base, base.replace(" ", ""), stripped, stripped.replace(" ", "")]
@@ -110,7 +102,6 @@ def school_variants(name: str) -> list[str]:
 
 
 def derive_level(name: str) -> str:
-    """학교명 접미사에서 학교급을 확정한다. CRM 마스터가 잘려 빠진 학교용."""
     base = re.sub(r"\s+", "", name)
     if any(token in base for token in NOT_A_SCHOOL):
         return ""
@@ -121,7 +112,6 @@ def derive_level(name: str) -> str:
 
 
 def customer_key(name: str) -> str:
-    """CRM 매칭에만 쓰는 이름 키. 원본 거래처 이름은 그대로 저장한다."""
     name = re.sub(
         r"주식회사|㈜|\(주\)|\(재\)|재단법인|사단법인|\(사\)|유한회사|\(유\)|법인",
         "",
@@ -131,13 +121,11 @@ def customer_key(name: str) -> str:
 
 
 def crm_list(value: Any) -> list[str]:
-    """Redash의 JSON 문자열을 목록으로 읽는다. 쉼표가 포함된 값도 보존한다."""
     values = json.loads(value) if isinstance(value, str) else (value or [])
     return [v for v in values if v]
 
 
 def customer_info(name: str, orgs: list[dict], deals: list[dict], manual: dict) -> dict:
-    """학교명 후보로 CRM을 찾고 수기 보정을 우선 적용한다."""
     result = {}
     for candidate in school_variants(name):
         matches = [
@@ -175,7 +163,6 @@ def enrich_rows(
     programs: list[dict],
     rules: dict,
 ) -> list[str]:
-    """정규화 거래에 승인된 CRM 컬럼만 붙인다. 매칭 실패는 빈 값으로 남긴다."""
     warnings = []
     aliases = sorted(
         rules.get("program_aliases", {}).items(), key=lambda pair: -len(pair[0])
@@ -202,7 +189,6 @@ def enrich_rows(
 
 
 def crm_amount(value: Any) -> Decimal | None:
-    """CRM 금액도 소수를 보존하며 잘못된 숫자는 배치를 실패시킨다."""
     if value is None or value == "":
         return None
     amount = Decimal(str(value).replace(",", ""))
@@ -212,7 +198,6 @@ def crm_amount(value: Any) -> Decimal | None:
 
 
 async def fetch_crm() -> tuple[list[dict], list[dict], list[dict]]:
-    """Redash를 통해 학교·딜·사업을 읽는다."""
     orgs = await run_sql(SQL_ORGS)
     deals = await run_sql(SQL_DEALS)
     programs = await run_sql(SQL_PROGRAMS)

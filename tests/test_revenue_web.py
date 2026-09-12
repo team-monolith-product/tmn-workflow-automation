@@ -1,5 +1,3 @@
-"""매출 대시보드(사람용) 라우터 테스트. admin-rails 와 시트는 부르지 않는다."""
-
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -20,7 +18,6 @@ from app.revenue_web import (
 
 ADMIN = {"id": 7, "email": "lch@team-mono.com", "permissions": [], "tenants": []}
 BASE = "https://wfa.codle.io"
-# 서버가 path=/revenue 로 굽는 쿠키와 같은 자리에 두어야 한 이름에 쿠키가 둘 생기지 않는다
 JAR = {"domain": "wfa.codle.io", "path": "/revenue"}
 
 
@@ -70,7 +67,6 @@ def test_로그인_없으면_admin_rails_인가_화면으로_보낸다(client):
     assert query["redirect_uri"] == [f"{BASE}/revenue/callback"]
     assert query["code_challenge_method"] == ["S256"]
     assert query["state"] == [state_of(client)]
-    # 쿠키는 브라우저 스크립트가 못 읽고 HTTPS 로만 간다
     assert "httponly" in response.headers["set-cookie"].lower()
     assert "secure" in response.headers["set-cookie"].lower()
 
@@ -145,7 +141,6 @@ def test_유효한_쿠키면_DB_조회_화면을_돌려준다(client):
     assert DATA_MARKER not in response.text
     assert '"amount":"1.25"' in response.text
     assert "도담고등학교" in response.text
-    # 같은 토큰은 60초 캐시라 admin-rails 를 한 번만 부른다
     assert me.await_count == 1
 
 

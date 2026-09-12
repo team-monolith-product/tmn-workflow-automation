@@ -1,10 +1,3 @@
-"""
-매출장 구글시트를 통째로 읽어 raw 스냅샷으로 만든다.
-
-호출 수는 시트 하나에 2회다(메타데이터 1 + values.batchGet 1). 탭마다
-get_worksheet_values 를 부르면 탭당 3회씩 든다.
-"""
-
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,22 +11,6 @@ KST = timezone(timedelta(hours=9))
 
 
 def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dict:
-    """매출장을 읽어 raw 스냅샷을 돌려준다.
-
-    탭 이름이 바뀌면 조용히 빈 값을 집계하는 대신 여기서 터진다. 매출장은 사람이
-    고치는 시트라 탭 이름이 바뀌는 일이 실제로 있었다(2026-09-10 (구)·(신) 분리).
-
-    Args:
-        sources: knowledge/revenue/sources.yml
-        account: 어느 서비스 계정으로 읽을지. 매출장은 DEFAULT 계정에만 공유한다
-
-    Returns:
-        dict: fetched_at, spreadsheet_id, spreadsheet_title, tabs{탭: {fiscal_year,
-            columns, rows}}, taxonomy_tab{name, rows}
-
-    Raises:
-        ValueError: sources.yml 이 가리키는 탭이 시트에 없을 때
-    """
     led = sources["ledger"]
     meta = get_spreadsheet_metadata(led["spreadsheet_id"], account=account)
     title = meta.get("properties", {}).get("title", "")
@@ -53,15 +30,12 @@ def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dic
             " 이름이 바뀌었으면 sources.yml 의 ledger.taxonomy_tab.name 을 고친다."
         )
 
-    # 탭 이름 안의 작은따옴표는 A1 표기에서 두 번 겹쳐 쓴다.
     ranges = [
         f"'{tab.replace(chr(39), chr(39) * 2)}'!{led['range']}" for tab in led["tabs"]
     ]
     if tax_tab:
         ranges.append(f"'{tax_tab['name']}'!{tax_tab['range']}")
 
-    # UNFORMATTED_VALUE 라야 공급가액이 "9,090,909" 가 아니라 숫자로 온다.
-    # 그때 날짜 셀은 일련번호가 되므로 FORMATTED_STRING 으로 문자열을 유지한다.
     payload = get_spreadsheet_values_batch(
         led["spreadsheet_id"],
         ranges,

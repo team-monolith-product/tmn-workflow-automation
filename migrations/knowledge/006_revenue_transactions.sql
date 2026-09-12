@@ -1,4 +1,3 @@
--- 재생성 가능한 매출장 캐시. 배치가 전체를 원자적으로 교체한다.
 CREATE TABLE revenue_transactions (
     year integer NOT NULL,
     issued_on date,

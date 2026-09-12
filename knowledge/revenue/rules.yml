@@ -1,4 +1,3 @@
-# 배치에서만 사용하는 상품 분류·수기 보정·사업 별칭. CRM 조회 결과는 저장하지 않는다.
 product:
   prefer_raw:
   - 1. 코들 라이선스
@@ -33,83 +32,69 @@ product:
       counterparty_has: 금성
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-    why: AI 디지털교과서 구독료 수익쉐어 수취분. 대표 확인 2026-08-08
   - id: aidt-금성-플랫폼구축
     when:
       counterparty_has: 금성
       item_has: 플랫폼 구축료
     then: 4. 플랫폼 제공 개발
-    why: 품목명은 구축료이나 성격은 AIDT 수익쉐어. 대표 확인 2026-08-20
   - id: aidt-keris-클라우드
     when:
       counterparty_has: 한국교육학술정보원
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-    why: AIDT 활용연수 클라우드 비용. 2025·2026 동일 건
   - id: aidt-잇플-서버
     when:
       counterparty_has: 잇플
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-    why: 내곡초 AIDT 서버 이용료. 대표 확인 2026-08-16
   - id: aidt-씨마스-뷰어
     when:
       counterparty_has: 씨마스
       item_has: 뷰어
     then: 4. 플랫폼 제공 개발
-    why: 출판사 플랫폼 개발. 대표 확인 2026-08-16
   - id: 콘텐츠-씨마스-저작
     when:
       counterparty_has: 씨마스
       item_has: 저작
     then: 3. 콘텐츠
-    why: 콘텐츠 저작비. 뷰어 개발비와 분리. 대표 확인 2026-08-16
   - id: 콘텐츠-라이브트위커
     when:
       item_has: 라이브트위커
     then: 3. 콘텐츠
-    why: 라이브트위커 사용료는 콘텐츠. 대표 확인 2026-08-16
   - id: 콘텐츠-제이에듀
     when:
       counterparty_has: 제이에듀
     then: 3. 콘텐츠
-    why: SW 콘텐츠 및 프로그램 개발대행
   - id: 콘텐츠-모두의ai챌린지
     when:
       item_has: 모두의 AI 챌린지
     then: 3. 콘텐츠
-    why: 선금·잔금 모두 콘텐츠. 대표 확인 2026-08-16
   - id: 짓다-해커톤-2025전북
     when:
       year: 2025
       counterparty_has: 전북특별자치도교육청
       item_has: 해커톤
     then: 2. 해커톤(짓다)
-    why: 짓다 분류 신설 전 건이나 실질은 해커톤 운영. 2025 유일 건
   - id: 짓다-활용비
     when:
       item_has: 짓다
     then: 2. 해커톤(짓다)
-    why: 사업비 안에서 팔린 짓다 자체흡수 분리분
   - id: 반납금-디지털새싹
     when:
       item_has: 디지털새싹
       item_has_any:
       - 반납
     then: 6. 교육용역
-    why: 디지털새싹은 교육용역 계열. 매출장 원분류가 연수용역인 반납금 1건 정정. 대표 확인 2026-08-16
   - id: 한양대-경기미래형-선발행
     when:
       year: 2025
       counterparty_has: 한양대
       item_has: 경기미래형
     then: 5. 연수용역
-    why: 발행 시점 판매 실질이 연수용역이고 계산서 품목과 일치. 짓다로 소급하지 않는다. 대표 확인 2026-08-16
   - id: 기타-자산처분
     when:
       item_has: 아이폰
     then: 8. 기타
-    why: 자산 처분인데 세금계산서가 나가 매출장에 남았다
 assertions:
   year_totals_issued:
     2023: 346832002

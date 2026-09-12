@@ -246,18 +246,6 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
 def get_spreadsheet_metadata(
     spreadsheet_id: str, account: str = DEFAULT_ACCOUNT
 ) -> dict:
-    """스프레드시트 메타데이터(제목·탭 목록)를 한 번의 GET 으로 받는다.
-
-    gspread 의 open_by_key 는 생성자에서 같은 것을 부르고 worksheets() 가 또 부른다.
-    탭 이름만 확인하려는 쪽이 Spreadsheet 객체를 만들면 그 두 번이 헛돈다.
-
-    Args:
-        spreadsheet_id: 스프레드시트 ID
-        account: 어느 서비스 계정으로 읽을지
-
-    Returns:
-        dict: spreadsheets.get 응답 원본
-    """
     return _get_client(account).http_client.fetch_sheet_metadata(spreadsheet_id)
 
 
@@ -268,23 +256,6 @@ def get_spreadsheet_values_batch(
     date_time_render_option: str = "FORMATTED_STRING",
     account: str = DEFAULT_ACCOUNT,
 ) -> dict:
-    """여러 A1 범위를 한 번의 values.batchGet 으로 받는다.
-
-    탭마다 get_worksheet_values 를 부르면 탭 수만큼 호출이 든다. 범위를 안다면
-    batchGet 한 번이 맞다.
-
-    Args:
-        spreadsheet_id: 스프레드시트 ID
-        ranges: A1 표기 범위. 탭 이름은 부르는 쪽이 따옴표로 감싼다
-        value_render_option: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA"
-        date_time_render_option: "SERIAL_NUMBER" | "FORMATTED_STRING".
-            UNFORMATTED_VALUE 로 읽을 때 날짜 셀이 일련번호(45678.0)로 오는 것을
-            막으려면 FORMATTED_STRING 이어야 한다
-        account: 어느 서비스 계정으로 읽을지
-
-    Returns:
-        dict: values.batchGet 응답 원본. valueRanges 가 ranges 순서로 온다
-    """
     return _get_client(account).http_client.values_batch_get(
         spreadsheet_id,
         ranges,

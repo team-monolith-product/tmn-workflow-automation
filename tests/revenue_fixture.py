@@ -1,10 +1,3 @@
-"""매출 정규화 테스트용 합성 raw. 시트를 읽지 않는다.
-
-tests/ 에는 __init__.py 가 없고 CI 환경에는 `tests` 라는 이름의 다른 패키지가 설치돼 있어
-`from tests.xxx import` 가 엉뚱한 곳을 잡는다. pytest 가 tests/ 를 sys.path 앞에 넣으므로
-최상위 모듈로 import 한다.
-"""
-
 import copy
 
 from service.revenue.normalize import normalize_rows

@@ -463,7 +463,6 @@ async def handle_webhook(
 
 
 app.include_router(knowledge_notion_router)
-# 매출 대시보드(사람용). 인증은 admin-rails OAuth, 쿠키 세션.
 app.include_router(revenue_web_router)
 
 

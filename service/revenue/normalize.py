@@ -1,5 +1,3 @@
-"""매출장 행을 단일 거래 테이블의 컬럼으로 정리한다."""
-
 import re
 from collections import defaultdict
 from datetime import date
@@ -15,7 +13,6 @@ from service.revenue.taxonomy import (
 
 
 def number(value: Any, required: bool = False) -> Decimal | None:
-    """숫자를 소수 손실 없이 읽는다. 잘못된 값은 0으로 덮지 않는다."""
     text = clean(value).replace(",", "").replace("₩", "")
     if not text and not required:
         return None
@@ -31,7 +28,6 @@ def number(value: Any, required: bool = False) -> Decimal | None:
 def normalize_rows(
     raw: dict, sources: dict, rules: dict
 ) -> tuple[list[dict], list[str]]:
-    """원본 한 행을 거래 한 행으로 변환한다. 파싱 오류면 전체 배치를 중단한다."""
     master = parse_taxonomy_master(raw, sources)
     if not master:
         raise ValueError("매출장 분류마스터가 비어 있습니다")
@@ -48,7 +44,6 @@ def normalize_rows(
                 return cells[index] if 0 <= index < len(cells) else ""
 
             if not any(clean(cell(k)) for k in ("date", "counterparty", "item")):
-                # 빈 행의 금액 수식 0은 거래가 아니다.
                 if all(
                     number(cell(k)) in (None, 0) for k in ("amount", "tax", "total")
                 ):

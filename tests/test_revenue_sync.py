@@ -1,5 +1,3 @@
-"""일간 배치의 외부 조회와 dry-run/알림 동작."""
-
 from unittest.mock import AsyncMock, Mock
 
 import pytest

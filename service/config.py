@@ -142,16 +142,8 @@ class EducationBidCrawlerConfig:
     batch_size: int = 20
 
 
-# --- 매출 배치 ---
-
-
 @dataclass(frozen=True)
 class RevenueConfig:
-    """매출장 검증 결과를 보낼 곳.
-
-    매출 데이터의 위치·열 배치·분류 규칙은 여기가 아니라 knowledge/revenue/ 에 있다.
-    config.yaml 에는 슬랙으로 어디에 알릴지만 둔다.
-    """
 
     alert_channel_id: str
 

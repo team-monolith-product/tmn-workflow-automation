@@ -1,9 +1,3 @@
-"""실제 PostgreSQL에서 전체 교체·SQL 집계를 검증한다.
-
-REVENUE_TEST_DATABASE_URL을 격리된 테스트 DB로 지정하면 실행한다.
-각 테스트는 임시 스키마를 쓰고 종료 시 제거한다.
-"""
-
 import os
 from decimal import Decimal
 from pathlib import Path

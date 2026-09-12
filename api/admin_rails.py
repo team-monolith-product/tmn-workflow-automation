@@ -43,11 +43,6 @@ async def get_me(access_token: str) -> dict[str, Any] | None:
 
 
 async def _post_token(form: dict[str, str]) -> dict[str, Any] | None:
-    """Doorkeeper 토큰 엔드포인트에 폼을 보내고 JSON 을 돌려줍니다.
-
-    코드·리프레시 토큰이 낡은 것(invalid_grant, 400)과 클라이언트가 틀린 것(401)은
-    오류가 아니라 「다시 로그인」 판정이라 None 으로 돌려줍니다. 나머지는 그대로 올립니다.
-    """
     async with aiohttp.ClientSession() as session:
         async with session.post(f"{get_base_url()}/oauth/token", data=form) as response:
             if response.status in (400, 401):
@@ -63,20 +58,6 @@ async def exchange_authorization_code(
     code_verifier: str,
     client_secret: str | None = None,
 ) -> dict[str, Any] | None:
-    """
-    인가 코드를 액세스 토큰으로 바꿉니다 (authorization_code + PKCE).
-
-    Args:
-        code: /oauth/authorize 가 돌려준 인가 코드
-        redirect_uri: 인가 요청에 썼던 것과 같은 리다이렉트 주소
-        client_id: Doorkeeper 애플리케이션 uid
-        code_verifier: 인가 요청의 code_challenge 를 만든 원문
-        client_secret: 기밀 클라이언트면 넣는다. 공개 클라이언트는 None
-
-    Returns:
-        dict[str, Any] | None: access_token·refresh_token·expires_in 등 원본 응답.
-            코드가 낡았으면 None
-    """
     form = {
         "grant_type": "authorization_code",
         "code": code,
@@ -92,17 +73,6 @@ async def exchange_authorization_code(
 async def refresh_access_token(
     refresh_token: str, client_id: str, client_secret: str | None = None
 ) -> dict[str, Any] | None:
-    """
-    리프레시 토큰으로 새 액세스 토큰을 받습니다.
-
-    Args:
-        refresh_token: 이전 토큰 응답의 refresh_token
-        client_id: Doorkeeper 애플리케이션 uid
-        client_secret: 기밀 클라이언트면 넣는다
-
-    Returns:
-        dict[str, Any] | None: 새 토큰 응답 원본. 리프레시 토큰이 폐기됐으면 None
-    """
     form = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,

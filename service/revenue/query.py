@@ -1,5 +1,3 @@
-"""화면에 필요한 집계와 거래 한 페이지를 DB에서 읽는다. 캐시는 두지 않는다."""
-
 from psycopg import sql
 
 from service.db import connect, fetch_all, fetch_one
@@ -21,11 +19,9 @@ def dashboard_data(
     page: int = 1,
     status: str = "issued",
 ) -> dict:
-    """귀속연도로 조회한다. 복수 예산출처별 합계는 서로 겹칠 수 있다."""
     if dimension not in DIMENSIONS or status not in ("issued", "planned"):
         raise ValueError("지원하지 않는 조회 조건입니다")
     with connect(read_only=True) as conn:
-        # 여러 SELECT를 실행하는 동안 배치가 교체해도 같은 스냅샷을 읽는다.
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         yearly = fetch_all(
             conn,
@@ -87,7 +83,6 @@ def dashboard_data(
         """,
             (year,),
         )
-        # 검색어는 SQL 구조에 넣지 않고 문자열로 비교한다.
         where = "year=%s AND status=%s AND strpos(lower(concat_ws(' ', customer, item, note)), lower(%s)) > 0"
         params = (year, status, search)
         count = fetch_one(

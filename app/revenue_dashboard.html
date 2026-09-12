@@ -25,10 +25,9 @@
 </section></div>
 <footer>예정 금액은 발행 실적에 포함하지 않습니다. 고객의 CRM 정보는 해당 거래의 확정 예산·계약기간이 아닙니다.</footer>
 </main><script>
-const DATA = /*__DATA__*/null;
+const DATA = __REVENUE_DATA__;
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-// 금액 원문은 문자열로 받아 소수 상세를 보존한다. Number는 막대 길이 계산에만 쓴다.
 function number(value){
   if(value === null || value === undefined) return '—';
   const [whole, fraction] = String(value).split('.');
