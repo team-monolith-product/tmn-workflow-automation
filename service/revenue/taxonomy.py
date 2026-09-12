@@ -28,8 +28,7 @@ def rule_matches(when: dict[str, Any], tx: dict[str, Any]) -> bool:
 def parse_taxonomy_master(
     raw: dict[str, Any], sources: dict[str, Any]
 ) -> dict[str, list[str]]:
-    blob = raw.get("taxonomy_tab") or {}
-    rows = blob.get("rows") or []
+    rows = raw.get("taxonomy_rows") or []
     spec = sources["ledger"].get("taxonomy_tab") or {}
     if not rows or not spec:
         return {}

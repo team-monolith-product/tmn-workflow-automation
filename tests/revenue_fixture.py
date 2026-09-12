@@ -13,7 +13,7 @@ HEADER = [
     "합계",
     "분류",
 ]
-HEADER_2026 = HEADER + ["적요", "비고"]
+HEADER_2026 = HEADER + ["세부분류", "비고"]
 
 SOURCES = {
     "ledger": {
@@ -27,7 +27,7 @@ SOURCES = {
         },
         "taxonomy_tab": {
             "name": "분류마스터",
-            "range": "A1:L40",
+            "range": "A:L",
             "major_col": 0,
             "major_start_row": 3,
             "detail_header_row": 2,
@@ -35,7 +35,7 @@ SOURCES = {
             "detail_last_col": 3,
             "detail_start_row": 3,
         },
-        "range": "A1:K1200",
+        "range": "A:K",
         "columns": {
             "date": 0,
             "counterparty": 1,
@@ -154,7 +154,7 @@ def make_raw() -> dict:
                 ],
             },
         },
-        "taxonomy_tab": {"name": "분류마스터", "rows": copy.deepcopy(MASTER_ROWS)},
+        "taxonomy_rows": copy.deepcopy(MASTER_ROWS),
     }
 
 

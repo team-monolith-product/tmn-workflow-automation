@@ -177,9 +177,9 @@ def test_fetch_ledger_는_탭과_분류마스터를_한_번에_받는다(monkeyp
 
     assert calls["account"] == "GOOGLE_SERVICE_ACCOUNT_JSON"
     assert calls["ranges"] == [
-        "'25년 매출장'!A1:K1200",
-        "'26년 매출장(신)'!A1:K1200",
-        "'분류마스터'!A1:L40",
+        "'25년 매출장'!A:K",
+        "'26년 매출장(신)'!A:K",
+        "'분류마스터'!A:L",
     ]
     assert calls["options"]["value_render_option"] == "UNFORMATTED_VALUE"
     assert calls["options"]["date_time_render_option"] == "FORMATTED_STRING"
@@ -188,4 +188,4 @@ def test_fetch_ledger_는_탭과_분류마스터를_한_번에_받는다(monkeyp
         "subcategory_raw": 9,
         "note": 10,
     }
-    assert raw["taxonomy_tab"]["rows"] == MASTER_ROWS
+    assert raw["taxonomy_rows"] == MASTER_ROWS

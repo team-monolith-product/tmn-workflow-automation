@@ -80,7 +80,7 @@ class TestRedashAPI:
         assert "Content-Type" in headers
         assert headers["Content-Type"] == "application/json"
 
-    @patch("api.redash._get_json", new_callable=AsyncMock)
+    @patch("api.redash._request_json", new_callable=AsyncMock)
     async def test_list_dashboards(self, mock_get_json):
         """대시보드 목록 조회 테스트"""
         mock_get_json.return_value = {
@@ -95,7 +95,7 @@ class TestRedashAPI:
         assert url.endswith("/api/dashboards")
         assert params == {"q": "test"}
 
-    @patch("api.redash._get_json", new_callable=AsyncMock)
+    @patch("api.redash._request_json", new_callable=AsyncMock)
     async def test_get_query(self, mock_get_json):
         """쿼리 조회 테스트"""
         mock_get_json.return_value = {

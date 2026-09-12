@@ -1,5 +1,7 @@
 from typing import Any
 
+from gspread.utils import absolute_range_name
+
 from api.google_sheets import (
     DEFAULT_ACCOUNT,
     get_spreadsheet_metadata,
@@ -26,11 +28,9 @@ def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dic
             " 이름이 바뀌었으면 sources.yml 의 ledger.taxonomy_tab.name 을 고친다."
         )
 
-    ranges = [
-        f"'{tab.replace(chr(39), chr(39) * 2)}'!{led['range']}" for tab in led["tabs"]
-    ]
+    ranges = [absolute_range_name(tab, led["range"]) for tab in led["tabs"]]
     if tax_tab:
-        ranges.append(f"'{tax_tab['name']}'!{tax_tab['range']}")
+        ranges.append(absolute_range_name(tax_tab["name"], tax_tab["range"]))
 
     payload = get_spreadsheet_values_batch(
         led["spreadsheet_id"],
@@ -59,7 +59,5 @@ def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dic
 
     return {
         "tabs": tabs_out,
-        "taxonomy_tab": (
-            {"name": tax_tab["name"], "rows": taxonomy_rows} if tax_tab else None
-        ),
+        "taxonomy_rows": taxonomy_rows,
     }
