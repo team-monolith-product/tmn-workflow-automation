@@ -5,13 +5,13 @@ import json
 import os
 import secrets
 import time
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from api.admin_rails import exchange_authorization_code, get_me, refresh_access_token
@@ -67,6 +67,12 @@ def _set_cookie(
     )
 
 
+def _set_tokens(response: Response, tokens: dict[str, Any]) -> None:
+    _set_cookie(response, SESSION_COOKIE, tokens["access_token"], tokens["expires_in"])
+    if tokens.get("refresh_token"):
+        _set_cookie(response, REFRESH_COOKIE, tokens["refresh_token"], REFRESH_MAX_AGE)
+
+
 async def _admin_for(token: str) -> dict[str, Any] | None:
     key = hashlib.sha256(token.encode()).hexdigest()
     cached = _me_cache.get(key)
@@ -106,17 +112,11 @@ def _login_redirect(request: Request) -> RedirectResponse:
 def render_dashboard(data: dict[str, Any]) -> str:
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     payload = json.dumps(
-        data, ensure_ascii=False, separators=(",", ":"), default=_json_value
+        jsonable_encoder(data, custom_encoder={Decimal: str}),
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
     return template.replace(DATA_MARKER, payload.replace("</", "<\\/"))
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, date):
-        return value.isoformat()
-    raise TypeError(f"JSON으로 변환할 수 없음: {type(value)}")
 
 
 @router.get("")
@@ -156,13 +156,7 @@ async def revenue_dashboard(
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     if refreshed:
-        _set_cookie(
-            response, SESSION_COOKIE, refreshed["access_token"], refreshed["expires_in"]
-        )
-        if refreshed.get("refresh_token"):
-            _set_cookie(
-                response, REFRESH_COOKIE, refreshed["refresh_token"], REFRESH_MAX_AGE
-            )
+        _set_tokens(response, refreshed)
     return response
 
 
@@ -181,9 +175,7 @@ async def revenue_callback(request: Request, code: str, state: str) -> Response:
     if tokens is None:
         return _login_redirect(request)
     response = RedirectResponse("/revenue/", status_code=303)
-    _set_cookie(response, SESSION_COOKIE, tokens["access_token"], tokens["expires_in"])
-    if tokens.get("refresh_token"):
-        _set_cookie(response, REFRESH_COOKIE, tokens["refresh_token"], REFRESH_MAX_AGE)
+    _set_tokens(response, tokens)
     response.delete_cookie(PKCE_COOKIE, path="/revenue")
     return response
 

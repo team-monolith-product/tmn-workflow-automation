@@ -12,6 +12,31 @@ DIMENSIONS = {
 PAGE_SIZE = 100
 
 
+def group_totals(
+    conn, year: int | None, column: str, limit: int | None = None
+) -> list[dict]:
+    source = sql.SQL("revenue_transactions")
+    label = sql.Identifier(column)
+    if column == "budget_sources":
+        source += sql.SQL(
+            " LEFT JOIN LATERAL (SELECT DISTINCT unnest(budget_sources) AS budget) tags ON true"
+        )
+        label = sql.SQL("coalesce(budget, '미기재')")
+    elif column != "customer":
+        label = sql.SQL("coalesce(nullif({}, ''), '미기재')").format(label)
+    return fetch_all(
+        conn,
+        sql.SQL(
+            """
+        SELECT {} AS label, sum(amount) AS amount FROM {}
+        WHERE year=%s AND status='issued'
+        GROUP BY label ORDER BY amount DESC LIMIT %s
+    """
+        ).format(label, source),
+        (year, limit),
+    )
+
+
 def dashboard_data(
     year: int | None = None,
     dimension: str = "category",
@@ -27,23 +52,21 @@ def dashboard_data(
             conn,
             """
             SELECT year, coalesce(sum(amount) FILTER (WHERE status='issued'), 0) AS issued,
-                   coalesce(sum(amount) FILTER (WHERE status='planned'), 0) AS planned
+                   coalesce(sum(amount) FILTER (WHERE status='planned'), 0) AS planned,
+                   count(*) FILTER (WHERE status='issued') AS count,
+                   count(DISTINCT customer) FILTER (WHERE status='issued') AS customers
             FROM revenue_transactions GROUP BY year ORDER BY year DESC
         """,
         )
         if year is None:
             year = yearly[0]["year"] if yearly else None
-        totals = fetch_one(
-            conn,
-            """
-            SELECT coalesce(sum(amount) FILTER (WHERE status='issued'), 0) AS issued,
-                   coalesce(sum(amount) FILTER (WHERE status='planned'), 0) AS planned,
-                   count(*) FILTER (WHERE status='issued') AS count,
-                   count(DISTINCT customer) FILTER (WHERE status='issued') AS customers
-            FROM revenue_transactions WHERE year=%s
-        """,
-            (year,),
-        )
+        totals = {
+            key: next((row[key] for row in yearly if row["year"] == year), 0)
+            for key in ("issued", "planned", "count", "customers")
+        }
+        yearly = [
+            {key: row[key] for key in ("year", "issued", "planned")} for row in yearly
+        ]
         monthly = fetch_all(
             conn,
             """
@@ -53,36 +76,8 @@ def dashboard_data(
         """,
             (year,),
         )
-        if dimension == "budget_sources":
-            groups = fetch_all(
-                conn,
-                """
-                SELECT coalesce(budget, '미기재') AS label, sum(amount) AS amount
-                FROM revenue_transactions
-                LEFT JOIN LATERAL (SELECT DISTINCT unnest(budget_sources) AS budget) tags ON true
-                WHERE year=%s AND status='issued' GROUP BY label ORDER BY amount DESC
-            """,
-                (year,),
-            )
-        else:
-            groups = fetch_all(
-                conn,
-                sql.SQL("""
-                SELECT coalesce(nullif({}, ''), '미기재') AS label, sum(amount) AS amount
-                FROM revenue_transactions WHERE year=%s AND status='issued'
-                GROUP BY label ORDER BY amount DESC
-            """).format(sql.Identifier(dimension)),
-                (year,),
-            )
-        customers = fetch_all(
-            conn,
-            """
-            SELECT customer AS label, sum(amount) AS amount
-            FROM revenue_transactions WHERE year=%s AND status='issued'
-            GROUP BY customer ORDER BY amount DESC LIMIT 20
-        """,
-            (year,),
-        )
+        groups = group_totals(conn, year, dimension)
+        customers = group_totals(conn, year, "customer", limit=20)
         where = "year=%s AND status=%s AND strpos(lower(concat_ws(' ', customer, item, note)), lower(%s)) > 0"
         params = (year, status, search)
         count = fetch_one(

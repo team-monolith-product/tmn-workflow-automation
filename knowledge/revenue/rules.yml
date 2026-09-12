@@ -1,14 +1,4 @@
 product:
-  prefer_raw:
-  - 1. 코들 라이선스
-  - 2. 해커톤(짓다)
-  - 3. 콘텐츠
-  - 4. 플랫폼 제공 개발
-  - 5. 연수용역
-  - 6. 교육용역
-  - 7. 글로벌
-  - 8. 기타
-  - 9. AI 캠프(코들)
   base:
     초등: 1. 코들 라이선스
     중등: 1. 코들 라이선스
@@ -27,72 +17,58 @@ product:
     교육용역: 6. 교육용역
     기타: 8. 기타
   exceptions:
-  - id: aidt-금성
-    when:
+  - when:
       counterparty_has: 금성
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-  - id: aidt-금성-플랫폼구축
-    when:
+  - when:
       counterparty_has: 금성
       item_has: 플랫폼 구축료
     then: 4. 플랫폼 제공 개발
-  - id: aidt-keris-클라우드
-    when:
+  - when:
       counterparty_has: 한국교육학술정보원
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-  - id: aidt-잇플-서버
-    when:
+  - when:
       counterparty_has: 잇플
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
-  - id: aidt-씨마스-뷰어
-    when:
+  - when:
       counterparty_has: 씨마스
       item_has: 뷰어
     then: 4. 플랫폼 제공 개발
-  - id: 콘텐츠-씨마스-저작
-    when:
+  - when:
       counterparty_has: 씨마스
       item_has: 저작
     then: 3. 콘텐츠
-  - id: 콘텐츠-라이브트위커
-    when:
+  - when:
       item_has: 라이브트위커
     then: 3. 콘텐츠
-  - id: 콘텐츠-제이에듀
-    when:
+  - when:
       counterparty_has: 제이에듀
     then: 3. 콘텐츠
-  - id: 콘텐츠-모두의ai챌린지
-    when:
+  - when:
       item_has: 모두의 AI 챌린지
     then: 3. 콘텐츠
-  - id: 짓다-해커톤-2025전북
-    when:
+  - when:
       year: 2025
       counterparty_has: 전북특별자치도교육청
       item_has: 해커톤
     then: 2. 해커톤(짓다)
-  - id: 짓다-활용비
-    when:
+  - when:
       item_has: 짓다
     then: 2. 해커톤(짓다)
-  - id: 반납금-디지털새싹
-    when:
+  - when:
       item_has: 디지털새싹
       item_has_any:
       - 반납
     then: 6. 교육용역
-  - id: 한양대-경기미래형-선발행
-    when:
+  - when:
       year: 2025
       counterparty_has: 한양대
       item_has: 경기미래형
     then: 5. 연수용역
-  - id: 기타-자산처분
-    when:
+  - when:
       item_has: 아이폰
     then: 8. 기타
 assertions:

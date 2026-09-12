@@ -1,10 +1,10 @@
 import asyncio
 import json
 import re
-from decimal import Decimal
 from typing import Any
 
 from api.redash import create_query_result, get_job, get_query_result
+from service.revenue.normalize import number
 from service.revenue.taxonomy import clean
 
 DATA_SOURCE_ID = 1
@@ -180,21 +180,12 @@ def enrich_rows(
             row.update(
                 program_name=name,
                 program_client=clean(program.get("client")) or None,
-                program_budget=crm_amount(program.get("budget")),
-                program_our_revenue=crm_amount(program.get("our_revenue")),
+                program_budget=number(program.get("budget")),
+                program_our_revenue=number(program.get("our_revenue")),
                 program_stage=clean(program.get("stage")) or None,
             )
             break
     return sorted(set(warnings))
-
-
-def crm_amount(value: Any) -> Decimal | None:
-    if value is None or value == "":
-        return None
-    amount = Decimal(str(value).replace(",", ""))
-    if not amount.is_finite():
-        raise ValueError(f"CRM 금액이 유한수가 아님: {value}")
-    return amount
 
 
 async def fetch_crm() -> tuple[list[dict], list[dict], list[dict]]:

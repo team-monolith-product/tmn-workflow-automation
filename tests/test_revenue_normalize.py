@@ -2,7 +2,14 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from revenue_fixture import HEADER, HEADER_2026, MASTER_ROWS, SOURCES, build, make_raw
+from revenue_fixture import (
+    HEADER,
+    HEADER_2026,
+    MASTER_ROWS,
+    SOURCES,
+    normalized_rows,
+    make_raw,
+)
 
 from service.revenue.ledger import fetch_ledger
 from service.revenue.normalize import number
@@ -19,7 +26,7 @@ def test_numeric_preserves_decimals_and_negative_amounts():
 
 
 def test_rows_keep_fiscal_year_planned_and_old_category_mapping():
-    rows, warnings = build()
+    rows, warnings = normalized_rows()
     assert warnings == []
     assert len(rows) == 5
     old = next(
@@ -42,7 +49,7 @@ def test_invalid_transaction_fails_instead_of_silently_dropping(column, value):
     raw = make_raw()
     raw["tabs"]["26년 매출장(신)"]["rows"][1][column] = value
     with pytest.raises(ValueError, match="26년 매출장.*2행"):
-        build(raw)
+        normalized_rows(raw)
 
 
 def test_duplicates_and_negative_adjustments_are_preserved():
@@ -52,7 +59,7 @@ def test_duplicates_and_negative_adjustments_are_preserved():
     tab.append(
         ["2026-03-01", "반납처", "반납", 1, -100, -100, -10, -110, "1. 코들 라이선스"]
     )
-    rows, _ = build(raw)
+    rows, _ = normalized_rows(raw)
     assert len(rows) == 7
     assert sum(r["customer"] == "도담고등학교" for r in rows) == 2
     assert rows[-1]["amount"] == -100
@@ -63,14 +70,14 @@ def test_category_and_total_problems_are_warnings():
     raw["tabs"]["25년 매출장"]["rows"][1][5] = 10
     raw["tabs"]["25년 매출장"]["rows"][1][8] = "새분류"
     raw["tabs"]["26년 매출장(신)"]["rows"][1][9] = "없는 세부"
-    rows, warnings = build(raw)
+    rows, warnings = normalized_rows(raw)
     assert rows[0]["category"] == "미분류"
     assert any("총계 불일치" in w for w in warnings)
     assert any("없는 조합" in w for w in warnings)
 
 
 def test_crm_keeps_all_budgets_and_manual_overrides():
-    rows, _ = build()
+    rows, _ = normalized_rows()
     warnings = enrich_rows(
         rows,
         [{"school": "도담고등학교", "level": "고등학교", "office": "세종"}],

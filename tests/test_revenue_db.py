@@ -7,7 +7,7 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 import pytest
-from revenue_fixture import build
+from revenue_fixture import normalized_rows
 
 from scripts import sync_revenue_ledger as batch
 from service.db import connect, fetch_all
@@ -36,7 +36,7 @@ def database(monkeypatch):
                 conn.execute(
                     "CREATE TABLE query_log (actor text, tool text, query text, filters jsonb, latency_ms int)"
                 )
-                rows, _ = build()
+                rows, _ = normalized_rows()
                 batch.replace_rows(conn, rows)
             yield test_dsn
         finally:
@@ -53,7 +53,7 @@ def transactions():
 
 
 def test_replace_is_idempotent_and_reflects_deletions(database):
-    rows, _ = build()
+    rows, _ = normalized_rows()
     with connect() as conn:
         batch.replace_rows(conn, rows)
     assert len(transactions()) == 5
@@ -69,7 +69,7 @@ def test_replace_is_idempotent_and_reflects_deletions(database):
 
 def test_failed_insert_rolls_back_delete_and_retains_previous_snapshot(database):
     before = transactions()
-    rows, _ = build()
+    rows, _ = normalized_rows()
     rows[-1]["status"] = "invalid"
     with pytest.raises(psycopg.errors.CheckViolation):
         with connect() as conn:
@@ -78,7 +78,7 @@ def test_failed_insert_rolls_back_delete_and_retains_previous_snapshot(database)
 
 
 def test_readers_keep_old_snapshot_until_commit(database):
-    rows, _ = build()
+    rows, _ = normalized_rows()
     with connect() as conn:
         batch.replace_rows(conn, rows[:1])
         assert len(transactions()) == 5
@@ -98,7 +98,7 @@ def test_batch_crm_failure_leaves_database_unchanged(database, monkeypatch):
 
 
 def test_batch_success_replaces_rows_and_dry_run_does_not(database, monkeypatch):
-    rows, _ = build()
+    rows, _ = normalized_rows()
     monkeypatch.setattr(batch, "collect_rows", lambda: (rows[:1], []))
     batch.main(dry_run=True)
     assert len(transactions()) == 5
@@ -132,7 +132,7 @@ def test_dashboard_and_query_knowledge_share_amount_and_year_basis(database):
 def test_crm_arrays_and_program_amounts_are_preserved_without_multiplying_total(
     database,
 ):
-    rows, _ = build()
+    rows, _ = normalized_rows()
     rows[2].update(
         budget_sources=["자체", "정책", "자체"],
         terms=["1학기", "2학기"],
@@ -151,7 +151,7 @@ def test_crm_arrays_and_program_amounts_are_preserved_without_multiplying_total(
 
 
 def test_filters_paging_and_query_injection(database):
-    rows, _ = build()
+    rows, _ = normalized_rows()
     with connect() as conn:
         batch.replace_rows(
             conn,

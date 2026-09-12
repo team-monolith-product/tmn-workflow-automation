@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from api.google_sheets import (
@@ -7,13 +6,10 @@ from api.google_sheets import (
     get_spreadsheet_values_batch,
 )
 
-KST = timezone(timedelta(hours=9))
-
 
 def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dict:
     led = sources["ledger"]
     meta = get_spreadsheet_metadata(led["spreadsheet_id"], account=account)
-    title = meta.get("properties", {}).get("title", "")
     live_tabs = {sheet["properties"]["title"] for sheet in meta.get("sheets", [])}
 
     missing = [tab for tab in led["tabs"] if tab not in live_tabs]
@@ -62,9 +58,6 @@ def fetch_ledger(sources: dict[str, Any], account: str = DEFAULT_ACCOUNT) -> dic
         }
 
     return {
-        "fetched_at": datetime.now(KST).isoformat(timespec="seconds"),
-        "spreadsheet_id": led["spreadsheet_id"],
-        "spreadsheet_title": title,
         "tabs": tabs_out,
         "taxonomy_tab": (
             {"name": tax_tab["name"], "rows": taxonomy_rows} if tax_tab else None

@@ -51,9 +51,7 @@ def normalize_rows(
             try:
                 date_text = clean(cell("date"))
                 status = (
-                    "planned"
-                    if date_text in sources["basis"]["pipeline_markers"]
-                    else "issued"
+                    "planned" if date_text in sources["planned_markers"] else "issued"
                 )
                 issued_on = None
                 if status == "issued":

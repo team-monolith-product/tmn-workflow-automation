@@ -18,7 +18,6 @@ HEADER_2026 = HEADER + ["적요", "비고"]
 SOURCES = {
     "ledger": {
         "spreadsheet_id": "sheet-id",
-        "spreadsheet_name": "매출장",
         "tabs": {
             "25년 매출장": {"year": 2025},
             "26년 매출장(신)": {
@@ -51,47 +50,20 @@ SOURCES = {
             "note": 9,
         },
     },
-    "basis": {"mode": "issued", "amount_field": "amount", "pipeline_markers": ["예정"]},
+    "planned_markers": ["예정"],
 }
 
-TAXONOMY = {
-    "version": "test",
-    "default_view": "상품",
-    "views": {
-        "원분류": {
-            "label": "매출장 원분류",
-            "kind": "passthrough",
-            "field": "category_raw",
-        },
-        "상품": {
-            "label": "상품 분류",
-            "kind": "rules",
-            "child": "세부",
-            "prefer_raw": ["1. 코들 라이선스", "2. 해커톤(짓다)"],
-            "order": ["1. 코들 라이선스", "2. 해커톤(짓다)"],
-            "base": {"고등": "1. 코들 라이선스", "짓다": "2. 해커톤(짓다)"},
-            "exceptions": [
-                {
-                    "id": "aidt-금성",
-                    "when": {"counterparty_has": "금성", "item_has": "AIDT"},
-                    "then": "2. 해커톤(짓다)",
-                }
-            ],
-        },
-        "세부": {
-            "label": "세부분류",
-            "kind": "passthrough",
-            "field": "subcategory_raw",
-            "empty": "미기재",
-        },
-        "학교급": {
-            "label": "학교급",
-            "kind": "enrichment",
-            "field": "school_level",
-            "empty": "미상",
-        },
+RULES = {
+    "product": {
+        "base": {"고등": "1. 코들 라이선스", "짓다": "2. 해커톤(짓다)"},
+        "exceptions": [
+            {
+                "when": {"counterparty_has": "금성", "item_has": "AIDT"},
+                "then": "2. 해커톤(짓다)",
+            }
+        ],
     },
-    "assertions": {"year_totals_issued": {2025: 2_000_000}, "tolerance_won": 5},
+    "assertions": {"year_totals_issued": {2025: 2000000}, "tolerance_won": 5},
 }
 
 MASTER_ROWS = [
@@ -104,9 +76,6 @@ MASTER_ROWS = [
 
 def make_raw() -> dict:
     return {
-        "fetched_at": "2026-09-11T07:10:00+09:00",
-        "spreadsheet_id": "sheet-id",
-        "spreadsheet_title": "매출장",
         "tabs": {
             "25년 매출장": {
                 "fiscal_year": 2025,
@@ -189,12 +158,5 @@ def make_raw() -> dict:
     }
 
 
-def build(raw: dict | None = None) -> tuple[list[dict], list[str]]:
-    return normalize_rows(
-        raw or make_raw(),
-        SOURCES,
-        {
-            "product": TAXONOMY["views"]["상품"],
-            "assertions": TAXONOMY["assertions"],
-        },
-    )
+def normalized_rows(raw: dict | None = None) -> tuple[list[dict], list[str]]:
+    return normalize_rows(raw or make_raw(), SOURCES, RULES)

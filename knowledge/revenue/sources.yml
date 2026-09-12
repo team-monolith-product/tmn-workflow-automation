@@ -1,7 +1,6 @@
 
 ledger:
   spreadsheet_id: "1apSjdsEY2mE-KQe3p0jCBypdc5ZKbA4g-6QACPxK7-4"
-  spreadsheet_name: "매출장"
   tabs:
     "23년 매출장": {year: 2023}
     "24년 매출장": {year: 2024}
@@ -33,7 +32,4 @@ ledger:
     subcategory_raw: -1
     note: 9
 
-basis:
-  mode: "issued"
-  amount_field: "amount"
-  pipeline_markers: ["예정", "예정분", "계약확정 예정"]
+planned_markers: ["예정", "예정분", "계약확정 예정"]

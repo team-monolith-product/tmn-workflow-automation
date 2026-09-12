@@ -211,9 +211,9 @@ def test_템플릿은_분류_이름과_색을_들고_있지_않다():
 
 
 def test_렌더는_script_종료_태그를_무력화한다():
-    facts = {"rows": [{"note": "</script><script>alert(1)</script>"}]}
+    data = {"rows": [{"note": "</script><script>alert(1)</script>"}]}
 
-    html = render_dashboard(facts)
+    html = render_dashboard(data)
 
     assert "</script><script>alert(1)" not in html
     assert "<\\/script><script>alert(1)" in html

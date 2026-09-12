@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from revenue_fixture import SOURCES, TAXONOMY, make_raw
+from revenue_fixture import RULES, SOURCES, make_raw
 
 from scripts import sync_revenue_ledger as batch
 from service.revenue.enrich import crm_list
@@ -10,14 +10,7 @@ from service.revenue.enrich import crm_list
 @pytest.fixture
 def source_data(monkeypatch):
     monkeypatch.setattr(batch, "load_sources", lambda: SOURCES)
-    monkeypatch.setattr(
-        batch,
-        "load_rules",
-        lambda: {
-            "product": TAXONOMY["views"]["상품"],
-            "assertions": TAXONOMY["assertions"],
-        },
-    )
+    monkeypatch.setattr(batch, "load_rules", lambda: RULES)
     monkeypatch.setattr(batch, "fetch_ledger", lambda sources: make_raw())
     crm = AsyncMock(
         return_value=(
