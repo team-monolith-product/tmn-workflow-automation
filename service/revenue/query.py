@@ -26,13 +26,11 @@ def group_totals(
         label = sql.SQL("coalesce(nullif({}, ''), '미기재')").format(label)
     return fetch_all(
         conn,
-        sql.SQL(
-            """
+        sql.SQL("""
         SELECT {} AS label, sum(amount) AS amount FROM {}
         WHERE year=%s AND status='issued'
         GROUP BY label ORDER BY amount DESC LIMIT %s
-    """
-        ).format(label, source),
+    """).format(label, source),
         (year, limit),
     )
 
