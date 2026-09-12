@@ -22,7 +22,7 @@ SOURCES = {
             "25년 매출장": {"year": 2025},
             "26년 매출장(신)": {
                 "year": 2026,
-                "columns": {"subcategory_raw": 9, "note": 10},
+                "columns": {"subcategory": 9, "note": 10},
             },
         },
         "taxonomy_tab": {
@@ -37,16 +37,16 @@ SOURCES = {
         },
         "range": "A:K",
         "columns": {
-            "date": 0,
-            "counterparty": 1,
+            "issued_on": 0,
+            "customer": 1,
             "item": 2,
-            "qty": 3,
+            "quantity": 3,
             "unit_price": 4,
             "amount": 5,
             "tax": 6,
             "total": 7,
-            "category_raw": 8,
-            "subcategory_raw": -1,
+            "category": 8,
+            "subcategory": -1,
             "note": 9,
         },
     },
@@ -58,7 +58,7 @@ RULES = {
         "base": {"고등": "1. 코들 라이선스", "짓다": "2. 해커톤(짓다)"},
         "exceptions": [
             {
-                "when": {"counterparty_has": "금성", "item_has": "AIDT"},
+                "when": {"customer_has": "금성", "item_has": "AIDT"},
                 "then": "2. 해커톤(짓다)",
             }
         ],
@@ -74,13 +74,11 @@ MASTER_ROWS = [
 ]
 
 
-def make_raw() -> dict:
+def sheet_response() -> dict:
     return {
-        "tabs": {
-            "25년 매출장": {
-                "fiscal_year": 2025,
-                "columns": {},
-                "rows": [
+        "valueRanges": [
+            {
+                "values": [
                     HEADER,
                     [
                         "2025-03-02",
@@ -107,10 +105,8 @@ def make_raw() -> dict:
                     ["", "", "", "", "", 0, 0, 0],
                 ],
             },
-            "26년 매출장(신)": {
-                "fiscal_year": 2026,
-                "columns": {"subcategory_raw": 9, "note": 10},
-                "rows": [
+            {
+                "values": [
                     HEADER_2026,
                     [
                         "2026-01-05",
@@ -153,10 +149,10 @@ def make_raw() -> dict:
                     ],
                 ],
             },
-        },
-        "taxonomy_rows": copy.deepcopy(MASTER_ROWS),
+            {"values": copy.deepcopy(MASTER_ROWS)},
+        ],
     }
 
 
-def normalized_rows(raw: dict | None = None) -> tuple[list[dict], list[str]]:
-    return normalize_rows(raw or make_raw(), SOURCES, RULES)
+def normalized_rows(response: dict | None = None) -> tuple[list[dict], list[str]]:
+    return normalize_rows(response or sheet_response(), SOURCES, RULES)

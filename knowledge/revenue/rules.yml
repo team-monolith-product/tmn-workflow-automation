@@ -18,41 +18,41 @@ product:
     기타: 8. 기타
   exceptions:
   - when:
-      counterparty_has: 금성
+      customer_has: 금성
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
   - when:
-      counterparty_has: 금성
+      customer_has: 금성
       item_has: 플랫폼 구축료
     then: 4. 플랫폼 제공 개발
   - when:
-      counterparty_has: 한국교육학술정보원
+      customer_has: 한국교육학술정보원
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
   - when:
-      counterparty_has: 잇플
+      customer_has: 잇플
       item_has: AIDT
     then: 4. 플랫폼 제공 개발
   - when:
-      counterparty_has: 씨마스
+      customer_has: 씨마스
       item_has: 뷰어
     then: 4. 플랫폼 제공 개발
   - when:
-      counterparty_has: 씨마스
+      customer_has: 씨마스
       item_has: 저작
     then: 3. 콘텐츠
   - when:
       item_has: 라이브트위커
     then: 3. 콘텐츠
   - when:
-      counterparty_has: 제이에듀
+      customer_has: 제이에듀
     then: 3. 콘텐츠
   - when:
       item_has: 모두의 AI 챌린지
     then: 3. 콘텐츠
   - when:
       year: 2025
-      counterparty_has: 전북특별자치도교육청
+      customer_has: 전북특별자치도교육청
       item_has: 해커톤
     then: 2. 해커톤(짓다)
   - when:
@@ -65,7 +65,7 @@ product:
     then: 6. 교육용역
   - when:
       year: 2025
-      counterparty_has: 한양대
+      customer_has: 한양대
       item_has: 경기미래형
     then: 5. 연수용역
   - when:

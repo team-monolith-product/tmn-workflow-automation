@@ -4,8 +4,7 @@ import re
 from typing import Any
 
 from api.redash import create_query_result, get_job, get_query_result
-from service.revenue.normalize import number
-from service.revenue.taxonomy import clean
+from service.revenue.normalize import clean, number
 
 DATA_SOURCE_ID = 1
 JOB_SUCCESS, JOB_FAILURE = 3, 4

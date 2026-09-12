@@ -7,7 +7,7 @@ ledger:
     "25년 매출장": {year: 2025}
     "26년 매출장(신)":
       year: 2026
-      columns: {subcategory_raw: 9, note: 10}
+      columns: {subcategory: 9, note: 10}
   taxonomy_tab:
     name: "분류마스터"
     range: "A:L"
@@ -20,16 +20,16 @@ ledger:
 
   range: "A:K"
   columns:
-    date: 0
-    counterparty: 1
+    issued_on: 0
+    customer: 1
     item: 2
-    qty: 3
+    quantity: 3
     unit_price: 4
     amount: 5
     tax: 6
     total: 7
-    category_raw: 8
-    subcategory_raw: -1
+    category: 8
+    subcategory: -1
     note: 9
 
 planned_markers: ["예정", "예정분", "계약확정 예정"]

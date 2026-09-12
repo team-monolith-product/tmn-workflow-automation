@@ -243,12 +243,6 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     ]
 
 
-def get_spreadsheet_metadata(
-    spreadsheet_id: str, account: str = DEFAULT_ACCOUNT
-) -> dict:
-    return _get_client(account).http_client.fetch_sheet_metadata(spreadsheet_id)
-
-
 def get_spreadsheet_values_batch(
     spreadsheet_id: str,
     ranges: list[str],

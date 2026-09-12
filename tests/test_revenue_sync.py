@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from revenue_fixture import RULES, SOURCES, make_raw
+from revenue_fixture import RULES, SOURCES, sheet_response
 
 from scripts import sync_revenue_ledger as batch
 from service.revenue.enrich import crm_list
@@ -11,7 +11,10 @@ from service.revenue.enrich import crm_list
 def source_data(monkeypatch):
     monkeypatch.setattr(batch, "load_sources", lambda: SOURCES)
     monkeypatch.setattr(batch, "load_rules", lambda: RULES)
-    monkeypatch.setattr(batch, "fetch_ledger", lambda sources: make_raw())
+    monkeypatch.setattr(
+        "service.revenue.normalize.get_spreadsheet_values_batch",
+        lambda *args, **kwargs: sheet_response(),
+    )
     crm = AsyncMock(
         return_value=(
             [{"school": "도담고등학교", "level": "고등학교", "office": "세종교육청"}],

@@ -3,16 +3,13 @@ from decimal import Decimal
 
 import pytest
 from revenue_fixture import (
-    HEADER,
-    HEADER_2026,
-    MASTER_ROWS,
+    RULES,
     SOURCES,
     normalized_rows,
-    make_raw,
+    sheet_response,
 )
 
-from service.revenue.ledger import fetch_ledger
-from service.revenue.normalize import number
+from service.revenue.normalize import fetch_rows, number
 from service.revenue.enrich import customer_key, enrich_rows
 
 
@@ -46,15 +43,15 @@ def test_rows_keep_fiscal_year_planned_and_old_category_mapping():
     "column,value", [(0, "2026-02-30"), (0, "3월중"), (0, ""), (5, "합계")]
 )
 def test_invalid_transaction_fails_instead_of_silently_dropping(column, value):
-    raw = make_raw()
-    raw["tabs"]["26년 매출장(신)"]["rows"][1][column] = value
+    raw = sheet_response()
+    raw["valueRanges"][1]["values"][1][column] = value
     with pytest.raises(ValueError, match="26년 매출장.*2행"):
         normalized_rows(raw)
 
 
 def test_duplicates_and_negative_adjustments_are_preserved():
-    raw = make_raw()
-    tab = raw["tabs"]["26년 매출장(신)"]["rows"]
+    raw = sheet_response()
+    tab = raw["valueRanges"][1]["values"]
     tab.append(list(tab[1]))
     tab.append(
         ["2026-03-01", "반납처", "반납", 1, -100, -100, -10, -110, "1. 코들 라이선스"]
@@ -66,10 +63,10 @@ def test_duplicates_and_negative_adjustments_are_preserved():
 
 
 def test_category_and_total_problems_are_warnings():
-    raw = make_raw()
-    raw["tabs"]["25년 매출장"]["rows"][1][5] = 10
-    raw["tabs"]["25년 매출장"]["rows"][1][8] = "새분류"
-    raw["tabs"]["26년 매출장(신)"]["rows"][1][9] = "없는 세부"
+    raw = sheet_response()
+    raw["valueRanges"][0]["values"][1][5] = 10
+    raw["valueRanges"][0]["values"][1][8] = "새분류"
+    raw["valueRanges"][1]["values"][1][9] = "없는 세부"
     rows, warnings = normalized_rows(raw)
     assert rows[0]["category"] == "미분류"
     assert any("총계 불일치" in w for w in warnings)
@@ -129,63 +126,46 @@ def test_ambiguous_school_does_not_pick_an_arbitrary_office():
     assert customer_key("(주) 가나다") == "가나다"
 
 
-def test_fetch_ledger_는_탭이_없으면_터진다(monkeypatch):
-    monkeypatch.setattr(
-        "service.revenue.ledger.get_spreadsheet_metadata",
-        lambda *_args, **_kwargs: {
-            "properties": {"title": "매출장"},
-            "sheets": [{"properties": {"title": "26년 매출장(구)"}}],
-        },
-    )
+def test_fetch_failure_propagates(monkeypatch):
+    def fail(*args, **kwargs):
+        raise RuntimeError("invalid range")
 
-    with pytest.raises(ValueError, match="매출장에 탭이 없다"):
-        fetch_ledger(SOURCES)
+    monkeypatch.setattr("service.revenue.normalize.get_spreadsheet_values_batch", fail)
+    with pytest.raises(RuntimeError, match="invalid range"):
+        fetch_rows(SOURCES, RULES)
 
 
-def test_fetch_ledger_는_탭과_분류마스터를_한_번에_받는다(monkeypatch):
-    calls: dict = {}
+def test_fetch_normalizes_all_ranges_in_one_request(monkeypatch):
+    calls = []
 
-    def fake_metadata(_spreadsheet_id, account):
-        calls["account"] = account
-        return {
-            "properties": {"title": "매출장"},
-            "sheets": [
-                {"properties": {"title": t}}
-                for t in ("25년 매출장", "26년 매출장(신)", "분류마스터")
-            ],
-        }
-
-    def fake_batch(_spreadsheet_id, ranges, **kwargs):
-        calls["ranges"] = ranges
-        calls["options"] = kwargs
-        return {
-            "valueRanges": [
-                {"values": [HEADER]},
-                {"values": [HEADER_2026]},
-                {"values": MASTER_ROWS},
-            ]
-        }
+    def fake_batch(spreadsheet_id, ranges, **kwargs):
+        calls.append((spreadsheet_id, ranges, kwargs))
+        return sheet_response()
 
     monkeypatch.setattr(
-        "service.revenue.ledger.get_spreadsheet_metadata", fake_metadata
+        "service.revenue.normalize.get_spreadsheet_values_batch", fake_batch
     )
-    monkeypatch.setattr(
-        "service.revenue.ledger.get_spreadsheet_values_batch", fake_batch
-    )
-
-    raw = fetch_ledger(SOURCES)
-
-    assert calls["account"] == "GOOGLE_SERVICE_ACCOUNT_JSON"
-    assert calls["ranges"] == [
-        "'25년 매출장'!A:K",
-        "'26년 매출장(신)'!A:K",
-        "'분류마스터'!A:L",
-    ]
-    assert calls["options"]["value_render_option"] == "UNFORMATTED_VALUE"
-    assert calls["options"]["date_time_render_option"] == "FORMATTED_STRING"
-    assert raw["tabs"]["26년 매출장(신)"]["fiscal_year"] == 2026
-    assert raw["tabs"]["26년 매출장(신)"]["columns"] == {
-        "subcategory_raw": 9,
-        "note": 10,
+    assert fetch_rows(SOURCES, RULES) == normalized_rows()
+    assert len(calls) == 1
+    spreadsheet_id, ranges, options = calls[0]
+    assert spreadsheet_id == SOURCES["ledger"]["spreadsheet_id"]
+    assert ranges == ["'25년 매출장'!A:K", "'26년 매출장(신)'!A:K", "'분류마스터'!A:L"]
+    assert options == {
+        "account": "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "value_render_option": "UNFORMATTED_VALUE",
+        "date_time_render_option": "FORMATTED_STRING",
     }
-    assert raw["taxonomy_rows"] == MASTER_ROWS
+
+
+def test_incomplete_ranges_fail():
+    response = sheet_response()
+    response["valueRanges"].pop()
+    with pytest.raises(ValueError, match="범위 수"):
+        normalized_rows(response)
+
+
+def test_empty_category_master_fails():
+    response = sheet_response()
+    response["valueRanges"][-1] = {}
+    with pytest.raises(ValueError, match="분류마스터가 비어"):
+        normalized_rows(response)

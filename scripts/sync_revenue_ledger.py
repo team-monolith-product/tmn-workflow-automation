@@ -14,8 +14,7 @@ from service.config import load_config
 from service.db import connect
 from service.revenue.config import load_rules, load_sources
 from service.revenue.enrich import enrich_rows, fetch_crm
-from service.revenue.ledger import fetch_ledger
-from service.revenue.normalize import normalize_rows
+from service.revenue.normalize import fetch_rows
 
 COLUMNS = (
     "year",
@@ -46,7 +45,7 @@ INSERT = f"INSERT INTO revenue_transactions ({', '.join(COLUMNS)}) VALUES ({', '
 
 def collect_rows() -> tuple[list[dict], list[str]]:
     sources, rules = load_sources(), load_rules()
-    rows, warnings = normalize_rows(fetch_ledger(sources), sources, rules)
+    rows, warnings = fetch_rows(sources, rules)
     orgs, deals, programs = asyncio.run(fetch_crm())
     warnings += enrich_rows(rows, orgs, deals, programs, rules)
     return rows, warnings
