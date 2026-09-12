@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import secrets
-import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -20,7 +19,6 @@ from service.revenue.query import dashboard_data
 router = APIRouter(prefix="/revenue")
 
 TEMPLATE_PATH = Path(__file__).with_name("revenue_dashboard.html")
-ASSETS_DIR = Path(__file__).with_name("revenue_assets")
 DATA_MARKER = "__REVENUE_DATA__"
 
 SESSION_COOKIE = "revenue_session"
@@ -28,9 +26,6 @@ REFRESH_COOKIE = "revenue_refresh"
 PKCE_COOKIE = "revenue_pkce"
 REFRESH_MAX_AGE = 30 * 24 * 3600
 PKCE_MAX_AGE = 10 * 60
-
-ME_CACHE_SECONDS = 60
-_me_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _base_url() -> str:
@@ -73,18 +68,6 @@ def _set_tokens(response: Response, tokens: dict[str, Any]) -> None:
         _set_cookie(response, REFRESH_COOKIE, tokens["refresh_token"], REFRESH_MAX_AGE)
 
 
-async def _admin_for(token: str) -> dict[str, Any] | None:
-    key = hashlib.sha256(token.encode()).hexdigest()
-    cached = _me_cache.get(key)
-    now = time.monotonic()
-    if cached and now - cached[0] < ME_CACHE_SECONDS:
-        return cached[1]
-    admin = await get_me(token)
-    if admin is not None:
-        _me_cache[key] = (now, admin)
-    return admin
-
-
 def _pkce_pair() -> tuple[str, str]:
     verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(verifier.encode()).digest()
@@ -92,7 +75,7 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def _login_redirect(request: Request) -> RedirectResponse:
+def _login_redirect() -> RedirectResponse:
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(24)
     params = {
@@ -136,17 +119,17 @@ async def revenue_dashboard(
     status: Literal["issued", "planned"] = "issued",
 ) -> Response:
     token = request.cookies.get(SESSION_COOKIE)
-    admin = await _admin_for(token) if token else None
+    admin = await get_me(token) if token else None
 
     refreshed: dict[str, Any] | None = None
     refresh = request.cookies.get(REFRESH_COOKIE)
     if admin is None and refresh:
         refreshed = await refresh_access_token(refresh, _client_id(), _client_secret())
         if refreshed:
-            admin = await _admin_for(refreshed["access_token"])
+            admin = await get_me(refreshed["access_token"])
 
     if admin is None:
-        return _login_redirect(request)
+        return _login_redirect()
 
     data = await asyncio.to_thread(
         dashboard_data, year, dimension, search, page, status
@@ -164,7 +147,7 @@ async def revenue_dashboard(
 async def revenue_callback(request: Request, code: str, state: str) -> Response:
     pkce_raw = request.cookies.get(PKCE_COOKIE)
     if not pkce_raw:
-        return _login_redirect(request)
+        return _login_redirect()
     expected_state, verifier = pkce_raw.split(".", 1)
     if not secrets.compare_digest(expected_state, state):
         return Response("state 가 맞지 않습니다. 다시 로그인하십시오.", status_code=400)
@@ -173,7 +156,7 @@ async def revenue_callback(request: Request, code: str, state: str) -> Response:
         code, _redirect_uri(), _client_id(), verifier, _client_secret()
     )
     if tokens is None:
-        return _login_redirect(request)
+        return _login_redirect()
     response = RedirectResponse("/revenue/", status_code=303)
     _set_tokens(response, tokens)
     response.delete_cookie(PKCE_COOKIE, path="/revenue")
@@ -188,9 +171,9 @@ async def revenue_logout() -> RedirectResponse:
     return response
 
 
-@router.get("/assets/{name}")
-async def revenue_asset(name: str) -> Response:
-    files = {entry.name: entry for entry in ASSETS_DIR.iterdir() if entry.is_file()}
-    if name not in files:
-        return Response("Not Found", status_code=404)
-    return FileResponse(files[name], headers={"Cache-Control": "public, max-age=86400"})
+@router.get("/assets/logo-monolith.png")
+async def revenue_logo() -> Response:
+    return FileResponse(
+        TEMPLATE_PATH.parent / "revenue_assets" / "logo-monolith.png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

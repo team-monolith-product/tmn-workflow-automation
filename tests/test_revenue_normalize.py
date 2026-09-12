@@ -3,13 +3,12 @@ from decimal import Decimal
 
 import pytest
 from revenue_fixture import (
-    RULES,
-    SOURCES,
+    TABS,
     normalized_rows,
     sheet_response,
 )
 
-from service.revenue.normalize import fetch_rows, number
+from service.revenue.normalize import SPREADSHEET_ID, fetch_rows, number
 from service.revenue.enrich import customer_key, enrich_rows
 
 
@@ -30,7 +29,7 @@ def test_rows_keep_fiscal_year_planned_and_old_category_mapping():
         r for r in rows if r["customer"] == "금성출판사" and r["status"] == "issued"
     )
     assert old["year"] == 2025 and old["issued_on"] == date(2024, 12, 30)
-    assert old["category"] == "2. 해커톤(짓다)"
+    assert old["category"] == "4. 플랫폼 제공 개발"
     new = next(r for r in rows if r["customer"] == "도담고등학교")
     assert new["category"] == "1. 코들 라이선스"
     assert new["subcategory"] == "학교 판매(초·중·고)" and new["note"] == "1학기"
@@ -71,7 +70,10 @@ def test_category_problems_are_warnings():
     assert any("없는 조합" in w for w in warnings)
 
 
-def test_crm_keeps_all_budgets_and_program_fields():
+def test_crm_keeps_all_budgets_and_program_fields(monkeypatch):
+    monkeypatch.setattr(
+        "service.revenue.enrich.PROGRAM_ALIASES", {"해커톤": "대학 해커톤"}
+    )
     rows, _ = normalized_rows()
     warnings = enrich_rows(
         rows,
@@ -92,9 +94,6 @@ def test_crm_keeps_all_budgets_and_program_fields():
                 "stage": "진행",
             }
         ],
-        {
-            "program_aliases": {"해커톤": "대학 해커톤"},
-        },
     )
     assert warnings == []
     school = next(r for r in rows if r["customer"] == "도담고등학교")
@@ -116,7 +115,6 @@ def test_ambiguous_school_does_not_pick_an_arbitrary_office():
         ],
         [],
         [],
-        {},
     )
     assert rows[0]["school_level"] == "고등학교"
     assert rows[0].get("edu_office") is None
@@ -129,10 +127,11 @@ def test_fetch_failure_propagates(monkeypatch):
 
     monkeypatch.setattr("service.revenue.normalize.get_spreadsheet_values_batch", fail)
     with pytest.raises(RuntimeError, match="invalid range"):
-        fetch_rows(SOURCES, RULES)
+        fetch_rows()
 
 
 def test_fetch_normalizes_all_ranges_in_one_request(monkeypatch):
+    monkeypatch.setattr("service.revenue.normalize.TABS", TABS)
     calls = []
 
     def fake_batch(spreadsheet_id, ranges, **kwargs):
@@ -142,10 +141,10 @@ def test_fetch_normalizes_all_ranges_in_one_request(monkeypatch):
     monkeypatch.setattr(
         "service.revenue.normalize.get_spreadsheet_values_batch", fake_batch
     )
-    assert fetch_rows(SOURCES, RULES) == normalized_rows()
+    assert fetch_rows() == normalized_rows()
     assert len(calls) == 1
     spreadsheet_id, ranges, options = calls[0]
-    assert spreadsheet_id == SOURCES["ledger"]["spreadsheet_id"]
+    assert spreadsheet_id == SPREADSHEET_ID
     assert ranges == ["'25년 매출장'!A:K", "'26년 매출장(신)'!A:K", "'분류마스터'!A:L"]
     assert options == {
         "account": "GOOGLE_SERVICE_ACCOUNT_JSON",

@@ -39,7 +39,6 @@ def client(monkeypatch):
     monkeypatch.setenv("MCP_RESOURCE_URL", BASE)
     monkeypatch.setenv("REVENUE_OAUTH_CLIENT_ID", "client-uid")
     monkeypatch.delenv("REVENUE_OAUTH_CLIENT_SECRET", raising=False)
-    revenue_web._me_cache.clear()
     monkeypatch.setattr(
         revenue_web,
         "dashboard_data",
@@ -134,7 +133,6 @@ def test_유효한_쿠키면_DB_조회_화면을_돌려준다(client):
 
     with patch("app.revenue_web.get_me", AsyncMock(return_value=ADMIN)) as me:
         response = client.get("/revenue/")
-        client.get("/revenue/")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
@@ -236,3 +234,11 @@ def test_query_parameters_reach_database(client, monkeypatch):
 def test_invalid_query_dimension_is_rejected(client):
     response = client.get("/revenue/?dimension=invalid")
     assert response.status_code == 422
+
+
+def test_admin_access_is_checked_on_each_request(client):
+    set_cookie(client, SESSION_COOKIE, "token")
+    with patch("app.revenue_web.get_me", AsyncMock(side_effect=[ADMIN, None])) as me:
+        assert client.get("/revenue/", follow_redirects=False).status_code == 200
+        assert client.get("/revenue/", follow_redirects=False).status_code == 302
+    assert me.await_count == 2

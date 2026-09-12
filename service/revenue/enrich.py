@@ -37,6 +37,27 @@ LEVEL_SUFFIX = [
 NOT_A_SCHOOL = ("대학교", "산학협력단", "산단", "교육청", "교육원", "연구정보원")
 
 
+PROGRAM_ALIASES = {
+    "찾아가는 학교 컨설팅": "2026 찾아가는 학교 컨설팅",
+    "찾학컨": "2026 찾아가는 학교 컨설팅",
+    "디지털새싹": "2026 디지털새싹",
+    "AI 동행": "2026 AI 동행 프로젝트",
+    "AI동행": "2026 AI 동행 프로젝트",
+    "SW동행": "SW 동행프로젝트",
+    "SW 동행": "SW 동행프로젝트",
+    "성동광진": "2026 성동광진 중등  AI 디지털 기반 교육혁신 연수",
+    "K-STEM": "2026「K-STEM 과학교육 활성화 지원사업(연수)」위탁 운영 용역",
+    "센스쿨": "2026 센스쿨 등록사업",
+    "기업연계 정보교사": "2026 기업 연계 정보교원 역량강화 프로젝트",
+    "기업 연계 정보교원": "2026 기업 연계 정보교원 역량강화 프로젝트",
+    "선도교사 연수 1권역": "2026  인공지능 선도교사 연수사업(서울대)",
+    "AI선도교사 1권역": "2026  인공지능 선도교사 연수사업(서울대)",
+    "선도교사 연수 2권역": "2026 인공지능 선도교사 연수 사업(춘천교대)",
+    "AI선도교사 2권역": "2026 인공지능 선도교사 연수 사업(춘천교대)",
+    "디지털튜터": "2026 디지털튜터",
+}
+
+
 SQL_ORGS = """
 SELECT school_name AS school, school_level AS level, edu_office AS office
 FROM notion_prd.organizations
@@ -154,12 +175,9 @@ def enrich_rows(
     orgs: list[dict],
     deals: list[dict],
     programs: list[dict],
-    rules: dict,
 ) -> list[str]:
     warnings = []
-    aliases = sorted(
-        rules.get("program_aliases", {}).items(), key=lambda pair: -len(pair[0])
-    )
+    aliases = sorted(PROGRAM_ALIASES.items(), key=lambda pair: -len(pair[0]))
     for row in rows:
         row.update(customer_info(row["customer"], orgs, deals))
         for alias, name in aliases:
