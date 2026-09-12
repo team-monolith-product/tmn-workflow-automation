@@ -71,13 +71,11 @@ def dashboard_data(
         else:
             groups = fetch_all(
                 conn,
-                sql.SQL(
-                    """
+                sql.SQL("""
                 SELECT coalesce(nullif({}, ''), '미기재') AS label, sum(amount) AS amount
                 FROM revenue_transactions WHERE year=%s AND status='issued'
                 GROUP BY label ORDER BY amount DESC
-            """
-                ).format(sql.Identifier(dimension)),
+            """).format(sql.Identifier(dimension)),
                 (year,),
             )
         customers = fetch_all(
