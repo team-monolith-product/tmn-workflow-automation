@@ -69,7 +69,7 @@ SCHEMA_GUIDE = """
   budget_sources text[], terms text[], program_name, program_client,
   program_budget, program_our_revenue, program_stage).
 - 구글 매출장·CRM을 매일 07:10 KST에 정규화한 DB 캐시다. 실시간이 아니며 실패 시
-  마지막 성공 데이터가 남는다. 거래 한 행이 매출장 한 행이며 ID/변경이력은 없다.
+  마지막 성공 데이터가 남는다. 거래 한 행이 매출장 한 행이다.
 - 매출은 status='issued'의 amount(공급가액, 부가세 제외)를 합산한다.
   status='planned'는 예정이며 실적에 섞지 않는다. tax는 세액, total은 세금 포함.
 - year는 탭 기준 귀속연도. issued_on은 실제 발행일이며 연도가 다를 수 있다.

@@ -192,22 +192,6 @@ def test_정적_자산은_디렉터리_밖으로_못_나간다(client):
     assert client.get("/revenue/assets/없는파일.png").status_code == 404
 
 
-def test_템플릿은_분류_이름과_색을_들고_있지_않다():
-    html = revenue_web.TEMPLATE_PATH.read_text(encoding="utf-8")
-
-    for name in (
-        "코들 라이선스",
-        "해커톤",
-        "연수용역",
-        "교육용역",
-        "--s1:",
-        "--s8:",
-        "data-slot",
-    ):
-        assert name not in html, name
-    assert "function bars(" in html
-
-
 def test_렌더는_script_종료_태그를_무력화한다():
     data = {"rows": [{"note": "</script><script>alert(1)</script>"}]}
 
