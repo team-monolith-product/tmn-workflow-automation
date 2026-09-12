@@ -72,7 +72,7 @@ def test_category_problems_are_warnings():
 
 def test_crm_keeps_all_budgets_and_program_fields(monkeypatch):
     monkeypatch.setattr(
-        "service.revenue.enrich.PROGRAM_ALIASES", {"해커톤": "대학 해커톤"}
+        "service.revenue.enrich.PROGRAM_ALIASES", {"해커톤": "대학  해커톤"}
     )
     rows, _ = normalized_rows()
     warnings = enrich_rows(

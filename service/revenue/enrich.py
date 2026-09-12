@@ -183,6 +183,7 @@ def enrich_rows(
         for alias, name in aliases:
             if alias not in f"{row['customer']} {row['item']}":
                 continue
+            name = clean(name)
             matches = [p for p in programs if clean(p["name"]) == name]
             if len(matches) != 1:
                 warnings.append(f"사업 «{name}» CRM 매칭 {len(matches)}건: 보강 생략")
