@@ -1,19 +1,4 @@
-"""
-매출 대시보드를 사람에게 서빙한다. wfa.codle.io/revenue/
-
-인증은 MCP 와 같은 admin-rails Doorkeeper 다. 브라우저라 bearer 헤더를 못 붙이므로
-authorization_code + PKCE 로 토큰을 받아 HttpOnly 쿠키에 둔다. 쿠키 값은 Doorkeeper
-액세스 토큰 그 자체이고, 요청마다 admin-rails 에 물어 유효한지 본다. 우리가 서명한
-세션이 따로 없으니 지킬 비밀도, 돌릴 키도 없다 — 만료·폐기는 발급자가 판정한다.
-
-Doorkeeper 애플리케이션은 admin-rails 의 /oauth/applications 에서 손으로 만든다.
-동적 등록(/oauth/register)은 loopback 리다이렉트만 받아 서버 앱에는 못 쓴다.
-  Redirect URI = {MCP_RESOURCE_URL}/revenue/callback
-  Confidential = 아니오(PKCE 공개 클라이언트). 기밀로 만들면 REVENUE_OAUTH_CLIENT_SECRET 도 넣는다
-
-화면은 app/revenue_dashboard.html 하나다. 서버가 facts 를 JSON 으로 박아 넣어 돌려주며,
-분류·색·항목 수는 전부 facts 에서 나온다. 화면 코드에 분류 이름이 없다.
-"""
+"""매출 대시보드. admin-rails로 인증하고 DB 조회 결과를 표시한다."""
 
 import asyncio
 import base64
@@ -22,15 +7,17 @@ import json
 import os
 import secrets
 import time
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from api.admin_rails import exchange_authorization_code, get_me, refresh_access_token
-from service.revenue.facts import get_facts
+from service.revenue.query import dashboard_data
 
 router = APIRouter(prefix="/revenue")
 
@@ -124,12 +111,22 @@ def _login_redirect(request: Request) -> RedirectResponse:
     return response
 
 
-def render_dashboard(facts: dict[str, Any]) -> str:
-    """템플릿에 facts 를 박아 넣는다. 화면은 이 JSON 만 보고 그린다."""
+def render_dashboard(data: dict[str, Any]) -> str:
+    """집계 결과와 거래 한 페이지를 HTML로 전달한다."""
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
-    payload = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+    payload = json.dumps(
+        data, ensure_ascii=False, separators=(",", ":"), default=_json_value
+    )
     # </script> 가 데이터 안에 있으면 문서가 거기서 끊긴다.
     return template.replace(DATA_MARKER, payload.replace("</", "<\\/"))
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"JSON으로 변환할 수 없음: {type(value)}")
 
 
 @router.get("")
@@ -139,7 +136,16 @@ async def revenue_root() -> RedirectResponse:
 
 
 @router.get("/")
-async def revenue_dashboard(request: Request) -> Response:
+async def revenue_dashboard(
+    request: Request,
+    year: int | None = None,
+    dimension: Literal[
+        "category", "subcategory", "school_level", "edu_office", "budget_sources"
+    ] = "category",
+    search: str = Query(default="", max_length=200),
+    page: int = Query(default=1, ge=1),
+    status: Literal["issued", "planned"] = "issued",
+) -> Response:
     """
     매출 대시보드. 로그인이 없으면 admin-rails 로 보내고, 만료면 리프레시를 먼저 시도한다.
     """
@@ -156,9 +162,11 @@ async def revenue_dashboard(request: Request) -> Response:
     if admin is None:
         return _login_redirect(request)
 
-    facts = await asyncio.to_thread(get_facts)
+    data = await asyncio.to_thread(
+        dashboard_data, year, dimension, search, page, status
+    )
     print(f"[revenue] dashboard by {admin['email']}")
-    response = HTMLResponse(render_dashboard(facts))
+    response = HTMLResponse(render_dashboard(data))
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     if refreshed:

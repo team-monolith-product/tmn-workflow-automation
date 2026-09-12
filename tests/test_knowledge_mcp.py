@@ -127,9 +127,6 @@ async def test_질의_도구가_등록된다(mcp_env):
 
     assert [tool.name for tool in tools] == [
         "query_knowledge",
-        "revenue_summary",
-        "revenue_transactions",
-        "revenue_health",
     ]
 
 

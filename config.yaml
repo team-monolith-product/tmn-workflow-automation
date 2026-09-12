@@ -290,10 +290,10 @@ scheduled_jobs:
       minute: 20            # 9시대 분산 배치된 타 작업과 겹치지 않게
     # 주말·공휴일 포함 매일 실행. 새 공고 없으면 Slack 전송은 자동 생략됨.
 
-  # 매출장 검증. 경리가 오전에 계산서를 끊기 전 상태를 본다.
+  # 매출장·CRM을 정규화해 DB 캐시를 교체한다.
   # 계산서는 주말에도 발행되므로 영업일 제한을 걸지 않는다. 경고 없으면 조용하다.
-  - name: validate_revenue_ledger
-    module: scripts.validate_revenue_ledger
+  - name: sync_revenue_ledger
+    module: scripts.sync_revenue_ledger
     function: main
     cron:
       hour: 7
@@ -324,7 +324,7 @@ education_bid_crawler:
       channel_id: "C0B7H27DFT7"  # 슬랙 교육/운영 공공입찰
       work_types: [교육운영, 행사]
 
-# 매출 facts (MCP revenue_* 도구 · scripts/validate_revenue_ledger.py)
+# 매출 일간 동기화 (scripts/sync_revenue_ledger.py)
 # - 매출장 위치·열 배치·인식기준·분류 규칙은 knowledge/revenue/ 에 있다. 여기엔 알림처만.
 # - 매출장은 GOOGLE_SERVICE_ACCOUNT_JSON 계정에 뷰어로 공유돼 있어야 한다.
 #   OPERATING 계정에는 공유하지 않는다 — 카탈로그에 실려 read_sheet 로 누구나 읽게 된다.

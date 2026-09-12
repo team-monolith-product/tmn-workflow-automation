@@ -28,8 +28,6 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
-from app.revenue_tools import INSTRUCTIONS as REVENUE_INSTRUCTIONS
-from app.revenue_tools import register_revenue_tools
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
@@ -41,9 +39,9 @@ INSTRUCTIONS = """
 읽기 전용 SQL로 질의합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
 
-매출(revenue_*) 도구도 이 서버에 있습니다. 매출 숫자는 query_knowledge 가 아니라
-그 도구로만 봅니다 — 지식베이스에는 매출이 없습니다.
-""".strip() + "\n\n" + REVENUE_INSTRUCTIONS
+매출은 query_knowledge로 revenue_transactions 테이블을 조회합니다.
+공급가액 amount, status, 귀속연도 year의 의미는 도구의 스키마 안내를 따릅니다.
+""".strip()
 
 
 def build_mcp() -> MCPServer:
@@ -70,7 +68,6 @@ def build_mcp() -> MCPServer:
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
-    register_revenue_tools(mcp)
     return mcp
 
 

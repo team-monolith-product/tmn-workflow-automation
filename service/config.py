@@ -142,7 +142,7 @@ class EducationBidCrawlerConfig:
     batch_size: int = 20
 
 
-# --- 매출 facts ---
+# --- 매출 배치 ---
 
 
 @dataclass(frozen=True)

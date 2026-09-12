@@ -1,4 +1,4 @@
-"""매출 facts 테스트용 합성 raw. 시트를 읽지 않는다.
+"""매출 정규화 테스트용 합성 raw. 시트를 읽지 않는다.
 
 tests/ 에는 __init__.py 가 없고 CI 환경에는 `tests` 라는 이름의 다른 패키지가 설치돼 있어
 `from tests.xxx import` 가 엉뚱한 곳을 잡는다. pytest 가 tests/ 를 sys.path 앞에 넣으므로
@@ -7,7 +7,7 @@ tests/ 에는 __init__.py 가 없고 CI 환경에는 `tests` 라는 이름의 �
 
 import copy
 
-from service.revenue.build import build_facts
+from service.revenue.normalize import normalize_rows
 
 HEADER = [
     "계산서 발행일자",
@@ -59,7 +59,6 @@ SOURCES = {
         },
     },
     "basis": {"mode": "issued", "amount_field": "amount", "pipeline_markers": ["예정"]},
-    "enrichment": {"file": "knowledge/revenue/enrichment.yml"},
 }
 
 TAXONOMY = {
@@ -197,7 +196,12 @@ def make_raw() -> dict:
     }
 
 
-def build(raw: dict | None = None, enrichment: dict | None = None) -> dict:
-    return build_facts(
-        raw or make_raw(), SOURCES, copy.deepcopy(TAXONOMY), enrichment or {}
+def build(raw: dict | None = None) -> tuple[list[dict], list[str]]:
+    return normalize_rows(
+        raw or make_raw(),
+        SOURCES,
+        {
+            "product": TAXONOMY["views"]["상품"],
+            "assertions": TAXONOMY["assertions"],
+        },
     )

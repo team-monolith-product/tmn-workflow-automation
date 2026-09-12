@@ -63,6 +63,27 @@ SCHEMA_GUIDE = """
   {"var1": "1기"} 꼴로 키 var1~var8이 문안의 [*1*]~[*8*]에 대응한다.
   project는 발송 시점에 박은 사업명이고 매핑에 없는 채널이면 NULL이다.
 
+매출:
+- revenue_transactions(year, issued_on, status, customer, item, quantity, unit_price,
+  amount, tax, total, category, subcategory, note, school_level, edu_office,
+  budget_sources text[], terms text[], program_name, program_client,
+  program_budget, program_our_revenue, program_stage).
+- 구글 매출장·CRM을 매일 07:10 KST에 정규화한 DB 캐시다. 실시간이 아니며 실패 시
+  마지막 성공 데이터가 남는다. 거래 한 행이 매출장 한 행이며 ID/변경이력은 없다.
+- 매출은 status='issued'의 amount(공급가액, 부가세 제외)를 합산한다.
+  status='planned'는 예정이며 실적에 섞지 않는다. tax는 세액, total은 세금 포함.
+- year는 탭 기준 귀속연도. issued_on은 실제 발행일이며 연도가 다를 수 있다.
+  예: SELECT year, sum(amount) FROM revenue_transactions
+      WHERE status='issued' GROUP BY year ORDER BY year;
+  월별 비교는 year로 거른 뒤 extract(month FROM issued_on)으로 묶는다.
+- category는 현재 상품 분류로 환산한 값. subcategory는 과거 연도에 없을 수 있다.
+- school_level/edu_office/budget_sources/terms는 이름으로 연결한 고객 CRM 정보다.
+  개별 거래의 확정 예산/계약기간이 아니다. 복수 budget_sources를 펼쳐 집계하면
+  같은 거래가 여러 태그에 포함될 수 있으므로 전체 매출 구성비로 합산하지 않는다.
+- program_budget/program_our_revenue는 사업 전체 정보가 거래마다 반복된다.
+  합산 금지. 사업명 기준으로 중복 제거하고 매출장 amount와 혼동하지 않는다.
+- 매칭되지 않은 보강은 NULL이다. 고객 실명·단가를 포함한 사내 데이터다.
+
 구글 시트 찾기:
 - data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트
   하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
@@ -94,7 +115,7 @@ VALUES (%(actor)s, %(tool)s, %(query)s, %(filters)s, %(latency_ms)s)
 # 봇 도구와 MCP 도구가 같은 설명을 씁니다. 스키마를 한쪽에만 고쳐 넣으면
 # 어느 에이전트가 무엇을 알고 SQL을 썼는지가 갈립니다.
 QUERY_TOOL_DESCRIPTION = f"""
-사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스에 읽기 전용 SQL을 실행합니다.
+사내 지식베이스의 슬랙 대화·매출 등에 읽기 전용 SQL을 실행합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 사용합니다.
 
 인자:

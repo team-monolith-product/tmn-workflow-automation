@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import FastAPI
-from revenue_fixture import build
+from decimal import Decimal
 from starlette.testclient import TestClient
 
 from app import revenue_web
@@ -43,7 +43,13 @@ def client(monkeypatch):
     monkeypatch.setenv("REVENUE_OAUTH_CLIENT_ID", "client-uid")
     monkeypatch.delenv("REVENUE_OAUTH_CLIENT_SECRET", raising=False)
     revenue_web._me_cache.clear()
-    monkeypatch.setattr(revenue_web, "get_facts", build)
+    monkeypatch.setattr(
+        revenue_web,
+        "dashboard_data",
+        lambda *args: {
+            "rows": [{"customer": "도담고등학교", "amount": Decimal("1.25")}]
+        },
+    )
     app = FastAPI()
     app.include_router(router)
     with TestClient(app, base_url=BASE) as tc:
@@ -127,7 +133,7 @@ def test_낡은_코드면_다시_로그인으로_보낸다(client):
     assert "/oauth/authorize" in response.headers["location"]
 
 
-def test_유효한_쿠키면_facts_를_박은_화면을_돌려준다(client):
+def test_유효한_쿠키면_DB_조회_화면을_돌려준다(client):
     set_cookie(client, SESSION_COOKIE, "at-1")
 
     with patch("app.revenue_web.get_me", AsyncMock(return_value=ADMIN)) as me:
@@ -137,7 +143,7 @@ def test_유효한_쿠키면_facts_를_박은_화면을_돌려준다(client):
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert DATA_MARKER not in response.text
-    assert '"default_view":"상품"' in response.text
+    assert '"amount":"1.25"' in response.text
     assert "도담고등학교" in response.text
     # 같은 토큰은 60초 캐시라 admin-rails 를 한 번만 부른다
     assert me.await_count == 1
@@ -206,14 +212,32 @@ def test_템플릿은_분류_이름과_색을_들고_있지_않다():
         "data-slot",
     ):
         assert name not in html, name
-    assert "seriesColors(" in html and "spectrumColor(" in html
+    assert "function bars(" in html
 
 
 def test_렌더는_script_종료_태그를_무력화한다():
-    facts = build()
-    facts["transactions"][0]["note"] = "</script><script>alert(1)</script>"
+    facts = {"rows": [{"note": "</script><script>alert(1)</script>"}]}
 
     html = render_dashboard(facts)
 
     assert "</script><script>alert(1)" not in html
     assert "<\\/script><script>alert(1)" in html
+
+
+def test_query_parameters_reach_database(client, monkeypatch):
+    set_cookie(client, SESSION_COOKIE, "at-1")
+    calls = []
+    monkeypatch.setattr(
+        revenue_web, "dashboard_data", lambda *args: calls.append(args) or {}
+    )
+    with patch("app.revenue_web.get_me", AsyncMock(return_value=ADMIN)):
+        response = client.get(
+            "/revenue/?year=2025&dimension=budget_sources&search=학교&page=2&status=planned"
+        )
+    assert response.status_code == 200
+    assert calls == [(2025, "budget_sources", "학교", 2, "planned")]
+
+
+def test_invalid_query_dimension_is_rejected(client):
+    response = client.get("/revenue/?dimension=invalid")
+    assert response.status_code == 422
