@@ -80,10 +80,10 @@ class TestRedashAPI:
         assert "Content-Type" in headers
         assert headers["Content-Type"] == "application/json"
 
-    @patch("api.redash._get_json", new_callable=AsyncMock)
-    async def test_list_dashboards(self, mock_get_json):
+    @patch("api.redash._request_json", new_callable=AsyncMock)
+    async def test_list_dashboards(self, mock_request_json):
         """대시보드 목록 조회 테스트"""
-        mock_get_json.return_value = {
+        mock_request_json.return_value = {
             "results": [{"name": "Test Dashboard", "slug": "test-dashboard"}]
         }
 
@@ -91,14 +91,14 @@ class TestRedashAPI:
 
         assert "results" in result
         assert len(result["results"]) == 1
-        url, params = mock_get_json.call_args.args
+        url, params = mock_request_json.call_args.args
         assert url.endswith("/api/dashboards")
         assert params == {"q": "test"}
 
-    @patch("api.redash._get_json", new_callable=AsyncMock)
-    async def test_get_query(self, mock_get_json):
+    @patch("api.redash._request_json", new_callable=AsyncMock)
+    async def test_get_query(self, mock_request_json):
         """쿼리 조회 테스트"""
-        mock_get_json.return_value = {
+        mock_request_json.return_value = {
             "id": 123,
             "name": "Test Query",
             "query": "SELECT 1",
@@ -108,7 +108,7 @@ class TestRedashAPI:
 
         assert result["id"] == 123
         assert result["name"] == "Test Query"
-        assert mock_get_json.call_args.args[0].endswith("/api/queries/123")
+        assert mock_request_json.call_args.args[0].endswith("/api/queries/123")
 
 
 class TestAthenaTools:

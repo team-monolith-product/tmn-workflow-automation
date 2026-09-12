@@ -290,6 +290,14 @@ scheduled_jobs:
       minute: 20            # 9시대 분산 배치된 타 작업과 겹치지 않게
     # 주말·공휴일 포함 매일 실행. 새 공고 없으면 Slack 전송은 자동 생략됨.
 
+  - name: sync_revenue_ledger
+    module: scripts.sync_revenue_ledger
+    function: main
+    cron:
+      hour: 0
+      minute: 10
+    business_day_only: false
+
 # 나라장터(G2B) 교육 외주 입찰공고 수집·평가
 # - DATA_GO_KR_BID_KEY 환경변수 필요 (입찰공고정보서비스 활용신청 후 발급, 클러스터 시크릿)
 # - 역량·자격·소스는 knowledge/edu_bid/*.yaml, 트랙별 전략·점수정책은 tracks/<key>.yaml 에서 관리

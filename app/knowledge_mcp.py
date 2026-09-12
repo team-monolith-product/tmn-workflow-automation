@@ -38,6 +38,9 @@ INSTRUCTIONS = """
 팀모노리스 사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스입니다.
 읽기 전용 SQL로 질의합니다.
 "예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 씁니다.
+
+매출은 query_knowledge로 revenue_transactions 테이블을 조회합니다.
+공급가액 amount, status, 귀속연도 year의 의미는 도구의 스키마 안내를 따릅니다.
 """.strip()
 
 

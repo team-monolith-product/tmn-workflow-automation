@@ -1,22 +1,3 @@
-"""
-지식베이스에 읽기 전용 SQL을 실행하는 Service Layer입니다.
-
-봇 도구와 MCP 서버가 같은 함수를 부릅니다. 실행 규칙이 둘로 갈리면 한쪽에서
-되는 질의가 다른 쪽에서 막히고, 그 차이를 query_log로는 설명할 수 없게 됩니다.
-
-고정된 검색 함수가 아니라 SQL을 그대로 받습니다. LIKE 한 방으로는 기간·복수
-채널·집계를 표현할 수 없어서, 에이전트가 할 수 있는 것이 키워드를 바꿔가며 같은
-도구를 여러 번 부르는 것뿐이었습니다.
-
-트랜잭션을 READ ONLY로 열어 쓰기를 막습니다. 적재 파이프라인과 같은 롤로
-접속하므로 권한으로는 갈리지 않습니다. query_log 적재는 쓰기라서 이 커넥션으로
-할 수 없고, 따로 접속해 남깁니다.
-
-결과는 서버 커서로 한 묶음씩 당겨오며 글자 예산이 떨어지면 멈춥니다. 다 받아
-놓고 자르면 `SELECT raw_text FROM item` 한 줄에 스레드 원문 1.5만 건이 그대로
-메모리에 올라옵니다.
-"""
-
 import json
 import time
 from datetime import date, datetime
@@ -26,95 +7,62 @@ import psycopg
 
 from service.db import connect
 
-# 옛 검색 도구가 스니펫 20건으로 돌려주던 분량이다.
 DEFAULT_CHAR_LIMIT = 8_000
-# 에이전트 문맥을 지키는 상한. 스레드 원문이 평균 1,148자라 이 값이면 원문
-# 40여 건에서 멈춘다.
 MAX_CHAR_LIMIT = 50_000
 
-# 서버 커서가 한 번에 당겨올 행 수
 FETCH_SIZE = 100
 
 SCHEMA_GUIDE = """
 스키마(PostgreSQL):
-- data_source(id, source, external_id, name, enabled): 슬랙 채널 하나가 한 행.
-  name이 "t_개발_백" 같은 채널 이름이다.
+- data_source(id, source, external_id, name, enabled): 데이터 출처.
+  source는 출처 유형, external_id는 해당 출처의 식별자.
 - item(id, data_source_id, external_id, url, title, author, source_created_at,
   source_updated_at, raw jsonb, raw_text, char_len, distilled jsonb,
-  distilled_text, metadata jsonb, indexed_at): 슬랙 스레드 하나가 한 행.
-  raw_text가 스레드 원문이고 평균 1,148자다. distilled_text는 아직 전부 비어 있다.
-- query_log(actor, tool, query, filters, latency_ms, created_at): 이 도구의 실행 기록.
+  distilled_text, metadata jsonb, indexed_at): 수집 항목.
+  slack은 스레드 단위이며 raw_text에 원문이 있다.
+  drive_sheet는 시트 단위이며 raw_text에 시트명·탭명·머리행이 있다.
+  metadata->'tabs'에는 탭별 gid·columns가 있다. 셀 값은 read_sheet로 조회한다.
+- query_log(actor, tool, query, filters, latency_ms, created_at): SQL 실행 기록.
 - sms_log(id, ref_key, message_key, channel_id, project, thread_ts, sender,
   content, message_type, approved_by, sent_at, scheduled_at, phone, name,
-  change_word jsonb): 문자 발송 이력. 슬랙 [보내기] 승인으로 나간 것만 있다.
-  틀리기 쉬운 자리 넷:
-  (1) 한 행이 "발송 × 받는 사람"이다. 148명에게 보낸 문자는 148행이고 content가
-      148번 반복된다. 발송 건수는 count(*)가 아니라 count(distinct ref_key).
-  (2) "언제 나갔나"는 coalesce(scheduled_at, sent_at). sent_at은 뿌리오가 접수한
-      시각이고, 예약 발송이면 실제로 나가는 시각은 scheduled_at에 있다.
-      둘 다 timestamptz이고 세션 타임존이 UTC라 그대로 뽑으면 09:00 KST가
-      00:00+00:00으로 보인다. 사람에게 보일 값은 AT TIME ZONE 'Asia/Seoul'.
-  (3) name은 문안이 [*이름*]을 쓰는데 값이 없으면 빈 문자열, 문안이 아예 안 쓰면
-      NULL이라 둘 다 봐야 한다. phone은 하이픈 없는 숫자다.
-  (4) 채널 이름으로 찾으려면 sms_log.channel_id = data_source.external_id AND
-      data_source.source = 'slack' 로 잇는다. 지식 수집에 등록되지 않은 채널은
-      data_source에 없어 이 조인이 조용히 0행을 내므로, 못 찾으면 channel_id로 직접.
-  content는 치환 전 원문이라 [*이름*] 태그가 그대로 있고, change_word는
-  {"var1": "1기"} 꼴로 키 var1~var8이 문안의 [*1*]~[*8*]에 대응한다.
-  project는 발송 시점에 박은 사업명이고 매핑에 없는 채널이면 NULL이다.
+  change_word jsonb): 수신자별 문자 발송 기록. ref_key는 발송 식별자.
+  sent_at은 발송 접수 시각, scheduled_at은 예약 발송 시각(timestamptz, 세션 UTC).
+  content는 치환 전 문안, change_word의 var1~var8은 [*1*]~[*8*] 치환값.
+  name은 미사용 시 NULL, 치환값 누락 시 빈 문자열. phone은 하이픈 없는 번호.
+  project는 발송 당시 사업명. channel_id는 슬랙 채널 ID.
+- revenue_transactions(year, issued_on, status, customer, item, quantity, unit_price,
+  amount, tax, total, category, subcategory, note, school_level, edu_office,
+  budget_sources text[], terms text[], program_name, program_client,
+  program_budget, program_our_revenue, program_stage): 매출장 한 행당 한 거래.
+  year는 탭의 귀속연도, issued_on은 발행일. status는 issued(발행)·planned(예정).
+  amount는 공급가액, tax는 세액, total은 세금 포함 금액.
+  category·subcategory는 상품 분류. school_level·edu_office·budget_sources·terms는
+  고객 단위 CRM 정보이며, program_*은 사업 단위 CRM 정보다.
+  같은 고객·사업의 정보가 여러 거래에 반복된다. 미매칭 필드는 NULL이다.
 
-구글 시트 찾기:
-- data_source.source='drive_sheet' 인 item 이 구글 시트 카탈로그다. **한 행이 시트
-  하나**이고, raw_text 는 "시트 이름 + 탭 이름 + 머리행"이다. 셀 값은 들어 있지
-  않다 -- 응답이 계속 쌓여 곧 낡기 때문이다.
-- 그래서 여기서 답할 수 있는 것은 "그런 시트가 어디 있나"까지다. 행수·집계·명단은
-  **execute_python 안에서 read_sheet 로 실시간으로 읽어** 처리한다.
-- metadata->'tabs' 에 탭별 gid 와 columns 가 있다. 시트를 찾은 뒤
-  external_id(=스프레드시트 ID)와 탭 이름(또는 gid)을 그 코드에 넘긴다.
-- 예: 출석 열이 있는 시트 찾기
-  SELECT i.title, i.external_id, i.url
-  FROM item i JOIN data_source d ON d.id = i.data_source_id
-  WHERE d.source = 'drive_sheet' AND lower(i.raw_text) LIKE lower('%출석%')
-  ORDER BY i.source_updated_at DESC
-
-규약:
-- 어휘를 찾을 때는 lower(raw_text) LIKE lower('%키워드%')로 쓴다. GIN(pg_bigm)
-  인덱스가 lower(raw_text)에만 걸려 있어 ILIKE나 정규식은 전체 스캔이 된다.
-- raw_text를 통째로 고르면 몇 행 만에 글자 상한에 닿는다. substring()으로 맞은
-  자리 주변만 자르고, url을 함께 골라 원문으로 넘긴다.
-- SELECT·WITH·VALUES만 실행된다. 트랜잭션이 READ ONLY라 쓰기는 거부되고,
-  세미콜론으로 문장을 이어붙일 수 없다.
+실행: SELECT·WITH·VALUES 단일 문장, 읽기 전용.
+검색 인덱스: lower(item.raw_text)의 GIN(pg_bigm).
 """.strip()
+
 
 LOG_QUERY = """
 INSERT INTO query_log (actor, tool, query, filters, latency_ms)
 VALUES (%(actor)s, %(tool)s, %(query)s, %(filters)s, %(latency_ms)s)
 """
 
-# 봇 도구와 MCP 도구가 같은 설명을 씁니다. 스키마를 한쪽에만 고쳐 넣으면
-# 어느 에이전트가 무엇을 알고 SQL을 썼는지가 갈립니다.
 QUERY_TOOL_DESCRIPTION = f"""
-사내 슬랙 공개 채널의 과거 대화가 쌓인 지식베이스에 읽기 전용 SQL을 실행합니다.
-"예전에 이거 어떻게 했었지", "이 에러 본 적 있나" 같은 질문에 사용합니다.
+사내 지식베이스의 슬랙 대화·매출 등에 읽기 전용 SQL을 실행합니다.
 
 인자:
 - sql: 실행할 SQL
 - char_limit: 돌려받을 글자 수 상한. 기본 {DEFAULT_CHAR_LIMIT}, 최대 {MAX_CHAR_LIMIT}.
-  넘치면 잘라내고 어디서 잘렸는지 알려줍니다.
+  초과 시 결과가 잘립니다.
 
 {SCHEMA_GUIDE}
 """.strip()
 
 
 def format_value(value: Any) -> str:
-    """한 칸에 들어갈 값을 한 줄 문자열로 만듭니다.
-
-    Args:
-        value: 행에서 꺼낸 값
-
-    Returns:
-        str: 줄바꿈이 없는 문자열. NULL은 빈 칸
-    """
     if value is None:
         return ""
     if isinstance(value, (dict, list)):
@@ -127,18 +75,6 @@ def format_value(value: Any) -> str:
 def render_rows(
     rows: Iterable[dict[str, Any]], char_limit: int
 ) -> tuple[str, int, bool]:
-    """행을 파이프로 구분한 표로 만들되 글자 예산까지만 만듭니다.
-
-    행을 하나씩 받아 예산을 넘기는 순간 멈춥니다. 호출부가 서버 커서를 넘기므로,
-    여기서 멈추면 남은 행은 아예 당겨오지 않습니다.
-
-    Args:
-        rows: 행 목록. dict 하나가 한 행
-        char_limit: 돌려줄 글자 수 상한
-
-    Returns:
-        tuple[str, int, bool]: 표, 읽은 행 수, 잘렸는지 여부
-    """
     lines: list[str] = []
     length = 0
     row_count = 0
@@ -158,8 +94,7 @@ def render_rows(
             rendered = "\n".join(lines)[:char_limit]
             return (
                 f"{rendered}\n"
-                f"…{char_limit}자에서 잘렸습니다({row_count}행까지 읽음). "
-                "LIMIT을 줄이거나 substring()으로 컬럼을 좁히세요.",
+                f"…{char_limit}자에서 잘렸습니다({row_count}행까지 읽음).",
                 row_count,
                 True,
             )
@@ -173,32 +108,12 @@ def render_rows(
 def run_query(
     sql: str, actor: str, tool: str, char_limit: int = DEFAULT_CHAR_LIMIT
 ) -> str:
-    """읽기 전용으로 SQL을 실행하고 결과를 표로 돌려줍니다.
-
-    실패를 예외가 아니라 문자열로 돌려줍니다. 부르는 쪽이 전부 에이전트 도구라
-    메시지를 받아 SQL을 고쳐 다시 부르는 것이 유일한 처리이기 때문입니다.
-
-    질의를 query_log에 남기는 것이 이 함수의 책임입니다. 호출부에 맡기면
-    빠뜨린 경로가 생기고, 무엇이 검색되지 않는지는 이 표로만 알 수 있습니다.
-    임의 SQL은 무엇이 나올지 정해져 있지 않아 result_ids는 채우지 않습니다.
-
-    Args:
-        sql: 실행할 SQL
-        actor: 질의한 사람의 이메일
-        tool: 질의가 들어온 경로. "slack", "mcp", "route_bug"
-        char_limit: 돌려받을 글자 수 상한. MAX_CHAR_LIMIT까지
-
-    Returns:
-        str: 파이프로 구분한 표. 실패하면 그 이유
-    """
     budget = min(char_limit, MAX_CHAR_LIMIT)
     filters: dict[str, Any] = {"char_limit": budget}
 
     started = time.monotonic()
     try:
         with connect(read_only=True) as conn:
-            # 서버 커서는 DECLARE ... CURSOR FOR를 타므로 SELECT·WITH·VALUES가
-            # 아닌 문장과 세미콜론으로 이어붙인 여러 문장이 여기서 걸린다.
             with conn.cursor(name="knowledge_query") as cur:
                 cur.itersize = FETCH_SIZE
                 cur.execute(sql)
@@ -215,7 +130,6 @@ def run_query(
 def _log_query(
     actor: str, tool: str, sql: str, filters: dict[str, Any], latency_ms: int
 ) -> None:
-    """질의 기록을 남깁니다. 읽기 전용 커넥션으로는 쓸 수 없어 따로 접속합니다."""
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             LOG_QUERY,

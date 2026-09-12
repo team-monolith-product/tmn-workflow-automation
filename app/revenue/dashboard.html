@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>팀모노리스 매출</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0e17;--panel:#141a27;--line:#283247;--text:#eef2fa;--muted:#a6b1c5;--accent:#5b8cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:32px 24px 64px}header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:24px}.brand{display:flex;align-items:center;gap:12px}.brand img{width:36px;height:36px;object-fit:contain}h1{font-size:28px;margin:0}h2{font-size:17px;margin:0 0 20px}a{color:#abc4ff}header>a{white-space:nowrap}p{margin:8px 0;color:var(--muted)}.small{font-size:12px;color:var(--muted)}form,.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}label{display:flex;align-items:center;gap:8px}input,select,button{font:inherit;color:var(--text);background:#1e2940;border:1px solid #3a4865;border-radius:8px;padding:8px 12px}button{cursor:pointer;background:#244b9f}button:disabled{opacity:.4;cursor:default}input{max-width:100%}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:24px 0}.card,.panel{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px}.card span{display:block;color:var(--muted);font-size:13px}.card strong{display:block;font-size:26px;margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{margin-bottom:20px;min-width:0}.wide{grid-column:1/-1}.bar-row{display:grid;grid-template-columns:minmax(90px,1fr) 2fr minmax(95px,auto);gap:14px;align-items:center;margin:12px 0;font-size:13px}.bar-track{height:10px;background:#222c40;border-radius:8px;overflow:hidden}.bar{height:100%;background:var(--accent);border-radius:8px}.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);white-space:nowrap}td.item{min-width:200px}details{margin-top:6px;color:var(--muted)}summary{cursor:pointer;color:#abc4ff}.pager{justify-content:flex-end;margin-top:18px}.empty{padding:28px 0;color:var(--muted)}.notice{padding:12px 0;color:var(--muted)}footer{margin-top:20px;color:var(--muted);font-size:12px}
+@media(max-width:760px){main{padding:20px 14px}header{align-items:flex-start}h1{font-size:23px}.cards{grid-template-columns:1fr 1fr;gap:10px}.card,.panel{padding:16px}.card strong{font-size:20px}.grid{grid-template-columns:1fr}.bar-row{grid-template-columns:100px 1fr 90px;gap:8px}.controls input{width:100%}}
+</style>
+</head>
+<body><main>
+<header><div><div class="brand"><img src="assets/logo-monolith.png" alt=""><h1>팀모노리스 매출</h1></div><p>세금계산서 발행 실적 · 공급가액 기준, 부가세 제외</p></div><a href="logout">로그아웃</a></header>
+<form method="get"><label>귀속연도 <select name="year" id="year"></select></label><label>분류 <select name="dimension" id="dimension"></select></label><button type="submit">조회</button></form>
+<p class="small">매일 00:10에 매출장을 반영합니다. 발행일과 귀속연도가 다를 수 있습니다.</p>
+<div class="cards" id="cards"></div>
+<div class="grid">
+<section class="panel"><h2>연도별 발행 매출</h2><div id="yearly"></div></section>
+<section class="panel"><h2>월별 발행 매출</h2><p class="small">선택한 귀속연도의 거래를 발행 월로 집계합니다.</p><div id="monthly"></div></section>
+<section class="panel"><h2 id="group-title">분류별 매출</h2><p id="group-note" class="small"></p><div id="groups"></div></section>
+<section class="panel"><h2>고객별 매출 · 상위 20곳</h2><div id="customers"></div></section>
+<section class="panel wide"><h2>거래 상세</h2>
+<form method="get" class="controls"><input type="hidden" name="year" id="detail-year"><input type="hidden" name="dimension" id="detail-dimension"><label>상태 <select name="status" id="status"><option value="issued">발행</option><option value="planned">예정</option></select></label><input name="search" id="search" placeholder="거래처·품목·비고 검색" aria-label="거래 검색" maxlength="200"><button type="submit">검색</button></form>
+<p class="notice" id="count"></p><div class="scroll"><table><thead><tr><th>발행일</th><th>거래처</th><th>품목 · 배경</th><th>분류</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th></tr></thead><tbody id="transactions"></tbody></table></div><div class="controls pager" id="pager"></div>
+</section></div>
+<footer>예정 금액은 발행 실적에 포함하지 않습니다. 고객의 CRM 정보는 해당 거래의 확정 예산·계약기간이 아닙니다.</footer>
+</main><script>
+const DATA = __REVENUE_DATA__;
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function number(value){
+  if(value === null || value === undefined) return '—';
+  const [whole, fraction] = String(value).split('.');
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction ? '.' + fraction : '');
+}
+function won(value){return number(value)+'원'}
+function bars(id, rows){
+  if(!rows.length){$(id).innerHTML='<div class="empty">데이터가 없습니다.</div>';return;}
+  const max=Math.max(...rows.map(r=>Math.abs(Number(r.amount))),1);
+  $(id).innerHTML=rows.map((r,i)=>`<div class="bar-row"><span>${esc(r.label)}</span><div class="bar-track"><div class="bar" style="width:${Math.abs(Number(r.amount))/max*100}%;background:hsl(${220+i*37} 70% 65%)"></div></div><span class="num">${esc(won(r.amount))}</span></div>`).join('');
+}
+$('year').innerHTML=DATA.yearly.map(r=>`<option value="${r.year}" ${r.year===DATA.year?'selected':''}>${r.year}년</option>`).join('');
+$('dimension').innerHTML=Object.entries(DATA.dimensions).map(([key,label])=>`<option value="${key}" ${key===DATA.dimension?'selected':''}>${esc(label)}</option>`).join('');
+const t=DATA.totals;
+$('cards').innerHTML=[['발행 매출',won(t.issued)],['예정 · 실적 제외',won(t.planned)],['발행 거래',number(t.count)+'건'],['고객',number(t.customers)+'곳']].map(([label,value])=>`<div class="card"><span>${label}</span><strong>${esc(value)}</strong></div>`).join('');
+bars('yearly',DATA.yearly.map(r=>({label:r.year+'년',amount:r.issued})));
+bars('monthly',Array.from({length:12},(_,i)=>({label:(i+1)+'월',amount:DATA.monthly.find(r=>r.month===i+1)?.amount??0})));
+bars('groups',DATA.groups);bars('customers',DATA.customers);
+$('group-title').textContent=DATA.dimensions[DATA.dimension]+'별 발행 매출';
+if(DATA.dimension==='budget_sources') $('group-note').textContent='고객의 복수 예산출처별 집계입니다. 항목 간 거래가 겹치므로 합계를 더하면 전체 매출과 다를 수 있습니다.';
+$('detail-year').value=DATA.year??'';$('detail-year').disabled=DATA.year===null;$('detail-dimension').value=DATA.dimension;$('status').value=DATA.status;$('search').value=DATA.search;
+$('count').textContent=`${DATA.count}건 · 금액 큰 순 · ${DATA.page}/${DATA.pages} 페이지`;
+function context(r){
+  const parts=[r.school_level,r.edu_office,(r.budget_sources||[]).join(' · '),(r.terms||[]).join(' · ')].filter(Boolean);
+  if(r.program_name){
+    parts.push('사업: '+r.program_name);
+    if(r.program_client) parts.push('발주처: '+r.program_client);
+    if(r.program_budget!==null) parts.push('사업 전체 예산: '+won(r.program_budget));
+    if(r.program_our_revenue!==null) parts.push('사업 전체 우리 몫: '+won(r.program_our_revenue));
+    if(r.program_stage) parts.push(r.program_stage);
+  }
+  return parts.length?`<details><summary>CRM 배경정보</summary>${parts.map(esc).join('<br>')}</details>`:'';
+}
+$('transactions').innerHTML=DATA.rows.length?DATA.rows.map(r=>`<tr><td>${esc(r.issued_on||'예정')}</td><td>${esc(r.customer)}</td><td class="item">${esc(r.item)}${r.note?`<div class="small">${esc(r.note)}</div>`:''}${context(r)}</td><td>${esc(r.category)}${r.subcategory?`<div class="small">${esc(r.subcategory)}</div>`:''}</td><td class="num">${number(r.quantity)}</td><td class="num">${number(r.unit_price)}</td><td class="num">${number(r.amount)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">해당 거래가 없습니다.</td></tr>';
+for(const [label,page] of [['이전',DATA.page-1],['다음',DATA.page+1]]){
+  const button=document.createElement('button');button.textContent=label;button.disabled=page<1||page>DATA.pages;
+  button.onclick=()=>{const params=new URLSearchParams({year:DATA.year,dimension:DATA.dimension,status:DATA.status,search:DATA.search,page});location.search=params.toString()};$('pager').append(button);
+}
+</script></body></html>

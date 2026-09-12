@@ -36,19 +36,13 @@ def get_headers() -> dict[str, str]:
     return {"Authorization": f"Key {get_api_key()}", "Content-Type": "application/json"}
 
 
-async def _get_json(url: str, params: dict[str, str] | None = None) -> dict:
-    """
-    Redash API에 GET 요청을 보내고 JSON 응답을 반환합니다.
-
-    Args:
-        url: 요청할 전체 URL
-        params: 쿼리 파라미터 (aiohttp는 문자열 값만 받는다)
-
-    Returns:
-        dict: 응답 JSON
-    """
+async def _request_json(
+    url: str, params: dict[str, str] | None = None, *, payload: dict | None = None
+) -> dict:
     async with aiohttp.ClientSession(headers=get_headers()) as session:
-        async with session.get(url, params=params) as response:
+        async with session.request(
+            "POST" if payload is not None else "GET", url, params=params, json=payload
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -66,7 +60,7 @@ async def list_dashboards(query: str | None = None) -> dict:
     url = f"{get_base_url()}/api/dashboards"
     params = {"q": query} if query else None
 
-    return await _get_json(url, params)
+    return await _request_json(url, params)
 
 
 async def get_dashboard(dashboard_slug: str) -> dict:
@@ -81,7 +75,7 @@ async def get_dashboard(dashboard_slug: str) -> dict:
     """
     url = f"{get_base_url()}/api/dashboards/{dashboard_slug}"
 
-    return await _get_json(url)
+    return await _request_json(url)
 
 
 async def get_query(query_id: int) -> dict:
@@ -96,7 +90,7 @@ async def get_query(query_id: int) -> dict:
     """
     url = f"{get_base_url()}/api/queries/{query_id}"
 
-    return await _get_json(url)
+    return await _request_json(url)
 
 
 async def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict:
@@ -114,4 +108,22 @@ async def search_queries(query: str, page: int = 1, page_size: int = 25) -> dict
     url = f"{get_base_url()}/api/queries"
     params = {"q": query, "page": str(page), "page_size": str(page_size)}
 
-    return await _get_json(url, params)
+    return await _request_json(url, params)
+
+
+async def create_query_result(
+    query: str, data_source_id: int, max_age: int = 0
+) -> dict:
+    url = f"{get_base_url()}/api/query_results"
+    return await _request_json(
+        url,
+        payload={"query": query, "data_source_id": data_source_id, "max_age": max_age},
+    )
+
+
+async def get_job(job_id: str) -> dict:
+    return await _request_json(f"{get_base_url()}/api/jobs/{job_id}")
+
+
+async def get_query_result(query_result_id: int) -> dict:
+    return await _request_json(f"{get_base_url()}/api/query_results/{query_result_id}")

@@ -28,6 +28,7 @@ from app.slack_task_mcp import (
     build_mcp as build_operations_task_mcp,
     build_mcp_app as build_operations_task_mcp_app,
 )
+from app.revenue.web import router as revenue_router
 from github import Github, GithubException
 from dotenv import load_dotenv
 import sentry_sdk
@@ -462,6 +463,7 @@ async def handle_webhook(
 
 
 app.include_router(knowledge_notion_router)
+app.include_router(revenue_router)
 
 
 @app.get("/")
@@ -474,6 +476,7 @@ async def root():
             "health": "/health",
             "webhook": "/webhook",
             "knowledge_notion_events": "/knowledge/notion/events",
+            "revenue_dashboard": "/revenue/",
             "docs": "/docs",
         },
     }

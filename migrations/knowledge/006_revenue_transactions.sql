@@ -1,0 +1,26 @@
+CREATE TABLE revenue_transactions (
+    year integer NOT NULL,
+    issued_on date,
+    status text NOT NULL CHECK (status IN ('issued', 'planned')),
+    customer text NOT NULL,
+    item text NOT NULL,
+    quantity numeric,
+    unit_price numeric,
+    amount numeric NOT NULL,
+    tax numeric,
+    total numeric,
+    category text NOT NULL,
+    subcategory text,
+    note text,
+    school_level text,
+    edu_office text,
+    budget_sources text[],
+    terms text[],
+    program_name text,
+    program_client text,
+    program_budget numeric,
+    program_our_revenue numeric,
+    program_stage text,
+    CHECK ((status = 'issued' AND issued_on IS NOT NULL)
+        OR (status = 'planned' AND issued_on IS NULL))
+);

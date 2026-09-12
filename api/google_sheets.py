@@ -241,3 +241,21 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
         # strict -- 응답이 요청보다 짧으면 뒤쪽 탭이 조용히 사라지는 대신 터진다.
         for tab, value_range in zip(tabs, ranges, strict=True)
     ]
+
+
+def get_spreadsheet_values_batch(
+    spreadsheet_id: str,
+    ranges: list[str],
+    value_render_option: str = "FORMATTED_VALUE",
+    date_time_render_option: str = "FORMATTED_STRING",
+    account: str = DEFAULT_ACCOUNT,
+) -> dict:
+    return _get_client(account).http_client.values_batch_get(
+        spreadsheet_id,
+        ranges,
+        params={
+            "valueRenderOption": value_render_option,
+            "dateTimeRenderOption": date_time_render_option,
+            "majorDimension": "ROWS",
+        },
+    )
