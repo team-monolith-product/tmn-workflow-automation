@@ -18,7 +18,7 @@ from service.revenue.query import dashboard_data
 
 router = APIRouter(prefix="/revenue")
 
-TEMPLATE_PATH = Path(__file__).with_name("revenue_dashboard.html")
+TEMPLATE_PATH = Path(__file__).with_name("dashboard.html")
 DATA_MARKER = "__REVENUE_DATA__"
 
 SESSION_COOKIE = "revenue_session"
@@ -174,6 +174,6 @@ async def revenue_logout() -> RedirectResponse:
 @router.get("/assets/logo-monolith.png")
 async def revenue_logo() -> Response:
     return FileResponse(
-        TEMPLATE_PATH.parent / "revenue_assets" / "logo-monolith.png",
+        TEMPLATE_PATH.with_name("logo-monolith.png"),
         headers={"Cache-Control": "public, max-age=86400"},
     )

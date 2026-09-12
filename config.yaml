@@ -294,7 +294,7 @@ scheduled_jobs:
     module: scripts.sync_revenue_ledger
     function: main
     cron:
-      hour: 7
+      hour: 0
       minute: 10
     business_day_only: false
 

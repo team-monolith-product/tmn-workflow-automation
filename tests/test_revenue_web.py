@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from decimal import Decimal
 from starlette.testclient import TestClient
 
-from app import revenue_web
-from app.revenue_web import (
+from app.revenue import web
+from app.revenue.web import (
     DATA_MARKER,
     PKCE_COOKIE,
     REFRESH_COOKIE,
@@ -40,7 +40,7 @@ def client(monkeypatch):
     monkeypatch.setenv("REVENUE_OAUTH_CLIENT_ID", "client-uid")
     monkeypatch.delenv("REVENUE_OAUTH_CLIENT_SECRET", raising=False)
     monkeypatch.setattr(
-        revenue_web,
+        web,
         "dashboard_data",
         lambda *args: {
             "rows": [{"customer": "도담고등학교", "amount": Decimal("1.25")}]
@@ -88,7 +88,7 @@ def test_콜백은_코드를_토큰으로_바꿔_쿠키에_두고_대시보드�
         }
     )
 
-    with patch("app.revenue_web.exchange_authorization_code", exchange):
+    with patch("app.revenue.web.exchange_authorization_code", exchange):
         response = client.get(
             f"/revenue/callback?code=abc&state={state}", follow_redirects=False
         )
@@ -118,7 +118,7 @@ def test_낡은_코드면_다시_로그인으로_보낸다(client):
     state = state_of(client)
 
     with patch(
-        "app.revenue_web.exchange_authorization_code", AsyncMock(return_value=None)
+        "app.revenue.web.exchange_authorization_code", AsyncMock(return_value=None)
     ):
         response = client.get(
             f"/revenue/callback?code=old&state={state}", follow_redirects=False
@@ -131,7 +131,7 @@ def test_낡은_코드면_다시_로그인으로_보낸다(client):
 def test_유효한_쿠키면_DB_조회_화면을_돌려준다(client):
     set_cookie(client, SESSION_COOKIE, "at-1")
 
-    with patch("app.revenue_web.get_me", AsyncMock(return_value=ADMIN)) as me:
+    with patch("app.revenue.web.get_me", AsyncMock(return_value=ADMIN)) as me:
         response = client.get("/revenue/")
 
     assert response.status_code == 200
@@ -154,8 +154,8 @@ def test_만료된_토큰은_리프레시로_살린다(client):
         }
     )
 
-    with patch("app.revenue_web.get_me", me), patch(
-        "app.revenue_web.refresh_access_token", refresh
+    with patch("app.revenue.web.get_me", me), patch(
+        "app.revenue.web.refresh_access_token", refresh
     ):
         response = client.get("/revenue/")
 
@@ -169,8 +169,8 @@ def test_리프레시도_안_되면_로그인으로_보낸다(client):
     set_cookie(client, SESSION_COOKIE, "expired")
     set_cookie(client, REFRESH_COOKIE, "revoked")
 
-    with patch("app.revenue_web.get_me", AsyncMock(return_value=None)), patch(
-        "app.revenue_web.refresh_access_token", AsyncMock(return_value=None)
+    with patch("app.revenue.web.get_me", AsyncMock(return_value=None)), patch(
+        "app.revenue.web.refresh_access_token", AsyncMock(return_value=None)
     ):
         response = client.get("/revenue/", follow_redirects=False)
 
@@ -202,10 +202,8 @@ def test_렌더는_script_종료_태그를_무력화한다():
 def test_query_parameters_reach_database(client, monkeypatch):
     set_cookie(client, SESSION_COOKIE, "at-1")
     calls = []
-    monkeypatch.setattr(
-        revenue_web, "dashboard_data", lambda *args: calls.append(args) or {}
-    )
-    with patch("app.revenue_web.get_me", AsyncMock(return_value=ADMIN)):
+    monkeypatch.setattr(web, "dashboard_data", lambda *args: calls.append(args) or {})
+    with patch("app.revenue.web.get_me", AsyncMock(return_value=ADMIN)):
         response = client.get(
             "/revenue/?year=2025&dimension=budget_sources&search=학교&page=2&status=planned"
         )
@@ -220,7 +218,7 @@ def test_invalid_query_dimension_is_rejected(client):
 
 def test_admin_access_is_checked_on_each_request(client):
     set_cookie(client, SESSION_COOKIE, "token")
-    with patch("app.revenue_web.get_me", AsyncMock(side_effect=[ADMIN, None])) as me:
+    with patch("app.revenue.web.get_me", AsyncMock(side_effect=[ADMIN, None])) as me:
         assert client.get("/revenue/", follow_redirects=False).status_code == 200
         assert client.get("/revenue/", follow_redirects=False).status_code == 302
     assert me.await_count == 2
