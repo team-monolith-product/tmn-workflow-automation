@@ -1,5 +1,4 @@
 import re
-from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -87,7 +86,6 @@ def normalize_rows(
     product = rules["product"]
     warnings = []
     rows = []
-    totals = defaultdict(Decimal)
     for (tab, spec), value_range in zip(
         ledger["tabs"].items(), values[:-1], strict=True
     ):
@@ -157,19 +155,9 @@ def normalize_rows(
                 warnings.append(
                     f"{tab} {row_number}행: 분류마스터에 없는 조합 «{original_category} / {row['subcategory']}»"
                 )
-            if status == "issued":
-                totals[row["year"]] += row["amount"]
             rows.append(row)
     if not rows:
         raise ValueError("매출장 거래가 비어 있습니다. 기존 DB를 유지합니다")
-    assertions = rules.get("assertions", {})
-    for year, expected in assertions.get("year_totals_issued", {}).items():
-        if abs(totals[int(year)] - Decimal(str(expected))) > assertions.get(
-            "tolerance_won", 5
-        ):
-            warnings.append(
-                f"연도 총계 불일치 {year}: 계산 {totals[int(year)]:,} / 기준 {expected:,}"
-            )
     targets = set(product["base"].values()) | {r["then"] for r in product["exceptions"]}
     for target in sorted(targets - master.keys()):
         warnings.append(f"분류 규칙의 «{target}»가 분류마스터에 없습니다")

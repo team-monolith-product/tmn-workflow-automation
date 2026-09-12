@@ -41,16 +41,43 @@ def test_collection_includes_live_crm_in_same_batch(source_data):
     source_data.assert_awaited_once()
 
 
-def test_dry_run_does_not_connect_database_or_send_slack(source_data, monkeypatch):
+def test_dry_run_does_not_connect_database_or_report_sentry(source_data, monkeypatch):
     db = Mock(side_effect=AssertionError("dry-run must not connect"))
-    slack = Mock(side_effect=AssertionError("dry-run must not send"))
+    report = Mock(side_effect=AssertionError("dry-run must not send"))
     monkeypatch.setattr(batch, "connect", db)
-    monkeypatch.setattr(batch, "WebClient", slack)
+    monkeypatch.setattr(batch.sentry_sdk, "capture_message", report)
     batch.main(dry_run=True)
     db.assert_not_called()
-    slack.assert_not_called()
+    report.assert_not_called()
 
 
 def test_crm_list_preserves_embedded_comma_and_all_values():
     assert crm_list('["A,B", "C", null, ""]') == ["A,B", "C"]
     assert crm_list(None) == []
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_normalization_errors_are_reported_without_blocking_sync(monkeypatch, dry_run):
+    from unittest.mock import MagicMock
+
+    rows = [{"customer": "학교"}]
+    warnings = ["미분류", "CRM 매칭 0건"]
+    monkeypatch.setattr(batch, "collect_rows", lambda: (rows, warnings))
+    connection = MagicMock()
+    monkeypatch.setattr(batch, "connect", connection)
+    replace = Mock()
+    monkeypatch.setattr(batch, "replace_rows", replace)
+    report = Mock()
+    monkeypatch.setattr(batch.sentry_sdk, "capture_message", report)
+    batch.main(dry_run=dry_run)
+    if dry_run:
+        connection.assert_not_called()
+        replace.assert_not_called()
+        report.assert_not_called()
+    else:
+        replace.assert_called_once_with(
+            connection.return_value.__enter__.return_value, rows
+        )
+        report.assert_called_once_with(
+            "매출장 정규화 오류\n미분류\nCRM 매칭 0건", level="error"
+        )

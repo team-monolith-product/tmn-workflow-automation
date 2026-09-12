@@ -62,22 +62,20 @@ def test_duplicates_and_negative_adjustments_are_preserved():
     assert rows[-1]["amount"] == -100
 
 
-def test_category_and_total_problems_are_warnings():
+def test_category_problems_are_warnings():
     raw = sheet_response()
-    raw["valueRanges"][0]["values"][1][5] = 10
     raw["valueRanges"][0]["values"][1][8] = "새분류"
     raw["valueRanges"][1]["values"][1][9] = "없는 세부"
     rows, warnings = normalized_rows(raw)
     assert rows[0]["category"] == "미분류"
-    assert any("총계 불일치" in w for w in warnings)
     assert any("없는 조합" in w for w in warnings)
 
 
-def test_crm_keeps_all_budgets_and_manual_overrides():
+def test_crm_keeps_all_budgets_and_program_fields():
     rows, _ = normalized_rows()
     warnings = enrich_rows(
         rows,
-        [{"school": "도담고등학교", "level": "고등학교", "office": "세종"}],
+        [{"school": "도담고등학교", "level": "고등학교", "office": "세종교육청"}],
         [
             {
                 "school": "도담고등학교",
@@ -95,7 +93,6 @@ def test_crm_keeps_all_budgets_and_manual_overrides():
             }
         ],
         {
-            "manual": {"도담고등학교": {"edu_office": "세종교육청"}},
             "program_aliases": {"해커톤": "대학 해커톤"},
         },
     )

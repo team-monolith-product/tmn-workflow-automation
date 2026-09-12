@@ -142,12 +142,6 @@ class EducationBidCrawlerConfig:
     batch_size: int = 20
 
 
-@dataclass(frozen=True)
-class RevenueConfig:
-
-    alert_channel_id: str
-
-
 # --- 스케줄 작업 ---
 
 
@@ -175,7 +169,6 @@ class AppConfig:
     scrum: ScrumConfig
     task_alerts: TaskAlertsConfig
     education_bid_crawler: EducationBidCrawlerConfig | None = None
-    revenue: RevenueConfig | None = None
     scheduled_jobs: list[ScheduledJobConfig] = field(default_factory=list)
     sms_projects: dict[str, str] = field(default_factory=dict)
 
@@ -310,13 +303,6 @@ def _parse_config(raw: dict) -> AppConfig:
             batch_size=ebc_raw.get("batch_size", 20),
         )
 
-    revenue_raw = raw.get("revenue")
-    revenue = (
-        RevenueConfig(alert_channel_id=revenue_raw["alert_channel_id"])
-        if revenue_raw
-        else None
-    )
-
     # Scheduled jobs
     scheduled_jobs = [
         ScheduledJobConfig(
@@ -336,7 +322,6 @@ def _parse_config(raw: dict) -> AppConfig:
         scrum=scrum,
         task_alerts=task_alerts,
         education_bid_crawler=education_bid_crawler,
-        revenue=revenue,
         scheduled_jobs=scheduled_jobs,
         sms_projects=raw.get("sms_projects") or {},
     )

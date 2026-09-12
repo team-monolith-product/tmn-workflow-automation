@@ -71,13 +71,6 @@ product:
   - when:
       item_has: 아이폰
     then: 8. 기타
-assertions:
-  year_totals_issued:
-    2023: 346832002
-    2024: 2746305912
-    2025: 5610314600
-  tolerance_won: 5
-manual: {}
 program_aliases:
   찾아가는 학교 컨설팅: 2026 찾아가는 학교 컨설팅
   찾학컨: 2026 찾아가는 학교 컨설팅

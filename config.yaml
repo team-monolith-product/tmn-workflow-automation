@@ -321,6 +321,3 @@ education_bid_crawler:
       name: "교육/연수"
       channel_id: "C0B7H27DFT7"  # 슬랙 교육/운영 공공입찰
       work_types: [교육운영, 행사]
-
-revenue:
-  alert_channel_id: "C0BA4UXD2G7"

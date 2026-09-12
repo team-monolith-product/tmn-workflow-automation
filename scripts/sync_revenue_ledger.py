@@ -5,12 +5,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import argparse
 import asyncio
-import os
 
 from dotenv import load_dotenv
-from slack_sdk import WebClient
+import sentry_sdk
 
-from service.config import load_config
 from service.db import connect
 from service.revenue.config import load_rules, load_sources
 from service.revenue.enrich import enrich_rows, fetch_crm
@@ -73,13 +71,9 @@ def main(dry_run: bool = False) -> None:
     print(f"[revenue] {'dry-run' if dry_run else '동기화 완료'}: {len(rows)}행")
     for warning in warnings:
         print(f"[revenue] 경고: {warning}")
-    config = load_config().revenue
-    if warnings and not dry_run and config:
-        text = f"매출장 검증 경고 {len(warnings)}건\n" + "\n".join(warnings[:15])
-        if len(warnings) > 15:
-            text += f"\n외 {len(warnings) - 15}건: 배치 로그 확인"
-        WebClient(token=os.environ["SLACK_BOT_TOKEN"]).chat_postMessage(
-            channel=config.alert_channel_id, text=text
+    if warnings and not dry_run:
+        sentry_sdk.capture_message(
+            "매출장 정규화 오류\n" + "\n".join(warnings), level="error"
         )
 
 

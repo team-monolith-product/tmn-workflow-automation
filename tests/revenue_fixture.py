@@ -63,7 +63,6 @@ RULES = {
             }
         ],
     },
-    "assertions": {"year_totals_issued": {2025: 2000000}, "tolerance_won": 5},
 }
 
 MASTER_ROWS = [

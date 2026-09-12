@@ -124,7 +124,7 @@ def crm_list(value: Any) -> list[str]:
     return [v for v in values if v]
 
 
-def customer_info(name: str, orgs: list[dict], deals: list[dict], manual: dict) -> dict:
+def customer_info(name: str, orgs: list[dict], deals: list[dict]) -> dict:
     result = {}
     for candidate in school_variants(name):
         matches = [
@@ -146,12 +146,6 @@ def customer_info(name: str, orgs: list[dict], deals: list[dict], manual: dict) 
             break
     if not result:
         result["school_level"] = derive_level(name) or None
-    overrides = manual.get(customer_key(name), {})
-    for column in ("school_level", "edu_office", "terms"):
-        if column in overrides:
-            result[column] = overrides[column]
-    if "budget_source" in overrides:
-        result["budget_sources"] = overrides["budget_source"]
     return result
 
 
@@ -167,7 +161,7 @@ def enrich_rows(
         rules.get("program_aliases", {}).items(), key=lambda pair: -len(pair[0])
     )
     for row in rows:
-        row.update(customer_info(row["customer"], orgs, deals, rules.get("manual", {})))
+        row.update(customer_info(row["customer"], orgs, deals))
         for alias, name in aliases:
             if alias not in f"{row['customer']} {row['item']}":
                 continue
