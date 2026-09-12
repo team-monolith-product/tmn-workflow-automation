@@ -11,7 +11,13 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 
 from api.admin_rails import exchange_authorization_code, get_me, refresh_access_token
 from service.revenue.query import dashboard_data
@@ -117,6 +123,9 @@ async def revenue_dashboard(
     search: str = Query(default="", max_length=200),
     page: int = Query(default=1, ge=1),
     status: Literal["issued", "planned"] = "issued",
+    bucket: str | None = Query(default=None, max_length=200),
+    subcategory: str | None = Query(default=None, max_length=200),
+    format: Literal["html", "json"] = "html",
 ) -> Response:
     token = request.cookies.get(SESSION_COOKIE)
     admin = await get_me(token) if token else None
@@ -132,10 +141,14 @@ async def revenue_dashboard(
         return _login_redirect()
 
     data = await asyncio.to_thread(
-        dashboard_data, year, dimension, search, page, status
+        dashboard_data, year, dimension, search, page, status, bucket, subcategory
     )
     print(f"[revenue] dashboard by {admin['email']}")
-    response = HTMLResponse(render_dashboard(data))
+    response = (
+        JSONResponse(jsonable_encoder(data, custom_encoder={Decimal: str}))
+        if format == "json"
+        else HTMLResponse(render_dashboard(data))
+    )
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     if refreshed:

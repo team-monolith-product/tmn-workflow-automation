@@ -174,3 +174,69 @@ def test_empty_database_renders_zero_totals(database):
     data = dashboard_data()
     assert data["year"] is None
     assert data["rows"] == [] and data["totals"]["issued"] == 0
+
+
+def test_charts_cover_all_rows_and_years_independently_of_detail_page(database):
+    rows, _ = normalized_rows()
+    issued = [
+        dict(
+            rows[2],
+            customer=f"customer-{i:03d}",
+            amount=Decimal(i + 1),
+            category="구독",
+            subcategory="연간",
+            budget_sources=["자체", "자체", "정책"],
+        )
+        for i in range(105)
+    ]
+    with connect() as conn:
+        batch.replace_rows(conn, issued + rows[:2] + [rows[-1]])
+    data = dashboard_data(2026, page=2, search="customer-000")
+    assert len(data["rows"]) == 1
+    assert data["totals"]["count"] == 105
+    assert len(data["charts"]["customers"]) == 105
+    assert sum(r["amount"] for r in data["charts"]["customers"]) == 5565
+    assert {r["year"] for r in data["charts"]["monthly"]} == {2025, 2026}
+    group = next(r for r in data["charts"]["groups"] if r["year"] == 2026)
+    assert group["amount"] == 5565 and group["count"] == 105 and group["matched"] == 1
+    assert data["charts"]["subgroups"][0]["amount"] == 1
+    assert sum(r["count"] for r in data["charts"]["sizes"]) == 105
+    assert data["charts"]["size_stats"]["median"] == 53
+    assert data["totals"]["planned_count"] == 1
+    budget = dashboard_data(2026, "budget_sources", bucket="自체")
+    assert budget["count"] == 0
+    budget = dashboard_data(2026, "budget_sources", bucket="자체", page=2)
+    assert budget["count"] == 105 and len(budget["rows"]) == 5
+    assert {r["amount"] for r in budget["charts"]["groups"] if r["year"] == 2026} == {
+        5565
+    }
+
+
+def test_chart_bins_and_drill_filters_keep_negative_zero_and_precise_amounts(database):
+    rows, _ = normalized_rows()
+    amounts = [
+        Decimal("-0.123456789"),
+        Decimal(0),
+        Decimal(1000000),
+        Decimal(5000000),
+        Decimal(10000000),
+        Decimal(50000000),
+        Decimal(100000000),
+    ]
+    with connect() as conn:
+        batch.replace_rows(
+            conn,
+            [
+                dict(rows[2], amount=a, category="구독", subcategory="연간")
+                for a in amounts
+            ],
+        )
+    data = dashboard_data(2026, bucket="구독", subcategory="연간")
+    assert data["count"] == 7
+    assert data["rows"][-1]["amount"] == amounts[0]
+    assert [r["bin"] for r in data["charts"]["sizes"]] == list(range(7))
+    assert data["charts"]["sizes"][0]["amount"] == amounts[0]
+    assert dashboard_data(2026, bucket="구독", subcategory="월간")["count"] == 0
+    assert dashboard_data(2026, bucket="' OR true --")["count"] == 0
+    assert dashboard_data(2026, "school_level", bucket="미기재")["count"] == 7
+    assert dashboard_data(2026, "budget_sources", bucket="미기재")["count"] == 7

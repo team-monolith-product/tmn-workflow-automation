@@ -208,7 +208,7 @@ def test_query_parameters_reach_database(client, monkeypatch):
             "/revenue/?year=2025&dimension=budget_sources&search=학교&page=2&status=planned"
         )
     assert response.status_code == 200
-    assert calls == [(2025, "budget_sources", "학교", 2, "planned")]
+    assert calls == [(2025, "budget_sources", "학교", 2, "planned", None, None)]
 
 
 def test_invalid_query_dimension_is_rejected(client):
@@ -222,3 +222,34 @@ def test_admin_access_is_checked_on_each_request(client):
         assert client.get("/revenue/", follow_redirects=False).status_code == 200
         assert client.get("/revenue/", follow_redirects=False).status_code == 302
     assert me.await_count == 2
+
+
+def test_json_requires_authentication_and_preserves_decimal(client):
+    assert (
+        client.get("/revenue/?format=json", follow_redirects=False).status_code == 302
+    )
+    set_cookie(client, SESSION_COOKIE, "at-1")
+    with patch("app.revenue.web.get_me", AsyncMock(return_value=ADMIN)):
+        response = client.get("/revenue/?format=json")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["rows"][0]["amount"] == "1.25"
+
+
+def test_drill_filters_reach_database(client, monkeypatch):
+    set_cookie(client, SESSION_COOKIE, "at-1")
+    calls = []
+    monkeypatch.setattr(web, "dashboard_data", lambda *args: calls.append(args) or {})
+    with patch("app.revenue.web.get_me", AsyncMock(return_value=ADMIN)):
+        response = client.get(
+            "/revenue/",
+            params={
+                "format": "json",
+                "year": 2026,
+                "bucket": "구독",
+                "subcategory": "연간",
+                "page": 2,
+            },
+        )
+    assert response.status_code == 200
+    assert calls == [(2026, "category", "", 2, "issued", "구독", "연간")]
