@@ -41,7 +41,7 @@ def test_rows_keep_fiscal_year_planned_and_old_category_mapping():
 @pytest.mark.parametrize(
     "column,value", [(0, "2026-02-30"), (0, "3월중"), (0, ""), (5, "합계")]
 )
-def test_invalid_transaction_fails_instead_of_silently_dropping(column, value):
+def test_invalid_transaction_reports_source_row(column, value):
     raw = sheet_response()
     raw["valueRanges"][1]["values"][1][column] = value
     with pytest.raises(ValueError, match="26년 매출장.*2행"):

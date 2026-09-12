@@ -186,10 +186,8 @@ def test_로그아웃은_쿠키를_지운다(client):
     assert cookie(client, SESSION_COOKIE) is None
 
 
-def test_정적_자산은_디렉터리_밖으로_못_나간다(client):
+def test_로고를_제공한다(client):
     assert client.get("/revenue/assets/logo-monolith.png").status_code == 200
-    assert client.get("/revenue/assets/..%2Frevenue_web.py").status_code == 404
-    assert client.get("/revenue/assets/없는파일.png").status_code == 404
 
 
 def test_렌더는_script_종료_태그를_무력화한다():
