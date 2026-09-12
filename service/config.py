@@ -318,7 +318,6 @@ def _parse_config(raw: dict) -> AppConfig:
             batch_size=ebc_raw.get("batch_size", 20),
         )
 
-    # Revenue facts
     revenue_raw = raw.get("revenue")
     revenue = (
         RevenueConfig(alert_channel_id=revenue_raw["alert_channel_id"])

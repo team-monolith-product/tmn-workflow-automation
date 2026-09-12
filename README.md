@@ -140,36 +140,3 @@ python scripts/send_sms.py --content "[*이름*]선생님, 안내드립니다" \
 (Socket Mode 라 Request URL 은 필요 없습니다).
 
 발송 기록을 DB 에 남기는 것과 도달 확인은 다음 PR 입니다.
-
-## 매출 대시보드와 AI 조회
-
-구글 매출장과 Notion CRM의 Athena 미러를 매일 07:10 KST에 읽어
-`revenue_transactions` 한 테이블로 정규화합니다. DB는 최신 데이터를 다시 만들 수 있는 캐시이며,
-배치가 전체를 한 트랜잭션으로 교체합니다. 실패하면 기존 데이터가 남고 스케줄러/Sentry 로그에 기록됩니다.
-분류·총계 검증 경고만 기존 매출 Slack 채널에 알립니다.
-
-- 원본 위치·열 배치: `knowledge/revenue/sources.yml`
-- 과거 상품 분류·수기 보정·사업 별칭: `knowledge/revenue/rules.yml`
-- 스키마: `migrations/knowledge/006_revenue_transactions.sql`
-- 배치: `python scripts/sync_revenue_ledger.py` (`--dry-run`: 원본/CRM 읽기·검증만 수행)
-- 대시보드: `/revenue/`. 기존 admin-rails OAuth 로그인 후 DB 집계·거래 페이지를 조회합니다.
-- AI: 기존 `query_knowledge`로 동일 테이블을 조회합니다. 별도 매출 MCP 도구는 없습니다.
-
-매출은 `status='issued'`인 `amount`(공급가액) 합계입니다. `planned`는 예정이며 실적에서 제외합니다.
-`year`는 탭 기준 귀속연도, `issued_on`은 실제 발행일입니다.
-CRM 예산출처·사용학기는 고객의 여러 딜 정보이며 개별 거래에 확정된 값이 아닙니다.
-사업 전체 예산·우리 몫은 거래마다 반복되므로 합산하지 않습니다.
-
-필요 설정은 기존 `KNOWLEDGE_DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `REDASH_BASE_URL`,
-`REDASH_API_KEY`입니다. 매출장은 DEFAULT 서비스 계정에 뷰어로 공유합니다.
-화면 로그인에는 `REVENUE_OAUTH_CLIENT_ID`와 기존 admin-rails 환경 설정을 사용합니다.
-배포 시 기존 마이그레이션 스크립트로 006을 적용하고 최초 배치를 실행한 후 화면을 확인합니다.
-Query Knowledge가 노출된 사내 봇/MCP 경로에서도 매출 SQL을 사용할 수 있습니다.
-
-PostgreSQL 통합 테스트는 격리된 DB를 지정해 실행합니다:
-
-```bash
-REVENUE_TEST_DATABASE_URL='postgresql://.../test_db' pytest tests/test_revenue_db.py
-```
-
-테스트는 임시 스키마를 생성하고 종료 시 제거합니다. 외부 원본/CRM은 합성 데이터로 대체합니다.
