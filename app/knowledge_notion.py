@@ -19,6 +19,7 @@ from typing import Any
 
 from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from notion_client import APIResponseError
 
 from app.common import notion, notion_page_to_markdown
 from app.knowledge import DISTILL_DELAY_SECONDS
@@ -86,7 +87,13 @@ def ingest_page(page_id: str) -> str:
         # 검색 결과에 찍힌다.
         return f"최상위를 못 찾음 {page_id}"
 
-    markdown = notion_page_to_markdown(page_id) or ""
+    try:
+        markdown = notion_page_to_markdown(page_id) or ""
+    except APIResponseError as exc:
+        # 페이지 자체는 살아 있어도 그 안의 하위 블록(동기화 블록, 링크된
+        # 페이지 등)이 지워졌거나 공유가 끊기면 통째로 404가 난다. 기존
+        # 색인을 빈 본문으로 덮어쓰지 않도록 여기서 건너뛴다.
+        return f"본문 조회 실패 {page_id}: {exc}"
     if is_database_row(page) and len(markdown) < MIN_BODY_CHARS:
         # 표의 행이다. 구매 내역이나 학교 목록 같은 것이 검색에 섞이지 않도록
         # 본문 길이로 가른다.
