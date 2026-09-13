@@ -5,6 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from slack_sdk.http_retry.builtin_async_handlers import (
+    AsyncConnectionErrorRetryHandler,
+    AsyncRateLimitErrorRetryHandler,
+)
 from starlette.testclient import TestClient
 
 from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
@@ -203,6 +207,19 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
     assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
+
+
+def test_기본_slack_클라이언트가_429_레이트리밋을_재시도한다(mcp_env):
+    with patch("app.slack_task_mcp.AsyncWebClient") as mock_client_cls:
+        build_mcp()
+
+    handler_types = {
+        type(handler) for handler in mock_client_cls.call_args.kwargs["retry_handlers"]
+    }
+    assert handler_types == {
+        AsyncConnectionErrorRetryHandler,
+        AsyncRateLimitErrorRetryHandler,
+    }
 
 
 @pytest.mark.parametrize(

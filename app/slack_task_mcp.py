@@ -8,6 +8,10 @@ from typing import Literal, cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
+from slack_sdk.http_retry.builtin_async_handlers import (
+    AsyncConnectionErrorRetryHandler,
+    AsyncRateLimitErrorRetryHandler,
+)
 from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
@@ -96,7 +100,13 @@ def build_mcp(
         token_verifier=AdminRailsTokenVerifier(),
         auth=admin_auth_settings(resource_url),
     )
-    slack = slack_client or AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    slack = slack_client or AsyncWebClient(
+        token=os.environ["SLACK_BOT_TOKEN"],
+        retry_handlers=[
+            AsyncConnectionErrorRetryHandler(),
+            AsyncRateLimitErrorRetryHandler(),
+        ],
+    )
 
     @mcp.tool(
         name="start-slack-list-task",
