@@ -2,7 +2,11 @@
 
 import hashlib
 import hmac
+from unittest.mock import patch
 
+from notion_client import APIResponseError
+
+from app.knowledge_notion import ingest_page
 from service.knowledge.notion_events import (
     DELETE_EVENTS,
     INGEST_EVENTS,
@@ -107,3 +111,24 @@ def test_사슬이_끊기면_최상위가_없다():
     page = _page("a", {"type": "block_id", "block_id": "토글"})
 
     assert resolve_root(page, lambda kind, i: None, {}) is None
+
+
+def test_하위_블록_404는_건너뛰고_기존_색인을_지우지_않는다():
+    """페이지는 살아 있어도 내부의 동기화 블록 등이 지워지거나 공유가
+    끊기면 markdown 변환 전체가 404로 죽는다. 예외를 그대로 던지면
+    (WORKFLOW-AUTOMATION-69) 웹훅 백그라운드 작업이 크래시한다.
+    """
+    page = _page("a", {"type": "workspace", "workspace": True})
+    error = APIResponseError.__new__(APIResponseError)
+    error.args = ("Could not find block with ID: missing-block",)
+
+    with (
+        patch("app.knowledge_notion.notion") as mock_notion,
+        patch("app.knowledge_notion.resolve_root", return_value=page),
+        patch("app.knowledge_notion.notion_page_to_markdown", side_effect=error),
+    ):
+        mock_notion.pages.retrieve.return_value = page
+        result = ingest_page("a")
+
+    assert "본문 조회 실패" in result
+    assert "a" in result
