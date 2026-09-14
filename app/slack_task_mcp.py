@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
@@ -167,7 +168,7 @@ def build_mcp(
         token = cast(AdminToken, get_access_token())
         task_list = await asyncio.to_thread(find_channel_task_list, channel_id)
         if task_list is None:
-            raise ValueError("선택한 채널에 연결된 Slack 작업 List가 없습니다.")
+            raise ToolError("선택한 채널에 연결된 Slack 작업 List가 없습니다.")
 
         assignees = await get_email_to_user_id_async(slack)
         return await task_list.create_task(
