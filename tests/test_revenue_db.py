@@ -28,11 +28,12 @@ def database(monkeypatch):
         monkeypatch.setenv("KNOWLEDGE_DATABASE_URL", test_dsn)
         try:
             with connect() as conn:
-                migrations = (
-                    Path(__file__).resolve().parents[1] / "migrations/knowledge"
+                conn.execute(
+                    (
+                        Path(__file__).resolve().parents[1]
+                        / "migrations/knowledge/006_revenue_transactions.sql"
+                    ).read_text()
                 )
-                for migration in sorted(migrations.glob("00[6-9]_revenue_*.sql")):
-                    conn.execute(migration.read_text())
                 conn.execute(
                     "CREATE TABLE query_log (actor text, tool text, query text, filters jsonb, latency_ms int)"
                 )
@@ -118,15 +119,6 @@ def test_batch_success_replaces_rows_and_dry_run_does_not(database, monkeypatch)
         "2026 발행 0.00억 (-1,500,000원 · -2건) · 예정 0.00억 (-300,000원 · -1건)"
         in report
     )
-
-
-def test_synced_at_is_shared_by_all_rows_and_shown_to_dashboard(database):
-    rows, _ = normalized_rows()
-    with connect() as conn:
-        batch.replace_rows(conn, rows)
-    stamps = {r["synced_at"] for r in transactions()}
-    assert len(stamps) == 1
-    assert dashboard_data(2025)["synced_at"] == stamps.pop()
 
 
 def test_dashboard_and_query_knowledge_share_amount_and_year_basis(database):

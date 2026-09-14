@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import sentry_sdk
 from slack_sdk import WebClient
 
-from service.db import connect, fetch_all, fetch_one
+from service.db import connect, fetch_all
 from service.revenue.enrich import enrich_rows, fetch_crm
 from service.revenue.normalize import fetch_rows
 
@@ -93,14 +93,14 @@ def delta(after: Decimal | int, before: Decimal | int, count: int) -> str:
 def format_report(
     before: dict[int, dict],
     after: dict[int, dict],
-    synced_at: datetime,
+    completed_at: datetime,
     warnings: list[str],
 ) -> str:
     years = sorted(set(before) | set(after), reverse=True)
     issued_count = sum(row["issued_count"] for row in after.values())
     planned_count = sum(row["planned_count"] for row in after.values())
     lines = [
-        f"매출장 반영 {synced_at.astimezone(KST):%m-%d %H:%M} · 발행 {issued_count}건 · 예정 {planned_count}건"
+        f"매출장 반영 {completed_at.astimezone(KST):%m-%d %H:%M} · 발행 {issued_count}건 · 예정 {planned_count}건"
     ]
     empty = {"issued": 0, "issued_count": 0, "planned": 0, "planned_count": 0}
     for year in years:
@@ -143,9 +143,7 @@ def main(dry_run: bool = False) -> None:
             rows, warnings = collect_rows()
             replace_rows(conn, rows)
             after = year_totals(conn)
-            synced_at = fetch_one(
-                conn, "SELECT max(synced_at) AS synced_at FROM revenue_transactions"
-            )["synced_at"]
+        completed_at = datetime.now(KST)
     except Exception as error:
         notify(
             ":x: 매출장 동기화 실패 — 대시보드는 이전 데이터 그대로입니다.\n"
@@ -159,7 +157,7 @@ def main(dry_run: bool = False) -> None:
         sentry_sdk.capture_message(
             "매출장 정규화 오류\n" + "\n".join(warnings), level="error"
         )
-    notify(format_report(before, after, synced_at, warnings))
+    notify(format_report(before, after, completed_at, warnings))
 
 
 if __name__ == "__main__":

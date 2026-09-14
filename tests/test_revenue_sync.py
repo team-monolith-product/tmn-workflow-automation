@@ -58,7 +58,7 @@ def test_crm_list_preserves_embedded_comma_and_all_values():
     assert crm_list(None) == []
 
 
-SYNCED_AT = datetime(2026, 9, 14, 0, 10, tzinfo=KST)
+COMPLETED_AT = datetime(2026, 9, 14, 0, 10, tzinfo=KST)
 
 
 def totals(**years):
@@ -78,7 +78,6 @@ def synced(monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr(batch, "connect", connection)
     monkeypatch.setattr(batch, "year_totals", lambda conn: {})
-    monkeypatch.setattr(batch, "fetch_one", lambda *args: {"synced_at": SYNCED_AT})
     notify = Mock()
     monkeypatch.setattr(batch, "notify", notify)
     return connection, notify
@@ -150,7 +149,7 @@ def test_report_shows_day_over_day_change_per_year():
             "2025": (5_610_314_600, 185, 0, 0),
         }
     )
-    text = batch.format_report(before, after, SYNCED_AT, [])
+    text = batch.format_report(before, after, COMPLETED_AT, [])
     assert text.splitlines() == [
         "매출장 반영 09-14 00:10 · 발행 319건 · 예정 19건",
         "2026 발행 26.39억 (+138,524,903원 · +4건) · 예정 14.00억 (+101,557원 · +0건)",
@@ -160,17 +159,17 @@ def test_report_shows_day_over_day_change_per_year():
 def test_report_keeps_latest_year_even_without_change_and_lists_new_years():
     before = totals(**{"2026": (100, 1, 0, 0)})
     after = totals(**{"2027": (50, 1, 0, 0), "2026": (100, 1, 0, 0)})
-    text = batch.format_report(before, after, SYNCED_AT, [])
+    text = batch.format_report(before, after, COMPLETED_AT, [])
     assert text.splitlines()[1:] == [
         "2027 발행 0.00억 (+50원 · +1건) · 예정 0.00억 (변동 없음)",
     ]
-    unchanged = batch.format_report(after, after, SYNCED_AT, [])
+    unchanged = batch.format_report(after, after, COMPLETED_AT, [])
     assert unchanged.splitlines()[1:] == [
         "2027 발행 0.00억 (변동 없음) · 예정 0.00억 (변동 없음)",
     ]
 
 
 def test_report_truncates_warnings_to_five():
-    text = batch.format_report({}, {}, SYNCED_AT, [f"경고 {i}" for i in range(7)])
+    text = batch.format_report({}, {}, COMPLETED_AT, [f"경고 {i}" for i in range(7)])
     assert ":warning: 정규화 경고 7건" in text
     assert "• 경고 4" in text and "• 경고 5" not in text
