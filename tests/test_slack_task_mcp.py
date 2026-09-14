@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from starlette.testclient import TestClient
 
 from app.slack_task_mcp import _client_display_name, build_mcp, build_mcp_app
@@ -203,6 +204,26 @@ async def test_사용자_동의_후_운영_list에_작업_행을_만든다(mcp_e
     fields = client.slackLists_items_create.await_args.kwargs["initial_fields"]
     assert {"column_id": "ColOwner", "user": ["U01OWNER"]} in fields
     assert {"column_id": "ColDue", "date": ["2026-09-12"]} in fields
+
+
+async def test_연결된_작업_list가_없는_채널은_UnexpectedToolError로_뭉개지지_않는다(
+    mcp_env,
+):
+    client = AsyncMock()
+
+    with patch(
+        "app.slack_task_mcp.get_access_token",
+        return_value=SimpleNamespace(email="operator@team-mono.com"),
+    ), patch("app.slack_task_mcp.find_channel_task_list", return_value=None):
+        with pytest.raises(ToolError, match="연결된 Slack 작업 List가 없습니다"):
+            await build_mcp(client).call_tool(
+                "create_slack_list_task",
+                {
+                    "channel_id": "C01TASK",
+                    "title": "계정 생성",
+                    "due_date": "2026-09-12",
+                },
+            )
 
 
 @pytest.mark.parametrize(
