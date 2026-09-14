@@ -589,7 +589,12 @@ function countUp(el){
 
 /* 헤더 */
 document.getElementById('basisBadge').textContent = '세금계산서 발행 실적';
-document.getElementById('stamp').textContent = '매일 00:10 갱신';
+function stampText(){
+  if (!DATA.synced_at) return '아직 반영된 매출장이 없습니다';
+  const at = new Date(DATA.synced_at).toLocaleString('ko-KR', {timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false});
+  return `마지막 반영 ${at} · 매일 00:10 갱신`;
+}
+document.getElementById('stamp').textContent = stampText();
 const themeBtn = document.getElementById('themeBtn');
 /* 기본 라이트. 다크는 스위치로 */
 const startDark = false;
@@ -627,6 +632,7 @@ async function reload(year = curYear, dimension = curView, search = query, expan
     history.replaceState(null, '', url);
     document.getElementById('warnings').textContent = '';
     document.getElementById('q').value = query;
+    document.getElementById('stamp').textContent = stampText();
     render();
     return true;
   } catch (error) {

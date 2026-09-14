@@ -72,6 +72,8 @@ def test_original_dashboard_interactions_with_database_paging(database, monkeypa
         page.goto("http://revenue.test/revenue/")
         expect = playwright.expect
         expect(page.locator(".tile")).to_have_count(4)
+        expect(page.locator("#stamp")).to_contain_text("마지막 반영 ")
+        expect(page.locator("#stamp")).to_contain_text("매일 00:10 갱신")
         expect(page.locator("#pipeTable tbody tr")).to_have_count(1)
         expect(page.locator("html")).to_have_attribute("data-theme", "light")
         page.locator("#themeBtn").click()

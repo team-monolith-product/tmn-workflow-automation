@@ -114,6 +114,9 @@ def dashboard_data(
             params + (PAGE_SIZE, (page - 1) * PAGE_SIZE),
         )
         charts = chart_data(conn, year, dimension, search)
+        synced_at = fetch_one(
+            conn, "SELECT max(synced_at) AS synced_at FROM revenue_transactions"
+        )["synced_at"]
     return {
         "charts": charts,
         "bucket": bucket,
@@ -132,6 +135,7 @@ def dashboard_data(
         "dimensions": DIMENSIONS,
         "search": search,
         "status": status,
+        "synced_at": synced_at,
     }
 
 
