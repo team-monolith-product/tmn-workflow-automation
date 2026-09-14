@@ -1,4 +1,5 @@
 import os
+from unittest.mock import Mock
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -87,6 +88,8 @@ def test_readers_keep_old_snapshot_until_commit(database):
 
 def test_batch_crm_failure_leaves_database_unchanged(database, monkeypatch):
     before = transactions()
+    notify = Mock()
+    monkeypatch.setattr(batch, "notify", notify)
 
     def failed_collection():
         raise RuntimeError("CRM unavailable")
@@ -95,15 +98,27 @@ def test_batch_crm_failure_leaves_database_unchanged(database, monkeypatch):
     with pytest.raises(RuntimeError, match="CRM unavailable"):
         batch.main()
     assert transactions() == before
+    assert "동기화 실패" in notify.call_args.args[0]
+    assert "RuntimeError: CRM unavailable" in notify.call_args.args[0]
 
 
 def test_batch_success_replaces_rows_and_dry_run_does_not(database, monkeypatch):
     rows, _ = normalized_rows()
+    notify = Mock()
+    monkeypatch.setattr(batch, "notify", notify)
     monkeypatch.setattr(batch, "collect_rows", lambda: (rows[:1], []))
     batch.main(dry_run=True)
     assert len(transactions()) == 5
+    notify.assert_not_called()
     batch.main()
     assert len(transactions()) == 1
+    report = notify.call_args.args[0]
+    assert report.startswith("매출장 반영 ")
+    assert "2025 발행 0.01억 (-1,000,000원 · -1건)" in report
+    assert (
+        "2026 발행 0.00억 (-1,500,000원 · -2건) · 예정 0.00억 (-300,000원 · -1건)"
+        in report
+    )
 
 
 def test_dashboard_and_query_knowledge_share_amount_and_year_basis(database):
