@@ -51,8 +51,15 @@ def test_delivery(monkeypatch, capsys, hour, expected_day, pulls, items, dry_run
     monkeypatch.setattr(job, "collect_updates", collect)
     openai = MagicMock()
     parse = openai.return_value.__enter__.return_value.beta.chat.completions.parse
-    parse.return_value.choices = [
-        SimpleNamespace(message=SimpleNamespace(parsed=job.Updates(items=items)))
+    parse.side_effect = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(parsed=job.Updates(items=value))
+                )
+            ]
+        )
+        for value in [["검토 전 초안"], items]
     ]
     monkeypatch.setattr(job, "OpenAI", openai)
     slack = MagicMock()

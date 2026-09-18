@@ -34,6 +34,7 @@ PROMPT = """병합된 PR들을 게임 이용자가 읽는 매우 간결한 한�
 개발·검증 환경만의 변화와 실제 이용 동작이 그대로인 내부 정리는 제외한다.
 
 출력은 이용자가 알아볼 수 있는 상황과 달라진 결과를 담은 짧은 문장들로 작성한다.
+각 문장은 '추가', '제거', '개선', '수정', '노출' 등으로 끝낸다.
 내부 처리 과정, 구현 용어, 코드 식별자, 개발자를 위한 설정 설명은 쓰지 않는다.
 한 항목에 하나의 사용자 변화만 담고 중복은 합친다.
 최종 검토에서 각 문장이 개발 지식 없이 이해되는지, 자료에 근거한 실제 사용자 변화인지 확인한다.
@@ -88,6 +89,29 @@ def main(dry_run: bool = False, now: datetime | None = None) -> None:
             messages=[
                 {"role": "system", "content": PROMPT},
                 {"role": "user", "content": json.dumps(pulls, ensure_ascii=False)},
+            ],
+            response_format=Updates,
+        )
+        draft = response.choices[0].message.parsed
+        if draft is None:
+            raise RuntimeError("TKO 변경 요약을 생성하지 못했습니다.")
+        response = client.beta.chat.completions.parse(
+            model="gpt-5.6-luna",
+            reasoning_effort="medium",
+            messages=[
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": json.dumps(pulls, ensure_ascii=False)},
+                {"role": "assistant", "content": draft.model_dump_json()},
+                {
+                    "role": "user",
+                    "content": "초안은 사실이 아니라 검토 대상이다. 각 항목의 실제 이용자와 "
+                    "이용 상황, 변경 전 문제, 변경 후 결과를 원자료와 대조하라. "
+                    "개발자만 보는 도구나 내부 처리의 변화는 삭제하라. "
+                    "구현 원리를 설명하는 문장은 자료가 뒷받침하는 사용자 문제의 해결로 "
+                    "다시 쓰고, 그 연결 근거가 없으면 삭제하라. "
+                    "개발 지식 없는 이용자가 자신의 경험과 연결할 수 없는 문장은 남기지 마라. "
+                    "중복을 합치고 한 줄에 한 변화만 남긴 최종 목록을 반환하라.",
+                },
             ],
             response_format=Updates,
         )
