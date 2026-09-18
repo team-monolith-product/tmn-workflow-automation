@@ -63,6 +63,8 @@ def test_delivery(monkeypatch, capsys, hour, expected_day, pulls, items, dry_run
     )
     if not pulls:
         openai.assert_not_called()
+    else:
+        assert parse.call_args.kwargs["model"] == "gpt-5.6-luna"
     if items and not dry_run:
         slack.return_value.chat_postMessage.assert_called_once_with(
             channel="C0C10FTGNTH",

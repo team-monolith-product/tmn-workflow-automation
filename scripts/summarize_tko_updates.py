@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from slack_sdk import WebClient
 
 from service.github import fetch_pull_requests_parallel
-from service.llm import DEFAULT_MODEL
 
 KST = timezone(timedelta(hours=9))
 REPOSITORY = "team-monolith-product/tko-game-godot"
@@ -80,7 +79,7 @@ def main(dry_run: bool = False, now: datetime | None = None) -> None:
         return
     with OpenAI() as client:
         response = client.beta.chat.completions.parse(
-            model=DEFAULT_MODEL,
+            model="gpt-5.6-luna",
             reasoning_effort="medium",
             messages=[
                 {"role": "system", "content": PROMPT},
