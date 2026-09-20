@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import requests
+import sentry_sdk
 
 from api.g2b import get_bid_pblanc_list, get_pre_spec_list, KIND_LABELS
 from .schemas import Announcement
@@ -124,10 +125,16 @@ def collect(
     collected: list[Announcement] = []
     for source in knowledge.enabled_sources:
         adapter = source.get("adapter")
-        if adapter in _ADAPTERS:
-            collected.extend(_collect_adapter(source, bgn, end, session, use_cache))
-        else:
+        if adapter not in _ADAPTERS:
             print(
                 f"[edu-bid] 미지원 어댑터 '{adapter}' (source={source.get('id')}) 건너뜀"
             )
+            continue
+        try:
+            collected.extend(_collect_adapter(source, bgn, end, session, use_cache))
+        except (requests.HTTPError, RuntimeError) as e:
+            # 소스 하나(예: 나라장터 용역 API 인증 범위 문제)가 계속 실패해도
+            # 다른 활성 소스는 그날 정상 수집되도록 소스 단위로 격리한다.
+            sentry_sdk.capture_exception(e)
+            print(f"[edu-bid] 소스 '{source.get('id')}' 수집 실패, 건너뜀: {e}")
     return collected
