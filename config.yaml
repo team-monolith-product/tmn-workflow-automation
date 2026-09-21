@@ -112,6 +112,9 @@ scrum:
     - handle: "탐색"
       channel_id: "C09277NGUET"
       pr_warning: false
+      extra_mention_user_ids:
+        - "U02JLCWGETT"  # 배영빈
+        - "U075PUFNGHX"  # 이예진
 
     - handle: "ie"
       channel_id: "C09277NGUET"

@@ -33,8 +33,10 @@ def main():
     for squad in scrum.squads:
         if squad.squad.slack_usergroup_id is None:
             continue
+        mentions = [f"<!subteam^{squad.squad.slack_usergroup_id}>"]
+        mentions += [f"<@{uid}>" for uid in squad.extra_mention_user_ids]
         team_entries[squad.squad.display_name] = {
-            "mention": f"<!subteam^{squad.squad.slack_usergroup_id}>",
+            "mention": " ".join(mentions),
             "channel_id": squad.channel_id,
         }
     for personal in scrum.personal_scrums:

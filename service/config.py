@@ -68,6 +68,7 @@ class ScrumSquadConfig:
     squad: Squad
     channel_id: str
     pr_warning: bool = True
+    extra_mention_user_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -237,6 +238,7 @@ def _parse_config(raw: dict) -> AppConfig:
                 squad=squad_by_handle[handle],
                 channel_id=ss_raw["channel_id"],
                 pr_warning=ss_raw.get("pr_warning", True),
+                extra_mention_user_ids=ss_raw.get("extra_mention_user_ids", []),
             )
         )
     personal_scrums = [
