@@ -4,6 +4,8 @@
 네트워크·LLM 은 모킹/모듈 경계에서 차단하고 순수 변환 로직을 검증한다.
 """
 
+import requests
+
 from service.edu_bid import stages, evaluate
 from service.edu_bid.knowledge import load_knowledge, load_shared_knowledge
 from service.edu_bid.schemas import Announcement, GateResult, Axes, EvalOut, BatchEval
@@ -392,6 +394,35 @@ def test_collect_caches_raw_per_window(monkeypatch, tmp_path):
     second = sources.collect(_KnSrc(), win)  # 캐시 적중 → API 미호출
     assert calls["n"] == 1  # 두 번째는 캐시
     assert first[0].title == second[0].title == "코딩교육 플랫폼"
+
+
+def test_collect_isolates_source_failure(monkeypatch, tmp_path):
+    """한 소스(예: 나라장터 용역)가 계속 400 을 내도 다른 활성 소스는 그날 수집된다."""
+    from service.edu_bid import sources
+
+    monkeypatch.setattr(sources, "_CACHE_DIR", tmp_path)
+    captured = []
+    monkeypatch.setattr(sources.sentry_sdk, "capture_exception", captured.append)
+
+    def flaky_paginate(fetch_fn, kind, bgn, end, session):
+        if kind == "servc":
+            resp = requests.Response()
+            resp.status_code = 400
+            raise requests.HTTPError("400 Client Error", response=resp)
+        return [{"bidNtceNo": "R1", "bidNtceNm": "코딩교육 플랫폼"}]
+
+    monkeypatch.setattr(sources, "_paginate", flaky_paginate)
+
+    class _KnSrc:
+        enabled_sources = [
+            {"adapter": "g2b", "kind": "servc", "id": "g2b_servc"},
+            {"adapter": "g2b", "kind": "thng", "id": "g2b_thng"},
+        ]
+
+    win = ("202605290000", "202605292359")
+    out = sources.collect(_KnSrc(), win)
+    assert len(out) == 1 and out[0].title == "코딩교육 플랫폼"  # 실패 소스만 빠짐
+    assert len(captured) == 1 and isinstance(captured[0], requests.HTTPError)
 
 
 # --- knowledge 로딩 (실파일) ---
