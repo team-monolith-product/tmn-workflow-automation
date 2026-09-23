@@ -200,6 +200,8 @@ async def answer_data_analysis(
                 "- data_mart_{env}: 2차 정제 핵심 지표 (DAU, 마케팅 동의, 에러 커버리지, 세션 전환율 등)\n"
                 "- monday_{env}: 영업/계약 데이터 (학교별 계약 상태/금액/기간/담당자)\n"
                 "- default: 인프라 로그 (ALB/CloudFront 액세스 로그)\n"
+                "- jitda_opencode_{env}: 짓다 OpenCode 파이프라인 데이터\n"
+                "- enk_hackathon_{env}: 짓다(enk) 해커톤 파이프라인 데이터\n"
                 "\n"
                 "파티션 필터링 (DB마다 다름):\n"
                 "- jce/datadb: WHERE partition_0 = 'YYYY-MM-DD'\n"
