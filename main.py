@@ -15,6 +15,7 @@ from typing import Optional, Any, Tuple
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.requests import ClientDisconnect
 import uvicorn
 from app.common import notion_page_to_markdown
 from app.knowledge_mcp import (
@@ -35,7 +36,26 @@ import sentry_sdk
 
 load_dotenv()
 
-sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN", ""))
+
+def _before_send(event, hint):
+    # 스트리밍 요청 도중 클라이언트가 연결을 끊는 경우 (정상적인 클라이언트 종료)
+    if "exc_info" in hint:
+        _, exc_value, _ = hint["exc_info"]
+        if isinstance(exc_value, ClientDisconnect):
+            return None
+    # 위 ClientDisconnect로 인해 uvicorn이 응답을 완료하지 못했다고 남기는 로그
+    message = (event.get("logentry") or {}).get("message", "")
+    if not message:
+        message = event.get("message", "")
+    if "ASGI callable returned without completing response" in message:
+        return None
+    return event
+
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN", ""),
+    before_send=_before_send,
+)
 
 # ============================================================================
 # 로깅 설정
