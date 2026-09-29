@@ -5,6 +5,7 @@
 import asyncio
 import functools
 import io
+import os
 import traceback
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +35,27 @@ DRAFT_CARDS_PER_RUN = 5
 # 두면 상한이 영영 안 걸리므로 호출 총량도 함께 센다. preview 가 동기라
 # 루프 위에서 도는데, 봇 넷과 스케줄러가 그 루프 하나를 나눠 쓴다.
 DRAFT_CALLS_PER_RUN = 50
+
+# 한 실행이 스레드에 올릴 수 있는 파일 수와 파일 하나의 크기 상한
+FILES_PER_RUN = 10
+FILE_SIZE_LIMIT = 100 * 1024 * 1024
+
+UPLOAD_FILE_GUIDE = """
+
+**파일 첨부**: `upload_file(filename, data=None, title=None)` 로 만든 파일을 슬랙
+스레드에 첨부합니다. CSV·엑셀·ZIP 을 사람에게 넘길 때 쓰십시오. 드라이브나 S3
+링크를 달라고 하지 마십시오.
+- `data` 에 bytes 나 str 을 넣으면 그 내용이 `filename` 으로 올라갑니다.
+  str 은 UTF-8 로 올리므로, 엑셀에서 열 CSV 는 `df.to_csv(index=False).encode("utf-8-sig")`
+  처럼 BOM 을 붙인 bytes 로 넘기십시오.
+- `data` 를 생략하면 `filename` 을 디스크 경로로 읽어 올립니다.
+- 코드가 끝까지 성공해야 올라갑니다. 실패하면 아무것도 올라가지 않습니다.
+- 한 번에 최대 10개, 파일당 100MB 까지입니다. 여러 파일은 ZIP 으로 묶으십시오.
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("팀A.csv", df.to_csv(index=False).encode("utf-8-sig"))
+    upload_file("conversations.zip", buf.getvalue())"""
 
 DRAFT_SMS_GUIDE = """
 
@@ -259,6 +281,32 @@ def get_execute_python_tool(
 
             injected["draft_sms"] = draft
 
+        pending_files: list[tuple[str, bytes, str | None]] = []
+        if slack_client and channel and thread_ts:
+
+            def upload_file(
+                filename: str, data: bytes | str | None = None, title: str | None = None
+            ) -> str:
+                if len(pending_files) >= FILES_PER_RUN:
+                    raise ValueError(
+                        f"한 번에 {FILES_PER_RUN}개까지만 올릴 수 있습니다. ZIP 으로 묶으십시오."
+                    )
+                if data is None:
+                    with open(filename, "rb") as f:
+                        data = f.read()
+                    filename = os.path.basename(filename)
+                elif isinstance(data, str):
+                    data = data.encode("utf-8")
+                if len(data) > FILE_SIZE_LIMIT:
+                    raise ValueError(
+                        f"{filename} 이 {len(data)} bytes 로 상한"
+                        f" {FILE_SIZE_LIMIT} bytes 를 넘습니다."
+                    )
+                pending_files.append((filename, data, title))
+                return f"{filename} 을 첨부 대기열에 넣었습니다."
+
+            injected["upload_file"] = upload_file
+
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor, functools.partial(_run_code, code, injected)
         )
@@ -293,6 +341,19 @@ def get_execute_python_tool(
                 error_message += f"\n\nSTDOUT:\n{stdout_output}"
             return error_message
 
+        uploaded_message = ""
+        if pending_files:
+            await slack_client.files_upload_v2(
+                channel=channel,
+                thread_ts=thread_ts,
+                file_uploads=[
+                    {"file": data, "filename": filename, "title": title or filename}
+                    for filename, data, title in pending_files
+                ],
+            )
+            names = ", ".join(filename for filename, _, _ in pending_files)
+            uploaded_message = f"\n파일을 슬랙 스레드에 첨부했습니다: {names}"
+
         if img_buffer is None:
             result_message = "✅ 코드 실행 성공"
         elif slack_client and channel and thread_ts:
@@ -306,11 +367,14 @@ def get_execute_python_tool(
             result_message = "✅ 코드 실행 성공: 차트를 슬랙에 업로드했습니다."
         else:
             result_message = "✅ 코드 실행 성공: 차트가 생성되었으나 슬랙 업로드에 필요한 정보가 없습니다."
+        result_message += uploaded_message
 
         if stdout_output:
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
 
+    if slack_client and channel and thread_ts:
+        execute_python.description += UPLOAD_FILE_GUIDE
     if draft_sms:
         execute_python.description += DRAFT_SMS_GUIDE
 

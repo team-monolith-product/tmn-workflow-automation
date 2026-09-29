@@ -228,6 +228,7 @@ async def answer_data_analysis(
                 "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
                 "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
                 "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
+                "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
                 "\n"
                 "**슬랙 텍스트 포맷팅**:\n"
                 "- 슬랙은 마크다운이 아닌 자체 mrkdwn 포맷을 사용합니다.\n"
