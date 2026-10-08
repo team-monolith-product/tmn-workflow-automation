@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from github import GithubException
 
 from app import github_deploy
-from service import deploy, merge_deploy
 
 
 @pytest.fixture
@@ -78,7 +77,7 @@ def test_invalid_signature_never_executes(client, payload, monkeypatch):
 @pytest.mark.parametrize("body", [" /deploy", "/deploy\n", "/deploy staging", "hello"])
 def test_only_exact_command_is_accepted(payload, body):
     payload["comment"]["body"] = body
-    assert deploy.deploy_request("issue_comment", payload) is None
+    assert github_deploy.deploy_request("issue_comment", payload) is None
 
 
 @pytest.mark.parametrize("change", ["edited", "issue", "foreign", "event"])
@@ -92,7 +91,7 @@ def test_unrelated_events_are_ignored(payload, change):
         payload["repository"]["full_name"] = "elsewhere/example"
     else:
         event = "push"
-    assert deploy.deploy_request(event, payload) is None
+    assert github_deploy.deploy_request(event, payload) is None
 
 
 @pytest.mark.parametrize(
@@ -108,7 +107,7 @@ def test_invalid_payload_returns_bad_request(client, payload, invalid):
 
 def test_large_unicode_logs_are_lossless_and_collapsed():
     logs = ("한글 오류 <> ``` ````\n" * 10000) + "last-line"
-    comments = deploy.failure_comments(
+    comments = github_deploy.failure_comments(
         logs, "요청 댓글 88", "https://example.com", "충돌", "충돌 해결"
     )
     recovered = []
@@ -123,17 +122,19 @@ def test_large_unicode_logs_are_lossless_and_collapsed():
 
 
 def test_push_complete_takes_priority_over_notification_error():
-    reason, action = deploy.failure_reason("DEPLOY_STAGE=push-complete\nHTTP 403")
+    reason, action = github_deploy.failure_reason(
+        "DEPLOY_STAGE=push-complete\nHTTP 403"
+    )
     assert "push 이후" in reason
     assert "이미 push" in action
 
 
 def test_execution_uses_scoped_app_token_and_reacts(monkeypatch, payload):
-    inputs = deploy.deploy_request("issue_comment", payload)
+    inputs = github_deploy.deploy_request("issue_comment", payload)
     app, issue = mock_github(monkeypatch)
     merge = Mock(return_value="DEPLOY_STAGE=push-complete\n")
-    monkeypatch.setattr(deploy, "merge", merge)
-    deploy.execute(123, inputs)
+    monkeypatch.setattr(github_deploy, "merge", merge)
+    github_deploy.execute(123, inputs)
     app.requester.requestJsonAndCheck.assert_called_once_with(
         "POST",
         "/app/installations/123/access_tokens",
@@ -164,15 +165,17 @@ def mock_github(monkeypatch):
     app.get_app.return_value.slug = "deploy-app"
     issue = client.get_repo.return_value.get_issue.return_value
     issue.get_comments.return_value = []
-    monkeypatch.setattr(deploy, "app_auth", Mock())
-    monkeypatch.setattr(deploy, "GithubIntegration", Mock(return_value=integration))
-    monkeypatch.setattr(deploy, "Github", Mock(return_value=connection))
+    monkeypatch.setattr(github_deploy, "app_auth", Mock())
+    monkeypatch.setattr(
+        github_deploy, "GithubIntegration", Mock(return_value=integration)
+    )
+    monkeypatch.setattr(github_deploy, "Github", Mock(return_value=connection))
     return app, issue
 
 
 @pytest.mark.parametrize("phase", ["mint", "merge", "reaction"])
 def test_failures_report_all_available_output(monkeypatch, payload, phase):
-    inputs = deploy.deploy_request("issue_comment", payload)
+    inputs = github_deploy.deploy_request("issue_comment", payload)
     error = GithubException(403, {"message": "permission denied"}, None)
     app, issue = mock_github(monkeypatch)
     merge = Mock(return_value="all git output\nDEPLOY_STAGE=push-complete\n")
@@ -185,9 +188,9 @@ def test_failures_report_all_available_output(monkeypatch, payload, phase):
         )
     else:
         issue.get_comment.return_value.create_reaction.side_effect = error
-    monkeypatch.setattr(deploy, "merge", merge)
-    monkeypatch.setattr(deploy, "report_failure", report)
-    deploy.execute(123, inputs)
+    monkeypatch.setattr(github_deploy, "merge", merge)
+    monkeypatch.setattr(github_deploy, "report_failure", report)
+    github_deploy.execute(123, inputs)
     details = report.call_args.args[2]
     assert "app-token" not in details
     if phase != "mint":
@@ -228,7 +231,7 @@ def git_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             arguments[-1] = str(origin)
         return original_run(arguments, **kwargs)
 
-    monkeypatch.setattr(merge_deploy.subprocess, "run", local_remote)
+    monkeypatch.setattr(github_deploy.subprocess, "run", local_remote)
     return work, git, base
 
 
@@ -240,7 +243,7 @@ def test_real_merge_preserves_main_and_creates_no_ff_commit(git_repository):
     git("commit", "-m", "feature")
     head = git("rev-parse", "HEAD")
     git("push", "origin", "HEAD:refs/pull/7/head")
-    logs = merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+    logs = github_deploy.merge("team-monolith-product/example", 7, "app-token")
     git("fetch", "origin", "develop")
     assert git("show", "-s", "--format=%P", "FETCH_HEAD") == f"{base} {head}"
     assert git("show", "-s", "--format=%s", "FETCH_HEAD") == "Merge PR #7 to develop"
@@ -251,7 +254,7 @@ def test_real_merge_preserves_main_and_creates_no_ff_commit(git_repository):
     assert git("ls-remote", "origin", "refs/heads/main").split()[0] == base
     assert "DEPLOY_STAGE=push-complete" in logs
     assert "app-token" not in logs
-    merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+    github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert git("ls-remote", "origin", "refs/heads/develop").split()[0] == git(
         "rev-parse", "FETCH_HEAD"
     )
@@ -270,7 +273,7 @@ def test_real_conflict_leaves_develop_unchanged(git_repository):
     git("commit", "-m", "feature change")
     git("push", "origin", "HEAD:refs/pull/7/head")
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+        github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert "CONFLICT (" in caught.value.output
     assert "develop 가져오기" in caught.value.output
     assert "PR 병합" in caught.value.output
@@ -284,9 +287,9 @@ def test_timeout_preserves_partial_output_and_redacts_token(monkeypatch):
             args[0], 180, output=b"partial output app-token"
         )
 
-    monkeypatch.setattr(merge_deploy.subprocess, "run", timeout)
+    monkeypatch.setattr(github_deploy.subprocess, "run", timeout)
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+        github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert "partial output ***" in caught.value.output
     assert "180초 제한" in caught.value.output
 
@@ -300,7 +303,7 @@ def test_concurrent_push_is_rejected_without_overwriting_develop(
     git("add", ".")
     git("commit", "-m", "feature")
     git("push", "origin", "HEAD:refs/pull/7/head")
-    local_remote = merge_deploy.subprocess.run
+    local_remote = github_deploy.subprocess.run
     concurrent_head = []
 
     def concurrent_push(arguments, **kwargs):
@@ -313,9 +316,9 @@ def test_concurrent_push_is_rejected_without_overwriting_develop(
             concurrent_head.append(git("rev-parse", "HEAD"))
         return local_remote(arguments, **kwargs)
 
-    monkeypatch.setattr(merge_deploy.subprocess, "run", concurrent_push)
+    monkeypatch.setattr(github_deploy.subprocess, "run", concurrent_push)
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+        github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert "[rejected]" in caught.value.output
     assert "develop push" in caught.value.output
     assert (
@@ -328,9 +331,12 @@ def test_missing_develop_is_reported_with_git_output(git_repository):
     work, git, base = git_repository
     git("push", "origin", "--delete", "develop")
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+        github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert "couldn't find remote ref refs/heads/develop" in caught.value.output
-    assert "develop 브랜치가 없습니다" in deploy.failure_reason(caught.value.output)[0]
+    assert (
+        "develop 브랜치가 없습니다"
+        in github_deploy.failure_reason(caught.value.output)[0]
+    )
 
 
 @pytest.mark.asyncio
@@ -379,7 +385,7 @@ async def test_response_and_event_loop_remain_available_during_git_work(
 
 
 def test_failure_report_reuses_own_comment_on_redelivery(payload, monkeypatch):
-    inputs = deploy.deploy_request("issue_comment", payload)
+    inputs = github_deploy.deploy_request("issue_comment", payload)
     app, issue = mock_github(monkeypatch)
     existing = []
     issue.get_comments.return_value = existing
@@ -390,8 +396,8 @@ def test_failure_report_reuses_own_comment_on_redelivery(payload, monkeypatch):
         existing.append(comment)
 
     issue.create_comment.side_effect = create_comment
-    deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
-    deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
+    github_deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
+    github_deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
     issue.create_comment.assert_called_once()
     assert "충돌" in existing[0].body
     assert "complete output" in existing[0].body
@@ -400,7 +406,7 @@ def test_failure_report_reuses_own_comment_on_redelivery(payload, monkeypatch):
 def test_git_can_execute_askpass_and_read_token(git_repository, monkeypatch):
     work, git, base = git_repository
     git("push", "origin", "HEAD:refs/pull/7/head")
-    local_remote = merge_deploy.subprocess.run
+    local_remote = github_deploy.subprocess.run
     checked = []
 
     def check_askpass(arguments, **kwargs):
@@ -416,6 +422,6 @@ def test_git_can_execute_askpass_and_read_token(git_repository, monkeypatch):
             checked.append(True)
         return local_remote(arguments, **kwargs)
 
-    monkeypatch.setattr(merge_deploy.subprocess, "run", check_askpass)
-    merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+    monkeypatch.setattr(github_deploy.subprocess, "run", check_askpass)
+    github_deploy.merge("team-monolith-product/example", 7, "app-token")
     assert checked == [True]
