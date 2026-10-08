@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from github import Auth, Github, GithubException, GithubIntegration
 
 REPOSITORY_PATTERN = r"team-monolith-product/[A-Za-z0-9_.-]+"
+JLEXT_REPOSITORY = "team-monolith-product/jce-codle-jlext"
 
 router = APIRouter()
 
@@ -57,12 +58,16 @@ def deploy_request(event: str, payload: dict[str, Any]) -> dict[str, str] | None
     if (
         event != "issue_comment"
         or payload.get("action") != "created"
-        or payload.get("comment", {}).get("body") != "/deploy"
         or "pull_request" not in payload.get("issue", {})
     ):
         return None
     repository = payload["repository"]["full_name"]
     if not re.fullmatch(REPOSITORY_PATTERN, repository):
+        return None
+    body = payload.get("comment", {}).get("body", "")
+    if body != "/deploy" and not (
+        repository == JLEXT_REPOSITORY and body.startswith("/deploy")
+    ):
         return None
     issue_number = payload["issue"]["number"]
     comment_id = payload["comment"]["id"]
@@ -219,7 +224,9 @@ def execute(installation_id: int, inputs: dict[str, str]) -> None:
             issue = client.get_repo(inputs["repository"], lazy=True).get_issue(
                 int(inputs["issue_number"])
             )
-            issue.get_comment(int(inputs["comment_id"])).create_reaction("rocket")
+            issue.get_comment(int(inputs["comment_id"])).create_reaction(
+                "+1" if inputs["repository"] == JLEXT_REPOSITORY else "rocket"
+            )
     except Exception as error:
         details = logs + error_details(error)
         if token:
@@ -285,7 +292,8 @@ def merge(repository: str, issue_number: int, token: str) -> str:
             ),
             ("develop push", ["push", "origin", "develop"]),
         ]
-        for stage, arguments in commands:
+
+        def run_git(stage: str, arguments: list[str]) -> str:
             command = ["git", "-c", f"core.hooksPath={os.devnull}", *arguments]
             logs.append(f"===== {stage} =====\n$ git {' '.join(arguments)}\n")
             try:
@@ -309,13 +317,39 @@ def merge(repository: str, issue_number: int, token: str) -> str:
                 raise subprocess.CalledProcessError(
                     127, command, output="".join(logs).replace(token, "***")
                 ) from error
-            logs.append(result.stdout.decode("utf-8", errors="backslashreplace"))
+            output = result.stdout.decode("utf-8", errors="backslashreplace")
+            logs.append(output)
             logs.append(f"\nexit_code={result.returncode}\n")
             if result.returncode:
                 raise subprocess.CalledProcessError(
                     result.returncode,
                     command,
                     output="".join(logs).replace(token, "***"),
+                )
+            return output
+
+        for stage, arguments in commands:
+            try:
+                run_git(stage, arguments)
+            except subprocess.CalledProcessError as error:
+                if repository != JLEXT_REPOSITORY or arguments[0] != "merge":
+                    raise
+                conflicts = run_git(
+                    "충돌 파일 확인", ["diff", "--name-only", "--diff-filter=U"]
+                ).strip()
+                if conflicts != "package.json":
+                    run_git("병합 취소", ["merge", "--abort"])
+                    error.output = "".join(logs).replace(token, "***")
+                    raise
+                run_git("package.json 해결", ["checkout", "--theirs", "package.json"])
+                run_git("package.json 선택", ["add", "package.json"])
+                run_git(
+                    "PR 병합 완료",
+                    [
+                        "commit",
+                        "-m",
+                        f"Merge PR #{issue_number} to develop (resolve package.json)",
+                    ],
                 )
         logs.append("DEPLOY_STAGE=push-complete\n")
     return "".join(logs).replace(token, "***")
