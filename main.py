@@ -30,7 +30,8 @@ from app.slack_task_mcp import (
     build_mcp_app as build_operations_task_mcp_app,
 )
 from app.revenue.web import router as revenue_router
-from github import Github, GithubException
+from github import GithubException
+from service.github import get_github_client
 from dotenv import load_dotenv
 import sentry_sdk
 
@@ -54,7 +55,6 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 WORKFLOW_AUTOMATION_API_KEY = os.environ.get("WORKFLOW_AUTOMATION_API_KEY")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 PLAN_MD_REPO = "team-monolith-product/plan-md"
 
 if not WORKFLOW_AUTOMATION_API_KEY:
@@ -346,8 +346,6 @@ async def handle_webhook(
     # API Key 검증
     step_start = time.time()
     await verify_api_key(x_api_key)
-    if not GITHUB_TOKEN:
-        raise HTTPException(503, "GITHUB_TOKEN 환경 변수가 설정되지 않았습니다.")
     logger.info(f"[1/7] API Key 검증 완료 (소요시간: {time.time() - step_start:.3f}초)")
 
     try:
@@ -355,8 +353,8 @@ async def handle_webhook(
 
         # GitHub 클라이언트 초기화
         step_start = time.time()
-        gh = Github(GITHUB_TOKEN)
-        repo = gh.get_repo(PLAN_MD_REPO)
+        gh = await asyncio.to_thread(get_github_client)
+        repo = await asyncio.to_thread(gh.get_repo, PLAN_MD_REPO)
         logger.info(
             f"[2/7] GitHub 클라이언트 초기화 완료 (소요시간: {time.time() - step_start:.3f}초)"
         )

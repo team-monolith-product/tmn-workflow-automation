@@ -116,15 +116,56 @@ def test_build_announcement_omits_empty_sections():
     assert "요청:" not in text
 
 
-def test_main_stops_when_bot_cannot_push(monkeypatch):
-    """푸시 권한이 없으면 ref 를 건드리지 않고 이유를 돌려준다"""
-    monkeypatch.setenv("GITHUB_TOKEN", "test-dummy-token")
+def test_main_dry_run_does_not_edit_or_announce(monkeypatch):
+    repo, develop, slack, github = _reset_clients(monkeypatch)
+    with github:
+        result = main("tmn-deploy-verification", dry_run=True)
+    assert "초기화했습니다" in result
+    develop.edit.assert_not_called()
+    slack.chat_postMessage.assert_not_called()
+
+
+def test_main_edits_before_announcement(monkeypatch):
+    repo, develop, slack, github = _reset_clients(monkeypatch)
+    order = MagicMock()
+    order.attach_mock(develop.edit, "edit")
+    order.attach_mock(slack.chat_postMessage, "announce")
+    with github:
+        result = main("tmn-deploy-verification")
+    develop.edit.assert_called_once_with(sha="main-sha", force=True)
+    assert [call[0] for call in order.mock_calls] == ["edit", "announce"]
+    assert "안내했습니다" in result
+
+
+def test_main_failed_edit_does_not_announce(monkeypatch):
+    from github import GithubException
+
+    repo, develop, slack, github = _reset_clients(monkeypatch)
+    develop.edit.side_effect = GithubException(
+        403, {"message": "Resource not accessible by integration"}
+    )
+    with github:
+        result = main("tmn-deploy-verification")
+    assert "GitHub 403" in result
+    assert "Resource not accessible by integration" in result
+    slack.chat_postMessage.assert_not_called()
+
+
+def _reset_clients(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
+    monkeypatch.setenv("NOTION_TOKEN", "test-notion-token")
     repo = MagicMock()
-    repo.permissions.push = False
-
-    with patch("scripts.reset_develop.Github") as github:
-        github.return_value.get_repo.return_value = repo
-        result = main("enk-opencode")
-
-    assert "푸시 권한이 없습니다" in result
-    repo.get_git_ref.return_value.edit.assert_not_called()
+    develop = MagicMock()
+    develop.object.sha = "develop-sha"
+    main_ref = MagicMock()
+    main_ref.object.sha = "main-sha"
+    repo.get_git_ref.side_effect = [develop, main_ref]
+    repo.get_pulls.return_value = []
+    slack = MagicMock()
+    monkeypatch.setattr("scripts.reset_develop.WebClient", lambda **kwargs: slack)
+    monkeypatch.setattr("scripts.reset_develop.NotionClient", MagicMock())
+    monkeypatch.setattr("scripts.reset_develop.get_email_to_user_id", lambda client: {})
+    client = MagicMock()
+    client.get_repo.return_value = repo
+    github = patch("scripts.reset_develop.get_github_client", return_value=client)
+    return repo, develop, slack, github

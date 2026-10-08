@@ -13,6 +13,7 @@ from github.PullRequest import PullRequest
 from slack_sdk import WebClient
 
 from service.github import (
+    get_github_client,
     fetch_pull_requests_parallel,
     fetch_pr_review_comments_parallel,
     fetch_comment_reactions_parallel,
@@ -22,7 +23,6 @@ from service.github import (
 load_dotenv()
 
 # 기본 설정
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_CHANNEL_ID = os.environ.get(
     "SLACK_CHANNEL_ID", "C08PTUQFDPV"
@@ -355,7 +355,7 @@ def main():
     days = args.days
     channel_id = args.channel
 
-    github_client = Github(GITHUB_TOKEN)
+    github_client = get_github_client()
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
     # 1. 병렬 처리로 PR 데이터와 리뷰 댓글 한 번에 가져오기

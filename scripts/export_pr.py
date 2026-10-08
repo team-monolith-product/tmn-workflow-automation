@@ -1,11 +1,17 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import os
 import datetime
 import subprocess
 from dotenv import load_dotenv
-from github import Github
 from github.PullRequest import PullRequest
 from markdown import markdown
 from weasyprint import HTML, CSS
+
+from service.github import get_github_client
 
 # 환경 변수 로드
 load_dotenv()
@@ -13,10 +19,9 @@ load_dotenv()
 # 설정: 토큰, 리포지토리 정보 등
 REPO_OWNER = "team-monolith-product"
 REPO_NAME = "ped-terraform"
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 # PyGithub 초기화
-g = Github(GITHUB_TOKEN)
+g = get_github_client()
 repo = g.get_repo(f"{REPO_OWNER}/{REPO_NAME}")
 
 # 6개월 전 날짜 계산

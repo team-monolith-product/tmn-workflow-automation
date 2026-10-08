@@ -15,6 +15,7 @@ from slack_sdk import WebClient
 import tabulate
 
 from service.github import (
+    get_github_client,
     fetch_pull_requests_parallel,
     fetch_pr_timeline_events_parallel,
 )
@@ -26,7 +27,6 @@ tabulate.WIDE_CHARS_MODE = True
 load_dotenv()
 
 # 기본 설정
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_CHANNEL_ID = "C08PU6D0K6G"  # 리뷰 통계를 보낼 채널 ID
 ORG_NAME = "team-monolith-product"  # GitHub 조직 이름
@@ -696,7 +696,7 @@ def main():
 
     args = parser.parse_args()
 
-    github_client = Github(GITHUB_TOKEN)
+    github_client = get_github_client()
     slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
     # 1. 모든 PR 데이터를, 타임라인 이벤트와 함께 한 번만 가져옵니다
