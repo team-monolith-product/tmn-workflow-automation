@@ -80,6 +80,23 @@ def test_only_exact_command_is_accepted(payload, body):
     assert github_deploy.deploy_request("issue_comment", payload) is None
 
 
+@pytest.mark.parametrize(
+    "body", ["/deploy", "/deploy\n", "/deploy staging", "/deployfoo"]
+)
+def test_jlext_accepts_command_prefix(payload, body):
+    payload["repository"]["full_name"] = github_deploy.JLEXT_REPOSITORY
+    payload["comment"]["body"] = body
+    assert github_deploy.deploy_request("issue_comment", payload) is not None
+
+
+def test_jlext_success_reacts_with_thumbs_up(monkeypatch, payload):
+    payload["repository"]["full_name"] = github_deploy.JLEXT_REPOSITORY
+    app, issue = mock_github(monkeypatch)
+    monkeypatch.setattr(github_deploy, "merge", Mock(return_value=""))
+    github_deploy.execute(123, github_deploy.deploy_request("issue_comment", payload))
+    issue.get_comment.return_value.create_reaction.assert_called_once_with("+1")
+
+
 @pytest.mark.parametrize("change", ["edited", "issue", "foreign", "event"])
 def test_unrelated_events_are_ignored(payload, change):
     event = "issue_comment"
@@ -279,6 +296,60 @@ def test_real_conflict_leaves_develop_unchanged(git_repository):
     assert "PR 병합" in caught.value.output
     assert "develop push" not in caught.value.output
     assert git("ls-remote", "origin", "refs/heads/develop").split()[0] == develop_head
+
+
+@pytest.mark.parametrize(
+    "repository,files,resolves",
+    [
+        (github_deploy.JLEXT_REPOSITORY, ["package.json"], True),
+        (github_deploy.JLEXT_REPOSITORY, ["file.txt"], False),
+        (github_deploy.JLEXT_REPOSITORY, ["package.json", "file.txt"], False),
+        ("team-monolith-product/example", ["package.json"], False),
+    ],
+)
+def test_real_package_conflict_resolution_is_limited_to_jlext(
+    git_repository, repository, files, resolves
+):
+    work, git, base = git_repository
+    (work / "package.json").write_text('{"version":"base"}\n')
+    git("add", ".")
+    git("commit", "-m", "package base")
+    git("branch", "-f", "main", "HEAD")
+    for name in files:
+        (work / name).write_text('{"version":"develop"}\n')
+    git("add", ".")
+    git("commit", "-m", "develop changes")
+    develop_head = git("rev-parse", "HEAD")
+    git("push", "origin", "develop")
+    git("checkout", "-b", "feature", "main")
+    for name in files:
+        (work / name).write_text('{"version":"feature"}\n')
+    git("add", ".")
+    git("commit", "-m", "feature changes")
+    head = git("rev-parse", "HEAD")
+    git("push", "origin", "HEAD:refs/pull/7/head")
+    if resolves:
+        logs = github_deploy.merge(repository, 7, "app-token")
+        git("fetch", "origin", "develop")
+        assert git("show", "FETCH_HEAD:package.json") == '{"version":"feature"}'
+        assert (
+            git("show", "-s", "--format=%P", "FETCH_HEAD") == f"{develop_head} {head}"
+        )
+        assert git("show", "-s", "--format=%s", "FETCH_HEAD") == (
+            "Merge PR #7 to develop (resolve package.json)"
+        )
+        assert "DEPLOY_STAGE=push-complete" in logs
+    else:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            github_deploy.merge(repository, 7, "app-token")
+        assert "CONFLICT (" in caught.value.output
+        assert "develop push" not in caught.value.output
+        if repository == github_deploy.JLEXT_REPOSITORY:
+            assert "충돌 파일 확인" in caught.value.output
+            assert "병합 취소" in caught.value.output
+        assert (
+            git("ls-remote", "origin", "refs/heads/develop").split()[0] == develop_head
+        )
 
 
 def test_timeout_preserves_partial_output_and_redacts_token(monkeypatch):
