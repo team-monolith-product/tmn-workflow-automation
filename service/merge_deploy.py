@@ -1,6 +1,5 @@
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,12 +15,13 @@ def merge(repository: str, issue_number: int, token: str) -> str:
         root = Path(directory)
         askpass = root / "askpass.sh"
         askpass.write_text(
-            'case "$1" in *Username*) printf "%s" "x-access-token" ;; *) printf "%s" "$DEPLOY_GIT_TOKEN" ;; esac\n',
+            '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; *) printf "%s" "$DEPLOY_GIT_TOKEN" ;; esac\n',
             encoding="utf-8",
         )
+        askpass.chmod(0o700)
         environment = {
             **os.environ,
-            "GIT_ASKPASS": shlex.join(["/bin/sh", str(askpass)]),
+            "GIT_ASKPASS": str(askpass),
             "GIT_TERMINAL_PROMPT": "0",
             "DEPLOY_GIT_TOKEN": token,
             "GIT_CONFIG_NOSYSTEM": "1",

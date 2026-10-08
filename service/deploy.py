@@ -113,7 +113,7 @@ def report_failure(
 ) -> None:
     repository = inputs["repository"]
     token = github.get_installation_token(
-        installation_id, [repository.split("/")[1]], {"issues": "write"}
+        installation_id, [repository.split("/")[1]], {"pull_requests": "write"}
     )
     path = f"/repos/{repository}/issues/{inputs['issue_number']}/comments"
     app_slug = github.request("GET", "/app", github.get_app_token()).json()["slug"]
@@ -164,7 +164,7 @@ def execute(installation_id: int, inputs: dict[str, str]) -> None:
         token = github.get_installation_token(
             installation_id,
             [inputs["repository"].split("/")[1]],
-            {"contents": "write", "workflows": "write", "issues": "write"},
+            {"contents": "write", "workflows": "write", "pull_requests": "write"},
         )
         logs = merge(inputs["repository"], int(inputs["issue_number"]), token)
         github.request(

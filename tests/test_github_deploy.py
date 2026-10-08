@@ -138,7 +138,9 @@ def test_execution_uses_scoped_app_token_and_reacts(monkeypatch, payload):
     monkeypatch.setattr(deploy, "merge", merge)
     deploy.execute(123, inputs)
     token.assert_called_once_with(
-        123, ["example"], {"contents": "write", "workflows": "write", "issues": "write"}
+        123,
+        ["example"],
+        {"contents": "write", "workflows": "write", "pull_requests": "write"},
     )
     merge.assert_called_once_with("team-monolith-product/example", 7, "app-token")
     assert request.call_args.kwargs["json"] == {"content": "rocket"}
@@ -388,3 +390,27 @@ def test_failure_report_reuses_own_comment_on_redelivery(payload, monkeypatch):
     assert len(writes) == 1
     assert "충돌" in writes[0]
     assert "complete output" in writes[0]
+
+
+def test_git_can_execute_askpass_and_read_token(git_repository, monkeypatch):
+    work, git, base = git_repository
+    git("push", "origin", "HEAD:refs/pull/7/head")
+    local_remote = merge_deploy.subprocess.run
+    checked = []
+
+    def check_askpass(arguments, **kwargs):
+        if arguments[-1] == "init":
+            result = local_remote(
+                ["git", "credential", "fill"],
+                input=b"protocol=https\nhost=example.invalid\n\n",
+                **kwargs,
+            )
+            assert result.returncode == 0
+            assert b"username=x-access-token" in result.stdout
+            assert b"password=app-token" in result.stdout
+            checked.append(True)
+        return local_remote(arguments, **kwargs)
+
+    monkeypatch.setattr(merge_deploy.subprocess, "run", check_askpass)
+    merge_deploy.merge("team-monolith-product/example", 7, "app-token")
+    assert checked == [True]
