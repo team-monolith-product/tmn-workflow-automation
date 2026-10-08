@@ -1,10 +1,9 @@
+import os
 import re
 import subprocess
 from typing import Any
 
-import requests
-
-from api import github
+from github import Auth, Github, GithubException, GithubIntegration
 from service.merge_deploy import merge
 
 REPOSITORY_PATTERN = r"team-monolith-product/[A-Za-z0-9_.-]+"
@@ -35,8 +34,8 @@ def deploy_request(event: str, payload: dict[str, Any]) -> dict[str, str] | None
 
 
 def error_details(error: Exception) -> str:
-    if isinstance(error, requests.HTTPError) and error.response is not None:
-        return f"HTTP {error.response.status_code}\n{error.response.text}"
+    if isinstance(error, GithubException):
+        return f"HTTP {error}"
     if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
         return str(error.output)
     return f"{type(error).__name__}: {error}"
@@ -107,79 +106,78 @@ def report_failure(
     installation_id: int,
     inputs: dict[str, str],
     logs: str,
-    execution: str,
-    reason: str | None = None,
-    next_action: str | None = None,
 ) -> None:
     repository = inputs["repository"]
-    token = github.get_installation_token(
-        installation_id, [repository.split("/")[1]], {"pull_requests": "write"}
-    )
-    path = f"/repos/{repository}/issues/{inputs['issue_number']}/comments"
-    app_slug = github.request("GET", "/app", github.get_app_token()).json()["slug"]
-    existing = {
-        comment["body"]: comment
-        for comment in github.get_pages(path, token)
-        if comment["user"]["login"] == f"{app_slug}[bot]"
-    }
-    default_reason, default_next_action = failure_reason(logs)
+    reason, next_action = failure_reason(logs)
     command_url = f"https://github.com/{repository}/pull/{inputs['issue_number']}#issuecomment-{inputs['comment_id']}"
-    for body in failure_comments(
-        logs,
-        execution,
-        command_url,
-        reason or default_reason,
-        next_action or default_next_action,
-    ):
-        title = body.split("<summary>", 1)[1].split("</summary>", 1)[0]
-        previous = next(
-            (
-                comment
-                for text, comment in existing.items()
-                if f"<summary>{title}</summary>" in text
-            ),
-            None,
+    with GithubIntegration(auth=app_auth(), timeout=4) as app:
+        token = installation_token(
+            app, installation_id, repository, {"pull_requests": "write"}
         )
-        if previous is None:
-            github.request("POST", path, token, json={"body": body})
-        elif previous["body"] != body:
-            github.request(
-                "PATCH",
-                f"/repos/{repository}/issues/comments/{previous['id']}",
-                token,
-                json={"body": body},
+        login = f"{app.get_app().slug}[bot]"
+        with Github(auth=Auth.Token(token), timeout=4) as client:
+            issue = client.get_repo(repository, lazy=True).get_issue(
+                int(inputs["issue_number"])
             )
-    github.request(
-        "POST",
-        f"/repos/{repository}/issues/comments/{inputs['comment_id']}/reactions",
-        token,
-        json={"content": "-1"},
+            existing = [c for c in issue.get_comments() if c.user.login == login]
+            for body in failure_comments(
+                logs,
+                f"요청 댓글 {inputs['comment_id']}",
+                command_url,
+                reason,
+                next_action,
+            ):
+                title = body.split("<summary>", 1)[1].split("</summary>", 1)[0]
+                previous = next(
+                    (c for c in existing if f"<summary>{title}</summary>" in c.body),
+                    None,
+                )
+                if previous is None:
+                    issue.create_comment(body)
+                elif previous.body != body:
+                    previous.edit(body)
+            issue.get_comment(int(inputs["comment_id"])).create_reaction("-1")
+
+
+def app_auth() -> Auth.AppAuth:
+    return Auth.AppAuth(
+        os.environ["DEPLOY_APP_CLIENT_ID"], os.environ["DEPLOY_APP_PRIVATE_KEY"]
     )
+
+
+def installation_token(
+    app: GithubIntegration,
+    installation_id: int,
+    repository: str,
+    permissions: dict[str, str],
+) -> str:
+    _, data = app.requester.requestJsonAndCheck(
+        "POST",
+        f"/app/installations/{installation_id}/access_tokens",
+        input={"repositories": [repository.split("/")[1]], "permissions": permissions},
+    )
+    return data["token"]
 
 
 def execute(installation_id: int, inputs: dict[str, str]) -> None:
     logs = ""
     token = ""
     try:
-        token = github.get_installation_token(
-            installation_id,
-            [inputs["repository"].split("/")[1]],
-            {"contents": "write", "workflows": "write", "pull_requests": "write"},
-        )
+        with GithubIntegration(auth=app_auth(), timeout=4) as app:
+            token = installation_token(
+                app,
+                installation_id,
+                inputs["repository"],
+                {"contents": "write", "workflows": "write", "pull_requests": "write"},
+            )
         logs = merge(inputs["repository"], int(inputs["issue_number"]), token)
-        github.request(
-            "POST",
-            f"/repos/{inputs['repository']}/issues/comments/{inputs['comment_id']}/reactions",
-            token,
-            json={"content": "rocket"},
-        )
+        with Github(auth=Auth.Token(token), timeout=4) as client:
+            issue = client.get_repo(inputs["repository"], lazy=True).get_issue(
+                int(inputs["issue_number"])
+            )
+            issue.get_comment(int(inputs["comment_id"])).create_reaction("rocket")
     except Exception as error:
         details = logs + error_details(error)
         if token:
             details = details.replace(token, "***")
-        report_failure(
-            installation_id,
-            inputs,
-            details,
-            f"요청 댓글 {inputs['comment_id']}",
-        )
+        report_failure(installation_id, inputs, details)

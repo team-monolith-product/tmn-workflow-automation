@@ -9,9 +9,9 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from github import GithubException
 
 from app import github_deploy
 from service import deploy, merge_deploy
@@ -130,43 +130,61 @@ def test_push_complete_takes_priority_over_notification_error():
 
 def test_execution_uses_scoped_app_token_and_reacts(monkeypatch, payload):
     inputs = deploy.deploy_request("issue_comment", payload)
-    token = Mock(return_value="app-token")
-    request = Mock()
+    app, issue = mock_github(monkeypatch)
     merge = Mock(return_value="DEPLOY_STAGE=push-complete\n")
-    monkeypatch.setattr(deploy.github, "get_installation_token", token)
-    monkeypatch.setattr(deploy.github, "request", request)
     monkeypatch.setattr(deploy, "merge", merge)
     deploy.execute(123, inputs)
-    token.assert_called_once_with(
-        123,
-        ["example"],
-        {"contents": "write", "workflows": "write", "pull_requests": "write"},
+    app.requester.requestJsonAndCheck.assert_called_once_with(
+        "POST",
+        "/app/installations/123/access_tokens",
+        input={
+            "repositories": ["example"],
+            "permissions": {
+                "contents": "write",
+                "workflows": "write",
+                "pull_requests": "write",
+            },
+        },
     )
     merge.assert_called_once_with("team-monolith-product/example", 7, "app-token")
-    assert request.call_args.kwargs["json"] == {"content": "rocket"}
+    issue.get_comment.assert_called_once_with(88)
+    issue.get_comment.return_value.create_reaction.assert_called_once_with("rocket")
+
+
+def mock_github(monkeypatch):
+    app = Mock()
+    client = Mock()
+    integration = Mock()
+    integration.__enter__ = Mock(return_value=app)
+    integration.__exit__ = Mock(return_value=False)
+    connection = Mock()
+    connection.__enter__ = Mock(return_value=client)
+    connection.__exit__ = Mock(return_value=False)
+    app.requester.requestJsonAndCheck.return_value = ({}, {"token": "app-token"})
+    app.get_app.return_value.slug = "deploy-app"
+    issue = client.get_repo.return_value.get_issue.return_value
+    issue.get_comments.return_value = []
+    monkeypatch.setattr(deploy, "app_auth", Mock())
+    monkeypatch.setattr(deploy, "GithubIntegration", Mock(return_value=integration))
+    monkeypatch.setattr(deploy, "Github", Mock(return_value=connection))
+    return app, issue
 
 
 @pytest.mark.parametrize("phase", ["mint", "merge", "reaction"])
 def test_failures_report_all_available_output(monkeypatch, payload, phase):
     inputs = deploy.deploy_request("issue_comment", payload)
-    response = requests.Response()
-    response.status_code = 403
-    response._content = b'{"message":"permission denied"}'
-    error = requests.HTTPError(response=response)
-    mint = Mock(return_value="app-token")
+    error = GithubException(403, {"message": "permission denied"}, None)
+    app, issue = mock_github(monkeypatch)
     merge = Mock(return_value="all git output\nDEPLOY_STAGE=push-complete\n")
-    request = Mock()
     report = Mock()
     if phase == "mint":
-        mint.side_effect = error
+        app.requester.requestJsonAndCheck.side_effect = error
     elif phase == "merge":
         merge.side_effect = subprocess.CalledProcessError(
             1, ["git"], output="all git output app-token"
         )
     else:
-        request.side_effect = error
-    monkeypatch.setattr(deploy.github, "get_installation_token", mint)
-    monkeypatch.setattr(deploy.github, "request", request)
+        issue.get_comment.return_value.create_reaction.side_effect = error
     monkeypatch.setattr(deploy, "merge", merge)
     monkeypatch.setattr(deploy, "report_failure", report)
     deploy.execute(123, inputs)
@@ -362,34 +380,21 @@ async def test_response_and_event_loop_remain_available_during_git_work(
 
 def test_failure_report_reuses_own_comment_on_redelivery(payload, monkeypatch):
     inputs = deploy.deploy_request("issue_comment", payload)
+    app, issue = mock_github(monkeypatch)
     existing = []
-    writes = []
-    monkeypatch.setattr(
-        deploy.github, "get_installation_token", lambda *args: "report-token"
-    )
-    monkeypatch.setattr(deploy.github, "get_app_token", lambda: "jwt")
-    monkeypatch.setattr(deploy.github, "get_pages", lambda *args: existing)
+    issue.get_comments.return_value = existing
 
-    def request(method, path, token, **kwargs):
-        if path == "/app":
-            return Mock(json=lambda: {"slug": "deploy-app"})
-        if path.endswith("/comments"):
-            writes.append(kwargs["json"]["body"])
-            existing.append(
-                {"id": 90, "body": writes[-1], "user": {"login": "deploy-app[bot]"}}
-            )
-        return Mock()
+    def create_comment(body):
+        comment = Mock(body=body)
+        comment.user.login = "deploy-app[bot]"
+        existing.append(comment)
 
-    monkeypatch.setattr(deploy.github, "request", request)
-    deploy.report_failure(
-        123, inputs, "CONFLICT (content)\ncomplete output", "요청 댓글 88"
-    )
-    deploy.report_failure(
-        123, inputs, "CONFLICT (content)\ncomplete output", "요청 댓글 88"
-    )
-    assert len(writes) == 1
-    assert "충돌" in writes[0]
-    assert "complete output" in writes[0]
+    issue.create_comment.side_effect = create_comment
+    deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
+    deploy.report_failure(123, inputs, "CONFLICT (content)\ncomplete output")
+    issue.create_comment.assert_called_once()
+    assert "충돌" in existing[0].body
+    assert "complete output" in existing[0].body
 
 
 def test_git_can_execute_askpass_and_read_token(git_repository, monkeypatch):
