@@ -1,13 +1,8 @@
-# 빌드 도구(git 등)는 builder 단계에만 두고, 런타임 이미지(prd)에는 실행에 필요한 것만
-# 남겨 OS 패키지 CVE 노출 면적을 줄인다. git 이 끌어오는 libssh2·perl·libcurl·libtasn1 은
-# 런타임에서 쓰지 않으므로 최종 이미지에서 제외된다.
-
 # ===== Builder Stage =====
 FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2 AS builder
 
 WORKDIR /app
 
-# git: requirements.txt 의 `notion-to-md-py @ git+https://...` 설치에 필요 (빌드 타임 전용)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -31,6 +26,7 @@ WORKDIR /app
 # 한글 폰트 설치 (matplotlib 차트 한글 표시용)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-nanum \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # matplotlib 폰트 캐시 삭제 (새 폰트 인식을 위해)
