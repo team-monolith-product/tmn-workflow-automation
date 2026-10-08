@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
 from app.common import notion_page_to_markdown
+from app.github_deploy import router as github_deploy_router
 from app.knowledge_mcp import (
     build_mcp as build_knowledge_mcp,
     build_mcp_app as build_knowledge_mcp_app,
@@ -59,10 +60,6 @@ PLAN_MD_REPO = "team-monolith-product/plan-md"
 if not WORKFLOW_AUTOMATION_API_KEY:
     raise RuntimeError("WORKFLOW_AUTOMATION_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-if not GITHUB_TOKEN:
-    raise RuntimeError("GITHUB_TOKEN 환경 변수가 설정되지 않았습니다.")
-
-
 # ============================================================================
 # FastAPI 앱 초기화
 # ============================================================================
@@ -94,6 +91,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(plugin_marketplace_router)
+app.include_router(github_deploy_router)
 
 
 # ============================================================================
@@ -348,6 +346,8 @@ async def handle_webhook(
     # API Key 검증
     step_start = time.time()
     await verify_api_key(x_api_key)
+    if not GITHUB_TOKEN:
+        raise HTTPException(503, "GITHUB_TOKEN 환경 변수가 설정되지 않았습니다.")
     logger.info(f"[1/7] API Key 검증 완료 (소요시간: {time.time() - step_start:.3f}초)")
 
     try:
