@@ -5,10 +5,6 @@ develop 은 dev 배포 누적 브랜치라 main 의 머지를 자동으로 따�
 main 과 어긋난다. 초기화는 develop ref 를 main 커밋으로 강제 이동시키는 것이며, 이
 push 가 dev 이미지 빌드를 트리거해 dev 환경이 main 상태로 재배포된다.
 
-GITHUB_TOKEN 계정(github-machine-monolith)이 Bot 팀 소속이므로, 대상 레포에 Bot 팀이
-write 로 추가되어 있어야 한다. fast-forward 가 아니라서 develop ruleset(non_fast_forward)
-이 있는 레포에서는 bypass 도 필요하고, Bot 팀이 그 bypass 대상이다.
-
 로컬 develop 은 각자 손으로 정리해야 하므로 초기화 후 안내에서 열린 PR 의 담당자를
 멘션한다. 담당자는 PR → 노션 작업 → 담당자 → 이메일 → 슬랙 사용자로 찾는다.
 
@@ -26,11 +22,12 @@ import os
 from typing import Iterator
 
 import dotenv
-from github import Github, UnknownObjectException
+from github import GithubException, UnknownObjectException
 from github.Repository import Repository
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 
+from service.github import get_github_client
 from service.slack import get_email_to_user_id
 
 # 환경 변수 로드
@@ -207,19 +204,12 @@ def main(
     if not repo_name:
         return "사용법: `/wa reset-develop <레포 이름>` (예: `jce-class-rails`)"
 
-    github_client = Github(os.environ["GITHUB_TOKEN"])
+    github_client = get_github_client()
     try:
         repo = github_client.get_repo(f"{ORG_NAME}/{repo_name}")
         develop_ref = repo.get_git_ref("heads/develop")
     except UnknownObjectException:
         return f"`{repo_name}` 레포 또는 그 develop 브랜치를 찾을 수 없습니다."
-
-    # 푸시 권한이 없으면 ref 이동이 404 로 떨어져 원인을 알기 어렵다.
-    if not repo.permissions.push:
-        return (
-            f"봇 계정에 `{repo_name}` 푸시 권한이 없습니다. "
-            "Bot 팀을 해당 레포에 write 로 추가해 주세요."
-        )
 
     old_sha = develop_ref.object.sha
     main_sha = repo.get_git_ref("heads/main").object.sha
@@ -244,7 +234,12 @@ def main(
     if dry_run:
         return announcement
 
-    develop_ref.edit(sha=main_sha, force=True)
+    try:
+        develop_ref.edit(sha=main_sha, force=True)
+    except GithubException as error:
+        return (
+            f"`{repo_name}` develop 초기화 실패 (GitHub {error.status}): {error.data}"
+        )
     slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=announcement)
     return (
         f"`{repo_name}` 의 develop 을 초기화하고 <#{SLACK_CHANNEL_ID}> 에 안내했습니다."

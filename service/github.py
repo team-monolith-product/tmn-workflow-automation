@@ -4,16 +4,27 @@ GitHub API 요청의 병렬 처리와 최적화를 담당합니다.
 """
 
 import concurrent.futures
+import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Any
 
 # PyGithub 라이브러리에서 필요한 클래스 임포트
-from github import Github
+from github import Auth, Github, GithubIntegration
 from github.PullRequest import PullRequest
 from github.TimelineEvent import TimelineEvent
 from github.PullRequestComment import PullRequestComment
 from github.Reaction import Reaction
+
+
+def get_github_client() -> Github:
+    with GithubIntegration(
+        auth=Auth.AppAuth(
+            os.environ["DEPLOY_APP_CLIENT_ID"], os.environ["DEPLOY_APP_PRIVATE_KEY"]
+        )
+    ) as app:
+        installation = app.get_org_installation("team-monolith-product")
+        return app.get_github_for_installation(installation.id)
 
 
 def fetch_pull_requests_parallel(
