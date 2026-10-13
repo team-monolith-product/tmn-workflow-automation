@@ -2,5 +2,13 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "Python 3.15에서 네이티브 의존성 빌드가 실패하므로 검증된 3.14 계열을 유지한다 (AHA-161).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["python"],
+      "allowedVersions": "/^3\\.14(?:\\.|-|$)/"
+    }
   ]
 }
