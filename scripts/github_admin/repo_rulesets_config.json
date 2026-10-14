@@ -48,5 +48,9 @@
   "tko-game-godot": {
     "skip": ["ruleset.json"],
     "add": ["ruleset_main_force_push_only.json"]
+  },
+  "jce-orange3-wasm": {
+    "skip": ["ruleset.json"],
+    "add": ["ruleset_main_force_push_only.json"]
   }
 }
