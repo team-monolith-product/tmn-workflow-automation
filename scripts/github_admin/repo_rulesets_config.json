@@ -49,6 +49,10 @@
     "skip": ["ruleset.json"],
     "add": ["ruleset_main_force_push_only.json"]
   },
+  "tko-ad-python": {
+    "skip": ["ruleset.json"],
+    "add": ["ruleset_main_ad_python.json"]
+  },
   "jce-orange3-wasm": {
     "skip": ["ruleset.json"],
     "add": ["ruleset_main_force_push_only.json"]
