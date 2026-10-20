@@ -70,6 +70,33 @@ def test_category_problems_are_warnings():
     assert any("없는 조합" in w for w in warnings)
 
 
+def test_ai_camp_subcategories_in_master_column_l_are_recognized():
+    raw = sheet_response()
+    master = raw["valueRanges"][-1]["values"]
+    master[1] += [""] * (11 - len(master[1])) + ["10. AI 캠프(코들)"]
+    master[2] += [""] * (11 - len(master[2])) + ["학교"]
+    master.append(["10. AI 캠프(코들)"])
+    raw["valueRanges"][1]["values"][1][8:10] = ["10. AI 캠프(코들)", "학교"]
+
+    rows, warnings = normalized_rows(raw)
+
+    assert warnings == []
+    assert rows[2]["category"] == "10. AI 캠프(코들)"
+    assert rows[2]["subcategory"] == "학교"
+
+
+@pytest.mark.parametrize("item", ["자산처분", "아이폰 매각"])
+def test_legacy_other_category_uses_current_master_number(item):
+    raw = sheet_response()
+    raw["valueRanges"][0]["values"][1][2] = item
+    raw["valueRanges"][0]["values"][1][8] = "기타"
+
+    rows, warnings = normalized_rows(raw)
+
+    assert warnings == []
+    assert rows[0]["category"] == "9. 기타"
+
+
 def test_crm_keeps_all_budgets_and_program_fields(monkeypatch):
     monkeypatch.setattr(
         "service.revenue.enrich.PROGRAM_ALIASES", {"해커톤": "대학  해커톤"}

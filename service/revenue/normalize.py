@@ -32,7 +32,7 @@ CATEGORIES = {
     "연구개발": "4. 플랫폼 제공 개발",
     "연수용역": "5. 연수용역",
     "교육용역": "6. 교육용역",
-    "기타": "8. 기타",
+    "기타": "9. 기타",
 }
 
 
@@ -55,7 +55,7 @@ def fetch_rows() -> tuple[list[dict], list[str]]:
 
 def parse_category_master(rows: list[list]) -> dict[str, list[str]]:
     master = {clean(row[0]): [] for row in rows[2:] if row and clean(row[0])}
-    for column in list(zip_longest(*rows[1:], fillvalue=""))[2:11]:
+    for column in list(zip_longest(*rows[1:], fillvalue=""))[2:12]:
         if major := clean(column[0]):
             master[major] = [clean(value) for value in column[1:] if clean(value)]
     return master
@@ -85,7 +85,7 @@ def category_for(customer: str, item: str, year: int, category: str) -> str:
     if year == 2025 and "한양대" in customer and "경기미래형" in item:
         return "5. 연수용역"
     if "아이폰" in item:
-        return "8. 기타"
+        return "9. 기타"
     return CATEGORIES.get(category, UNCLASSIFIED)
 
 
