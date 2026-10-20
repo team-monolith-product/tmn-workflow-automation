@@ -97,7 +97,7 @@ squads:
 
 # 복수 스쿼드에 소속된 사용자의 우선 스쿼드 지정
 squad_overrides:
-  "U07RP7U3FPU": "ie"  # 박기영: 인프라 팀 우선
+  "U07RP7U3FPU": "해커톤"
 
 scrum:
   pr_warning_excluded_members:
@@ -106,6 +106,10 @@ scrum:
 
   squads:
     - handle: "코들"
+      channel_id: "C09277NGUET"
+      pr_warning: true
+
+    - handle: "해커톤"
       channel_id: "C09277NGUET"
       pr_warning: true
 

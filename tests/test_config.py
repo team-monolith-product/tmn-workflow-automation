@@ -31,7 +31,7 @@ def test_load_config():
     assert isinstance(config, AppConfig)
     assert len(config.notion_databases) == 5
     assert len(config.squads) == 6
-    assert len(config.scrum.squads) == 4
+    assert len(config.scrum.squads) == 5
     assert len(config.scrum.personal_scrums) == 1
     assert len(config.task_alerts.pipelines) == 2
 
@@ -77,7 +77,7 @@ def test_scrum_config():
     config = load_config(CONFIG_PATH)
 
     handles = [s.squad.handle for s in config.scrum.squads]
-    assert handles == ["코들", "탐색", "ie", "게임"]
+    assert handles == ["코들", "해커톤", "탐색", "ie", "게임"]
 
     codle = config.scrum.squads[0]
     assert codle.squad.display_name == ":codle_bird: 코들 스쿼드"
@@ -163,8 +163,8 @@ def test_squad_overrides():
     config = load_config(CONFIG_PATH)
 
     assert "U07RP7U3FPU" in config.squad_overrides
-    assert config.squad_overrides["U07RP7U3FPU"].handle == "ie"
-    assert config.squad_overrides["U07RP7U3FPU"].notion_db.name == "infra"
+    assert config.squad_overrides["U07RP7U3FPU"].handle == "해커톤"
+    assert config.squad_overrides["U07RP7U3FPU"].notion_db.name == "hackathon"
 
 
 def test_invalid_squad_override_reference():
