@@ -217,6 +217,7 @@ async def answer_data_analysis(
                 "- GA(ga/jitda_ga)의 traffic_source, collected_traffic_source는 JSON → json_extract_scalar()로 파싱\n"
                 "- jitda_gsc 평균 순위는 SUM(sum_top_position) / SUM(impressions) + 1 (site), SUM(sum_position) / SUM(impressions) + 1 (url). CTR은 SUM(clicks) / SUM(impressions)\n"
                 "- jitda_gsc의 is_anonymized_query = true 행은 query가 NULL(개인정보 보호로 익명 처리) → 검색어별 합계는 전체보다 작음. site와 url 테이블은 집계 기준이 달라 합계가 서로 다름\n"
+                "- jitda_gsc의 2026-10-17 이전 데이터는 Search Console API 백필: search_type은 WEB만, is_* 칸은 NULL, url 테이블에는 익명 검색어 행이 없음(사이트 테이블은 포함)\n"
                 "\n"
                 "Instructions:\n"
                 "- 데이터 분석 요청에 대해 위 데이터베이스 가이드를 참고하여 적절한 DB를 선택합니다.\n"
