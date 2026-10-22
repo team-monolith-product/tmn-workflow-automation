@@ -1,5 +1,5 @@
 # ===== Builder Stage =====
-FROM python:3.14-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a AS builder
+FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ===== Production Stage =====
-FROM python:3.14-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a AS prd
+FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS prd
 
 # 환경 변수 설정 (Python 출력 버퍼링 비활성화)
 ENV PYTHONUNBUFFERED=1
