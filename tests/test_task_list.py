@@ -478,9 +478,22 @@ async def build_tools_with(channel: str, **task_list_patch) -> set[str]:
         with patch.multiple(general, **factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
                 tools = await general._build_tools(
-                    AsyncMock(), REQUESTER, channel, "1700000000.000100"
+                    AsyncMock(), REQUESTER, channel, "1700000000.000100", AsyncMock()
                 )
     return {getattr(tool, "name", tool) for tool in tools}
+
+
+async def test_build_tools_includes_data_analysis_tools():
+    """로봇 도구에 데이터 봇과 같은 Redash·Athena 도구가 들어간다"""
+    names = await build_tools_with(CHANNEL, return_value=None)
+
+    assert {
+        "list_redash_dashboards",
+        "read_redash_dashboard",
+        "read_redash_query",
+        "execute_athena_query",
+        "execute_python",
+    } <= names
 
 
 async def test_registered_channel_swaps_notion_task_tools_for_list_tools():

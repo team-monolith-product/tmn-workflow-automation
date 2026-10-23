@@ -684,6 +684,7 @@ async def answer(
     say,
     client,
     tools: list,
+    instructions: str = "",
 ):
     """
     슬랙에서 질문을 받아 답변을 생성하여 슬랙에 전송한다.
@@ -696,6 +697,7 @@ async def answer(
         say: 메시지 전송 함수
         client: 슬랙 클라이언트
         tools: 외부에서 주입할 도구들의 리스트.
+        instructions: 시스템 프롬프트 끝에 덧붙일 봇별 지침.
 
     Returns:
         None
@@ -734,7 +736,7 @@ async def answer(
                 "- Italic: `_텍스트_` (언더스코어)\n"
                 "- Strikethrough: `~텍스트~` (물결표)\n"
                 "- Code: `` `코드` `` (백틱)\n"
-                "- Code block: ``` ```코드 블록``` ``` (백틱 3개)"
+                "- Code block: ``` ```코드 블록``` ``` (백틱 3개)" + instructions
             )
         )
     ]
@@ -789,7 +791,7 @@ async def answer(
 
     response = await agent_executor.ainvoke(
         {"messages": messages},
-        {"callbacks": [tool_status_handler], "recursion_limit": 50},
+        {"callbacks": [tool_status_handler], "recursion_limit": 200},
     )
 
     agent_answer = extract_text(response["messages"][-1].content)
