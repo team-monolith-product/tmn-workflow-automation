@@ -2,6 +2,7 @@
 데이터 봇 전용 로직
 """
 
+import time
 from datetime import datetime
 from typing import Annotated
 
@@ -28,6 +29,7 @@ async def collect_thread_context(
     channel: str,
     thread_ts: str,
     user: str | None,
+    latest: str | None = None,
 ) -> tuple[str, str]:
     """
     스레드의 이전 대화 내용과 질문자 이름을 수집합니다.
@@ -39,11 +41,14 @@ async def collect_thread_context(
         channel: 채널 ID
         thread_ts: 스레드 타임스탬프
         user: 질문자의 Slack 사용자 ID
+        latest: 이 시각 이전의 메시지만 읽습니다. 생략하면 스레드 전체를 읽습니다.
 
     Returns:
         tuple[str, str]: (질문자 이름, 이전 대화 내용)
     """
-    result = await slack_client.conversations_replies(channel=channel, ts=thread_ts)
+    result = await slack_client.conversations_replies(
+        channel=channel, ts=thread_ts, latest=latest
+    )
 
     # 메시지에서 사용자 ID를 수집
     user_ids = set(
@@ -163,7 +168,8 @@ def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str 
 
     대표 봇(로봇)이 데이터 봇과 같은 분석을 하도록 프롬프트·도구·추론 설정을
     그대로 쓰는 하위 에이전트를 돌립니다. 쿼리 결과 표, 차트, 도구 상태는
-    하위 에이전트가 부르는 쪽 봇으로 스레드에 직접 올립니다.
+    하위 에이전트가 부르는 쪽 봇으로 스레드에 직접 올립니다. 도구 상태는 부르는
+    쪽 에이전트의 상태 메시지에 함께 표시됩니다.
 
     Args:
         slack_client: 부르는 쪽 봇의 Slack 클라이언트
@@ -174,6 +180,9 @@ def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str 
     Returns:
         analyze_data tool
     """
+    # 도구가 불릴 때는 부르는 쪽 봇이 상태 메시지를 이미 스레드에 올린 뒤다.
+    # 그 전 시각까지만 읽어야 스레드의 마지막 메시지가 방금 도착한 질문이 된다.
+    latest = f"{time.time():.6f}"
 
     async def say(payload, thread_ts=thread_ts):
         # ToolStatusHandler가 상태 메시지를 고치려면 응답의 ts가 필요하다
@@ -201,8 +210,10 @@ def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str 
             분석 결과 (슬랙 mrkdwn)
         """
         user_real_name, threads_joined = await collect_thread_context(
-            slack_client, channel, thread_ts, user
+            slack_client, channel, thread_ts, user, latest
         )
+        # 부르는 쪽 에이전트의 콜백이 하위 에이전트까지 이어지므로 상태 핸들러를
+        # 따로 붙이지 않는다. 붙이면 같은 도구 호출이 상태 메시지 두 개에 찍힌다.
         return await run_data_analysis(
             thread_ts,
             channel,
@@ -211,6 +222,7 @@ def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str 
             question,
             say,
             slack_client,
+            callbacks=[],
         )
 
     return analyze_data
@@ -240,6 +252,11 @@ async def answer_data_analysis(
     Returns:
         None
     """
+    # 툴 호출 상태를 슬랙에 표시하는 핸들러
+    tool_status_handler = ToolStatusHandler(
+        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
+    )
+
     agent_answer = await run_data_analysis(
         thread_ts,
         channel,
@@ -248,6 +265,7 @@ async def answer_data_analysis(
         text,
         say,
         slack_client,
+        callbacks=[tool_status_handler],
     )
 
     # Slack 텍스트 블록은 최대 3000자까지만 지원
@@ -309,6 +327,7 @@ async def run_data_analysis(
     text: str,
     say,
     slack_client,
+    callbacks: list,
 ) -> str:
     """
     데이터 분석 에이전트를 돌려 답변을 만듭니다.
@@ -321,6 +340,7 @@ async def run_data_analysis(
         text: 질문 내용
         say: 메시지 전송 함수
         slack_client: Slack 클라이언트
+        callbacks: 에이전트 실행에 붙일 콜백 핸들러
 
     Returns:
         str: 에이전트의 최종 답변
@@ -439,14 +459,9 @@ async def run_data_analysis(
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-    # 툴 호출 상태를 슬랙에 표시하는 핸들러
-    tool_status_handler = ToolStatusHandler(
-        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
-    )
-
     response = await agent_executor.ainvoke(
         {"messages": messages},
-        {"callbacks": [tool_status_handler], "recursion_limit": 200},
+        {"callbacks": callbacks, "recursion_limit": 200},
     )
 
     return extract_text(response["messages"][-1].content)
