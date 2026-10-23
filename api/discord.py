@@ -51,17 +51,12 @@ def get_message(channel_id: str, message_id: str) -> dict:
     return resp.json()
 
 
-def get_channel_messages(
-    channel_id: str, limit: int = 100, before: str | None = None
-) -> list[dict]:
-    """채널의 최근 메시지 목록 조회 (최신순). before 를 주면 그 메시지 이전부터"""
-    params = {"limit": limit}
-    if before:
-        params["before"] = before
+def get_channel_messages(channel_id: str, limit: int = 100) -> list[dict]:
+    """채널의 최근 메시지 목록 조회 (최신순)"""
     resp = requests.get(
         f"{BASE_URL}/channels/{channel_id}/messages",
         headers=_headers(),
-        params=params,
+        params={"limit": limit},
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()

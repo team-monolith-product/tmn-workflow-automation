@@ -54,7 +54,6 @@ PROGRAM_NAME = "AI동행프로그램"
 
 CATEGORY_CHANNEL_TYPE = 4
 FORUM_CHANNEL_TYPE = 15
-MESSAGE_PAGE_SIZE = 100
 
 ATTACHMENT_ID_KEY = "discord_attachment_id"
 UPLOADED_EMOJI = "✅"
@@ -111,18 +110,6 @@ def list_snack_threads(forums: dict[str, str], backfill: bool) -> list[dict]:
     ]
 
 
-def list_thread_messages(thread_id: str) -> list[dict]:
-    """스레드의 메시지를 끝까지 넘겨 가며 모은다."""
-    messages: list[dict] = []
-    before = None
-    while True:
-        page = get_channel_messages(thread_id, limit=MESSAGE_PAGE_SIZE, before=before)
-        messages.extend(page)
-        if len(page) < MESSAGE_PAGE_SIZE:
-            return messages
-        before = page[-1]["id"]
-
-
 def is_image(attachment: dict) -> bool:
     return attachment.get("content_type", "").startswith("image/")
 
@@ -172,8 +159,9 @@ def upload_thread(
 ) -> int:
     """스레드 하나의 새 사진을 올리고 올린 장수를 돌려준다."""
     count = 0
+    # 수업 한 회차의 글이라 댓글이 100개를 넘지 않는다.
     # 오래된 메시지부터 올려야 _2, _3 번호가 올린 순서와 맞는다.
-    for message in reversed(list_thread_messages(thread["id"])):
+    for message in reversed(get_channel_messages(thread["id"])):
         images = [a for a in message["attachments"] if is_image(a)]
         if not images or is_marked_uploaded(message):
             continue
