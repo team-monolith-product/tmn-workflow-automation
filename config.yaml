@@ -286,13 +286,11 @@ scheduled_jobs:
       minute: "*/10"
     business_day_only: false
 
-  # 간식증빙 사진을 드라이브로. 올린 메시지에는 봇이 ✅ 를 달아 다시 올리지 않고,
-  # 실행이 빠지면 다음 실행이 이어 올린다.
   - name: upload_snack_photos
     module: scripts.upload_snack_photos
     function: main
     cron:
-      minute: "5-55/10"     # discord_post_completion_notice 와 엇갈리게
+      minute: "5-55/10"
     business_day_only: false
 
   - name: crawl_education_bids
