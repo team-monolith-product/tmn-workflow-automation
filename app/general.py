@@ -13,6 +13,7 @@ from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
+from .data_bot import get_analyze_data_tool
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
@@ -176,6 +177,9 @@ async def _build_tools(
                 draft_sms=draft_sms.coroutine,
             )
         ]
+        # 데이터 분석은 데이터 봇과 같은 에이전트에게 맡긴다. DB 가이드와 높은
+        # 추론 설정이 그쪽에 있어서 로봇 프롬프트에 옮겨 담으면 둘이 갈라진다.
+        + [get_analyze_data_tool(client, channel, thread_ts, user_id)]
     )
 
 

@@ -3,8 +3,10 @@
 """
 
 from datetime import datetime
+from typing import Annotated
 
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
@@ -155,6 +157,65 @@ def register_data_handlers(app_data):
         )
 
 
+def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str | None):
+    """
+    데이터 봇의 분석 에이전트를 다른 봇이 부를 수 있게 도구로 감쌉니다.
+
+    대표 봇(로봇)이 데이터 봇과 같은 분석을 하도록 프롬프트·도구·추론 설정을
+    그대로 쓰는 하위 에이전트를 돌립니다. 쿼리 결과 표, 차트, 도구 상태는
+    하위 에이전트가 부르는 쪽 봇으로 스레드에 직접 올립니다.
+
+    Args:
+        slack_client: 부르는 쪽 봇의 Slack 클라이언트
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+        user: 질문자의 Slack 사용자 ID
+
+    Returns:
+        analyze_data tool
+    """
+
+    async def say(payload, thread_ts=thread_ts):
+        # ToolStatusHandler가 상태 메시지를 고치려면 응답의 ts가 필요하다
+        return await slack_client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=payload.get("text", "데이터 분석 결과"),
+            **{k: v for k, v in payload.items() if k != "text"},
+        )
+
+    @tool
+    async def analyze_data(
+        question: Annotated[str, "분석할 질문. 사용자의 요청을 빠짐없이 담습니다."],
+    ) -> str:
+        """
+        데이터 봇과 같은 데이터 분석 에이전트에게 질문하고 분석 결과를 받습니다.
+
+        코들·짓다 서비스 지표, 사용자·교실·교재 통계, GA·검색 성과, 영업 계약 등
+        사내 데이터(Athena, Redash)를 조회·집계·시각화해야 하는 요청에 사용합니다.
+        스레드의 앞선 대화는 에이전트가 직접 읽으므로 question 에 옮겨 적지 않아도 됩니다.
+        쿼리 결과 표와 차트는 에이전트가 스레드에 직접 올립니다.
+        돌려받은 분석 결과는 요약하거나 고치지 말고 그대로 전달하십시오.
+
+        Returns:
+            분석 결과 (슬랙 mrkdwn)
+        """
+        user_real_name, threads_joined = await collect_thread_context(
+            slack_client, channel, thread_ts, user
+        )
+        return await run_data_analysis(
+            thread_ts,
+            channel,
+            user_real_name,
+            threads_joined,
+            question,
+            say,
+            slack_client,
+        )
+
+    return analyze_data
+
+
 async def answer_data_analysis(
     thread_ts: str,
     channel: str,
@@ -178,6 +239,91 @@ async def answer_data_analysis(
 
     Returns:
         None
+    """
+    agent_answer = await run_data_analysis(
+        thread_ts,
+        channel,
+        user_real_name,
+        threads_joined,
+        text,
+        say,
+        slack_client,
+    )
+
+    # Slack 텍스트 블록은 최대 3000자까지만 지원
+    # 긴 응답은 여러 메시지로 분할하여 전송
+    MAX_CHARS = 3000
+    if len(agent_answer) <= MAX_CHARS:
+        await say(
+            {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": agent_answer},
+                    }
+                ]
+            },
+            thread_ts=thread_ts,
+        )
+    else:
+        # 메시지를 3000자 단위로 분할
+        chunks = []
+        current_chunk = ""
+
+        for line in agent_answer.split("\n"):
+            # 현재 줄을 추가했을 때 3000자를 초과하면 chunk 저장
+            if len(current_chunk) + len(line) + 1 > MAX_CHARS:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                if current_chunk:
+                    current_chunk += "\n" + line
+                else:
+                    current_chunk = line
+
+        # 마지막 chunk 저장
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        # 각 chunk를 순차적으로 전송
+        for chunk in chunks:
+            await say(
+                {
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": chunk},
+                        }
+                    ]
+                },
+                thread_ts=thread_ts,
+            )
+
+
+async def run_data_analysis(
+    thread_ts: str,
+    channel: str,
+    user_real_name: str,
+    threads_joined: str,
+    text: str,
+    say,
+    slack_client,
+) -> str:
+    """
+    데이터 분석 에이전트를 돌려 답변을 만듭니다.
+
+    Args:
+        thread_ts: 스레드 타임스탬프
+        channel: 채널 ID
+        user_real_name: 사용자 이름
+        threads_joined: 스레드 대화 내용
+        text: 질문 내용
+        say: 메시지 전송 함수
+        slack_client: Slack 클라이언트
+
+    Returns:
+        str: 에이전트의 최종 답변
     """
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
@@ -303,54 +449,4 @@ async def answer_data_analysis(
         {"callbacks": [tool_status_handler], "recursion_limit": 200},
     )
 
-    agent_answer = extract_text(response["messages"][-1].content)
-
-    # Slack 텍스트 블록은 최대 3000자까지만 지원
-    # 긴 응답은 여러 메시지로 분할하여 전송
-    MAX_CHARS = 3000
-    if len(agent_answer) <= MAX_CHARS:
-        await say(
-            {
-                "blocks": [
-                    {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": agent_answer},
-                    }
-                ]
-            },
-            thread_ts=thread_ts,
-        )
-    else:
-        # 메시지를 3000자 단위로 분할
-        chunks = []
-        current_chunk = ""
-
-        for line in agent_answer.split("\n"):
-            # 현재 줄을 추가했을 때 3000자를 초과하면 chunk 저장
-            if len(current_chunk) + len(line) + 1 > MAX_CHARS:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = line
-            else:
-                if current_chunk:
-                    current_chunk += "\n" + line
-                else:
-                    current_chunk = line
-
-        # 마지막 chunk 저장
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        # 각 chunk를 순차적으로 전송
-        for chunk in chunks:
-            await say(
-                {
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": chunk},
-                        }
-                    ]
-                },
-                thread_ts=thread_ts,
-            )
+    return extract_text(response["messages"][-1].content)
