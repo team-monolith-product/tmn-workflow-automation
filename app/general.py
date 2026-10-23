@@ -46,6 +46,8 @@ PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로�
 
 # 로봇도 데이터 봇과 같은 지침으로 데이터를 분석한다
 ROBOT_INSTRUCTIONS: str = "\n\n" + DATA_ANALYSIS_GUIDE
+# 데이터 분석은 쿼리를 고쳐 다시 돌리느라 단계를 많이 쓴다. 데이터 봇과 같은 한도를 둔다.
+ROBOT_RECURSION_LIMIT: int = 200
 
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
@@ -239,6 +241,7 @@ def get_sms_revise(app):
             app.client,
             tools,
             ROBOT_INSTRUCTIONS,
+            recursion_limit=ROBOT_RECURSION_LIMIT,
         )
 
     return revise
@@ -331,6 +334,7 @@ def register_general_handlers(app):
             app.client,
             tools,
             ROBOT_INSTRUCTIONS,
+            recursion_limit=ROBOT_RECURSION_LIMIT,
         )
 
     @app.event("message")
@@ -363,6 +367,7 @@ def register_general_handlers(app):
                 app.client,
                 tools,
                 ROBOT_INSTRUCTIONS,
+                recursion_limit=ROBOT_RECURSION_LIMIT,
             )
         elif channel in BUG_REPORT_CHANNEL_TO_PRODUCT:
             # 메시지 편집 이벤트 필터링

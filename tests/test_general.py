@@ -143,6 +143,7 @@ class TestGeneralBotDirectMessage:
 
         assert mock_answer.call_args.args[7] == general.ROBOT_INSTRUCTIONS
         assert general.DATA_ANALYSIS_GUIDE in general.ROBOT_INSTRUCTIONS
+        assert mock_answer.call_args.kwargs == {"recursion_limit": 200}
 
     async def test_thread_reply(self, mock_answer):
         """스레드에서 이어진 질문은 그 스레드에서 처리한다"""
