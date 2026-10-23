@@ -9,15 +9,20 @@ from scripts.upload_snack_photos import KST
 CHANNELS = [
     {"id": "c1", "type": 4, "name": "공지_팀모노리스"},
     {"id": "c2", "type": 4, "name": "공지_스마트인재개발원"},
+    {"id": "c3", "type": 4, "name": "공지_팀모노리스2"},
     {"id": "f1", "type": 15, "name": "대구-영남중-공지", "parent_id": "c1"},
     {"id": "f2", "type": 15, "name": "거창대성고-공지", "parent_id": "c2"},
     {"id": "f3", "type": 15, "name": "자유게시판", "parent_id": "c1"},
+    {"id": "f4", "type": 15, "name": "장성중1반-공지", "parent_id": "c3"},
     {"id": "t1", "type": 0, "name": "서울고-공지", "parent_id": "c1"},
 ]
 
 
 def test_우리_카테고리의_공지_포럼만_학교로_본다():
-    assert script.find_school_forums(CHANNELS) == {"f1": "대구-영남중"}
+    assert script.find_school_forums(CHANNELS) == {
+        "f1": "대구-영남중",
+        "f4": "장성중1반",
+    }
 
 
 def test_같은_이름이_있으면_번호를_붙인다():

@@ -2,7 +2,7 @@
 Discord 간식증빙사진을 구글 드라이브에 모아 올림
 
 10분마다 실행되며:
-1. "공지_팀모노리스" 카테고리의 "{학교}-공지" 포럼에서 제목에 "간식증빙"이 든 스레드를 찾음
+1. "공지_팀모노리스"로 시작하는 카테고리의 "{학교}-공지" 포럼에서 제목에 "간식증빙"이 든 스레드를 찾음
 2. 스레드의 이미지 첨부를 "{학교}_{M월D일}_AI동행프로그램.jpg" 이름으로 드라이브 폴더에 올림
 3. 멱등성: 드라이브 파일의 appProperties 에 Discord 첨부 ID 를 남겨, 이미 올린 첨부는 스킵
 
@@ -37,7 +37,8 @@ KST = timezone(timedelta(hours=9))
 
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1504338147155251220")
 # 운영기관마다 카테고리가 따로 있다. 다른 기관 학교의 사진은 우리 몫이 아니다.
-CATEGORY_NAME = "공지_팀모노리스"
+# 학교가 늘면 "공지_팀모노리스2" 처럼 카테고리를 더 만들므로 접두어로 찾는다.
+CATEGORY_PREFIX = "공지_팀모노리스"
 FORUM_SUFFIX = "-공지"
 THREAD_KEYWORD = "간식증빙"
 PROGRAM_NAME = "AI동행프로그램"
@@ -59,7 +60,8 @@ def find_school_forums(channels: list[dict]) -> dict[str, str]:
     category_ids = {
         ch["id"]
         for ch in channels
-        if ch["type"] == CATEGORY_CHANNEL_TYPE and ch["name"] == CATEGORY_NAME
+        if ch["type"] == CATEGORY_CHANNEL_TYPE
+        and ch["name"].startswith(CATEGORY_PREFIX)
     }
     return {
         ch["id"]: ch["name"].removesuffix(FORUM_SUFFIX)
