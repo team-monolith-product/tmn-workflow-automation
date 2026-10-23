@@ -177,3 +177,52 @@ class TestGeneralBotDirectMessage:
             )
 
         assert not mock_answer.called
+
+
+async def test_athena_tool_posts_result_to_thread():
+    """로봇의 Athena 도구는 결과 표를 질문 스레드에 올린다"""
+    notion_factories = {
+        name: (lambda *args, name=name, **kwargs: name)
+        for name in (
+            "get_create_notion_task_tool",
+            "get_create_notion_follow_up_task_tool",
+            "get_update_notion_task_deadline_tool",
+            "get_update_notion_task_status_tool",
+            "get_notion_page_tool",
+        )
+    }
+    say = AsyncMock()
+    with patch.object(general, "find_channel_task_list", return_value=None):
+        with patch.multiple(general, **notion_factories):
+            with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
+                tools = await general._build_tools(
+                    AsyncMock(), "U1", "C123", "1700000000.000100", say
+                )
+    athena_tool = next(
+        tool for tool in tools if getattr(tool, "name", "") == "execute_athena_query"
+    )
+    results = {
+        "ResultSet": {
+            "Rows": [
+                {"Data": [{"VarCharValue": "dau"}]},
+                {"Data": [{"VarCharValue": "1234"}]},
+            ]
+        }
+    }
+
+    with patch(
+        "app.tools.athena_tools.athena.execute_and_wait",
+        AsyncMock(return_value=results),
+    ):
+        await athena_tool.ainvoke(
+            {
+                "query": "SELECT 1",
+                "database": "data_mart_prd",
+                "show_result_to_user": True,
+            }
+        )
+
+    assert say.await_count == 2  # 실행한 SQL, 결과 표
+    assert all(
+        call.kwargs["thread_ts"] == "1700000000.000100" for call in say.await_args_list
+    )

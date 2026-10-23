@@ -124,3 +124,32 @@ class TestAnswer:
         for call in say.call_args_list:
             text = call.args[0]["blocks"][0]["text"]["text"]
             assert len(text) <= 3000
+
+    async def test_appends_instructions_to_system_prompt(self, slack_client):
+        """봇별 지침은 시스템 프롬프트 끝에 붙고, 주지 않으면 프롬프트가 그대로다"""
+        executor = MagicMock()
+        executor.ainvoke = AsyncMock(
+            return_value={"messages": [AIMessage(content="답")]}
+        )
+
+        async def system_prompt(*instructions):
+            with patch("app.common.ChatOpenAI"), patch(
+                "app.common.create_react_agent", return_value=executor
+            ):
+                await common.answer(
+                    "1786006902.904459",
+                    "C0AP8CG1Y6N",
+                    "U1",
+                    "질문",
+                    AsyncMock(),
+                    slack_client,
+                    [],
+                    *instructions,
+                )
+            return executor.ainvoke.call_args.args[0]["messages"][0].content
+
+        default = await system_prompt()
+        with_instructions = await system_prompt("\n\n데이터 지침")
+
+        assert default.endswith("(백틱 3개)")
+        assert with_instructions == default + "\n\n데이터 지침"

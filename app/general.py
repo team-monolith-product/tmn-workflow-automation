@@ -43,8 +43,9 @@ from service.slack_task_list import find_channel_task_list
 DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB (기본값)
 PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
 
-# 데이터 분석 지침. app/data_bot.py 시스템 프롬프트와 같은 내용이므로
-# Athena DB가 늘거나 바뀌면 두 곳을 함께 고친다.
+# 데이터 분석 지침. app/data_bot.py 시스템 프롬프트의 'Athena 데이터베이스 가이드'부터
+# '파이썬 실행'까지와 Presto 문법 안내를 옮겨 적은 것이다.
+# DB 안내든 도구 사용법이든 어느 쪽을 고치면 두 곳을 함께 고친다.
 ROBOT_INSTRUCTIONS: str = (
     "\n\n"
     "Athena 데이터베이스 가이드:\n"
@@ -90,6 +91,7 @@ ROBOT_INSTRUCTIONS: str = (
     "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
     "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
     "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
+    "- 쿼리 작성 시 Athena(Presto) SQL 문법을 사용합니다.\n"
 )
 
 # 유저그룹 멤버 캐시 (1시간 TTL)
