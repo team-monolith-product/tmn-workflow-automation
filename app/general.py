@@ -13,11 +13,10 @@ from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
-from .data_bot import DATA_ANALYSIS_GUIDE
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
-from .tools.athena_tools import get_execute_athena_query_tool
+from .tools.athena_tools import DATA_ANALYSIS_GUIDE, get_execute_athena_query_tool
 from .tools.python_tools import get_execute_python_tool
 from .tools.redash_tools import (
     list_redash_dashboards,
