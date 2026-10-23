@@ -28,11 +28,25 @@ def test_우리_카테고리의_공지_포럼만_학교로_본다():
     }
 
 
+def test_날짜는_업로드한_날이_아니라_제목의_수업_날짜다():
+    # 강사님이 다음 날 올려도 그 회차 사진이다.
+    next_day = datetime(2026, 10, 17, 9, 0, tzinfo=KST)
+
+    label = script.class_date_label("10.16(금) 17:00 - 🍪 간식증빙사진", next_day)
+
+    assert label == "10월16일"
+
+
+def test_제목에_날짜가_없으면_업로드_날짜를_쓴다():
+    posted_at = datetime(2026, 7, 2, 18, 0, tzinfo=KST)
+
+    assert script.class_date_label("🍪 간식증빙사진", posted_at) == "7월2일"
+
+
 def test_같은_이름이_있으면_번호를_붙인다():
-    posted_at = datetime(2026, 10, 28, 14, 0, tzinfo=KST)
     taken = {"서울고_10월28일_AI동행프로그램.jpg"}
 
-    name = script.make_file_name("서울고", posted_at, ".jpg", taken)
+    name = script.make_file_name("서울고", "10월28일", ".jpg", taken)
 
     assert name == "서울고_10월28일_AI동행프로그램_2.jpg"
 

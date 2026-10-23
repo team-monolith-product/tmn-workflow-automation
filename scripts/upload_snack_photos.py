@@ -4,6 +4,7 @@ Discord 간식증빙사진을 구글 드라이브에 모아 올림
 10분마다 실행되며:
 1. "공지_팀모노리스"로 시작하는 카테고리의 "{학교}-공지" 포럼에서 제목에 "간식증빙"이 든 스레드를 찾음
 2. 스레드의 이미지 첨부를 "{학교}_{M월D일}_AI동행프로그램.jpg" 이름으로 드라이브 폴더에 올림
+   날짜는 스레드 제목의 수업 날짜다. 강사님이 다음 날 올려도 그 회차 사진이기 때문이다.
 3. 메시지의 사진을 다 올리면 봇이 ✅ 반응을 달고, 다음부터 그 메시지는 건너뜀
 
 한 번 올린 사진은 다시 올리면 안 된다. 드라이브는 사람이 파일을 지우거나 옮기므로
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -58,6 +60,8 @@ ATTACHMENT_ID_KEY = "discord_attachment_id"
 UPLOADED_EMOJI = "✅"
 # 반응 추가는 채널당 0.25초에 한 번으로 제한된다. backfill 처럼 연달아 달면 429 가 난다.
 REACTION_INTERVAL_SECONDS = 0.3
+# 운영사업봇이 만드는 제목 "7.16(목) 12:40 - 🍪 간식증빙사진" 의 수업 날짜
+CLASS_DATE_PATTERN = re.compile(r"^(\d{1,2})\.(\d{1,2})\(")
 
 
 def find_school_forums(channels: list[dict]) -> dict[str, str]:
@@ -131,12 +135,25 @@ def is_marked_uploaded(message: dict) -> bool:
     )
 
 
-def make_file_name(school: str, posted_at: datetime, ext: str, taken: set[str]) -> str:
+def class_date_label(thread_name: str, posted_at: datetime) -> str:
+    """
+    스레드 제목에서 수업 날짜를 "M월D일" 로 꺼낸다.
+
+    운영사업봇 이전에 사람이 만든 스레드는 제목에 날짜가 없을 수 있다. 그때는
+    "수업 당일까지 업로드" 규칙에 기대어 업로드 날짜를 쓴다.
+    """
+    match = CLASS_DATE_PATTERN.match(thread_name)
+    if not match:
+        return f"{posted_at.month}월{posted_at.day}일"
+    return f"{int(match[1])}월{int(match[2])}일"
+
+
+def make_file_name(school: str, date_label: str, ext: str, taken: set[str]) -> str:
     """
     "{학교}_{M월D일}_AI동행프로그램{ext}" 를 만든다.
     같은 날 사진이 여러 장이면 뒤에 _2, _3 을 붙인다.
     """
-    base = f"{school}_{posted_at.month}월{posted_at.day}일_{PROGRAM_NAME}"
+    base = f"{school}_{date_label}_{PROGRAM_NAME}"
     name = f"{base}{ext}"
     n = 2
     while name in taken:
@@ -161,11 +178,12 @@ def upload_thread(
         if not images or is_marked_uploaded(message):
             continue
         posted_at = datetime.fromisoformat(message["timestamp"]).astimezone(KST)
+        date_label = class_date_label(thread["name"], posted_at)
         for attachment in images:
             if attachment["id"] in uploaded_ids:
                 continue
             ext = Path(attachment["filename"]).suffix.lower()
-            name = make_file_name(school, posted_at, ext, taken_names)
+            name = make_file_name(school, date_label, ext, taken_names)
             taken_names.add(name)
             if dry_run:
                 print(f"  [DRY-RUN] {name}")
