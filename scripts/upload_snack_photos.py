@@ -133,7 +133,7 @@ def main(dry_run: bool = False, backfill: bool = False):
         dry_run: 업로드 없이 대상만 출력
         backfill: 보관된 스레드까지 훑는다 (최초 1회용)
     """
-    folder_id = os.environ["SNACK_PHOTO_DRIVE_FOLDER_ID"]
+    folder_id = os.environ["DISCORD_SNACK_PHOTO_DRIVE_FOLDER_ID"]
     print(f"[upload_snack_photos] 실행: {datetime.now(KST).isoformat()}")
 
     forums = find_school_forums(get_guild_channels(GUILD_ID))

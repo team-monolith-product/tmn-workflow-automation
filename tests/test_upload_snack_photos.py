@@ -43,7 +43,7 @@ def _image(attachment_id, filename="a.JPG"):
 
 
 def test_새_이미지만_올리고_이미_올린_첨부는_건너뛴다(monkeypatch):
-    monkeypatch.setenv("SNACK_PHOTO_DRIVE_FOLDER_ID", "folder")
+    monkeypatch.setenv("DISCORD_SNACK_PHOTO_DRIVE_FOLDER_ID", "folder")
     threads = {
         "threads": [
             {
