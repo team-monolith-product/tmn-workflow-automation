@@ -2,12 +2,9 @@
 데이터 봇 전용 로직
 """
 
-import time
 from datetime import datetime
-from typing import Annotated
 
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
-from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
@@ -23,13 +20,60 @@ from .tools.redash_tools import (
     read_redash_query,
 )
 
+# 데이터 분석에 필요한 Athena DB 안내와 도구 사용 지침.
+# 데이터 봇과 대표 봇(로봇)이 같은 지침으로 분석하도록 함께 쓴다.
+DATA_ANALYSIS_GUIDE = (
+    "Athena 데이터베이스 가이드:\n"
+    "- 네이밍: {서비스}_{env}_{region} (env: dev/prd, region: 서울은 생략, 중동=me, 영국=uk)\n"
+    "- jce_{env}_{region}: 코들 서비스 원본 (교실/교재/활동/학생/교사/제출물/구독). class_ 접두사=수업, user_ 접두사=사용자\n"
+    "- datadb_{env}_{region}: AI Chatkit 대화 세션/스레드/메시지\n"
+    "- ga_{env}: 코들 GA 웹사이트 행동 이벤트, 유입 경로(UTM), 디바이스/지역\n"
+    "- kafka_{env}: 서비스 내부 실시간 이벤트 (LLM 호출 로그, 동영상 재생, 교재 수정 등)\n"
+    "- data_warehouse_{env}: 1차 정제 분석 데이터 (활성 교실/교재/교사, 사용자 활성화, GA 행동, 짓다 GA 행동(jitda_ga_* 테이블), 연수 로그, AI 퀴즈 등)\n"
+    "- data_mart_{env}: 2차 정제 핵심 지표 (DAU, 마케팅 동의, 에러 커버리지, 세션 전환율 등)\n"
+    "- monday_{env}: 영업/계약 데이터 (학교별 계약 상태/금액/기간/담당자)\n"
+    "- default: 인프라 로그 (ALB/CloudFront 액세스 로그)\n"
+    "- jitda_opencode_{env}: 짓다 OpenCode 파이프라인 데이터\n"
+    "- enk_hackathon_{env}: 짓다(enk) 해커톤 파이프라인 데이터\n"
+    "- jitda_ga_{env}: 짓다(jitda.io) GA 웹사이트 행동 이벤트, 유입 경로(UTM), 디바이스/지역 (raw 테이블 jitda_google_analytics, 파싱 뷰 parsed_ga)\n"
+    "- jitda_gsc_{env}: 짓다(jitda.io) Google Search Console 검색 성과. searchdata_site_impression(사이트 단위 검색어·국가·기기별 노출/클릭/순위), searchdata_url_impression(페이지 URL·검색어별 노출/클릭/순위, is_* 검색 노출 유형)\n"
+    "\n"
+    "파티션 필터링 (DB마다 다름):\n"
+    "- jce/datadb: WHERE partition_0 = 'YYYY-MM-DD'\n"
+    "- ga/jitda_ga: WHERE event_date = 'YYYYMMDD'\n"
+    "- jitda_gsc: WHERE data_date = 'YYYY-MM-DD' (미국 태평양 시간 기준 날짜, 약 2일 늦게 들어옴)\n"
+    "- data_warehouse/data_mart/kafka: WHERE date = 'YYYY-MM-DD'\n"
+    "\n"
+    "주의사항:\n"
+    "- ga_prd.parsed_ga는 파티션 간 스키마 불일치 → raw 테이블(google_analytics) 사용 권장\n"
+    "- ga_prd.google_analytics의 is_active_user도 타입 불일치 → SELECT * 대신 컬럼 명시\n"
+    "- GA(ga/jitda_ga)의 traffic_source, collected_traffic_source는 JSON → json_extract_scalar()로 파싱\n"
+    "- jitda_gsc의 sum_top_position·sum_position은 0부터 센 순위 합 → 평균 순위 = 합 / impressions + 1\n"
+    "\n"
+    "Instructions:\n"
+    "- 데이터 분석 요청에 대해 위 데이터베이스 가이드를 참고하여 적절한 DB를 선택합니다.\n"
+    "- 필요시 Redash 대시보드를 검색하여 관련 쿼리 패턴을 참고합니다.\n"
+    "- Redash에서 찾은 쿼리를 참고하거나, 직접 Athena에서 SQL 쿼리를 작성하여 실행합니다.\n"
+    "\n"
+    "**중요**: 사용자에게 쿼리 결과를 보여주고 싶을 때:\n"
+    "- execute_athena_query 도구를 호출할 때 반드시 show_result_to_user=True를 설정해야 합니다.\n"
+    "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
+    "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
+    "\n"
+    "**파이썬 실행**:\n"
+    "- 집계·대조·명단 추출·시각화는 execute_python 도구를 사용하세요.\n"
+    "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
+    "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
+    "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
+    "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
+)
+
 
 async def collect_thread_context(
     slack_client,
     channel: str,
     thread_ts: str,
     user: str | None,
-    latest: str | None = None,
 ) -> tuple[str, str]:
     """
     스레드의 이전 대화 내용과 질문자 이름을 수집합니다.
@@ -41,14 +85,11 @@ async def collect_thread_context(
         channel: 채널 ID
         thread_ts: 스레드 타임스탬프
         user: 질문자의 Slack 사용자 ID
-        latest: 이 시각 이전의 메시지만 읽습니다. 생략하면 스레드 전체를 읽습니다.
 
     Returns:
         tuple[str, str]: (질문자 이름, 이전 대화 내용)
     """
-    result = await slack_client.conversations_replies(
-        channel=channel, ts=thread_ts, latest=latest
-    )
+    result = await slack_client.conversations_replies(channel=channel, ts=thread_ts)
 
     # 메시지에서 사용자 ID를 수집
     user_ids = set(
@@ -162,72 +203,6 @@ def register_data_handlers(app_data):
         )
 
 
-def get_analyze_data_tool(slack_client, channel: str, thread_ts: str, user: str | None):
-    """
-    데이터 봇의 분석 에이전트를 다른 봇이 부를 수 있게 도구로 감쌉니다.
-
-    대표 봇(로봇)이 데이터 봇과 같은 분석을 하도록 프롬프트·도구·추론 설정을
-    그대로 쓰는 하위 에이전트를 돌립니다. 쿼리 결과 표, 차트, 도구 상태는
-    하위 에이전트가 부르는 쪽 봇으로 스레드에 직접 올립니다. 도구 상태는 부르는
-    쪽 에이전트의 상태 메시지에 함께 표시됩니다.
-
-    Args:
-        slack_client: 부르는 쪽 봇의 Slack 클라이언트
-        channel: 채널 ID
-        thread_ts: 스레드 타임스탬프
-        user: 질문자의 Slack 사용자 ID
-
-    Returns:
-        analyze_data tool
-    """
-    # 도구가 불릴 때는 부르는 쪽 봇이 상태 메시지를 이미 스레드에 올린 뒤다.
-    # 그 전 시각까지만 읽어야 스레드의 마지막 메시지가 방금 도착한 질문이 된다.
-    latest = f"{time.time():.6f}"
-
-    async def say(payload, thread_ts=thread_ts):
-        # ToolStatusHandler가 상태 메시지를 고치려면 응답의 ts가 필요하다
-        return await slack_client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=payload.get("text", "데이터 분석 결과"),
-            **{k: v for k, v in payload.items() if k != "text"},
-        )
-
-    @tool
-    async def analyze_data(
-        question: Annotated[str, "분석할 질문. 사용자의 요청을 빠짐없이 담습니다."],
-    ) -> str:
-        """
-        데이터 봇과 같은 데이터 분석 에이전트에게 질문하고 분석 결과를 받습니다.
-
-        코들·짓다 서비스 지표, 사용자·교실·교재 통계, GA·검색 성과, 영업 계약 등
-        사내 데이터(Athena, Redash)를 조회·집계·시각화해야 하는 요청에 사용합니다.
-        스레드의 앞선 대화는 에이전트가 직접 읽으므로 question 에 옮겨 적지 않아도 됩니다.
-        쿼리 결과 표와 차트는 에이전트가 스레드에 직접 올립니다.
-        돌려받은 분석 결과는 요약하거나 고치지 말고 그대로 전달하십시오.
-
-        Returns:
-            분석 결과 (슬랙 mrkdwn)
-        """
-        user_real_name, threads_joined = await collect_thread_context(
-            slack_client, channel, thread_ts, user, latest
-        )
-        # 부르는 쪽 에이전트의 콜백이 하위 에이전트까지 이어지므로 상태 핸들러를
-        # 따로 붙이지 않는다. 붙이면 같은 도구 호출이 상태 메시지 두 개에 찍힌다.
-        return await run_data_analysis(
-            thread_ts,
-            channel,
-            user_real_name,
-            threads_joined,
-            question,
-            say,
-            slack_client,
-            callbacks=[],
-        )
-
-    return analyze_data
-
-
 async def answer_data_analysis(
     thread_ts: str,
     channel: str,
@@ -252,99 +227,6 @@ async def answer_data_analysis(
     Returns:
         None
     """
-    # 툴 호출 상태를 슬랙에 표시하는 핸들러
-    tool_status_handler = ToolStatusHandler(
-        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
-    )
-
-    agent_answer = await run_data_analysis(
-        thread_ts,
-        channel,
-        user_real_name,
-        threads_joined,
-        text,
-        say,
-        slack_client,
-        callbacks=[tool_status_handler],
-    )
-
-    # Slack 텍스트 블록은 최대 3000자까지만 지원
-    # 긴 응답은 여러 메시지로 분할하여 전송
-    MAX_CHARS = 3000
-    if len(agent_answer) <= MAX_CHARS:
-        await say(
-            {
-                "blocks": [
-                    {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": agent_answer},
-                    }
-                ]
-            },
-            thread_ts=thread_ts,
-        )
-    else:
-        # 메시지를 3000자 단위로 분할
-        chunks = []
-        current_chunk = ""
-
-        for line in agent_answer.split("\n"):
-            # 현재 줄을 추가했을 때 3000자를 초과하면 chunk 저장
-            if len(current_chunk) + len(line) + 1 > MAX_CHARS:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = line
-            else:
-                if current_chunk:
-                    current_chunk += "\n" + line
-                else:
-                    current_chunk = line
-
-        # 마지막 chunk 저장
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        # 각 chunk를 순차적으로 전송
-        for chunk in chunks:
-            await say(
-                {
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": chunk},
-                        }
-                    ]
-                },
-                thread_ts=thread_ts,
-            )
-
-
-async def run_data_analysis(
-    thread_ts: str,
-    channel: str,
-    user_real_name: str,
-    threads_joined: str,
-    text: str,
-    say,
-    slack_client,
-    callbacks: list,
-) -> str:
-    """
-    데이터 분석 에이전트를 돌려 답변을 만듭니다.
-
-    Args:
-        thread_ts: 스레드 타임스탬프
-        channel: 채널 ID
-        user_real_name: 사용자 이름
-        threads_joined: 스레드 대화 내용
-        text: 질문 내용
-        say: 메시지 전송 함수
-        slack_client: Slack 클라이언트
-        callbacks: 에이전트 실행에 붙일 콜백 핸들러
-
-    Returns:
-        str: 에이전트의 최종 답변
-    """
     today_str = datetime.now(tz=KST).strftime("%Y-%m-%d(%A)")
 
     messages: list[BaseMessage] = [
@@ -355,51 +237,7 @@ async def run_data_analysis(
                 "- Your answer will be sent to the Slack thread.\n"
                 "- We are an edu-tech startup in Korea. So always answer in Korean.\n"
                 f"- Today's date is {today_str}\n"
-                "\n"
-                "Athena 데이터베이스 가이드:\n"
-                "- 네이밍: {서비스}_{env}_{region} (env: dev/prd, region: 서울은 생략, 중동=me, 영국=uk)\n"
-                "- jce_{env}_{region}: 코들 서비스 원본 (교실/교재/활동/학생/교사/제출물/구독). class_ 접두사=수업, user_ 접두사=사용자\n"
-                "- datadb_{env}_{region}: AI Chatkit 대화 세션/스레드/메시지\n"
-                "- ga_{env}: 코들 GA 웹사이트 행동 이벤트, 유입 경로(UTM), 디바이스/지역\n"
-                "- kafka_{env}: 서비스 내부 실시간 이벤트 (LLM 호출 로그, 동영상 재생, 교재 수정 등)\n"
-                "- data_warehouse_{env}: 1차 정제 분석 데이터 (활성 교실/교재/교사, 사용자 활성화, GA 행동, 짓다 GA 행동(jitda_ga_* 테이블), 연수 로그, AI 퀴즈 등)\n"
-                "- data_mart_{env}: 2차 정제 핵심 지표 (DAU, 마케팅 동의, 에러 커버리지, 세션 전환율 등)\n"
-                "- monday_{env}: 영업/계약 데이터 (학교별 계약 상태/금액/기간/담당자)\n"
-                "- default: 인프라 로그 (ALB/CloudFront 액세스 로그)\n"
-                "- jitda_opencode_{env}: 짓다 OpenCode 파이프라인 데이터\n"
-                "- enk_hackathon_{env}: 짓다(enk) 해커톤 파이프라인 데이터\n"
-                "- jitda_ga_{env}: 짓다(jitda.io) GA 웹사이트 행동 이벤트, 유입 경로(UTM), 디바이스/지역 (raw 테이블 jitda_google_analytics, 파싱 뷰 parsed_ga)\n"
-                "- jitda_gsc_{env}: 짓다(jitda.io) Google Search Console 검색 성과. searchdata_site_impression(사이트 단위 검색어·국가·기기별 노출/클릭/순위), searchdata_url_impression(페이지 URL·검색어별 노출/클릭/순위, is_* 검색 노출 유형)\n"
-                "\n"
-                "파티션 필터링 (DB마다 다름):\n"
-                "- jce/datadb: WHERE partition_0 = 'YYYY-MM-DD'\n"
-                "- ga/jitda_ga: WHERE event_date = 'YYYYMMDD'\n"
-                "- jitda_gsc: WHERE data_date = 'YYYY-MM-DD' (미국 태평양 시간 기준 날짜, 약 2일 늦게 들어옴)\n"
-                "- data_warehouse/data_mart/kafka: WHERE date = 'YYYY-MM-DD'\n"
-                "\n"
-                "주의사항:\n"
-                "- ga_prd.parsed_ga는 파티션 간 스키마 불일치 → raw 테이블(google_analytics) 사용 권장\n"
-                "- ga_prd.google_analytics의 is_active_user도 타입 불일치 → SELECT * 대신 컬럼 명시\n"
-                "- GA(ga/jitda_ga)의 traffic_source, collected_traffic_source는 JSON → json_extract_scalar()로 파싱\n"
-                "- jitda_gsc의 sum_top_position·sum_position은 0부터 센 순위 합 → 평균 순위 = 합 / impressions + 1\n"
-                "\n"
-                "Instructions:\n"
-                "- 데이터 분석 요청에 대해 위 데이터베이스 가이드를 참고하여 적절한 DB를 선택합니다.\n"
-                "- 필요시 Redash 대시보드를 검색하여 관련 쿼리 패턴을 참고합니다.\n"
-                "- Redash에서 찾은 쿼리를 참고하거나, 직접 Athena에서 SQL 쿼리를 작성하여 실행합니다.\n"
-                "\n"
-                "**중요**: 사용자에게 쿼리 결과를 보여주고 싶을 때:\n"
-                "- execute_athena_query 도구를 호출할 때 반드시 show_result_to_user=True를 설정해야 합니다.\n"
-                "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
-                "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
-                "\n"
-                "**파이썬 실행**:\n"
-                "- 집계·대조·명단 추출·시각화는 execute_python 도구를 사용하세요.\n"
-                "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
-                "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
-                "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
-                "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
-                "\n"
+                "\n" + DATA_ANALYSIS_GUIDE + "\n"
                 "**슬랙 텍스트 포맷팅**:\n"
                 "- 슬랙은 마크다운이 아닌 자체 mrkdwn 포맷을 사용합니다.\n"
                 "- Bold: `*텍스트*` (별표 1개, **텍스트** 형식은 작동하지 않음)\n"
@@ -459,9 +297,64 @@ async def run_data_analysis(
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 
-    response = await agent_executor.ainvoke(
-        {"messages": messages},
-        {"callbacks": callbacks, "recursion_limit": 200},
+    # 툴 호출 상태를 슬랙에 표시하는 핸들러
+    tool_status_handler = ToolStatusHandler(
+        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
     )
 
-    return extract_text(response["messages"][-1].content)
+    response = await agent_executor.ainvoke(
+        {"messages": messages},
+        {"callbacks": [tool_status_handler], "recursion_limit": 200},
+    )
+
+    agent_answer = extract_text(response["messages"][-1].content)
+
+    # Slack 텍스트 블록은 최대 3000자까지만 지원
+    # 긴 응답은 여러 메시지로 분할하여 전송
+    MAX_CHARS = 3000
+    if len(agent_answer) <= MAX_CHARS:
+        await say(
+            {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": agent_answer},
+                    }
+                ]
+            },
+            thread_ts=thread_ts,
+        )
+    else:
+        # 메시지를 3000자 단위로 분할
+        chunks = []
+        current_chunk = ""
+
+        for line in agent_answer.split("\n"):
+            # 현재 줄을 추가했을 때 3000자를 초과하면 chunk 저장
+            if len(current_chunk) + len(line) + 1 > MAX_CHARS:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                if current_chunk:
+                    current_chunk += "\n" + line
+                else:
+                    current_chunk = line
+
+        # 마지막 chunk 저장
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        # 각 chunk를 순차적으로 전송
+        for chunk in chunks:
+            await say(
+                {
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": chunk},
+                        }
+                    ]
+                },
+                thread_ts=thread_ts,
+            )

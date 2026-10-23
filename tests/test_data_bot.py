@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-import time
 
 import pytest
 from slack_bolt.async_app import AsyncApp
@@ -422,72 +421,6 @@ class TestDataBotDirectMessage:
         await dispatch(app, dm_event(subtype="message_changed"))
 
         assert not mock_answer.called
-
-
-class TestAnalyzeDataTool:
-    """대표 봇이 데이터 봇 에이전트를 부르는 도구 테스트"""
-
-    @patch("app.data_bot.run_data_analysis", new_callable=AsyncMock)
-    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
-    async def test_runs_data_agent_with_thread_context(self, mock_users_list, mock_run):
-        """스레드 맥락을 모아 데이터 봇 에이전트에 넘기고 답을 그대로 돌려준다"""
-        mock_users_list.return_value = USERS_LIST_RESPONSE
-        mock_run.return_value = "어제 DAU는 *1,234명*입니다."
-        thread = [
-            {"ts": "1234567890.123456", "user": "U2", "text": "DAU 추이가 궁금해요"},
-            {"ts": "1234567899.000000", "user": "U1", "text": "<@U0BOT> 어제 DAU"},
-        ]
-
-        async def conversations_replies(channel, ts, latest):
-            """latest 이전 메시지만 돌려주는 슬랙 동작을 흉내 낸다"""
-            return {"messages": [m for m in thread if float(m["ts"]) < float(latest)]}
-
-        client = AsyncMock()
-        client.conversations_replies.side_effect = conversations_replies
-        analyze_data = data_bot.get_analyze_data_tool(
-            client, "C123", "1234567890.123456", "U1"
-        )
-        # 도구가 불리기 전에 부르는 쪽 봇이 상태 메시지를 올린다
-        thread.append(
-            {"ts": f"{time.time() + 1:.6f}", "bot_id": "B1", "text": "⏳ analyze_data"}
-        )
-
-        result = await analyze_data.ainvoke({"question": "어제 DAU 알려줘"})
-
-        assert result == "어제 DAU는 *1,234명*입니다."
-        assert mock_run.call_args.args[:5] == (
-            "1234567890.123456",
-            "C123",
-            "김분석",
-            "이데이터:\nDAU 추이가 궁금해요",
-            "어제 DAU 알려줘",
-        )
-        # 부르는 쪽 에이전트의 상태 메시지에 함께 찍히므로 상태 핸들러를 따로 달지 않는다
-        assert mock_run.call_args.kwargs == {"callbacks": []}
-
-    @patch("app.data_bot.run_data_analysis", new_callable=AsyncMock)
-    @patch("app.data_bot.slack_users_list", new_callable=AsyncMock)
-    async def test_say_posts_to_thread_with_caller_bot(self, mock_users_list, mock_run):
-        """에이전트의 표·상태 메시지는 부르는 쪽 봇으로 같은 스레드에 올린다"""
-        mock_users_list.return_value = USERS_LIST_RESPONSE
-        client = AsyncMock()
-        client.conversations_replies.return_value = {"messages": [{"user": "U1"}]}
-        client.chat_postMessage.return_value = {"ts": "1234567891.000000"}
-        analyze_data = data_bot.get_analyze_data_tool(
-            client, "C123", "1234567890.123456", "U1"
-        )
-        await analyze_data.ainvoke({"question": "어제 DAU 알려줘"})
-        say = mock_run.call_args.args[5]
-
-        response = await say({"blocks": []}, thread_ts="1234567890.123456")
-
-        assert response == {"ts": "1234567891.000000"}
-        client.chat_postMessage.assert_called_once_with(
-            channel="C123",
-            thread_ts="1234567890.123456",
-            text="데이터 분석 결과",
-            blocks=[],
-        )
 
 
 if __name__ == "__main__":

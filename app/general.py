@@ -13,11 +13,17 @@ from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
-from .data_bot import get_analyze_data_tool
+from .data_bot import DATA_ANALYSIS_GUIDE
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
+from .tools.athena_tools import get_execute_athena_query_tool
 from .tools.python_tools import get_execute_python_tool
+from .tools.redash_tools import (
+    list_redash_dashboards,
+    read_redash_dashboard,
+    read_redash_query,
+)
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
@@ -37,6 +43,9 @@ from service.slack_task_list import find_channel_task_list
 # Notion API 2025-09-03 버전부터 data_source_id를 직접 사용
 DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB (기본값)
 PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
+
+# 로봇도 데이터 봇과 같은 지침으로 데이터를 분석한다
+ROBOT_INSTRUCTIONS: str = "\n\n" + DATA_ANALYSIS_GUIDE
 
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
@@ -79,7 +88,11 @@ async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad 
 
 
 async def _build_tools(
-    client: AsyncWebClient, user_id: str | None, channel: str, thread_ts: str
+    client: AsyncWebClient,
+    user_id: str | None,
+    channel: str,
+    thread_ts: str,
+    say,
 ) -> list:
     """질문자의 스쿼드에 맞춘 도구 목록을 만듭니다.
 
@@ -96,6 +109,7 @@ async def _build_tools(
         user_id: 질문자의 Slack 사용자 ID
         channel: 채널 ID
         thread_ts: 스레드 타임스탬프
+        say: 메시지 전송 함수. Athena 결과 표를 스레드에 올릴 때 쓴다.
 
     Returns:
         list: 에이전트에 주입할 도구 목록
@@ -177,9 +191,15 @@ async def _build_tools(
                 draft_sms=draft_sms.coroutine,
             )
         ]
-        # 데이터 분석은 데이터 봇과 같은 에이전트에게 맡긴다. DB 가이드와 높은
-        # 추론 설정이 그쪽에 있어서 로봇 프롬프트에 옮겨 담으면 둘이 갈라진다.
-        + [get_analyze_data_tool(client, channel, thread_ts, user_id)]
+        # 데이터 봇과 같은 데이터 분석 도구. 사용 지침은 ROBOT_INSTRUCTIONS 에 있다.
+        + [
+            list_redash_dashboards,
+            read_redash_dashboard,
+            read_redash_query,
+            get_execute_athena_query_tool(
+                say=say, thread_ts=thread_ts, slack_client=client, channel=channel
+            ),
+        ]
     )
 
 
@@ -209,8 +229,17 @@ def get_sms_revise(app):
                 **{k: v for k, v in payload.items() if k != "text"},
             )
 
-        tools = await _build_tools(app.client, user, channel, thread_ts)
-        await answer(thread_ts, channel, user, text, say, app.client, tools)
+        tools = await _build_tools(app.client, user, channel, thread_ts, say)
+        await answer(
+            thread_ts,
+            channel,
+            user,
+            text,
+            say,
+            app.client,
+            tools,
+            ROBOT_INSTRUCTIONS,
+        )
 
     return revise
 
@@ -292,8 +321,17 @@ def register_general_handlers(app):
             await analyze_oom.analyze_oom_alert(app.client, body, say)
             return
 
-        tools = await _build_tools(app.client, user, channel, thread_ts)
-        await answer(thread_ts, channel, user, text, say, app.client, tools)
+        tools = await _build_tools(app.client, user, channel, thread_ts, say)
+        await answer(
+            thread_ts,
+            channel,
+            user,
+            text,
+            say,
+            app.client,
+            tools,
+            ROBOT_INSTRUCTIONS,
+        )
 
     @app.event("message")
     async def message(body, say):
@@ -315,9 +353,16 @@ def register_general_handlers(app):
 
             thread_ts = event.get("thread_ts") or event["ts"]
             user = event.get("user")
-            tools = await _build_tools(app.client, user, channel, thread_ts)
+            tools = await _build_tools(app.client, user, channel, thread_ts, say)
             await answer(
-                thread_ts, channel, user, event["text"], say, app.client, tools
+                thread_ts,
+                channel,
+                user,
+                event["text"],
+                say,
+                app.client,
+                tools,
+                ROBOT_INSTRUCTIONS,
             )
         elif channel in BUG_REPORT_CHANNEL_TO_PRODUCT:
             # 메시지 편집 이벤트 필터링

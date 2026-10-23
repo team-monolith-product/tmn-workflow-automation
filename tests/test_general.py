@@ -134,6 +134,16 @@ class TestGeneralBotDirectMessage:
             "이번 주 할 일 정리해줘",
         )
 
+    async def test_answers_with_data_analysis_guide(self, mock_answer):
+        """로봇은 데이터 봇과 같은 데이터 분석 지침을 덧붙여 답한다"""
+        app = build_general_app()
+
+        # 앞 테스트와 같은 이벤트면 중복 이벤트 필터에 걸리므로 ts를 바꾼다
+        await dispatch(app, dm_event(ts="1234567891.000000"))
+
+        assert mock_answer.call_args.args[7] == general.ROBOT_INSTRUCTIONS
+        assert general.DATA_ANALYSIS_GUIDE in general.ROBOT_INSTRUCTIONS
+
     async def test_thread_reply(self, mock_answer):
         """스레드에서 이어진 질문은 그 스레드에서 처리한다"""
         app = build_general_app()
