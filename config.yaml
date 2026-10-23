@@ -286,6 +286,15 @@ scheduled_jobs:
       minute: "*/10"
     business_day_only: false
 
+  # 간식증빙 사진을 드라이브로. 업로드 여부는 드라이브 파일 속성으로 판별하므로
+  # 실행이 빠지거나 겹쳐도 다음 실행이 이어 올린다.
+  - name: upload_snack_photos
+    module: scripts.upload_snack_photos
+    function: main
+    cron:
+      minute: "5-55/10"     # discord_post_completion_notice 와 엇갈리게
+    business_day_only: false
+
   - name: crawl_education_bids
     module: scripts.crawl_education_bids
     function: main

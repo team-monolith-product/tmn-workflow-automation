@@ -50,12 +50,17 @@ def get_message(channel_id: str, message_id: str) -> dict:
     return resp.json()
 
 
-def get_channel_messages(channel_id: str, limit: int = 100) -> list[dict]:
-    """채널의 최근 메시지 목록 조회 (최신순)"""
+def get_channel_messages(
+    channel_id: str, limit: int = 100, before: str | None = None
+) -> list[dict]:
+    """채널의 최근 메시지 목록 조회 (최신순). before 를 주면 그 메시지 이전부터"""
+    params = {"limit": limit}
+    if before:
+        params["before"] = before
     resp = requests.get(
         f"{BASE_URL}/channels/{channel_id}/messages",
         headers=_headers(),
-        params={"limit": limit},
+        params=params,
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
@@ -71,6 +76,28 @@ def get_active_threads(guild_id: str) -> dict:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def get_public_archived_threads(channel_id: str, before: str | None = None) -> dict:
+    """채널의 보관된 공개 스레드 목록 조회 (최근 보관순). before 는 ISO8601 시각"""
+    params = {"limit": 100}
+    if before:
+        params["before"] = before
+    resp = requests.get(
+        f"{BASE_URL}/channels/{channel_id}/threads/archived/public",
+        headers=_headers(),
+        params=params,
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_attachment(url: str) -> bytes:
+    """첨부 파일 내려받기. CDN 주소는 서명돼 있어 인증 헤더가 필요 없다"""
+    resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return resp.content
 
 
 def create_thread(channel_id: str, name: str, content: str) -> dict:
