@@ -685,7 +685,6 @@ async def answer(
     client,
     tools: list,
     instructions: str = "",
-    recursion_limit: int = 50,
 ):
     """
     슬랙에서 질문을 받아 답변을 생성하여 슬랙에 전송한다.
@@ -699,7 +698,6 @@ async def answer(
         client: 슬랙 클라이언트
         tools: 외부에서 주입할 도구들의 리스트.
         instructions: 시스템 프롬프트 끝에 덧붙일 봇별 지침.
-        recursion_limit: 에이전트가 쓸 수 있는 최대 단계 수.
 
     Returns:
         None
@@ -793,7 +791,7 @@ async def answer(
 
     response = await agent_executor.ainvoke(
         {"messages": messages},
-        {"callbacks": [tool_status_handler], "recursion_limit": recursion_limit},
+        {"callbacks": [tool_status_handler], "recursion_limit": 200},
     )
 
     agent_answer = extract_text(response["messages"][-1].content)
