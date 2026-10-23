@@ -286,8 +286,8 @@ scheduled_jobs:
       minute: "*/10"
     business_day_only: false
 
-  # 간식증빙 사진을 드라이브로. 업로드 여부는 드라이브 파일 속성으로 판별하므로
-  # 실행이 빠지거나 겹쳐도 다음 실행이 이어 올린다.
+  # 간식증빙 사진을 드라이브로. 올린 메시지에는 봇이 ✅ 를 달아 다시 올리지 않고,
+  # 실행이 빠지면 다음 실행이 이어 올린다.
   - name: upload_snack_photos
     module: scripts.upload_snack_photos
     function: main

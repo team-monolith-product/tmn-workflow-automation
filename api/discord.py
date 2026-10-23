@@ -3,6 +3,7 @@ Discord API 래퍼 함수
 """
 
 import os
+from urllib.parse import quote
 
 import requests
 
@@ -127,3 +128,13 @@ def create_message(channel_id: str, content: str) -> dict:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def create_reaction(channel_id: str, message_id: str, emoji: str) -> None:
+    """메시지에 봇 반응 달기"""
+    resp = requests.put(
+        f"{BASE_URL}/channels/{channel_id}/messages/{message_id}/reactions/{quote(emoji)}/@me",
+        headers=_headers(),
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()

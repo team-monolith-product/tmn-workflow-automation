@@ -4,7 +4,11 @@ Discord 간식증빙사진을 구글 드라이브에 모아 올림
 10분마다 실행되며:
 1. "공지_팀모노리스"로 시작하는 카테고리의 "{학교}-공지" 포럼에서 제목에 "간식증빙"이 든 스레드를 찾음
 2. 스레드의 이미지 첨부를 "{학교}_{M월D일}_AI동행프로그램.jpg" 이름으로 드라이브 폴더에 올림
-3. 멱등성: 드라이브 파일의 appProperties 에 Discord 첨부 ID 를 남겨, 이미 올린 첨부는 스킵
+3. 메시지의 사진을 다 올리면 봇이 ✅ 반응을 달고, 다음부터 그 메시지는 건너뜀
+
+한 번 올린 사진은 다시 올리면 안 된다. 드라이브는 사람이 파일을 지우거나 옮기므로
+판단 근거가 될 수 없어 ✅ 를 기준으로 삼는다. 메시지 중간에 실패해 ✅ 가 없을 때를
+위해 드라이브 파일 appProperties 의 Discord 첨부 ID 도 함께 확인한다.
 
 평소에는 활성 스레드만 본다. 사진이 올라오면 스레드가 다시 활성이 되므로 충분하다.
 보관된 스레드까지 훑는 것은 --backfill 로 한 번만 돌린다. 학교마다 스레드가 매주
@@ -18,11 +22,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
+import requests
 from dotenv import load_dotenv
 
 from api.discord import (
+    create_reaction,
     get_active_threads,
     get_attachment,
     get_channel_messages,
@@ -48,6 +55,9 @@ FORUM_CHANNEL_TYPE = 15
 MESSAGE_PAGE_SIZE = 100
 
 ATTACHMENT_ID_KEY = "discord_attachment_id"
+UPLOADED_EMOJI = "✅"
+# 반응 추가는 채널당 0.25초에 한 번으로 제한된다. backfill 처럼 연달아 달면 429 가 난다.
+REACTION_INTERVAL_SECONDS = 0.3
 
 
 def find_school_forums(channels: list[dict]) -> dict[str, str]:
@@ -113,6 +123,14 @@ def is_image(attachment: dict) -> bool:
     return attachment.get("content_type", "").startswith("image/")
 
 
+def is_marked_uploaded(message: dict) -> bool:
+    """봇이 단 ✅ 가 있으면 이미 올린 메시지다. 사람이 단 ✅ 는 세지 않는다."""
+    return any(
+        r["emoji"]["name"] == UPLOADED_EMOJI and r["me"]
+        for r in message.get("reactions", [])
+    )
+
+
 def make_file_name(school: str, posted_at: datetime, ext: str, taken: set[str]) -> str:
     """
     "{학교}_{M월D일}_AI동행프로그램{ext}" 를 만든다.
@@ -125,6 +143,51 @@ def make_file_name(school: str, posted_at: datetime, ext: str, taken: set[str]) 
         name = f"{base}_{n}{ext}"
         n += 1
     return name
+
+
+def upload_thread(
+    thread: dict,
+    school: str,
+    folder_id: str,
+    uploaded_ids: set[str],
+    taken_names: set[str],
+    dry_run: bool,
+) -> int:
+    """스레드 하나의 새 사진을 올리고 올린 장수를 돌려준다."""
+    count = 0
+    # 오래된 메시지부터 올려야 _2, _3 번호가 올린 순서와 맞는다.
+    for message in reversed(list_thread_messages(thread["id"])):
+        images = [a for a in message["attachments"] if is_image(a)]
+        if not images or is_marked_uploaded(message):
+            continue
+        posted_at = datetime.fromisoformat(message["timestamp"]).astimezone(KST)
+        for attachment in images:
+            if attachment["id"] in uploaded_ids:
+                continue
+            ext = Path(attachment["filename"]).suffix.lower()
+            name = make_file_name(school, posted_at, ext, taken_names)
+            taken_names.add(name)
+            if dry_run:
+                print(f"  [DRY-RUN] {name}")
+                continue
+
+            content = get_attachment(attachment["url"])
+            create_file(
+                folder_id,
+                name,
+                content,
+                attachment["content_type"],
+                {ATTACHMENT_ID_KEY: attachment["id"]},
+            )
+            uploaded_ids.add(attachment["id"])
+            count += 1
+            print(f"  업로드: {name}")
+
+        if not dry_run:
+            create_reaction(thread["id"], message["id"], UPLOADED_EMOJI)
+            time.sleep(REACTION_INTERVAL_SECONDS)
+
+    return count
 
 
 def main(dry_run: bool = False, backfill: bool = False):
@@ -151,34 +214,22 @@ def main(dry_run: bool = False, backfill: bool = False):
     taken_names = {f["name"] for f in existing}
 
     count = 0
+    failures = []
+    # 한 학교의 실패(권한 없는 포럼, 일시적 오류)가 나머지 학교를 막지 않게 격리한다.
+    # 코드 버그는 잡지 않고, 잡은 실패도 마지막에 터뜨려 스케줄러 로그에 남긴다.
     for thread in threads:
         school = forums[thread["parent_id"]]
-        # 오래된 메시지부터 올려야 _2, _3 번호가 올린 순서와 맞는다.
-        for message in reversed(list_thread_messages(thread["id"])):
-            posted_at = datetime.fromisoformat(message["timestamp"]).astimezone(KST)
-            for attachment in message["attachments"]:
-                if not is_image(attachment) or attachment["id"] in uploaded_ids:
-                    continue
-                ext = Path(attachment["filename"]).suffix.lower()
-                name = make_file_name(school, posted_at, ext, taken_names)
-                taken_names.add(name)
-                if dry_run:
-                    print(f"  [DRY-RUN] {name}")
-                    continue
-
-                content = get_attachment(attachment["url"])
-                create_file(
-                    folder_id,
-                    name,
-                    content,
-                    attachment["content_type"],
-                    {ATTACHMENT_ID_KEY: attachment["id"]},
-                )
-                uploaded_ids.add(attachment["id"])
-                count += 1
-                print(f"  업로드: {name}")
+        try:
+            count += upload_thread(
+                thread, school, folder_id, uploaded_ids, taken_names, dry_run
+            )
+        except requests.RequestException as e:
+            failures.append(f"{school} {thread['name']}: {type(e).__name__}: {e}")
+            print(f"  [실패] {failures[-1]}")
 
     print(f"  새로 올린 사진 {count}장")
+    if failures:
+        raise RuntimeError(f"간식증빙 업로드 실패 {len(failures)}건: {failures}")
 
 
 if __name__ == "__main__":
