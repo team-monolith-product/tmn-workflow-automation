@@ -7,6 +7,7 @@ import json
 from contextlib import contextmanager
 from email.message import EmailMessage
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -331,11 +332,11 @@ def test_상대_스레드_안에서는_그_상대에게_답장을_만든다(monk
     _fake_db(monkeypatch, ops_mail, thread=None, latest=latest)
 
     # When : 상대 스레드에서 본문만 주거나, 다른 사람을 받는 사람으로 주면
-    draft = ops_mail._prepare(CHANNEL, "ts-office", "안내드립니다", "", "")
-    other = ops_mail._prepare(CHANNEL, "ts-office", "안내드립니다", "x@y.kr", "")
+    draft = ops_mail._prepare(CHANNEL, "ts-office", "안내드립니다", [], "")
+    other = ops_mail._prepare(CHANNEL, "ts-office", "안내드립니다", ["x@y.kr"], "")
 
     # Then : 그 상대에게 마지막 메일에 거는 답장이 되고, 받는 사람은 바꿀 수 없다
-    assert draft["to"] == "office@abc.kr"
+    assert draft["recipients"] == ["office@abc.kr"]
     assert draft["subject"] == "Re: 견적 문의"
     assert draft["references_ids"] == ["<m1@abc.kr>", "<m2@abc.kr>"]
     assert "바꿀 수 없습니다" in other
@@ -344,14 +345,16 @@ def test_상대_스레드_안에서는_그_상대에게_답장을_만든다(monk
 def test_스레드_밖에서_새_메일은_받는_사람과_제목이_있어야_한다(monkeypatch):
     _fake_db(monkeypatch, ops_mail, thread=None, latest=None)
 
-    # When : 메일 스레드가 아닌 곳에서 제목 없이 부르면
-    missing = ops_mail._prepare(CHANNEL, "ts-chat", "안녕하세요", "a@b.kr", "")
-    draft = ops_mail._prepare(CHANNEL, "ts-chat", "안녕하세요", "A@B.kr", "안내")
+    # When : 메일 스레드가 아닌 곳에서 제목 없이 부르거나, 같은 주소를 겹쳐 주면
+    missing = ops_mail._prepare(CHANNEL, "ts-chat", "안녕하세요", ["a@b.kr"], "")
+    draft = ops_mail._prepare(
+        CHANNEL, "ts-chat", "안녕하세요", ["A@B.kr", "c@d.kr", "a@b.kr"], "안내"
+    )
 
-    # Then : 제목을 달라고 하고, 다 있으면 references 없는 새 메일이 된다
+    # Then : 제목을 달라고 하고, 다 있으면 받는 사람을 소문자로 한 번씩만 둔 새 메일이 된다
     assert "제목" in missing
     assert draft == {
-        "to": "a@b.kr",
+        "recipients": ["a@b.kr", "c@d.kr"],
         "subject": "안내",
         "body": "안녕하세요",
         "references_ids": [],
@@ -398,7 +401,7 @@ def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypa
     app = _FakeApp()
     ops_mail.register_ops_mail_handlers(app)
     ops_mail._DRAFTS["d1"] = {
-        "to": "office@abc.kr",
+        "recipients": ["office@abc.kr"],
         "subject": "Re: 견적 문의",
         "body": "자료 보내드립니다",
         "references_ids": ["<m2@abc.kr>"],
@@ -430,3 +433,61 @@ def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypa
     assert [a.filename for a in mime.parse(sent[0]).attachments] == ["계획안.pdf"]
     assert "첨부: 계획안.pdf" in slack.updates[0]["text"]
     assert len(recorded) == 1
+
+
+def _approve(app, slack, draft_id: str) -> None:
+    async def ack():
+        pass
+
+    asyncio.run(
+        app.handlers[ops_mail.APPROVE](
+            ack=ack,
+            body={
+                "actions": [{"value": draft_id}],
+                "container": {"channel_id": CHANNEL, "message_ts": "ts-card"},
+                "user": {"id": "U1"},
+            },
+            client=slack,
+        )
+    )
+
+
+def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실패하면_멈춘다(monkeypatch):
+    monkeypatch.setenv("OPS_MAIL_FROM", "팀모노리스 <ops@team-mono.com>")
+    sent = []
+    traced = []
+
+    def send(raw):
+        to = mime.parse(raw).to_addresses
+        if to == ["b@school.kr"]:
+            raise TimeoutError
+        sent.append(to)
+        return {"MessageId": "s"}
+
+    async def leave_trace(client, channel, draft, done, user):
+        traced.extend(recipient for recipient, _, _ in done)
+
+    monkeypatch.setattr(ops_mail, "send_raw_email", send)
+    monkeypatch.setattr(ops_mail, "_leave_trace", leave_trace)
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d2"] = {
+        "recipients": ["a@school.kr", "b@school.kr", "c@school.kr"],
+        "subject": "안내",
+        "body": "안녕하세요",
+        "references_ids": [],
+        "attachments": [],
+        "thread_ts": "ts-chat",
+    }
+    slack = _FakeAsyncSlack()
+
+    # When : 세 명 중 두 번째에게 보내다 타임아웃이 나면
+    with pytest.raises(TimeoutError):
+        _approve(app, slack, "d2")
+
+    # Then : 첫 번째만 혼자 받은 메일로 나가고, 세 번째는 보내지 않으며,
+    #        카드에 누가 받았고 누가 모르는지 남기고, 나간 것만 기록한다
+    assert sent == [["a@school.kr"]]
+    assert "b@school.kr 는 발송 여부를 모릅니다" in slack.updates[0]["text"]
+    assert "보내지 않은 사람: c@school.kr" in slack.updates[0]["text"]
+    assert traced == ["a@school.kr"]
