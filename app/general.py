@@ -259,8 +259,8 @@ async def _build_tools(
     )
 
 
-def get_sms_revise(app):
-    """문자 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
+def get_draft_revise(app):
+    """문자·메일 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
 
     카드의 [수정] 은 모달로 피드백만 받습니다. 그 피드백을 스레드의 다음
     질문처럼 다시 태워야 에이전트가 앞의 대화(수신자·문안·의도)를 그대로 두고
@@ -281,7 +281,7 @@ def get_sms_revise(app):
             await app.client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
-                text=payload.get("text", "문자 초안을 다시 썼습니다"),
+                text=payload.get("text", "초안을 다시 썼습니다"),
                 **{k: v for k, v in payload.items() if k != "text"},
             )
 

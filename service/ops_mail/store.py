@@ -1,22 +1,19 @@
 """
 ops@ 메일 기록을 읽고 씁니다.
 
-슬랙 스레드는 상대방 주소 하나에 하나입니다. 같은 상대와 주고받은 메일은
-방향과 상관없이 같은 스레드에 쌓입니다.
-
-새 메일로 먼저 보낸 상대는 회신이 오기 전까지 스레드가 없습니다(thread_ts 가
-NULL). 수백 명에게 보내도 상대마다 스레드를 열지 않기 위해서입니다. 회신이 와서
-스레드가 열리면 그때 그 상대의 메일들을 스레드에 묶습니다.
-
-psycopg 는 동기라 봇 쪽에서는 스레드로 넘겨 부릅니다.
+메일 한 통은 ops_mail_message 한 행이고, 상대방 하나에 슬랙 스레드 하나는
+ops_mail_thread 한 행입니다. 메일은 스레드를 모릅니다 -- 스레드는 상대방 주소로
+찾습니다. 그래서 스레드가 열리기 전에 보낸 메일도, 열린 뒤에 채널에서 새로 보낸
+메일도 따로 묶지 않아도 그 상대의 스레드에서 보입니다.
 """
 
+import asyncio
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 import psycopg
 
-from service.db import fetch_all
+from service.db import connect, fetch_all
 
 
 @dataclass(frozen=True)
@@ -25,7 +22,7 @@ class OpsMailRow:
 
     direction: str
     message_id: str
-    ses_message_id: str | None
+    ses_message_id: str
     counterpart: str
     from_address: str
     to_addresses: list[str]
@@ -34,7 +31,6 @@ class OpsMailRow:
     references_ids: list[str]
     s3_key: str | None
     channel_id: str
-    thread_ts: str | None
     sent_by: str | None
 
 
@@ -45,57 +41,49 @@ COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 INSERT = f"""
 INSERT INTO ops_mail_message ({", ".join(COLUMNS)})
 VALUES ({", ".join(f"%({name})s" for name in COLUMNS)})
-ON CONFLICT (message_id) DO NOTHING
+ON CONFLICT (ses_message_id) DO NOTHING
 """
-
-EXISTS = "SELECT 1 FROM ops_mail_message WHERE message_id = %s"
 
 PROCESSED_KEYS = "SELECT s3_key FROM ops_mail_message WHERE s3_key = ANY(%s)"
 
-# 상대방 스레드는 처음 만들어진 것을 계속 쓴다.
 FIND_THREAD = """
-SELECT thread_ts
-FROM ops_mail_message
-WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NOT NULL
-ORDER BY created_at
-LIMIT 1
+SELECT thread_ts FROM ops_mail_thread WHERE channel_id = %s AND counterpart = %s
+"""
+
+# 먼저 연 쪽이 이긴다. 진 쪽은 이긴 스레드를 받아 쓴다.
+CLAIM_THREAD = """
+INSERT INTO ops_mail_thread (channel_id, counterpart, thread_ts)
+VALUES (%s, %s, %s)
+ON CONFLICT (channel_id, counterpart) DO NOTHING
 """
 
 # 스레드가 열리기 전에 이 상대에게 보낸 메일. 스레드 첫 메시지에 보여준다.
-UNTHREADED = """
+SENT_TO = """
 SELECT subject, sent_by, created_at
 FROM ops_mail_message
-WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NULL
-  AND direction = 'out'
+WHERE channel_id = %s AND counterpart = %s AND direction = 'out'
 ORDER BY created_at
 """
 
-ATTACH_THREAD = """
-UPDATE ops_mail_message
-SET thread_ts = %s
-WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NULL
-"""
-
 LATEST_IN_THREAD = """
-SELECT *
-FROM ops_mail_message
-WHERE channel_id = %s AND thread_ts = %s
-ORDER BY created_at DESC
+SELECT m.*
+FROM ops_mail_thread t
+JOIN ops_mail_message m
+  ON m.channel_id = t.channel_id AND m.counterpart = t.counterpart
+WHERE t.channel_id = %s AND t.thread_ts = %s
+ORDER BY m.created_at DESC
 LIMIT 1
 """
 
 
-def exists(conn: psycopg.Connection, message_id: str) -> bool:
-    """이미 기록된 메일인지 봅니다. SNS 는 같은 알림을 두 번 보낼 수 있습니다.
+async def run(function, *args):
+    """store 함수 하나를 새 커넥션으로 부릅니다. psycopg 는 동기라 스레드로 넘깁니다."""
 
-    Args:
-        conn: 커넥션
-        message_id: Message-ID
+    def call():
+        with connect() as conn:
+            return function(conn, *args)
 
-    Returns:
-        bool: 기록돼 있으면 True
-    """
-    return bool(fetch_all(conn, EXISTS, (message_id,)))
+    return await asyncio.to_thread(call)
 
 
 def processed_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
@@ -122,16 +110,35 @@ def find_thread(
         counterpart: 상대방 주소 (소문자)
 
     Returns:
-        str | None: 스레드 ts. 처음 오가는 상대면 None
+        str | None: 스레드 ts. 아직 스레드가 없는 상대면 None
     """
     rows = fetch_all(conn, FIND_THREAD, (channel_id, counterpart))
     return rows[0]["thread_ts"] if rows else None
 
 
-def unthreaded(
+def claim_thread(
+    conn: psycopg.Connection, channel_id: str, counterpart: str, thread_ts: str
+) -> str:
+    """새로 연 스레드를 상대방 스레드로 등록합니다.
+
+    Args:
+        conn: 커넥션
+        channel_id: 메일 채널 ID
+        counterpart: 상대방 주소 (소문자)
+        thread_ts: 새로 연 스레드 ts
+
+    Returns:
+        str: 상대방 스레드 ts. 다른 쪽이 먼저 열었으면 그 스레드입니다.
+    """
+    with conn.cursor() as cur:
+        cur.execute(CLAIM_THREAD, (channel_id, counterpart, thread_ts))
+    return find_thread(conn, channel_id, counterpart)
+
+
+def sent_to(
     conn: psycopg.Connection, channel_id: str, counterpart: str
 ) -> list[dict[str, Any]]:
-    """스레드가 열리기 전에 이 상대에게 보낸 메일을 찾습니다.
+    """이 상대에게 보낸 메일을 찾습니다.
 
     Args:
         conn: 커넥션
@@ -141,28 +148,13 @@ def unthreaded(
     Returns:
         list[dict[str, Any]]: 제목·보낸 사람·보낸 시각
     """
-    return fetch_all(conn, UNTHREADED, (channel_id, counterpart))
-
-
-def attach_thread(
-    conn: psycopg.Connection, channel_id: str, counterpart: str, thread_ts: str
-) -> None:
-    """스레드가 없던 이 상대의 메일들을 새로 연 스레드에 묶습니다.
-
-    Args:
-        conn: 커넥션
-        channel_id: 메일 채널 ID
-        counterpart: 상대방 주소 (소문자)
-        thread_ts: 새로 연 스레드 ts
-    """
-    with conn.cursor() as cur:
-        cur.execute(ATTACH_THREAD, (thread_ts, channel_id, counterpart))
+    return fetch_all(conn, SENT_TO, (channel_id, counterpart))
 
 
 def latest_in_thread(
     conn: psycopg.Connection, channel_id: str, thread_ts: str
 ) -> dict[str, Any] | None:
-    """스레드에서 마지막으로 오간 메일을 찾습니다. 답장은 이 메일에 겁니다.
+    """상대방 스레드의 상대와 마지막으로 오간 메일을 찾습니다. 답장은 이 메일에 겁니다.
 
     Args:
         conn: 커넥션
@@ -170,7 +162,7 @@ def latest_in_thread(
         thread_ts: 스레드 ts
 
     Returns:
-        dict[str, Any] | None: 행. 메일 스레드가 아니면 None
+        dict[str, Any] | None: 행. 상대방 스레드가 아니면 None
     """
     rows = fetch_all(conn, LATEST_IN_THREAD, (channel_id, thread_ts))
     return rows[0] if rows else None

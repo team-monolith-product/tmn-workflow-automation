@@ -8,6 +8,9 @@
 방금 들어온 메일은 웹훅이 처리 중일 수 있어 건너뜁니다. 둘이 겹치면 같은
 메일이 슬랙에 두 번 올라갑니다.
 
+오래된 원본은 보지 않습니다. 하루 넘게 실패하는 원본은 다시 해도 같은 이유로
+실패하니 사람이 봐야 하고, 모든 키를 DB 에 물으면 메일이 쌓일수록 무거워집니다.
+
 사용:
   python scripts/reconcile_ops_mail.py --dry-run
 """
@@ -25,7 +28,6 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 from api.s3 import list_objects
-from app.ops_mail import run_store
 from app.ops_mail_sns import process_object
 from service.ops_mail import store
 
@@ -37,6 +39,9 @@ PREFIX = "ops/"
 # 웹훅이 처리할 시간. 이보다 최근 객체는 건너뛴다.
 GRACE = timedelta(minutes=5)
 
+# 이보다 오래된 원본은 다시 처리하지 않는다.
+LOOKBACK = timedelta(days=1)
+
 
 async def reconcile(dry_run: bool) -> None:
     """DB 에 없는 원본을 다시 처리합니다.
@@ -45,13 +50,13 @@ async def reconcile(dry_run: bool) -> None:
         dry_run: True 면 처리할 키만 출력합니다
     """
     bucket = os.environ["OPS_MAIL_S3_BUCKET"]
-    cutoff = datetime.now(timezone.utc) - GRACE
+    now = datetime.now(timezone.utc)
     keys = [
         item["Key"]
         for item in await asyncio.to_thread(list_objects, bucket, PREFIX)
-        if item["LastModified"] < cutoff
+        if now - LOOKBACK < item["LastModified"] < now - GRACE
     ]
-    processed = await asyncio.to_thread(run_store, store.processed_keys, keys)
+    processed = await store.run(store.processed_keys, keys)
     missing = [key for key in keys if key not in processed]
     print(f"ops 메일 원본 {len(keys)}개 중 미처리 {len(missing)}개")
 

@@ -10,7 +10,7 @@ SES 는 임의 URL 로 요청을 보내지 못해서 SNS 의 HTTPS 구독으로 
 
 슬랙 스레드는 상대방 주소 하나에 하나입니다. 처음 오가는 상대면 채널에
 상대 주소로 스레드를 열고, 메일은 늘 그 스레드의 댓글로 답니다. 우리가 새 메일로
-먼저 보낸 상대라면 그 메일들을 스레드 첫 메시지에 보여주고 스레드에 묶습니다.
+먼저 보낸 상대라면 그 메일들을 스레드 첫 메시지에 보여줍니다.
 
 자동응답(부재중 등)은 이미 있는 스레드에만 달고 새 스레드를 열지 않습니다.
 여러 명에게 보낸 메일에 돌아오는 자동응답이 채널을 덮지 않게 하려는 것입니다.
@@ -26,7 +26,6 @@ SES 는 임의 URL 로 요청을 보내지 못해서 SNS 의 HTTPS 구독으로 
 import asyncio
 import json
 import os
-from collections import defaultdict
 from typing import Any
 
 import requests
@@ -35,18 +34,13 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from api.s3 import get_object
 from app.common import KST
-from app.ops_mail import escape, run_store
 from service.ops_mail import mime, sns, store
+from service.slack import escape
 
 router = APIRouter()
 
 # 슬랙 메시지 한 개에 싣는 본문 길이. 넘으면 자르고 원본 위치를 남긴다.
 MAX_BODY_CHARS = 3500
-
-# 처음 오는 상대의 메일 두 통이 동시에 처리되면 둘 다 "스레드 없음" 을 보고
-# 스레드를 두 개 연다. 상대별로 줄을 세운다. 웹훅 서버는 한 대(replicaCount 1)라
-# 프로세스 안 잠금으로 충분하다.
-_thread_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def format_inbound(mail: mime.ParsedMail, s3_uri: str) -> str:
@@ -100,15 +94,22 @@ def format_thread_root(counterpart: str, sent: list[dict[str, Any]]) -> str:
 
 
 async def _open_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
-    """상대방 스레드를 열고, 먼저 보낸 메일들을 그 스레드에 묶습니다."""
-    sent = await asyncio.to_thread(run_store, store.unthreaded, channel, counterpart)
+    """상대방 스레드를 열고 등록합니다.
+
+    같은 상대의 메일 두 통이 동시에 들어오면(웹훅과 정리 작업은 다른 프로세스다)
+    둘 다 스레드를 연다. 등록은 하나만 되니, 진 쪽은 자기가 연 것을 지우고
+    이긴 스레드를 씁니다.
+    """
+    sent = await store.run(store.sent_to, channel, counterpart)
     response = await client.chat_postMessage(
         channel=channel, text=format_thread_root(counterpart, sent)
     )
-    await asyncio.to_thread(
-        run_store, store.attach_thread, channel, counterpart, response["ts"]
+    thread_ts = await store.run(
+        store.claim_thread, channel, counterpart, response["ts"]
     )
-    return response["ts"]
+    if thread_ts != response["ts"]:
+        await client.chat_delete(channel=channel, ts=response["ts"])
+    return thread_ts
 
 
 async def process_object(bucket: str, key: str) -> None:
@@ -118,24 +119,23 @@ async def process_object(bucket: str, key: str) -> None:
         bucket: 메일 원본 버킷
         key: 객체 키. 끝이 SES 메시지 ID 입니다.
     """
+    # SNS 는 같은 알림을 두 번 보낼 수 있다. Message-ID 는 없는 메일도 있어
+    # 지어 넣으므로, 늘 같은 값인 객체 키로 거른다.
+    if await store.run(store.processed_keys, [key]):
+        print(f"ops 메일 중복 {key}")
+        return
     raw = await asyncio.to_thread(get_object, bucket, key)
     # 첨부 디코딩과 HTML 파싱이 무거워 이벤트 루프에서 돌리지 않는다.
     mail = await asyncio.to_thread(mime.parse, raw)
-    if await asyncio.to_thread(run_store, store.exists, mail.message_id):
-        print(f"ops 메일 중복 {mail.message_id}")
-        return
 
     channel_id = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
     client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     counterpart = mail.reply_to_address
 
-    async with _thread_locks[counterpart]:
-        thread_ts = await asyncio.to_thread(
-            run_store, store.find_thread, channel_id, counterpart
-        )
-        # 자동응답은 이미 있는 스레드에만 단다. 없으면 기록만 남긴다.
-        if thread_ts is None and not mail.auto_reply:
-            thread_ts = await _open_thread(client, channel_id, counterpart)
+    thread_ts = await store.run(store.find_thread, channel_id, counterpart)
+    # 자동응답은 이미 있는 스레드에만 단다. 없으면 기록만 남긴다.
+    if thread_ts is None and not mail.auto_reply:
+        thread_ts = await _open_thread(client, channel_id, counterpart)
 
     if thread_ts:
         await client.chat_postMessage(
@@ -153,8 +153,7 @@ async def process_object(bucket: str, key: str) -> None:
                 ],
             )
 
-    await asyncio.to_thread(
-        run_store,
+    await store.run(
         store.insert,
         store.OpsMailRow(
             direction="in",
@@ -168,7 +167,6 @@ async def process_object(bucket: str, key: str) -> None:
             references_ids=mail.references_ids,
             s3_key=key,
             channel_id=channel_id,
-            thread_ts=thread_ts,
             sent_by=None,
         ),
     )

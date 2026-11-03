@@ -17,6 +17,7 @@
 """
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 
@@ -25,9 +26,10 @@ from cachetools import TTLCache
 from langchain_core.tools import StructuredTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
 
-from api.ses import send_raw_email
-from service.db import connect
+from api.ses import send_mime
 from service.ops_mail import mime, store
+from service.ops_mail.draft import Draft, DraftProblem, make, megabytes, pick_files
+from service.slack import escape
 
 APPROVE = "ops_mail_approve"
 CANCEL = "ops_mail_cancel"
@@ -37,19 +39,12 @@ FEEDBACK_BLOCK = "ops_mail_feedback"
 FEEDBACK_INPUT = "ops_mail_feedback_input"
 
 # 슬랙 버튼 value 는 2000자 제한이라 본문을 못 싣는다. 초안은 여기 둔다.
-_DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
+_DRAFTS: TTLCache[str, Draft] = TTLCache(maxsize=200, ttl=3600)
 
-# 첨부 크기 합의 상한. SES v2 는 한 통에 40MB 까지인데 base64 인코딩 뒤
-# 크기로 잰다. 인코딩하면 4/3 배가 되니 원본으로는 30MB 남짓이고, 본문과
-# 헤더 자리를 남겨 28MB 로 둔다.
-MAX_ATTACHMENT_BYTES = 28 * 1024 * 1024
-
-# 한 번에 보내는 받는 사람 수의 상한. 명단을 잘못 넣어 수천 명에게 나가는 것을 막는다.
-MAX_RECIPIENTS = 500
-
-# 카드에 보여주는 주소 수. 카드 section text 가 3000자라 전부는 못 싣는다.
-# 넘으면 전체 명단을 같은 스레드에 파일로 올린다.
+# 카드 section text 가 3000자라 명단과 본문을 다 싣지 못한다. 앞부분만 보이고,
+# 넘치면 전체를 같은 스레드에 파일로 올린다.
 PREVIEW_RECIPIENTS = 10
+PREVIEW_BODY_CHARS = 1500
 
 # 보내는 주소. IAM 정책이 From 을 이 주소로만 허용해서 설정으로 바꿀 일이 없다.
 FROM_ADDRESS = "ops@team-mono.com"
@@ -57,21 +52,6 @@ FROM_HEADER = f"팀모노리스 <{FROM_ADDRESS}>"
 
 # 몇 통마다 카드에 진행 상황을 고쳐 쓸지. chat.update 는 분당 50회 남짓이 한도다.
 PROGRESS_EVERY = 20
-
-
-def escape(text: str) -> str:
-    """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def run_store(function, *args):
-    """store 함수 하나를 새 커넥션으로 부릅니다. psycopg 는 동기라 스레드로 넘겨 씁니다."""
-    with connect() as conn:
-        return function(conn, *args)
-
-
-def _megabytes(size: int) -> str:
-    return f"{size / 1024 / 1024:.1f}MB"
 
 
 def _preview(addresses: list[str]) -> str:
@@ -82,72 +62,48 @@ def _preview(addresses: list[str]) -> str:
     return shown
 
 
-def _summary(draft: dict) -> str:
+def _summary(draft: Draft) -> str:
     """받는 사람·제목·첨부·본문을 슬랙 텍스트로 만듭니다."""
-    recipients = draft["recipients"]
-    to = _preview(recipients)
-    if len(recipients) > 1:
-        to = f"*{len(recipients)}명* — {to} · 한 명씩 따로 보냅니다"
+    to = _preview(draft.recipients)
+    if len(draft.recipients) > 1:
+        to = f"*{len(draft.recipients)}명* — {to} · 한 명씩 따로 보냅니다"
     lines = [
         f"받는 사람: {to}",
-        f"제목: {escape(draft['subject'])}",
+        f"제목: {escape(draft.subject)}",
     ]
-    if draft["attachments"]:
+    if draft.attachments:
         names = ", ".join(
-            f"{escape(file['name'])} ({_megabytes(file['size'])})"
-            for file in draft["attachments"]
+            f"{escape(file['name'])} ({megabytes(file['size'])})"
+            for file in draft.attachments
         )
         lines.append(f"첨부: {names}")
-    lines.append(f"```{draft['body'].replace('`', chr(39))}```")
+    body = draft.body
+    if len(body) > PREVIEW_BODY_CHARS:
+        body = body[:PREVIEW_BODY_CHARS] + f"\n…(전체 {len(draft.body)}자는 본문 파일)"
+    lines.append(f"```{body.replace('`', chr(39))}```")
     return "\n".join(lines)
 
 
-def _pick_files(messages: list[dict], names: list[str]) -> list[dict] | str:
-    """스레드에 올라온 파일 중 붙일 것을 이름으로 고릅니다.
-
-    에이전트가 파일을 지어내지 못하게 스레드에 실제로 있는 파일만 받습니다.
-    같은 이름이 여러 번 올라왔으면 나중에 올린 것을 씁니다.
-
-    Args:
-        messages: conversations_replies 의 메시지들
-        names: 붙일 파일 이름
-
-    Returns:
-        list[dict] | str: 고른 파일. 없는 이름이 있거나 너무 크면 고칠 것을 적은 문자열
-    """
-    files = {}
-    for message in messages:
-        for file in message.get("files", []):
-            files[file["name"]] = file
-
-    missing = [name for name in names if name not in files]
-    if missing:
-        return (
-            f"스레드에 {', '.join(missing)} 파일이 없습니다. "
-            f"스레드에 올라온 파일: {', '.join(files) or '없음'}"
+def _full_text_files(draft: Draft) -> list[dict]:
+    """카드에 다 못 싣는 명단과 본문을 파일로 만듭니다."""
+    files = []
+    count = len(draft.recipients)
+    if count > PREVIEW_RECIPIENTS:
+        files.append(
+            {
+                "content": "\n".join(draft.recipients),
+                "filename": f"받는사람_{count}명.txt",
+                "title": f"받는 사람 {count}명",
+            }
         )
-
-    picked = [files[name] for name in dict.fromkeys(names)]
-    total = sum(file["size"] for file in picked)
-    if total > MAX_ATTACHMENT_BYTES:
-        return (
-            f"첨부가 합쳐서 {_megabytes(total)} 라 보낼 수 없습니다. "
-            f"{_megabytes(MAX_ATTACHMENT_BYTES)} 까지입니다."
-        )
-    return [
-        {
-            "name": file["name"],
-            "mimetype": file["mimetype"],
-            "size": file["size"],
-            "url": file["url_private_download"],
-        }
-        for file in picked
-    ]
+    if len(draft.body) > PREVIEW_BODY_CHARS:
+        files.append({"content": draft.body, "filename": "본문.txt", "title": "본문"})
+    return files
 
 
-def _blocks(draft_id: str, draft: dict) -> list[dict]:
+def _blocks(draft_id: str, draft: Draft) -> list[dict]:
     """승인 카드를 만듭니다."""
-    kind = "답장" if draft["references_ids"] else "새 메일"
+    kind = "답장" if draft.is_reply else "새 메일"
     return [
         {
             "type": "section",
@@ -181,69 +137,6 @@ def _blocks(draft_id: str, draft: dict) -> list[dict]:
             ],
         },
     ]
-
-
-def _reply_references(latest: dict) -> list[str]:
-    """답장의 References 를 만듭니다. 마지막 것이 In-Reply-To 가 됩니다.
-
-    SES 는 보낼 때 Message-ID 를 자기 값으로 바꿔 씁니다. 그래서 우리가 보낸 메일의
-    message_id 는 상대가 본 적 없는 값이라 넣지 않습니다. 우리가 보낸 메일의
-    references_ids 에는 그때까지 상대 메일의 ID 가 이미 들어 있습니다.
-    """
-    if latest["direction"] == "out":
-        return latest["references_ids"]
-    return [*latest["references_ids"], latest["message_id"]]
-
-
-def _prepare(
-    channel: str, thread_ts: str, body: str, to: list[str], subject: str
-) -> dict | str:
-    """초안을 만듭니다. 상대방 스레드 안이면 답장, 밖이면 새 메일입니다.
-
-    Args:
-        channel: 채널 ID
-        thread_ts: 도구를 부른 스레드
-        body: 본문
-        to: 받는 사람 주소들. 답장이면 비워도 됩니다
-        subject: 제목. 답장이면 비워도 됩니다
-
-    Returns:
-        dict | str: 초안. 보낼 수 없으면 고칠 것을 적은 문자열
-    """
-    recipients = list(
-        dict.fromkeys(address.strip().lower() for address in to if address.strip())
-    )
-    latest = run_store(store.latest_in_thread, channel, thread_ts)
-
-    if latest:
-        if recipients and recipients != [latest["counterpart"]]:
-            return (
-                f"이 스레드는 {latest['counterpart']} 와의 메일 스레드라 받는 사람을"
-                " 바꿀 수 없습니다. 다른 사람에게는 채널에서 새 메일로 보내주세요."
-            )
-        return {
-            "recipients": [latest["counterpart"]],
-            "subject": mime.reply_subject(latest["subject"]),
-            "body": body,
-            "references_ids": _reply_references(latest),
-        }
-
-    if not recipients or not subject:
-        return "새 메일은 받는 사람(to)과 제목(subject)이 필요합니다."
-    invalid = [address for address in recipients if "@" not in address]
-    if invalid:
-        return f"메일 주소가 아닙니다: {', '.join(invalid)}"
-    if len(recipients) > MAX_RECIPIENTS:
-        return (
-            f"받는 사람이 {len(recipients)}명입니다. 한 번에 {MAX_RECIPIENTS}명까지라"
-            " 나눠서 올려주세요."
-        )
-    return {
-        "recipients": recipients,
-        "subject": subject,
-        "body": body,
-        "references_ids": [],
-    }
 
 
 def get_draft_ops_mail_tool(
@@ -287,38 +180,42 @@ def get_draft_ops_mail_tool(
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        draft = await asyncio.to_thread(
-            _prepare, channel, thread_ts, body, to or [], subject
-        )
-        if isinstance(draft, str):
-            return draft
-
-        files = []
-        if attachments:
-            replies = await client.conversations_replies(channel=channel, ts=thread_ts)
-            files = _pick_files(replies["messages"], attachments)
-            if isinstance(files, str):
-                return files
-        draft = {**draft, "attachments": files}
+        latest = await store.run(store.latest_in_thread, channel, thread_ts)
+        try:
+            draft = make(
+                thread_ts=thread_ts,
+                latest=latest,
+                body=body,
+                to=to or [],
+                subject=subject,
+            )
+            if attachments:
+                replies = await client.conversations_replies(
+                    channel=channel, ts=thread_ts
+                )
+                draft = dataclasses.replace(
+                    draft, attachments=pick_files(replies["messages"], attachments)
+                )
+        except DraftProblem as problem:
+            return str(problem)
 
         draft_id = hashlib.sha256(
-            json.dumps([channel, thread_ts, draft], ensure_ascii=False).encode()
+            json.dumps(
+                [channel, dataclasses.asdict(draft)], ensure_ascii=False
+            ).encode()
         ).hexdigest()[:32]
         if draft_id in _DRAFTS:
             return "같은 초안이 이미 이 스레드에 올라가 있습니다. 그 카드에서 [보내기] 를 눌러주세요."
 
         # 검사와 저장 사이에 await 가 있으면 한 턴에 실린 두 호출이 둘 다
         # 빠져나간다. 자리를 먼저 잡고, 카드가 못 올라가면 되돌린다.
-        _DRAFTS[draft_id] = {**draft, "thread_ts": thread_ts}
-        count = len(draft["recipients"])
+        _DRAFTS[draft_id] = draft
+        count = len(draft.recipients)
         try:
-            if count > PREVIEW_RECIPIENTS:
+            files = _full_text_files(draft)
+            if files:
                 await client.files_upload_v2(
-                    channel=channel,
-                    thread_ts=thread_ts,
-                    content="\n".join(draft["recipients"]),
-                    filename=f"받는사람_{count}명.txt",
-                    title=f"받는 사람 {count}명",
+                    channel=channel, thread_ts=thread_ts, file_uploads=files
                 )
             await client.chat_postMessage(
                 channel=channel,
@@ -348,7 +245,7 @@ async def _download(token: str, file: dict) -> mime.Attachment:
 
 
 def _send(
-    draft: dict, recipient: str, attachments: list[mime.Attachment]
+    draft: Draft, recipient: str, attachments: list[mime.Attachment]
 ) -> tuple[str, str]:
     """한 사람에게 SES 로 보냅니다.
 
@@ -358,26 +255,25 @@ def _send(
     message_id, raw = mime.build(
         from_header=FROM_HEADER,
         to_address=recipient,
-        subject=draft["subject"],
-        body=draft["body"],
-        references_ids=draft["references_ids"],
+        subject=draft.subject,
+        body=draft.body,
+        references_ids=draft.references_ids,
         attachments=attachments,
     )
-    response = send_raw_email(raw)
+    response = send_mime(raw)
     return message_id, response["MessageId"]
 
 
-def _record(
-    draft: dict,
+async def _record(
+    draft: Draft,
     recipient: str,
     channel: str,
-    thread_ts: str | None,
     message_id: str,
     ses_id: str,
     user: str,
 ) -> None:
     """보낸 메일 한 통을 남깁니다."""
-    run_store(
+    await store.run(
         store.insert,
         store.OpsMailRow(
             direction="out",
@@ -386,18 +282,17 @@ def _record(
             counterpart=recipient,
             from_address=FROM_ADDRESS,
             to_addresses=[recipient],
-            subject=draft["subject"],
-            body_text=draft["body"],
-            references_ids=draft["references_ids"],
+            subject=draft.subject,
+            body_text=draft.body,
+            references_ids=draft.references_ids,
             s3_key=None,
             channel_id=channel,
-            thread_ts=thread_ts,
             sent_by=user,
         ),
     )
 
 
-def _revise_view(draft_id: str, channel: str, ts: str, draft: dict) -> dict:
+def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
     """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다."""
     return {
         "type": "modal",
@@ -447,7 +342,7 @@ def register_ops_mail_handlers(app, revise=None):
         # 내려받기는 보내기 전이라 실패해도 메일은 나가지 않았다.
         try:
             attachments = [
-                await _download(client.token, file) for file in draft["attachments"]
+                await _download(client.token, file) for file in draft.attachments
             ]
         except Exception as error:
             await _replace(
@@ -459,69 +354,47 @@ def register_ops_mail_handlers(app, revise=None):
             raise
 
         # 한 명씩 따로 보낸다. 받는 사람끼리 서로의 주소가 보이지 않고, 회신은
-        # 각자의 상대방 스레드로 들어온다. 답장은 카드가 있는 스레드가 곧 상대방
-        # 스레드이고, 새 메일은 회신이 와서 스레드가 열릴 때 묶인다.
-        thread_ts = draft["thread_ts"] if draft["references_ids"] else None
-        total = len(draft["recipients"])
-        sent = []
+        # 각자의 상대방 스레드로 들어온다.
+        total = len(draft.recipients)
         # 버튼을 먼저 걷는다. 수백 명이면 다 보내는 데 1분 남짓 걸린다.
         await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
-        for recipient in draft["recipients"]:
+        for sent, recipient in enumerate(draft.recipients):
             # 무엇이 실패하든 나머지는 보내지 않는다. 같은 원인으로 줄줄이 실패하거나
             # 같은 상태를 늘린다. 카드에는 어디서 멈췄는지 남긴다.
+            # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
+            # 다시 보내고, 같은 사람이 두 번 받는다.
+            problem = (
+                f"{escape(recipient)} 는 발송 여부를 모릅니다 — 받는 쪽에 확인하세요."
+            )
             try:
                 message_id, ses_id = await asyncio.to_thread(
                     _send, draft, recipient, attachments
                 )
-            except Exception as error:
-                # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
-                # 다시 보내고, 같은 사람이 두 번 받는다.
-                await _stop(
-                    client,
-                    channel,
-                    ts,
-                    draft,
-                    len(sent),
-                    f"{recipient} 는 발송 여부를 모릅니다 ({type(error).__name__})"
-                    " — 받는 쪽에 확인하세요.",
-                )
-                raise
-            print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
-            # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
-            # 나간 메일의 기록이 빠진다.
-            try:
-                await asyncio.to_thread(
-                    _record,
-                    draft,
-                    recipient,
-                    channel,
-                    thread_ts,
-                    message_id,
-                    ses_id,
-                    user,
-                )
+                print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
+                # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
+                # 나간 메일의 기록이 빠진다.
+                problem = f"{escape(recipient)} 에게는 보냈지만 기록하지 못했습니다."
+                await _record(draft, recipient, channel, message_id, ses_id, user)
             except Exception as error:
                 await _stop(
                     client,
                     channel,
                     ts,
                     draft,
-                    len(sent),
-                    f"{recipient} 에게는 보냈지만 기록하지 못했습니다"
-                    f" ({type(error).__name__}).",
+                    sent,
+                    f"{problem} ({type(error).__name__})",
                 )
                 raise
-            sent.append(recipient)
-            if len(sent) % PROGRESS_EVERY == 0 and len(sent) < total:
-                await _replace(
-                    client, channel, ts, f"📤 보내는 중… {len(sent)}/{total}"
+            if (sent + 1) % PROGRESS_EVERY == 0 and sent + 1 < total:
+                await _progress(
+                    client, channel, ts, f"📤 보내는 중… {sent + 1}/{total}"
                 )
 
         await _replace(
             client,
             channel,
             ts,
-            f"📤 <@{user}> 님이 {len(sent)}명에게 보냈습니다\n{_summary(draft)}",
+            f"📤 <@{user}> 님이 {total}명에게 보냈습니다\n{_summary(draft)}",
         )
 
     @app.action(REVISE)
@@ -565,7 +438,7 @@ def register_ops_mail_handlers(app, revise=None):
             return
         await revise(
             channel=meta["channel"],
-            thread_ts=draft["thread_ts"],
+            thread_ts=draft.thread_ts,
             user=user,
             text=feedback,
         )
@@ -585,7 +458,7 @@ def register_ops_mail_handlers(app, revise=None):
 
 
 async def _stop(
-    client, channel: str, ts: str, draft: dict, sent: int, problem: str
+    client, channel: str, ts: str, draft: Draft, sent: int, problem: str
 ) -> None:
     """발송을 멈추고 카드에 어디까지 나갔는지 남깁니다.
 
@@ -599,7 +472,7 @@ async def _stop(
         sent: 문제가 생긴 사람 앞까지 나간 통 수
         problem: 문제가 생긴 사람에게 무슨 일이 있었는지
     """
-    left = draft["recipients"][sent + 1 :]
+    left = draft.recipients[sent + 1 :]
     await _replace(
         client,
         channel,
@@ -608,6 +481,19 @@ async def _stop(
         + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
         + f"\n{_summary(draft)}",
     )
+
+
+async def _progress(client, channel: str, ts: str, text: str) -> None:
+    """진행 상황을 카드에 고쳐 씁니다. 실패해도 발송은 멈추지 않습니다.
+
+    여기서 던지면 발송 루프가 카드에 아무 말도 남기지 못한 채 빠져나가, 카드가
+    "보내는 중" 에 멈추고 남은 사람에게는 아무도 모르게 안 나간다. 끝나면
+    결과 문구가 어차피 덮어쓴다.
+    """
+    try:
+        await _replace(client, channel, ts, text)
+    except Exception as error:
+        print(f"ops 메일 진행 표시 실패 {channel} {ts} {type(error).__name__}")
 
 
 async def _replace(client, channel: str, ts: str, text: str) -> None:

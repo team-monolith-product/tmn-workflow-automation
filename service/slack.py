@@ -9,6 +9,11 @@ from slack_sdk import WebClient
 from slack_sdk.web.async_client import AsyncWebClient
 
 
+def escape(text: str) -> str:
+    """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def find_thread_ts_by_text(
     slack_client: WebClient,
     channel_id: str,
