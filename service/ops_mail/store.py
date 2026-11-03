@@ -4,6 +4,10 @@ ops@ 메일 기록을 읽고 씁니다.
 슬랙 스레드는 상대방 주소 하나에 하나입니다. 같은 상대와 주고받은 메일은
 방향과 상관없이 같은 스레드에 쌓입니다.
 
+새 메일로 먼저 보낸 상대는 회신이 오기 전까지 스레드가 없습니다(thread_ts 가
+NULL). 수백 명에게 보내도 상대마다 스레드를 열지 않기 위해서입니다. 회신이 와서
+스레드가 열리면 그때 그 상대의 메일들을 스레드에 묶습니다.
+
 psycopg 는 동기라 봇 쪽에서는 스레드로 넘겨 부릅니다.
 """
 
@@ -30,7 +34,7 @@ class OpsMailRow:
     references_ids: list[str]
     s3_key: str | None
     channel_id: str
-    thread_ts: str
+    thread_ts: str | None
     sent_by: str | None
 
 
@@ -50,9 +54,23 @@ EXISTS = "SELECT 1 FROM ops_mail_message WHERE message_id = %s"
 FIND_THREAD = """
 SELECT thread_ts
 FROM ops_mail_message
-WHERE channel_id = %s AND counterpart = %s
+WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NOT NULL
 ORDER BY created_at
 LIMIT 1
+"""
+
+# 스레드가 열리기 전에 이 상대에게 보낸 메일. 스레드 첫 메시지에 보여준다.
+UNTHREADED = """
+SELECT subject, sent_by, created_at
+FROM ops_mail_message
+WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NULL
+ORDER BY created_at
+"""
+
+ATTACH_THREAD = """
+UPDATE ops_mail_message
+SET thread_ts = %s
+WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NULL
 """
 
 LATEST_IN_THREAD = """
@@ -92,6 +110,37 @@ def find_thread(
     """
     rows = fetch_all(conn, FIND_THREAD, (channel_id, counterpart))
     return rows[0]["thread_ts"] if rows else None
+
+
+def unthreaded(
+    conn: psycopg.Connection, channel_id: str, counterpart: str
+) -> list[dict[str, Any]]:
+    """스레드가 열리기 전에 이 상대에게 보낸 메일을 찾습니다.
+
+    Args:
+        conn: 커넥션
+        channel_id: 메일 채널 ID
+        counterpart: 상대방 주소 (소문자)
+
+    Returns:
+        list[dict[str, Any]]: 제목·보낸 사람·보낸 시각
+    """
+    return fetch_all(conn, UNTHREADED, (channel_id, counterpart))
+
+
+def attach_thread(
+    conn: psycopg.Connection, channel_id: str, counterpart: str, thread_ts: str
+) -> None:
+    """스레드가 없던 이 상대의 메일들을 새로 연 스레드에 묶습니다.
+
+    Args:
+        conn: 커넥션
+        channel_id: 메일 채널 ID
+        counterpart: 상대방 주소 (소문자)
+        thread_ts: 새로 연 스레드 ts
+    """
+    with conn.cursor() as cur:
+        cur.execute(ATTACH_THREAD, (thread_ts, channel_id, counterpart))
 
 
 def latest_in_thread(

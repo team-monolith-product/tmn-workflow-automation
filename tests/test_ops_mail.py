@@ -263,8 +263,16 @@ class _FakeSlack:
         self.updates.append(kwargs)
 
 
-def _fake_db(monkeypatch, module, *, thread: str | None, latest: dict | None = None):
+def _fake_db(
+    monkeypatch,
+    module,
+    *,
+    thread: str | None,
+    latest: dict | None = None,
+    unthreaded: list[dict] | None = None,
+):
     inserted = []
+    attached = []
 
     @contextmanager
     def connect():
@@ -276,6 +284,15 @@ def _fake_db(monkeypatch, module, *, thread: str | None, latest: dict | None = N
     monkeypatch.setattr(module.store, "find_thread", lambda conn, channel, cp: thread)
     monkeypatch.setattr(module.store, "latest_in_thread", lambda conn, c, t: latest)
     monkeypatch.setattr(module.store, "insert", lambda conn, row: inserted.append(row))
+    monkeypatch.setattr(
+        module.store, "unthreaded", lambda conn, c, cp: list(unthreaded or [])
+    )
+    monkeypatch.setattr(
+        module.store,
+        "attach_thread",
+        lambda conn, c, cp, ts: attached.append((cp, ts)),
+    )
+    module.store.attached = attached
     return inserted
 
 
@@ -315,14 +332,24 @@ def test_처음_오는_상대는_스레드를_열고_바이러스_의심이면_�
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(ops_mail_sns, "AsyncWebClient", _FakeSlack)
     monkeypatch.setattr(ops_mail_sns, "get_object", lambda bucket, key: _raw_mail())
-    inserted = _fake_db(monkeypatch, ops_mail_sns, thread=None)
+    sent_before = {
+        "subject": "2학기 안내",
+        "sent_by": "U1",
+        "created_at": datetime.datetime(2026, 11, 3, 10, 0),
+    }
+    inserted = _fake_db(
+        monkeypatch, ops_mail_sns, thread=None, unthreaded=[sent_before]
+    )
 
-    # When : 처음 오는 상대의 메일이 바이러스 의심이면
+    # When : 새 메일로 먼저 보냈던 상대가 처음 회신했는데 바이러스 의심이면
     asyncio.run(ops_mail_sns.process_notification(_notification(virus="FAIL")))
 
-    # Then : 상대 주소로 스레드를 열어 메일을 달고, 첨부는 올리지 않는다
+    # Then : 먼저 보낸 메일을 보여주며 스레드를 열어 그 메일들을 묶고,
+    #        회신을 달되 첨부는 올리지 않는다
     slack = _FakeSlack.last
     assert "thread_ts" not in slack.posts[0]
+    assert "먼저 보낸 메일: 2학기 안내" in slack.posts[0]["text"]
+    assert ops_mail_sns.store.attached == [("office@abc.kr", "ts-1")]
     assert slack.posts[1]["thread_ts"] == "ts-1"
     assert "바이러스 의심" in slack.posts[1]["text"]
     assert slack.uploads == []
@@ -452,7 +479,7 @@ def _approve(app, slack, draft_id: str) -> None:
 def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실패하면_멈춘다(monkeypatch):
     monkeypatch.setenv("OPS_MAIL_FROM", "팀모노리스 <ops@team-mono.com>")
     sent = []
-    traced = []
+    recorded = []
 
     def send(raw):
         to = mime.parse(raw).to_addresses
@@ -461,11 +488,8 @@ def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실
         sent.append(to)
         return {"MessageId": "s"}
 
-    async def leave_trace(client, channel, draft, done, user):
-        traced.extend(recipient for recipient, _, _ in done)
-
     monkeypatch.setattr(ops_mail, "send_raw_email", send)
-    monkeypatch.setattr(ops_mail, "_leave_trace", leave_trace)
+    monkeypatch.setattr(ops_mail, "_record", lambda *args: recorded.append(args))
     app = _FakeApp()
     ops_mail.register_ops_mail_handlers(app)
     ops_mail._DRAFTS["d2"] = {
@@ -483,11 +507,13 @@ def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실
         _approve(app, slack, "d2")
 
     # Then : 첫 번째만 혼자 받은 메일로 나가고, 세 번째는 보내지 않으며,
-    #        카드에 누가 받았고 누가 모르는지 남기고, 나간 것만 기록한다
+    #        카드에 누가 받았고 누가 모르는지 남기고, 나간 것만 스레드 없이 기록하며,
+    #        상대별 스레드에는 아무것도 올리지 않는다
     assert sent == [["a@school.kr"]]
     assert "b@school.kr 는 발송 여부를 모릅니다" in slack.updates[-1]["text"]
     assert "보내지 않은 1명: c@school.kr" in slack.updates[-1]["text"]
-    assert traced == ["a@school.kr"]
+    assert [(args[1], args[3]) for args in recorded] == [("a@school.kr", None)]
+    assert slack.posts == []
 
 
 def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파일로_올린다(monkeypatch):

@@ -24,7 +24,8 @@ CREATE TABLE ops_mail_message (
     references_ids  text[]      NOT NULL DEFAULT '{}',
     s3_key          text,
     channel_id      text        NOT NULL,
-    thread_ts       text        NOT NULL,
+    -- 새 메일로 먼저 보낸 상대는 회신이 와서 스레드가 열리기 전까지 NULL 이다.
+    thread_ts       text,
     -- 보낸 메일의 [보내기] 를 누른 사람의 Slack 사용자 ID.
     sent_by         text,
     created_at      timestamptz NOT NULL DEFAULT now(),

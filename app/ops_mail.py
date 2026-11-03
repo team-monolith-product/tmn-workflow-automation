@@ -12,7 +12,8 @@
 문자와 같은 이유로 도구를 부르는 것만으로는 나가지 않습니다.
 
 받은 메일은 app/ops_mail_sns.py 가 슬랙에 올립니다. 스레드는 상대방 주소 하나에
-하나이고, 보낸 메일도 그 스레드에 남습니다.
+하나입니다. 답장은 그 스레드에 남고, 새 메일은 카드 하나가 기록입니다 -- 상대가
+회신해서 스레드가 열릴 때 먼저 보낸 메일이 그 스레드에 함께 보입니다.
 """
 
 import asyncio
@@ -64,30 +65,6 @@ def run_store(function, *args):
     """store 함수 하나를 새 커넥션으로 부릅니다. psycopg 는 동기라 스레드로 넘겨 씁니다."""
     with connect() as conn:
         return function(conn, *args)
-
-
-async def mail_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
-    """상대방 스레드를 찾고, 처음 오가는 상대면 엽니다.
-
-    받은 메일(app/ops_mail_sns.py)과 보낸 메일이 같은 함수로 스레드를 고릅니다.
-
-    Args:
-        client: 슬랙 클라이언트
-        channel: 메일 채널 ID
-        counterpart: 상대방 주소 (소문자)
-
-    Returns:
-        str: 스레드 ts
-    """
-    thread_ts = await asyncio.to_thread(
-        run_store, store.find_thread, channel, counterpart
-    )
-    if thread_ts:
-        return thread_ts
-    response = await client.chat_postMessage(
-        channel=channel, text=f"✉️ {counterpart} 와 주고받은 메일"
-    )
-    return response["ts"]
 
 
 def _megabytes(size: int) -> str:
@@ -379,7 +356,7 @@ def _record(
     draft: dict,
     recipient: str,
     channel: str,
-    thread_ts: str,
+    thread_ts: str | None,
     message_id: str,
     ses_id: str,
     user: str,
@@ -403,40 +380,6 @@ def _record(
             sent_by=user,
         ),
     )
-
-
-async def _leave_trace(
-    client: AsyncWebClient,
-    channel: str,
-    draft: dict,
-    sent: list[tuple[str, str, str]],
-    user: str,
-) -> None:
-    """보낸 메일을 상대방 스레드와 DB 에 남깁니다.
-
-    Args:
-        client: 슬랙 클라이언트
-        channel: 메일 채널 ID
-        draft: 초안
-        sent: 실제로 나간 (받는 사람, Message-ID, SES MessageId)
-        user: [보내기] 를 누른 사람
-    """
-    for recipient, message_id, ses_id in sent:
-        # 답장이면 카드가 있는 스레드가 곧 상대방 스레드다. 새 메일이면 상대방
-        # 스레드를 찾아 거기에 남긴다.
-        if draft["references_ids"]:
-            thread_ts = draft["thread_ts"]
-        else:
-            thread_ts = await mail_thread(client, channel, recipient)
-            await client.chat_postMessage(
-                channel=channel,
-                thread_ts=thread_ts,
-                text=f"📤 <@{user}> 님이 보냈습니다\n"
-                + _summary({**draft, "recipients": [recipient]}),
-            )
-        await asyncio.to_thread(
-            _record, draft, recipient, channel, thread_ts, message_id, ses_id, user
-        )
 
 
 def _revise_view(draft_id: str, channel: str, ts: str, draft: dict) -> dict:
@@ -501,7 +444,9 @@ def register_ops_mail_handlers(app, revise=None):
             raise
 
         # 한 명씩 따로 보낸다. 받는 사람끼리 서로의 주소가 보이지 않고, 회신은
-        # 각자의 상대방 스레드로 들어온다.
+        # 각자의 상대방 스레드로 들어온다. 답장은 카드가 있는 스레드가 곧 상대방
+        # 스레드이고, 새 메일은 회신이 와서 스레드가 열릴 때 묶인다.
+        thread_ts = draft["thread_ts"] if draft["references_ids"] else None
         total = len(draft["recipients"])
         sent = []
         # 버튼을 먼저 걷는다. 수백 명이면 다 보내는 데 1분 남짓 걸린다.
@@ -525,24 +470,25 @@ def register_ops_mail_handlers(app, revise=None):
                     + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
                     + f"\n{_summary(draft)}",
                 )
-                await _leave_trace(client, channel, draft, sent, user)
                 raise
             print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
-            sent.append((recipient, message_id, ses_id))
+            # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
+            # 나간 메일의 기록이 빠진다.
+            await asyncio.to_thread(
+                _record, draft, recipient, channel, thread_ts, message_id, ses_id, user
+            )
+            sent.append(recipient)
             if len(sent) % PROGRESS_EVERY == 0 and len(sent) < total:
                 await _replace(
                     client, channel, ts, f"📤 보내는 중… {len(sent)}/{total}"
                 )
 
-        # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
-        # 메일을 카드가 실패로 그린다.
         await _replace(
             client,
             channel,
             ts,
             f"📤 <@{user}> 님이 {len(sent)}명에게 보냈습니다\n{_summary(draft)}",
         )
-        await _leave_trace(client, channel, draft, sent, user)
 
     @app.action(REVISE)
     async def open_revise(ack, body, client):

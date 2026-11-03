@@ -9,7 +9,8 @@ SES 는 임의 URL 로 요청을 보내지 못해서 SNS 의 HTTPS 구독으로 
 구독이 살아납니다.
 
 슬랙 스레드는 상대방 주소 하나에 하나입니다. 처음 오가는 상대면 채널에
-상대 주소로 스레드를 열고, 메일은 늘 그 스레드의 댓글로 답니다.
+상대 주소로 스레드를 열고, 메일은 늘 그 스레드의 댓글로 답니다. 우리가 새 메일로
+먼저 보낸 상대라면 그 메일들을 스레드 첫 메시지에 보여주고 스레드에 묶습니다.
 
 응답을 먼저 돌려주고 처리는 그 뒤에 합니다. 응답이 늦으면 SNS 가 실패로 보고
 같은 알림을 다시 보냅니다.
@@ -25,7 +26,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from slack_sdk.web.async_client import AsyncWebClient
 
 from api.s3 import get_object
-from app.ops_mail import escape, mail_thread, run_store
+from app.ops_mail import escape, run_store
 from service.ops_mail import mime, sns, store
 
 router = APIRouter()
@@ -64,6 +65,51 @@ def format_inbound(mail: mime.ParsedMail, receipt: dict[str, Any], s3_uri: str) 
         escape(body),
     ]
     return "\n".join(lines)
+
+
+def format_thread_root(counterpart: str, sent: list[dict[str, Any]]) -> str:
+    """상대방 스레드의 첫 메시지를 만듭니다.
+
+    Args:
+        counterpart: 상대방 주소
+        sent: 스레드가 열리기 전에 이 상대에게 보낸 메일
+
+    Returns:
+        str: 슬랙 메시지 텍스트
+    """
+    lines = [f"✉️ {escape(counterpart)} 와 주고받은 메일"]
+    lines += [
+        f"📤 먼저 보낸 메일: {escape(mail['subject'])}"
+        f" ({mail['created_at']:%m/%d %H:%M}, <@{mail['sent_by']}> 님)"
+        for mail in sent
+    ]
+    return "\n".join(lines)
+
+
+async def mail_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
+    """상대방 스레드를 찾고, 처음이면 엽니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 메일 채널 ID
+        counterpart: 상대방 주소 (소문자)
+
+    Returns:
+        str: 스레드 ts
+    """
+    thread_ts = await asyncio.to_thread(
+        run_store, store.find_thread, channel, counterpart
+    )
+    if thread_ts:
+        return thread_ts
+    sent = await asyncio.to_thread(run_store, store.unthreaded, channel, counterpart)
+    response = await client.chat_postMessage(
+        channel=channel, text=format_thread_root(counterpart, sent)
+    )
+    await asyncio.to_thread(
+        run_store, store.attach_thread, channel, counterpart, response["ts"]
+    )
+    return response["ts"]
 
 
 async def process_notification(notification: dict[str, Any]) -> None:
