@@ -225,10 +225,9 @@ async def _build_tools(
 
     # 회사 이름으로 나가는 메일이라 메일 채널에서만 준다. 이 함수는 모든 답변이
     # 지나는 길이라 환경 변수가 빠져도 터지지 않게 get 으로 읽는다.
+    mail_tools = []
     if channel == os.environ.get("OPS_MAIL_SLACK_CHANNEL_ID"):
-        create_tools = create_tools + [
-            get_draft_ops_mail_tool(client, channel, thread_ts)
-        ]
+        mail_tools.append(get_draft_ops_mail_tool(client, channel, thread_ts))
 
     return (
         [search_tool, get_web_page_from_url]
@@ -237,6 +236,7 @@ async def _build_tools(
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
         + [draft_sms]
+        + mail_tools
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
         # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
         + [

@@ -3,8 +3,10 @@
 
     ① 메일 채널의 상대방 스레드에서 "이렇게 답장해줘" 라고 말한다
        (스레드 밖에서는 받는 사람과 제목을 함께 말하면 새 메일)
+       파일을 붙이려면 그 스레드에 파일을 올리고 붙여 달라고 한다
     ② 에이전트가 draft_ops_mail 로 초안 카드를 올린다 (아직 안 나간다)
-    ③ [보내기] 를 누르면 SES 로 나간다. 고칠 데가 있으면 [수정]
+    ③ [보내기] 를 누르면 첨부를 슬랙에서 내려받아 SES 로 보낸다.
+       고칠 데가 있으면 [수정]
 
 문자와 같은 이유로 도구를 부르는 것만으로는 나가지 않습니다.
 
@@ -17,6 +19,7 @@ import hashlib
 import json
 import os
 
+import aiohttp
 from cachetools import TTLCache
 from langchain_core.tools import StructuredTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
@@ -35,19 +38,78 @@ FEEDBACK_INPUT = "ops_mail_feedback_input"
 # 슬랙 버튼 value 는 2000자 제한이라 본문을 못 싣는다. 초안은 여기 둔다.
 _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 
+# 첨부 크기 합의 상한. SES v2 는 한 통에 40MB 까지인데 base64 인코딩 뒤
+# 크기로 잰다. 인코딩하면 4/3 배가 되니 원본으로는 30MB 남짓이고, 본문과
+# 헤더 자리를 남겨 28MB 로 둔다.
+MAX_ATTACHMENT_BYTES = 28 * 1024 * 1024
+
 
 def _escape(text: str) -> str:
     """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _megabytes(size: int) -> str:
+    return f"{size / 1024 / 1024:.1f}MB"
+
+
 def _summary(draft: dict) -> str:
-    """받는 사람·제목·본문을 슬랙 텍스트로 만듭니다."""
-    return (
-        f"받는 사람: {_escape(draft['to'])}\n"
-        f"제목: {_escape(draft['subject'])}\n"
-        f"```{draft['body'].replace('`', chr(39))}```"
-    )
+    """받는 사람·제목·첨부·본문을 슬랙 텍스트로 만듭니다."""
+    lines = [
+        f"받는 사람: {_escape(draft['to'])}",
+        f"제목: {_escape(draft['subject'])}",
+    ]
+    if draft["attachments"]:
+        names = ", ".join(
+            f"{_escape(file['name'])} ({_megabytes(file['size'])})"
+            for file in draft["attachments"]
+        )
+        lines.append(f"첨부: {names}")
+    lines.append(f"```{draft['body'].replace('`', chr(39))}```")
+    return "\n".join(lines)
+
+
+def _pick_files(messages: list[dict], names: list[str]) -> list[dict] | str:
+    """스레드에 올라온 파일 중 붙일 것을 이름으로 고릅니다.
+
+    에이전트가 파일을 지어내지 못하게 스레드에 실제로 있는 파일만 받습니다.
+    같은 이름이 여러 번 올라왔으면 나중에 올린 것을 씁니다.
+
+    Args:
+        messages: conversations_replies 의 메시지들
+        names: 붙일 파일 이름
+
+    Returns:
+        list[dict] | str: 고른 파일. 없는 이름이 있거나 너무 크면 고칠 것을 적은 문자열
+    """
+    files = {}
+    for message in messages:
+        for file in message.get("files", []):
+            files[file["name"]] = file
+
+    missing = [name for name in names if name not in files]
+    if missing:
+        return (
+            f"스레드에 {', '.join(missing)} 파일이 없습니다. "
+            f"스레드에 올라온 파일: {', '.join(files) or '없음'}"
+        )
+
+    picked = [files[name] for name in dict.fromkeys(names)]
+    total = sum(file["size"] for file in picked)
+    if total > MAX_ATTACHMENT_BYTES:
+        return (
+            f"첨부가 합쳐서 {_megabytes(total)} 라 보낼 수 없습니다. "
+            f"{_megabytes(MAX_ATTACHMENT_BYTES)} 까지입니다."
+        )
+    return [
+        {
+            "name": file["name"],
+            "mimetype": file["mimetype"],
+            "size": file["size"],
+            "url": file["url_private_download"],
+        }
+        for file in picked
+    ]
 
 
 def _blocks(draft_id: str, draft: dict) -> list[dict]:
@@ -132,7 +194,12 @@ def get_draft_ops_mail_tool(
     """
 
     @tool
-    async def draft_ops_mail(body: str, to: str = "", subject: str = "") -> str:
+    async def draft_ops_mail(
+        body: str,
+        to: str = "",
+        subject: str = "",
+        attachments: list[str] | None = None,
+    ) -> str:
         """
         ops@team-mono.com 이름으로 보낼 메일 초안을 스레드에 올립니다.
         이 도구는 메일을 보내지 않습니다. 사람이 카드의 [보내기] 를 눌러야 나갑니다.
@@ -145,12 +212,24 @@ def get_draft_ops_mail_tool(
 
         body 는 메일 본문 텍스트입니다. 인사와 서명까지 완성된 문장으로 씁니다.
 
+        attachments 는 붙일 파일 이름입니다. 이 스레드에 올라온 파일만 붙일 수
+        있습니다. 이름이 틀리면 스레드에 있는 파일 목록을 돌려주니, 그중에서
+        골라 다시 부릅니다. 첨부가 없으면 비웁니다.
+
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
         draft = await asyncio.to_thread(_prepare, channel, thread_ts, body, to, subject)
         if isinstance(draft, str):
             return draft
+
+        files = []
+        if attachments:
+            replies = await client.conversations_replies(channel=channel, ts=thread_ts)
+            files = _pick_files(replies["messages"], attachments)
+            if isinstance(files, str):
+                return files
+        draft = {**draft, "attachments": files}
 
         draft_id = hashlib.sha256(
             json.dumps([channel, thread_ts, draft], ensure_ascii=False).encode()
@@ -176,7 +255,20 @@ def get_draft_ops_mail_tool(
     return draft_ops_mail
 
 
-def _send(draft: dict) -> tuple[str, str]:
+async def _download(token: str, file: dict) -> mime.Attachment:
+    """슬랙에 올라온 파일을 내려받습니다. 봇 토큰에 files:read 가 있어야 합니다."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            file["url"], headers={"Authorization": f"Bearer {token}"}
+        ) as response:
+            response.raise_for_status()
+            data = await response.read()
+    return mime.Attachment(
+        filename=file["name"], content_type=file["mimetype"], data=data
+    )
+
+
+def _send(draft: dict, attachments: list[mime.Attachment]) -> tuple[str, str]:
     """SES 로 보냅니다.
 
     Returns:
@@ -188,6 +280,7 @@ def _send(draft: dict) -> tuple[str, str]:
         subject=draft["subject"],
         body=draft["body"],
         references_ids=draft["references_ids"],
+        attachments=attachments,
     )
     response = send_raw_email(raw)
     return message_id, response["MessageId"]
@@ -281,8 +374,22 @@ def register_ops_mail_handlers(app, revise=None):
         ts = body["container"]["message_ts"]
         user = body["user"]["id"]
 
+        # 내려받기는 보내기 전이라 실패해도 메일은 나가지 않았다.
         try:
-            message_id, ses_id = await asyncio.to_thread(_send, draft)
+            attachments = [
+                await _download(client.token, file) for file in draft["attachments"]
+            ]
+        except Exception as error:
+            await _replace(
+                client,
+                channel,
+                ts,
+                f"첨부파일을 받지 못해 보내지 않았습니다 ({type(error).__name__}) — 초안을 다시 만들어주세요",
+            )
+            raise
+
+        try:
+            message_id, ses_id = await asyncio.to_thread(_send, draft, attachments)
         except Exception as error:
             # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
             # 다시 보내고, 같은 사람이 두 번 받는다.

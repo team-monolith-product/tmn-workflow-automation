@@ -1,8 +1,8 @@
 """
 AWS SES API 래퍼 함수들
 
-IAM 정책이 ses:SendRawEmail 만 허용하므로 SES v1 API 를 씁니다.
-SES v2 의 send_email 은 ses:SendEmail 권한을 요구합니다.
+SES v2 API 를 씁니다. v1 send_raw_email 은 한 통에 10MB 까지라 첨부가 든
+메일을 보내기에 작고, v2 는 40MB 까지 받습니다. IAM 권한은 ses:SendEmail 입니다.
 """
 
 import os
@@ -21,6 +21,6 @@ def send_raw_email(raw: bytes) -> dict:
         dict: SES 응답 (MessageId 포함)
     """
     client = boto3.client(
-        "ses", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
+        "sesv2", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
     )
-    return client.send_raw_email(RawMessage={"Data": raw})
+    return client.send_email(Content={"Raw": {"Data": raw}})

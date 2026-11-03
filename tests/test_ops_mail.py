@@ -1,5 +1,6 @@
 """ops@ 메일 수신·발송 테스트"""
 
+import asyncio
 import base64
 import datetime
 import json
@@ -73,6 +74,7 @@ def test_답장_원문은_마지막_메일에_건다():
         subject=mime.reply_subject("Re: 견적 문의"),
         body="안내드립니다",
         references_ids=["<m1@abc.kr>", "<m2@abc.kr>"],
+        attachments=[],
     )
     sent = mime.parse(raw)
 
@@ -81,6 +83,63 @@ def test_답장_원문은_마지막_메일에_건다():
     assert sent.references_ids == ["<m1@abc.kr>", "<m2@abc.kr>"]
     assert sent.subject == "Re: 견적 문의"
     assert message_id.endswith("@team-mono.com>")
+
+
+def test_보낼_메일에_파일을_붙인다():
+    # When : 첨부 하나를 넣어 원문을 만들면
+    _, raw = mime.build(
+        from_header="팀모노리스 <ops@team-mono.com>",
+        to_address="office@abc.kr",
+        subject="자료",
+        body="첨부 확인 부탁드립니다",
+        references_ids=[],
+        attachments=[mime.Attachment("계획안.pdf", "application/pdf", b"%PDF")],
+    )
+    sent = mime.parse(raw)
+
+    # Then : 받는 쪽에서 읽으면 본문과 같은 파일이 나온다
+    assert sent.body_text == "첨부 확인 부탁드립니다"
+    assert sent.attachments == [
+        mime.Attachment("계획안.pdf", "application/pdf", b"%PDF")
+    ]
+
+
+def _slack_file(name: str, size: int = 100) -> dict:
+    return {
+        "name": name,
+        "mimetype": "application/pdf",
+        "size": size,
+        "url_private_download": f"https://files.slack.com/{name}",
+    }
+
+
+def test_첨부는_스레드에_올라온_파일에서만_고른다():
+    messages = [
+        {"text": "자료", "files": [_slack_file("계획안.pdf", 1)]},
+        {"text": "고친 것", "files": [_slack_file("계획안.pdf", 2)]},
+        {"text": "답장해줘"},
+    ]
+
+    # When : 있는 파일과 없는 파일을 고르면
+    picked = ops_mail._pick_files(messages, ["계획안.pdf"])
+    missing = ops_mail._pick_files(messages, ["견적서.pdf"])
+
+    # Then : 있는 것은 나중에 올린 것을 쓰고, 없으면 스레드의 파일 목록을 알려준다
+    assert [(f["name"], f["size"]) for f in picked] == [("계획안.pdf", 2)]
+    assert "견적서.pdf 파일이 없습니다" in missing
+    assert "계획안.pdf" in missing
+
+
+def test_첨부가_너무_크면_초안을_막는다():
+    messages = [
+        {"files": [_slack_file("큰파일.zip", ops_mail.MAX_ATTACHMENT_BYTES + 1)]}
+    ]
+
+    # When : 상한을 넘는 파일을 고르면
+    result = ops_mail._pick_files(messages, ["큰파일.zip"])
+
+    # Then : 보낼 수 없다고 한다
+    assert "보낼 수 없습니다" in result
 
 
 def _signed_message(key, extra: dict | None = None) -> dict:
@@ -297,3 +356,77 @@ def test_스레드_밖에서_새_메일은_받는_사람과_제목이_있어야_
         "body": "안녕하세요",
         "references_ids": [],
     }
+
+
+class _FakeApp:
+    def __init__(self):
+        self.handlers = {}
+
+    def action(self, action_id):
+        def register(handler):
+            self.handlers[action_id] = handler
+            return handler
+
+        return register
+
+    view = action
+
+
+class _FakeAsyncSlack:
+    token = "xoxb-test"
+
+    def __init__(self):
+        self.updates = []
+
+    async def chat_update(self, **kwargs):
+        self.updates.append(kwargs)
+
+
+def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypatch):
+    monkeypatch.setenv("OPS_MAIL_FROM", "팀모노리스 <ops@team-mono.com>")
+    sent = []
+    recorded = []
+
+    async def download(token, file):
+        return mime.Attachment(file["name"], file["mimetype"], b"%PDF")
+
+    monkeypatch.setattr(ops_mail, "_download", download)
+    monkeypatch.setattr(
+        ops_mail, "send_raw_email", lambda raw: sent.append(raw) or {"MessageId": "s"}
+    )
+    monkeypatch.setattr(ops_mail, "_record", lambda *args: recorded.append(args))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d1"] = {
+        "to": "office@abc.kr",
+        "subject": "Re: 견적 문의",
+        "body": "자료 보내드립니다",
+        "references_ids": ["<m2@abc.kr>"],
+        "attachments": [
+            {"name": "계획안.pdf", "mimetype": "application/pdf", "size": 4, "url": "u"}
+        ],
+        "thread_ts": "ts-office",
+    }
+    slack = _FakeAsyncSlack()
+
+    async def ack():
+        pass
+
+    # When : 카드의 [보내기] 를 누르면
+    asyncio.run(
+        app.handlers[ops_mail.APPROVE](
+            ack=ack,
+            body={
+                "actions": [{"value": "d1"}],
+                "container": {"channel_id": CHANNEL, "message_ts": "ts-card"},
+                "user": {"id": "U1"},
+            },
+            client=slack,
+        )
+    )
+
+    # Then : 첨부가 든 메일이 한 통 나가고, 카드에 첨부가 보이고, 기록이 남는다
+    assert len(sent) == 1
+    assert [a.filename for a in mime.parse(sent[0]).attachments] == ["계획안.pdf"]
+    assert "첨부: 계획안.pdf" in slack.updates[0]["text"]
+    assert len(recorded) == 1

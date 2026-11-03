@@ -120,6 +120,7 @@ def build(
     subject: str,
     body: str,
     references_ids: list[str],
+    attachments: list[Attachment],
 ) -> tuple[str, bytes]:
     """보낼 메일 원문을 만듭니다.
 
@@ -130,6 +131,7 @@ def build(
         body: 본문 텍스트
         references_ids: 이어지는 메일들의 Message-ID. 마지막 것이 답장 대상입니다.
             새 메일이면 비웁니다.
+        attachments: 붙일 파일. 없으면 비웁니다.
 
     Returns:
         tuple[str, bytes]: (Message-ID, MIME 원문)
@@ -145,4 +147,12 @@ def build(
         message["In-Reply-To"] = references_ids[-1]
         message["References"] = " ".join(references_ids)
     message.set_content(body)
+    for attachment in attachments:
+        maintype, subtype = attachment.content_type.split("/", 1)
+        message.add_attachment(
+            attachment.data,
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment.filename,
+        )
     return message_id, message.as_bytes()
