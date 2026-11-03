@@ -21,7 +21,7 @@ import pandas as pd
 
 from api import athena
 from app.sms import POSTED_MARK
-from service.sheets.read import read_sheet
+from service.sheets.read import list_tabs, read_sheet
 
 # 코드가 돌려주는 글자 수 상한. 실행 결과는 컨텍스트로 들어간다.
 STDOUT_LIMIT = 4_000
@@ -210,13 +210,20 @@ def get_execute_python_tool(
         - `execute_athena_query(query: str, database: str)`: Athena SQL 을 실행합니다.
         - `read_sheet(sheet, columns=None, tab=None)`: 구글 시트를 읽어 행 목록(dict)을
           반환합니다. sheet 에는 시트 링크나 **시트 이름 일부**를 넣습니다.
-          tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 첫 번째 탭입니다.
+          tab 에는 탭 이름이나 gid 를 넣습니다. 생략하면 링크의 gid 탭, 링크에
+          gid 가 없으면 첫 번째 탭 **하나만** 읽습니다.
           **여기서는 전량을 읽고 자르지 않습니다** — 수백 행 통계는 이 도구로 내십시오.
           이름으로 여러 시트가 걸리면 후보를 담은 ValueError 가 납니다. 그때는
           임의로 고르지 말고 사람에게 어느 것인지 물어보십시오. 열 이름이
           모호할 때도 같습니다 — 예외 메시지가 대안을 알려주니 그대로 따르십시오.
           `APIError [429]` 는 읽기 쿼터(분당 60회)가 찬 것입니다. 코드를 고쳐도
           소용없으니 사람에게 잠시 뒤 다시 부르라고 알리십시오.
+
+        - `list_tabs(sheet)`: 시트의 탭 목록을 반환합니다. 탭마다 이름(tab)·gid·
+          머리행(header)이 들어 있습니다.
+          **시트를 처음 받으면 먼저 list_tabs 로 탭을 전부 보십시오.** 링크는 아무
+          탭에서나 복사된 것이라, 찾는 정보가 다른 탭에 있는 일이 흔합니다.
+          머리행을 보고 관련 있는 탭을 모두 읽은 뒤에야 "없다" 고 답하십시오.
 
         **행 수 주의**: 시트의 데이터 행을 **그대로** 돌려줍니다. 통째로 빈 행만
         버리므로, 아래쪽에 한 칸씩 끌어내려진 행이 섞여 있으면 그것도 들어옵니다.
@@ -253,6 +260,7 @@ def get_execute_python_tool(
         injected = {
             "execute_athena_query": _to_sync(athena.execute_and_wait, loop),
             "read_sheet": read_sheet,
+            "list_tabs": list_tabs,
         }
         if draft_sms:
             call = _to_sync(draft_sms, loop)

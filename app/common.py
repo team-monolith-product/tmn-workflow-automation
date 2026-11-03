@@ -263,6 +263,8 @@ async def get_web_page_from_url(
     """
     주어진 URL에서 웹 페이지를 로드하여 문서로 반환합니다.
     www.notion.so에 대한 링크는 이 도구를 사용하지 않고 get_notion_page 도구를 사용합니다.
+    docs.google.com/spreadsheets 에 대한 링크는 이 도구를 사용하지 않고
+    execute_python 의 list_tabs·read_sheet 로 읽습니다. 이 도구로는 시트의 일부만 보입니다.
     """
     return await asyncio.to_thread(_load_web_page, url)
 

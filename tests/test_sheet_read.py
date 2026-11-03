@@ -353,3 +353,40 @@ def test_폼_응답을_고쳐_한_행이_겹쳐도_막지_않는다():
 
     assert header == ["성함"]
     assert [row[0] for row in rows] == ["옛응답", "이진선", "김지수"]
+
+
+def test_탭_목록은_탭마다_이름과_머리행을_준다(monkeypatch):
+    # 링크의 탭에 없는 정보를 "없다" 고 답하지 않도록, 다른 탭도 보여야 한다.
+    monkeypatch.setattr(
+        read,
+        "get_worksheet_headers",
+        lambda spreadsheet_id: [
+            {
+                "id": 239647898,
+                "title": "학교별 운영 현황",
+                "header": ["순번", "학교명"],
+            },
+            {"id": 5, "title": "[학교DB]_운영확인", "header": ["학교명", "담당교사"]},
+        ],
+    )
+
+    tabs = read.list_tabs(
+        "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLdAbCdEfGhIjKlMnOpQrStUvWx/edit#gid=239647898"
+    )
+
+    assert tabs == [
+        {"tab": "학교별 운영 현황", "gid": 239647898, "header": ["순번", "학교명"]},
+        {"tab": "[학교DB]_운영확인", "gid": 5, "header": ["학교명", "담당교사"]},
+    ]
+
+
+def test_탭_목록도_시트가_모호하면_고르지_않는다(monkeypatch):
+    monkeypatch.setattr(
+        read.locate,
+        "locate",
+        lambda target: locate.Found(None, [{"id": "a", "name": "명단 A"}]),
+    )
+    monkeypatch.setattr(read.locate, "render_candidates", lambda candidates: "후보")
+
+    with pytest.raises(ValueError, match="후보"):
+        read.list_tabs("명단")

@@ -11,7 +11,11 @@
 
 from typing import Any
 
-from api.google_sheets import OPERATING_ACCOUNT, get_worksheet_values
+from api.google_sheets import (
+    OPERATING_ACCOUNT,
+    get_worksheet_headers,
+    get_worksheet_values,
+)
 from service.sheets import locate
 
 
@@ -311,3 +315,35 @@ def read_sheet(
     header, rows = pick(values, want)
     # pick 이 돌려주는 머리행에는 중복이 없습니다. 그래야 여기서 열이 안 지워집니다.
     return [dict(zip(header, row)) for row in rows]
+
+
+def list_tabs(sheet: str) -> list[dict]:
+    """시트의 탭 목록과 탭마다 머리행을 돌려줍니다.
+
+    에이전트가 쓰는 코드에 이 이름으로 주입됩니다.
+
+    **read_sheet 는 탭 하나만 읽습니다.** 사람은 아무 탭에서나 링크를 복사해
+    주므로, 링크의 탭에 없는 정보를 "없습니다" 로 답하는 일이 생깁니다
+    (11/3 실측: 담당교사 연락처가 [학교DB]_운영확인 탭에 있었는데 링크는 다른
+    탭이었다). 탭 목록을 먼저 보고 어느 탭을 읽을지 고르게 합니다.
+
+    숨긴 탭은 빠집니다(get_worksheet_headers). 사람이 감춘 탭을 찾아 주는 것은
+    이 함수의 일이 아닙니다 -- 그 탭이 필요하면 사람이 이름이나 gid 를 줍니다.
+
+    Args:
+        sheet: 시트 링크·ID 또는 이름 일부
+
+    Returns:
+        list[dict]: tab(이름)·gid·header(1행)
+
+    Raises:
+        ValueError: 시트를 하나로 좁히지 못했을 때
+    """
+    found = locate.locate(sheet)
+    if found.sheet is None:
+        raise ValueError(locate.render_candidates(found.candidates))
+
+    return [
+        {"tab": tab["title"], "gid": tab["id"], "header": tab["header"]}
+        for tab in get_worksheet_headers(found.sheet.spreadsheet_id)
+    ]
