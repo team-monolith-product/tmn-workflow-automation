@@ -183,6 +183,18 @@ def _blocks(draft_id: str, draft: dict) -> list[dict]:
     ]
 
 
+def _reply_references(latest: dict) -> list[str]:
+    """답장의 References 를 만듭니다. 마지막 것이 In-Reply-To 가 됩니다.
+
+    SES 는 보낼 때 Message-ID 를 자기 값으로 바꿔 씁니다. 그래서 우리가 보낸 메일의
+    message_id 는 상대가 본 적 없는 값이라 넣지 않습니다. 우리가 보낸 메일의
+    references_ids 에는 그때까지 상대 메일의 ID 가 이미 들어 있습니다.
+    """
+    if latest["direction"] == "out":
+        return latest["references_ids"]
+    return [*latest["references_ids"], latest["message_id"]]
+
+
 def _prepare(
     channel: str, thread_ts: str, body: str, to: list[str], subject: str
 ) -> dict | str:
@@ -213,7 +225,7 @@ def _prepare(
             "recipients": [latest["counterpart"]],
             "subject": mime.reply_subject(latest["subject"]),
             "body": body,
-            "references_ids": [*latest["references_ids"], latest["message_id"]],
+            "references_ids": _reply_references(latest),
         }
 
     if not recipients or not subject:
@@ -455,31 +467,50 @@ def register_ops_mail_handlers(app, revise=None):
         # 버튼을 먼저 걷는다. 수백 명이면 다 보내는 데 1분 남짓 걸린다.
         await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
         for recipient in draft["recipients"]:
+            # 무엇이 실패하든 나머지는 보내지 않는다. 같은 원인으로 줄줄이 실패하거나
+            # 같은 상태를 늘린다. 카드에는 어디서 멈췄는지 남긴다.
             try:
                 message_id, ses_id = await asyncio.to_thread(
                     _send, draft, recipient, attachments
                 )
             except Exception as error:
                 # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
-                # 다시 보내고, 같은 사람이 두 번 받는다. 나머지는 보내지 않는다 --
-                # 같은 원인으로 줄줄이 실패하거나 같은 상태를 늘린다.
-                left = draft["recipients"][len(sent) + 1 :]
-                await _replace(
+                # 다시 보내고, 같은 사람이 두 번 받는다.
+                await _stop(
                     client,
                     channel,
                     ts,
-                    f"⚠️ {len(sent)}명에게 보냈고, {recipient} 는 발송 여부를 모릅니다"
-                    f" ({type(error).__name__}) — 받는 쪽에 확인하세요."
-                    + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
-                    + f"\n{_summary(draft)}",
+                    draft,
+                    len(sent),
+                    f"{recipient} 는 발송 여부를 모릅니다 ({type(error).__name__})"
+                    " — 받는 쪽에 확인하세요.",
                 )
                 raise
             print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
             # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
             # 나간 메일의 기록이 빠진다.
-            await asyncio.to_thread(
-                _record, draft, recipient, channel, thread_ts, message_id, ses_id, user
-            )
+            try:
+                await asyncio.to_thread(
+                    _record,
+                    draft,
+                    recipient,
+                    channel,
+                    thread_ts,
+                    message_id,
+                    ses_id,
+                    user,
+                )
+            except Exception as error:
+                await _stop(
+                    client,
+                    channel,
+                    ts,
+                    draft,
+                    len(sent),
+                    f"{recipient} 에게는 보냈지만 기록하지 못했습니다"
+                    f" ({type(error).__name__}).",
+                )
+                raise
             sent.append(recipient)
             if len(sent) % PROGRESS_EVERY == 0 and len(sent) < total:
                 await _replace(
@@ -551,6 +582,32 @@ def register_ops_mail_handlers(app, revise=None):
             body["container"]["message_ts"],
             f"<@{body['user']['id']}> 님이 취소했습니다.",
         )
+
+
+async def _stop(
+    client, channel: str, ts: str, draft: dict, sent: int, problem: str
+) -> None:
+    """발송을 멈추고 카드에 어디까지 나갔는지 남깁니다.
+
+    문제가 생긴 사람은 recipients[sent] 이고, 그다음 사람부터 보내지 않았습니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 카드가 있는 채널
+        ts: 카드 ts
+        draft: 초안
+        sent: 문제가 생긴 사람 앞까지 나간 통 수
+        problem: 문제가 생긴 사람에게 무슨 일이 있었는지
+    """
+    left = draft["recipients"][sent + 1 :]
+    await _replace(
+        client,
+        channel,
+        ts,
+        f"⚠️ {sent}명에게 보냈습니다. {problem}"
+        + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
+        + f"\n{_summary(draft)}",
+    )
 
 
 async def _replace(client, channel: str, ts: str, text: str) -> None:

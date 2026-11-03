@@ -22,9 +22,11 @@ TOPIC = "arn:aws:sns:ap-northeast-2:000000000000:tmn-topic-ops-mail"
 CHANNEL = "C_OPS"
 
 
-def _raw_mail() -> bytes:
+def _raw_mail(headers: dict[str, str] | None = None) -> bytes:
     """본문(텍스트+HTML), 첨부 하나, 서명 로고(본문 삽입 이미지) 하나가 든 메일."""
     message = EmailMessage()
+    for name, value in (headers or {}).items():
+        message[name] = value
     message["Message-ID"] = "<m2@abc.kr>"
     message["From"] = "김선생 <Kim@ABC.kr>"
     message["Reply-To"] = "office@abc.kr"
@@ -223,8 +225,13 @@ def test_다른_토픽이나_서명이_틀린_요청은_막는다(monkeypatch):
 
 def test_수신_알림은_응답_뒤에_처리한다(monkeypatch):
     handled = []
-    monkeypatch.setattr(ops_mail_sns, "process_notification", handled.append)
-    notification = {"notificationType": "Received", "mail": {}, "receipt": {}}
+    monkeypatch.setattr(
+        ops_mail_sns, "process_object", lambda bucket, key: handled.append(key)
+    )
+    notification = {
+        "notificationType": "Received",
+        "receipt": {"action": {"bucketName": "bucket", "objectKey": "ops/abc"}},
+    }
 
     # When : SES 수신 알림이 오면
     response = _client(monkeypatch).post(
@@ -238,9 +245,9 @@ def test_수신_알림은_응답_뒤에_처리한다(monkeypatch):
         ),
     )
 
-    # Then : 받았다고 답하고 알림을 처리한다
+    # Then : 받았다고 답하고 그 원본을 처리한다
     assert response.json() == {"status": "accepted"}
-    assert handled == [notification]
+    assert handled == ["ops/abc"]
 
 
 class _FakeSlack:
@@ -296,17 +303,6 @@ def _fake_db(
     return inserted
 
 
-def _notification(virus: str = "PASS") -> dict:
-    return {
-        "mail": {"messageId": "ses-1"},
-        "receipt": {
-            "action": {"bucketName": "bucket", "objectKey": "ops/abc"},
-            "spamVerdict": {"status": "PASS"},
-            "virusVerdict": {"status": virus},
-        },
-    }
-
-
 def test_같은_상대의_메일은_그_상대_스레드에_첨부와_함께_단다(monkeypatch):
     monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
@@ -315,7 +311,7 @@ def test_같은_상대의_메일은_그_상대_스레드에_첨부와_함께_단
     inserted = _fake_db(monkeypatch, ops_mail_sns, thread="ts-office")
 
     # When : 이미 스레드가 있는 상대에게서 메일이 오면
-    asyncio.run(ops_mail_sns.process_notification(_notification()))
+    asyncio.run(ops_mail_sns.process_object("bucket", "ops/abc"))
 
     # Then : 새 스레드를 열지 않고 그 스레드에 메일과 첨부를 달고, 같은 스레드로 남긴다
     slack = _FakeSlack.last
@@ -331,7 +327,11 @@ def test_처음_오는_상대는_스레드를_열고_바이러스_의심이면_�
     monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(ops_mail_sns, "AsyncWebClient", _FakeSlack)
-    monkeypatch.setattr(ops_mail_sns, "get_object", lambda bucket, key: _raw_mail())
+    monkeypatch.setattr(
+        ops_mail_sns,
+        "get_object",
+        lambda bucket, key: _raw_mail({"X-SES-Virus-Verdict": "FAIL"}),
+    )
     sent_before = {
         "subject": "2학기 안내",
         "sent_by": "U1",
@@ -342,7 +342,7 @@ def test_처음_오는_상대는_스레드를_열고_바이러스_의심이면_�
     )
 
     # When : 새 메일로 먼저 보냈던 상대가 처음 회신했는데 바이러스 의심이면
-    asyncio.run(ops_mail_sns.process_notification(_notification(virus="FAIL")))
+    asyncio.run(ops_mail_sns.process_object("bucket", "ops/abc"))
 
     # Then : 먼저 보낸 메일을 보여주며 스레드를 열어 그 메일들을 묶고,
     #        회신을 달되 첨부는 올리지 않는다
@@ -358,6 +358,7 @@ def test_처음_오는_상대는_스레드를_열고_바이러스_의심이면_�
 
 def test_상대_스레드_안에서는_그_상대에게_답장을_만든다(monkeypatch):
     latest = {
+        "direction": "in",
         "counterpart": "office@abc.kr",
         "subject": "견적 문의",
         "message_id": "<m2@abc.kr>",
@@ -531,3 +532,102 @@ def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파
     assert "*12명*" in card and "외 2명" in card
     assert slack.uploads[0]["content"].splitlines() == recipients
     assert "12명" in answer
+
+
+def _inbound(monkeypatch, headers: dict[str, str], *, thread: str | None):
+    monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(ops_mail_sns, "AsyncWebClient", _FakeSlack)
+    monkeypatch.setattr(
+        ops_mail_sns, "get_object", lambda bucket, key: _raw_mail(headers)
+    )
+    inserted = _fake_db(monkeypatch, ops_mail_sns, thread=thread)
+    asyncio.run(ops_mail_sns.process_object("bucket", "ops/abc"))
+    return _FakeSlack.last, inserted
+
+
+def test_자동응답은_스레드가_없으면_슬랙에_올리지_않고_있으면_그_스레드에_단다(
+    monkeypatch,
+):
+    # When : 부재중 자동응답이 스레드 없는 상대와 스레드 있는 상대에게서 오면
+    new_slack, new_inserted = _inbound(
+        monkeypatch, {"Auto-Submitted": "auto-replied"}, thread=None
+    )
+    old_slack, _ = _inbound(monkeypatch, {"Precedence": "auto_reply"}, thread="ts-x")
+
+    # Then : 스레드 없는 상대는 기록만 남기고, 있는 상대는 그 스레드에 단다
+    assert new_slack.posts == [] and new_inserted[0].thread_ts is None
+    assert [post["thread_ts"] for post in old_slack.posts] == ["ts-x"]
+
+
+def test_우리가_마지막에_보낸_스레드의_답장은_상대_메일에_건다(monkeypatch):
+    latest = {
+        "direction": "out",
+        "counterpart": "office@abc.kr",
+        "subject": "Re: 견적 문의",
+        "message_id": "<ours@team-mono.com>",
+        "references_ids": ["<m1@abc.kr>", "<m2@abc.kr>"],
+    }
+    _fake_db(monkeypatch, ops_mail, thread=None, latest=latest)
+
+    # When : 마지막 메일이 우리가 보낸 것인 스레드에서 다시 답장하면
+    draft = ops_mail._prepare(CHANNEL, "ts-office", "추가 안내", [], "")
+
+    # Then : SES 가 바꿔 쓴 우리 Message-ID 는 빼고 상대 메일까지만 잇는다
+    assert draft["references_ids"] == ["<m1@abc.kr>", "<m2@abc.kr>"]
+
+
+def test_보낸_뒤_기록이_실패하면_멈추고_카드에_남긴다(monkeypatch):
+    monkeypatch.setattr(ops_mail, "send_raw_email", lambda raw: {"MessageId": "s"})
+
+    def record(*args):
+        raise ConnectionError
+
+    monkeypatch.setattr(ops_mail, "_record", record)
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d3"] = {
+        "recipients": ["a@school.kr", "b@school.kr"],
+        "subject": "안내",
+        "body": "안녕하세요",
+        "references_ids": [],
+        "attachments": [],
+        "thread_ts": "ts-chat",
+    }
+    slack = _FakeSlack()
+
+    # When : 첫 번째에게 보낸 뒤 기록이 실패하면
+    with pytest.raises(ConnectionError):
+        _approve(app, slack, "d3")
+
+    # Then : 카드가 "보내는 중" 에 멈추지 않고, 보냈지만 기록이 없다는 것과
+    #        보내지 않은 사람을 남긴다
+    text = slack.updates[-1]["text"]
+    assert "a@school.kr 에게는 보냈지만 기록하지 못했습니다" in text
+    assert "보내지 않은 1명: b@school.kr" in text
+
+
+def test_정리_작업은_오래된_미처리_원본만_다시_처리한다(monkeypatch):
+    from scripts import reconcile_ops_mail
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    objects = [
+        {"Key": "ops/done", "LastModified": now - datetime.timedelta(hours=1)},
+        {"Key": "ops/lost", "LastModified": now - datetime.timedelta(hours=1)},
+        {"Key": "ops/new", "LastModified": now},
+    ]
+    handled = []
+
+    async def process(bucket, key):
+        handled.append(key)
+
+    monkeypatch.setenv("OPS_MAIL_S3_BUCKET", "bucket")
+    monkeypatch.setattr(reconcile_ops_mail, "list_objects", lambda b, p: objects)
+    monkeypatch.setattr(reconcile_ops_mail, "run_store", lambda fn, keys: {"ops/done"})
+    monkeypatch.setattr(reconcile_ops_mail, "process_object", process)
+
+    # When : 처리된 것, 처리 안 된 것, 방금 들어온 것이 섞여 있으면
+    reconcile_ops_mail.main()
+
+    # Then : 웹훅이 처리 중일 수 있는 방금 것은 두고, 처리 안 된 것만 다시 처리한다
+    assert handled == ["ops/lost"]

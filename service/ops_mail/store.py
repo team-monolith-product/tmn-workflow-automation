@@ -50,6 +50,8 @@ ON CONFLICT (message_id) DO NOTHING
 
 EXISTS = "SELECT 1 FROM ops_mail_message WHERE message_id = %s"
 
+PROCESSED_KEYS = "SELECT s3_key FROM ops_mail_message WHERE s3_key = ANY(%s)"
+
 # 상대방 스레드는 처음 만들어진 것을 계속 쓴다.
 FIND_THREAD = """
 SELECT thread_ts
@@ -64,6 +66,7 @@ UNTHREADED = """
 SELECT subject, sent_by, created_at
 FROM ops_mail_message
 WHERE channel_id = %s AND counterpart = %s AND thread_ts IS NULL
+  AND direction = 'out'
 ORDER BY created_at
 """
 
@@ -93,6 +96,19 @@ def exists(conn: psycopg.Connection, message_id: str) -> bool:
         bool: 기록돼 있으면 True
     """
     return bool(fetch_all(conn, EXISTS, (message_id,)))
+
+
+def processed_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
+    """S3 원본 키 중 이미 처리해서 기록된 것을 고릅니다.
+
+    Args:
+        conn: 커넥션
+        keys: S3 객체 키
+
+    Returns:
+        set[str]: 기록돼 있는 키
+    """
+    return {row["s3_key"] for row in fetch_all(conn, PROCESSED_KEYS, (keys,))}
 
 
 def find_thread(

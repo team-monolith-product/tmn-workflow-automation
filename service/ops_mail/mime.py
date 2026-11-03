@@ -12,6 +12,10 @@ from bs4 import BeautifulSoup
 
 MESSAGE_ID = re.compile(r"<[^<>\s]+>")
 
+# 사람이 쓰지 않은 메일을 알리는 헤더. 부재중 자동응답, 메일링 리스트 등.
+# RFC 3834 의 Auto-Submitted 와, 그걸 안 따르는 메일 서버들이 쓰는 관용 헤더다.
+AUTO_PRECEDENCE = {"auto_reply", "bulk", "junk", "list"}
+
 
 @dataclass(frozen=True)
 class Attachment:
@@ -35,6 +39,10 @@ class ParsedMail:
     references_ids: list[str]
     body_text: str
     attachments: list[Attachment]
+    # SES 수신 규칙이 검사 결과를 X-SES-*-Verdict 헤더로 원문에 붙인다.
+    spam: bool
+    virus: bool
+    auto_reply: bool
 
 
 def _address(header: str | None) -> str:
@@ -73,6 +81,18 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
     return attachments
 
 
+def _is_auto_reply(message: EmailMessage) -> bool:
+    """자동응답이나 대량 발송처럼 사람이 쓰지 않은 메일인지 봅니다."""
+    auto_submitted = str(message["Auto-Submitted"] or "no").strip().lower()
+    precedence = str(message["Precedence"] or "").strip().lower()
+    return (
+        auto_submitted != "no"
+        or precedence in AUTO_PRECEDENCE
+        or message["X-Autoreply"] is not None
+        or message["X-Autorespond"] is not None
+    )
+
+
 def parse(raw: bytes) -> ParsedMail:
     """메일 원문을 읽습니다.
 
@@ -88,7 +108,7 @@ def parse(raw: bytes) -> ParsedMail:
         f"{message['References'] or ''} {message['In-Reply-To'] or ''}"
     )
     return ParsedMail(
-        message_id=message["Message-ID"] or make_msgid(),
+        message_id=str(message["Message-ID"] or make_msgid()),
         from_header=str(message["From"] or ""),
         from_address=from_address,
         reply_to_address=_address(message["Reply-To"]) or from_address,
@@ -103,6 +123,9 @@ def parse(raw: bytes) -> ParsedMail:
         references_ids=list(dict.fromkeys(references)),
         body_text=_body_text(message),
         attachments=_attachments(message),
+        spam=str(message["X-SES-Spam-Verdict"] or "") == "FAIL",
+        virus=str(message["X-SES-Virus-Verdict"] or "") == "FAIL",
+        auto_reply=_is_auto_reply(message),
     )
 
 
