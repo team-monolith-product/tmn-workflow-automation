@@ -5,6 +5,7 @@
 import asyncio
 from datetime import datetime, timedelta
 import importlib
+import os
 import traceback
 
 import psycopg
@@ -14,6 +15,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
+from .ops_mail import get_draft_ops_mail_tool
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
 from .tools.athena_tools import get_execute_athena_query_tool
@@ -220,6 +222,13 @@ async def _build_tools(
     ]
 
     draft_sms = get_draft_sms_tool(client, channel, thread_ts)
+
+    # 회사 이름으로 나가는 메일이라 메일 채널에서만 준다. 이 함수는 모든 답변이
+    # 지나는 길이라 환경 변수가 빠져도 터지지 않게 get 으로 읽는다.
+    if channel == os.environ.get("OPS_MAIL_SLACK_CHANNEL_ID"):
+        create_tools = create_tools + [
+            get_draft_ops_mail_tool(client, channel, thread_ts)
+        ]
 
     return (
         [search_tool, get_web_page_from_url]

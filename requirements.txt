@@ -13,6 +13,8 @@ langgraph
 langchain-google-community
 tavily-python
 beautifulsoup4
+# SNS 메시지 서명 검증 (service/ops_mail/sns.py)
+cryptography
 lxml
 aiohttp
 browser-use

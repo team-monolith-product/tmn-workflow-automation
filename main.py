@@ -25,6 +25,7 @@ from app.knowledge_mcp import (
 )
 from app.knowledge_notion import router as knowledge_notion_router
 from app.mcp_dispatcher import MCPPathDispatcher
+from app.ops_mail_sns import router as ops_mail_sns_router
 from app.plugin_marketplace import router as plugin_marketplace_router
 from app.slack_task_mcp import (
     build_mcp as build_operations_task_mcp,
@@ -481,6 +482,7 @@ async def handle_webhook(
 
 
 app.include_router(knowledge_notion_router)
+app.include_router(ops_mail_sns_router)
 app.include_router(revenue_router)
 
 

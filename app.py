@@ -16,6 +16,7 @@ from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
 from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
+from app.ops_mail import register_ops_mail_handlers
 from app.sms import register_sms_handlers
 from service.db import get_dsn
 from scheduler import start_scheduler
@@ -62,6 +63,7 @@ register_knowledge_middleware(app)
 # [수정] 피드백은 초안을 쓴 에이전트에게 되돌린다 — 콜백을 여기서 주입하는 것은
 # 에이전트 진입점을 아는 곳이 여기뿐이고, sms 가 general 을 부르면 순환하기 때문이다.
 register_sms_handlers(app, revise=get_sms_revise(app))
+register_ops_mail_handlers(app, revise=get_sms_revise(app))
 register_contents_handlers(app_contents)
 register_data_handlers(app_data)
 register_justin_handlers(app_justin)

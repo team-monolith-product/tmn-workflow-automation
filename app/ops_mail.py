@@ -1,0 +1,382 @@
+"""
+슬랙에서 ops@team-mono.com 이름으로 메일을 보내는 흐름입니다.
+
+    ① 메일 채널의 상대방 스레드에서 "이렇게 답장해줘" 라고 말한다
+       (스레드 밖에서는 받는 사람과 제목을 함께 말하면 새 메일)
+    ② 에이전트가 draft_ops_mail 로 초안 카드를 올린다 (아직 안 나간다)
+    ③ [보내기] 를 누르면 SES 로 나간다. 고칠 데가 있으면 [수정]
+
+문자와 같은 이유로 도구를 부르는 것만으로는 나가지 않습니다.
+
+받은 메일은 app/ops_mail_sns.py 가 슬랙에 올립니다. 스레드는 상대방 주소 하나에
+하나이고, 보낸 메일도 그 스레드에 남습니다.
+"""
+
+import asyncio
+import hashlib
+import json
+import os
+
+from cachetools import TTLCache
+from langchain_core.tools import StructuredTool, tool
+from slack_sdk.web.async_client import AsyncWebClient
+
+from api.ses import send_raw_email
+from service.db import connect
+from service.ops_mail import mime, store
+
+APPROVE = "ops_mail_approve"
+CANCEL = "ops_mail_cancel"
+REVISE = "ops_mail_revise"
+REVISE_VIEW = "ops_mail_revise_view"
+FEEDBACK_BLOCK = "ops_mail_feedback"
+FEEDBACK_INPUT = "ops_mail_feedback_input"
+
+# 슬랙 버튼 value 는 2000자 제한이라 본문을 못 싣는다. 초안은 여기 둔다.
+_DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
+
+
+def _escape(text: str) -> str:
+    """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _summary(draft: dict) -> str:
+    """받는 사람·제목·본문을 슬랙 텍스트로 만듭니다."""
+    return (
+        f"받는 사람: {_escape(draft['to'])}\n"
+        f"제목: {_escape(draft['subject'])}\n"
+        f"```{draft['body'].replace('`', chr(39))}```"
+    )
+
+
+def _blocks(draft_id: str, draft: dict) -> list[dict]:
+    """승인 카드를 만듭니다."""
+    kind = "답장" if draft["references_ids"] else "새 메일"
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*메일 발송 확인* — {kind}\n{_summary(draft)}",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": APPROVE,
+                    "style": "primary",
+                    "text": {"type": "plain_text", "text": "보내기"},
+                    "value": draft_id,
+                },
+                {
+                    "type": "button",
+                    "action_id": REVISE,
+                    "text": {"type": "plain_text", "text": "수정"},
+                    "value": draft_id,
+                },
+                {
+                    "type": "button",
+                    "action_id": CANCEL,
+                    "text": {"type": "plain_text", "text": "취소"},
+                    "value": draft_id,
+                },
+            ],
+        },
+    ]
+
+
+def _prepare(
+    channel: str, thread_ts: str, body: str, to: str, subject: str
+) -> dict | str:
+    """초안을 만듭니다. 상대방 스레드 안이면 답장, 밖이면 새 메일입니다.
+
+    Returns:
+        dict | str: 초안. 보낼 수 없으면 고칠 것을 적은 문자열
+    """
+    with connect() as conn:
+        latest = store.latest_in_thread(conn, channel, thread_ts)
+
+    if latest:
+        if to and to.lower() != latest["counterpart"]:
+            return (
+                f"이 스레드는 {latest['counterpart']} 와의 메일 스레드라 받는 사람을"
+                " 바꿀 수 없습니다. 다른 사람에게는 채널에서 새 메일로 보내주세요."
+            )
+        return {
+            "to": latest["counterpart"],
+            "subject": mime.reply_subject(latest["subject"]),
+            "body": body,
+            "references_ids": [*latest["references_ids"], latest["message_id"]],
+        }
+
+    if not to or not subject:
+        return "새 메일은 받는 사람(to)과 제목(subject)이 필요합니다."
+    return {"to": to.lower(), "subject": subject, "body": body, "references_ids": []}
+
+
+def get_draft_ops_mail_tool(
+    client: AsyncWebClient, channel: str, thread_ts: str
+) -> StructuredTool:
+    """ops@ 메일 발송 초안 도구를 반환합니다. 메일 채널에서만 줍니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+
+    Returns:
+        StructuredTool: 초안 도구
+    """
+
+    @tool
+    async def draft_ops_mail(body: str, to: str = "", subject: str = "") -> str:
+        """
+        ops@team-mono.com 이름으로 보낼 메일 초안을 스레드에 올립니다.
+        이 도구는 메일을 보내지 않습니다. 사람이 카드의 [보내기] 를 눌러야 나갑니다.
+
+        상대방 메일 스레드 안에서 부르면 그 상대에게 보내는 답장이 됩니다.
+        받는 사람과 제목은 스레드에서 정해지므로 body 만 주면 됩니다.
+
+        스레드 밖에서 부르면 새 메일입니다. to(받는 사람 주소)와 subject(제목)가
+        필요합니다.
+
+        body 는 메일 본문 텍스트입니다. 인사와 서명까지 완성된 문장으로 씁니다.
+
+        Returns:
+            초안을 올렸다는 안내. 발송 결과가 아닙니다.
+        """
+        draft = await asyncio.to_thread(_prepare, channel, thread_ts, body, to, subject)
+        if isinstance(draft, str):
+            return draft
+
+        draft_id = hashlib.sha256(
+            json.dumps([channel, thread_ts, draft], ensure_ascii=False).encode()
+        ).hexdigest()[:32]
+        if draft_id in _DRAFTS:
+            return "같은 초안이 이미 이 스레드에 올라가 있습니다. 그 카드에서 [보내기] 를 눌러주세요."
+
+        # 검사와 저장 사이에 await 가 있으면 한 턴에 실린 두 호출이 둘 다
+        # 빠져나간다. 자리를 먼저 잡고, 카드가 못 올라가면 되돌린다.
+        _DRAFTS[draft_id] = {**draft, "thread_ts": thread_ts}
+        try:
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"메일 발송 확인 — {draft['to']}",
+                blocks=_blocks(draft_id, draft),
+            )
+        except BaseException:
+            _DRAFTS.pop(draft_id, None)
+            raise
+        return f"{draft['to']} 에게 보낼 초안을 올렸습니다. [보내기] 를 눌러주세요."
+
+    return draft_ops_mail
+
+
+def _send(draft: dict) -> tuple[str, str]:
+    """SES 로 보냅니다.
+
+    Returns:
+        tuple[str, str]: (우리가 만든 Message-ID, SES MessageId)
+    """
+    message_id, raw = mime.build(
+        from_header=os.environ["OPS_MAIL_FROM"],
+        to_address=draft["to"],
+        subject=draft["subject"],
+        body=draft["body"],
+        references_ids=draft["references_ids"],
+    )
+    response = send_raw_email(raw)
+    return message_id, response["MessageId"]
+
+
+def _record(
+    draft: dict, channel: str, thread_ts: str, message_id: str, ses_id: str, user: str
+) -> None:
+    """보낸 메일을 남깁니다."""
+    with connect() as conn:
+        store.insert(
+            conn,
+            store.OpsMailRow(
+                direction="out",
+                message_id=message_id,
+                ses_message_id=ses_id,
+                counterpart=draft["to"],
+                from_address=os.environ["OPS_MAIL_FROM"],
+                to_addresses=[draft["to"]],
+                subject=draft["subject"],
+                body_text=draft["body"],
+                references_ids=draft["references_ids"],
+                s3_key=None,
+                channel_id=channel,
+                thread_ts=thread_ts,
+                sent_by=user,
+            ),
+        )
+
+
+async def _mail_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
+    """상대방 스레드를 찾고, 처음 오가는 상대면 엽니다."""
+    with_thread = await asyncio.to_thread(_find_thread, channel, counterpart)
+    if with_thread:
+        return with_thread
+    response = await client.chat_postMessage(
+        channel=channel, text=f"✉️ {counterpart} 와 주고받은 메일"
+    )
+    return response["ts"]
+
+
+def _find_thread(channel: str, counterpart: str) -> str | None:
+    with connect() as conn:
+        return store.find_thread(conn, channel, counterpart)
+
+
+def _revise_view(draft_id: str, channel: str, ts: str, draft: dict) -> dict:
+    """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다."""
+    return {
+        "type": "modal",
+        "callback_id": REVISE_VIEW,
+        "private_metadata": json.dumps(
+            {"draft_id": draft_id, "channel": channel, "ts": ts}
+        ),
+        "title": {"type": "plain_text", "text": "메일 수정 요청"},
+        "submit": {"type": "plain_text", "text": "다시 쓰기"},
+        "close": {"type": "plain_text", "text": "닫기"},
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": _summary(draft)}},
+            {
+                "type": "input",
+                "block_id": FEEDBACK_BLOCK,
+                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": FEEDBACK_INPUT,
+                    "multiline": True,
+                },
+            },
+        ],
+    }
+
+
+def register_ops_mail_handlers(app, revise=None):
+    """승인·수정·취소 버튼 핸들러를 등록합니다.
+
+    Args:
+        app: slack_bolt AsyncApp
+        revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
+            `async (channel, thread_ts, user, text) -> None` 입니다.
+    """
+
+    @app.action(APPROVE)
+    async def approve(ack, body, client):
+        await ack()
+        # 꺼내면서 지운다. 두 번 눌러도 두 번 보내지 않는다.
+        draft = _DRAFTS.pop(body["actions"][0]["value"], None)
+        if draft is None:
+            return
+        channel = body["container"]["channel_id"]
+        ts = body["container"]["message_ts"]
+        user = body["user"]["id"]
+
+        try:
+            message_id, ses_id = await asyncio.to_thread(_send, draft)
+        except Exception as error:
+            # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
+            # 다시 보내고, 같은 사람이 두 번 받는다.
+            await _replace(
+                client,
+                channel,
+                ts,
+                f"발송 여부를 모릅니다 ({type(error).__name__}) — 받는 쪽에 확인하고 보내세요",
+            )
+            raise
+
+        print(f"OPS MAIL SENT {channel} {user} {draft['to']} {ses_id}")
+
+        # 답장이면 카드가 있는 스레드가 곧 상대방 스레드다. 새 메일이면 상대방
+        # 스레드를 찾아 거기에 남긴다.
+        if draft["references_ids"]:
+            mail_thread = draft["thread_ts"]
+        else:
+            mail_thread = await _mail_thread(client, channel, draft["to"])
+            await client.chat_postMessage(
+                channel=channel,
+                thread_ts=mail_thread,
+                text=f"📤 <@{user}> 님이 보냈습니다\n{_summary(draft)}",
+            )
+        await _replace(
+            client, channel, ts, f"📤 <@{user}> 님이 보냈습니다\n{_summary(draft)}"
+        )
+
+        # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
+        # 메일을 카드가 실패로 그린다.
+        await asyncio.to_thread(
+            _record, draft, channel, mail_thread, message_id, ses_id, user
+        )
+
+    @app.action(REVISE)
+    async def open_revise(ack, body, client):
+        await ack()
+        draft_id = body["actions"][0]["value"]
+        draft = _DRAFTS.get(draft_id)
+        # 여기서는 꺼내지 않는다. 모달을 닫아 버리면 멀쩡한 카드의 [보내기] 가 죽는다.
+        if draft is None:
+            return
+        await client.views_open(
+            trigger_id=body["trigger_id"],
+            view=_revise_view(
+                draft_id,
+                body["container"]["channel_id"],
+                body["container"]["message_ts"],
+                draft,
+            ),
+        )
+
+    @app.view(REVISE_VIEW)
+    async def submit_revise(ack, body, client):
+        await ack()
+        meta = json.loads(body["view"]["private_metadata"])
+        feedback = body["view"]["state"]["values"][FEEDBACK_BLOCK][FEEDBACK_INPUT][
+            "value"
+        ]
+        # 이 카드의 [보내기] 는 이제 옛 문안이라 눌리면 안 된다.
+        draft = _DRAFTS.pop(meta["draft_id"], None)
+        if draft is None:
+            return
+        user = body["user"]["id"]
+        quoted = "\n".join(f"&gt; {line}" for line in feedback.splitlines())
+        await _replace(
+            client,
+            meta["channel"],
+            meta["ts"],
+            f"<@{user}> 님이 수정을 요청했습니다.\n{quoted}",
+        )
+        if revise is None:
+            return
+        await revise(
+            channel=meta["channel"],
+            thread_ts=draft["thread_ts"],
+            user=user,
+            text=feedback,
+        )
+
+    @app.action(CANCEL)
+    async def cancel(ack, body, client):
+        await ack()
+        draft = _DRAFTS.pop(body["actions"][0]["value"], None)
+        if draft is None:
+            return
+        await _replace(
+            client,
+            body["container"]["channel_id"],
+            body["container"]["message_ts"],
+            f"<@{body['user']['id']}> 님이 취소했습니다.",
+        )
+
+
+async def _replace(client, channel: str, ts: str, text: str) -> None:
+    """카드를 결과 문구로 바꿉니다. 버튼이 남아 있으면 또 눌린다."""
+    await client.chat_update(channel=channel, ts=ts, text=text, blocks=[])
