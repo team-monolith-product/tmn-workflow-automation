@@ -44,33 +44,77 @@ _DRAFTS: TTLCache = TTLCache(maxsize=200, ttl=3600)
 # 헤더 자리를 남겨 28MB 로 둔다.
 MAX_ATTACHMENT_BYTES = 28 * 1024 * 1024
 
-# 한 카드에 담는 받는 사람 수. 카드의 section text 가 3000자라 주소를 다 보여주려면
-# 이 정도가 한계다. 안 보이는 사람에게 나가면 승인하는 사람이 명단을 확인할 수 없다.
-MAX_RECIPIENTS = 50
+# 한 번에 보내는 받는 사람 수의 상한. 명단을 잘못 넣어 수천 명에게 나가는 것을 막는다.
+MAX_RECIPIENTS = 500
+
+# 카드에 보여주는 주소 수. 카드 section text 가 3000자라 전부는 못 싣는다.
+# 넘으면 전체 명단을 같은 스레드에 파일로 올린다.
+PREVIEW_RECIPIENTS = 10
+
+# 몇 통마다 카드에 진행 상황을 고쳐 쓸지. chat.update 는 분당 50회 남짓이 한도다.
+PROGRESS_EVERY = 20
 
 
-def _escape(text: str) -> str:
+def escape(text: str) -> str:
     """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def run_store(function, *args):
+    """store 함수 하나를 새 커넥션으로 부릅니다. psycopg 는 동기라 스레드로 넘겨 씁니다."""
+    with connect() as conn:
+        return function(conn, *args)
+
+
+async def mail_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
+    """상대방 스레드를 찾고, 처음 오가는 상대면 엽니다.
+
+    받은 메일(app/ops_mail_sns.py)과 보낸 메일이 같은 함수로 스레드를 고릅니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 메일 채널 ID
+        counterpart: 상대방 주소 (소문자)
+
+    Returns:
+        str: 스레드 ts
+    """
+    thread_ts = await asyncio.to_thread(
+        run_store, store.find_thread, channel, counterpart
+    )
+    if thread_ts:
+        return thread_ts
+    response = await client.chat_postMessage(
+        channel=channel, text=f"✉️ {counterpart} 와 주고받은 메일"
+    )
+    return response["ts"]
 
 
 def _megabytes(size: int) -> str:
     return f"{size / 1024 / 1024:.1f}MB"
 
 
+def _preview(addresses: list[str]) -> str:
+    """주소를 앞의 몇 개만 보여줍니다. 나머지는 스레드에 올린 명단 파일에 있습니다."""
+    shown = ", ".join(escape(address) for address in addresses[:PREVIEW_RECIPIENTS])
+    if len(addresses) > PREVIEW_RECIPIENTS:
+        shown += f" 외 {len(addresses) - PREVIEW_RECIPIENTS}명"
+    return shown
+
+
 def _summary(draft: dict) -> str:
     """받는 사람·제목·첨부·본문을 슬랙 텍스트로 만듭니다."""
     recipients = draft["recipients"]
-    to = ", ".join(_escape(address) for address in recipients)
+    to = _preview(recipients)
     if len(recipients) > 1:
-        to += f" ({len(recipients)}명, 한 명씩 따로 보냅니다)"
+        to = f"*{len(recipients)}명* — {to} · 한 명씩 따로 보냅니다"
     lines = [
         f"받는 사람: {to}",
-        f"제목: {_escape(draft['subject'])}",
+        f"제목: {escape(draft['subject'])}",
     ]
     if draft["attachments"]:
         names = ", ".join(
-            f"{_escape(file['name'])} ({_megabytes(file['size'])})"
+            f"{escape(file['name'])} ({_megabytes(file['size'])})"
             for file in draft["attachments"]
         )
         lines.append(f"첨부: {names}")
@@ -177,8 +221,7 @@ def _prepare(
     recipients = list(
         dict.fromkeys(address.strip().lower() for address in to if address.strip())
     )
-    with connect() as conn:
-        latest = store.latest_in_thread(conn, channel, thread_ts)
+    latest = run_store(store.latest_in_thread, channel, thread_ts)
 
     if latest:
         if recipients and recipients != [latest["counterpart"]]:
@@ -241,7 +284,7 @@ def get_draft_ops_mail_tool(
 
         스레드 밖에서 부르면 새 메일입니다. to(받는 사람 주소 목록)와
         subject(제목)가 필요합니다. 받는 사람이 여럿이면 한 명씩 따로 보내서
-        서로의 주소가 보이지 않습니다. 한 번에 50명까지입니다.
+        서로의 주소가 보이지 않습니다. 한 번에 500명까지입니다.
 
         body 는 메일 본문 텍스트입니다. 인사와 서명까지 완성된 문장으로 씁니다.
 
@@ -277,6 +320,14 @@ def get_draft_ops_mail_tool(
         _DRAFTS[draft_id] = {**draft, "thread_ts": thread_ts}
         count = len(draft["recipients"])
         try:
+            if count > PREVIEW_RECIPIENTS:
+                await client.files_upload_v2(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    content="\n".join(draft["recipients"]),
+                    filename=f"받는사람_{count}명.txt",
+                    title=f"받는 사람 {count}명",
+                )
             await client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
@@ -334,41 +385,24 @@ def _record(
     user: str,
 ) -> None:
     """보낸 메일 한 통을 남깁니다."""
-    with connect() as conn:
-        store.insert(
-            conn,
-            store.OpsMailRow(
-                direction="out",
-                message_id=message_id,
-                ses_message_id=ses_id,
-                counterpart=recipient,
-                from_address=os.environ["OPS_MAIL_FROM"],
-                to_addresses=[recipient],
-                subject=draft["subject"],
-                body_text=draft["body"],
-                references_ids=draft["references_ids"],
-                s3_key=None,
-                channel_id=channel,
-                thread_ts=thread_ts,
-                sent_by=user,
-            ),
-        )
-
-
-async def _mail_thread(client: AsyncWebClient, channel: str, counterpart: str) -> str:
-    """상대방 스레드를 찾고, 처음 오가는 상대면 엽니다."""
-    with_thread = await asyncio.to_thread(_find_thread, channel, counterpart)
-    if with_thread:
-        return with_thread
-    response = await client.chat_postMessage(
-        channel=channel, text=f"✉️ {counterpart} 와 주고받은 메일"
+    run_store(
+        store.insert,
+        store.OpsMailRow(
+            direction="out",
+            message_id=message_id,
+            ses_message_id=ses_id,
+            counterpart=recipient,
+            from_address=os.environ["OPS_MAIL_FROM"],
+            to_addresses=[recipient],
+            subject=draft["subject"],
+            body_text=draft["body"],
+            references_ids=draft["references_ids"],
+            s3_key=None,
+            channel_id=channel,
+            thread_ts=thread_ts,
+            sent_by=user,
+        ),
     )
-    return response["ts"]
-
-
-def _find_thread(channel: str, counterpart: str) -> str | None:
-    with connect() as conn:
-        return store.find_thread(conn, channel, counterpart)
 
 
 async def _leave_trace(
@@ -391,17 +425,17 @@ async def _leave_trace(
         # 답장이면 카드가 있는 스레드가 곧 상대방 스레드다. 새 메일이면 상대방
         # 스레드를 찾아 거기에 남긴다.
         if draft["references_ids"]:
-            mail_thread = draft["thread_ts"]
+            thread_ts = draft["thread_ts"]
         else:
-            mail_thread = await _mail_thread(client, channel, recipient)
+            thread_ts = await mail_thread(client, channel, recipient)
             await client.chat_postMessage(
                 channel=channel,
-                thread_ts=mail_thread,
+                thread_ts=thread_ts,
                 text=f"📤 <@{user}> 님이 보냈습니다\n"
                 + _summary({**draft, "recipients": [recipient]}),
             )
         await asyncio.to_thread(
-            _record, draft, recipient, channel, mail_thread, message_id, ses_id, user
+            _record, draft, recipient, channel, thread_ts, message_id, ses_id, user
         )
 
 
@@ -468,7 +502,10 @@ def register_ops_mail_handlers(app, revise=None):
 
         # 한 명씩 따로 보낸다. 받는 사람끼리 서로의 주소가 보이지 않고, 회신은
         # 각자의 상대방 스레드로 들어온다.
+        total = len(draft["recipients"])
         sent = []
+        # 버튼을 먼저 걷는다. 수백 명이면 다 보내는 데 1분 남짓 걸린다.
+        await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
         for recipient in draft["recipients"]:
             try:
                 message_id, ses_id = await asyncio.to_thread(
@@ -485,13 +522,17 @@ def register_ops_mail_handlers(app, revise=None):
                     ts,
                     f"⚠️ {len(sent)}명에게 보냈고, {recipient} 는 발송 여부를 모릅니다"
                     f" ({type(error).__name__}) — 받는 쪽에 확인하세요."
-                    + (f"\n보내지 않은 사람: {', '.join(left)}" if left else "")
+                    + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
                     + f"\n{_summary(draft)}",
                 )
                 await _leave_trace(client, channel, draft, sent, user)
                 raise
             print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
             sent.append((recipient, message_id, ses_id))
+            if len(sent) % PROGRESS_EVERY == 0 and len(sent) < total:
+                await _replace(
+                    client, channel, ts, f"📤 보내는 중… {len(sent)}/{total}"
+                )
 
         # 카드를 먼저 고치고 남긴다. 순서가 반대면 DB 가 터졌을 때 이미 나간
         # 메일을 카드가 실패로 그린다.

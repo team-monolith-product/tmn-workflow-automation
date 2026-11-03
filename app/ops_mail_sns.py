@@ -22,21 +22,16 @@ from typing import Any
 
 import requests
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
-from slack_sdk import WebClient
+from slack_sdk.web.async_client import AsyncWebClient
 
 from api.s3 import get_object
-from service.db import connect
+from app.ops_mail import escape, mail_thread, run_store
 from service.ops_mail import mime, sns, store
 
 router = APIRouter()
 
 # 슬랙 메시지 한 개에 싣는 본문 길이. 넘으면 자르고 원본 위치를 남긴다.
 MAX_BODY_CHARS = 3500
-
-
-def _escape(text: str) -> str:
-    """슬랙 mrkdwn 에서 특수문자로 읽히는 것만 바꿉니다."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def format_inbound(mail: mime.ParsedMail, receipt: dict[str, Any], s3_uri: str) -> str:
@@ -61,90 +56,69 @@ def format_inbound(mail: mime.ParsedMail, receipt: dict[str, Any], s3_uri: str) 
         body = body[:MAX_BODY_CHARS] + f"\n…(이하 생략, 원본 {s3_uri})"
 
     lines = [
-        f"📨 *{_escape(mail.subject or '(제목 없음)')}*",
-        f"보낸 사람: {_escape(mail.from_header)}",
-        f"받는 사람: {_escape(', '.join(mail.to_addresses))}",
+        f"📨 *{escape(mail.subject or '(제목 없음)')}*",
+        f"보낸 사람: {escape(mail.from_header)}",
+        f"받는 사람: {escape(', '.join(mail.to_addresses))}",
         *warnings,
         "",
-        _escape(body),
+        escape(body),
     ]
     return "\n".join(lines)
 
 
-def open_thread(client: WebClient, channel_id: str, counterpart: str) -> str:
-    """상대방 스레드를 엽니다.
-
-    Args:
-        client: 슬랙 클라이언트
-        channel_id: 메일 채널 ID
-        counterpart: 상대방 주소
-
-    Returns:
-        str: 새 스레드 ts
-    """
-    response = client.chat_postMessage(
-        channel=channel_id, text=f"✉️ {counterpart} 와 주고받은 메일"
-    )
-    return response["ts"]
-
-
-def process_notification(notification: dict[str, Any]) -> None:
-    """SES 수신 알림 하나를 처리합니다. 슬랙과 DB 를 부르므로 스레드에서 돕니다.
+async def process_notification(notification: dict[str, Any]) -> None:
+    """SES 수신 알림 하나를 처리합니다. S3 와 DB 는 동기라 스레드로 넘깁니다.
 
     Args:
         notification: SNS Message 안의 SES 알림
     """
     action = notification["receipt"]["action"]
     s3_uri = f"s3://{action['bucketName']}/{action['objectKey']}"
-    mail = mime.parse(get_object(action["bucketName"], action["objectKey"]))
+    raw = await asyncio.to_thread(get_object, action["bucketName"], action["objectKey"])
+    mail = mime.parse(raw)
+
+    if await asyncio.to_thread(run_store, store.exists, mail.message_id):
+        print(f"ops 메일 중복 알림 {mail.message_id}")
+        return
 
     channel_id = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
-    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    with connect() as conn:
-        if store.exists(conn, mail.message_id):
-            print(f"ops 메일 중복 알림 {mail.message_id}")
-            return
-
-        counterpart = mail.reply_to_address
-        thread_ts = store.find_thread(conn, channel_id, counterpart) or open_thread(
-            client, channel_id, counterpart
-        )
-        client.chat_postMessage(
+    client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    counterpart = mail.reply_to_address
+    thread_ts = await mail_thread(client, channel_id, counterpart)
+    await client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=thread_ts,
+        text=format_inbound(mail, notification["receipt"], s3_uri),
+    )
+    if mail.attachments and notification["receipt"]["virusVerdict"]["status"] != "FAIL":
+        await client.files_upload_v2(
             channel=channel_id,
             thread_ts=thread_ts,
-            text=format_inbound(mail, notification["receipt"], s3_uri),
+            file_uploads=[
+                {"file": a.data, "filename": a.filename, "title": a.filename}
+                for a in mail.attachments
+            ],
         )
-        if (
-            mail.attachments
-            and notification["receipt"]["virusVerdict"]["status"] != "FAIL"
-        ):
-            client.files_upload_v2(
-                channel=channel_id,
-                thread_ts=thread_ts,
-                file_uploads=[
-                    {"file": a.data, "filename": a.filename, "title": a.filename}
-                    for a in mail.attachments
-                ],
-            )
 
-        store.insert(
-            conn,
-            store.OpsMailRow(
-                direction="in",
-                message_id=mail.message_id,
-                ses_message_id=notification["mail"]["messageId"],
-                counterpart=counterpart,
-                from_address=mail.from_address,
-                to_addresses=mail.to_addresses,
-                subject=mail.subject,
-                body_text=mail.body_text,
-                references_ids=mail.references_ids,
-                s3_key=action["objectKey"],
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                sent_by=None,
-            ),
-        )
+    await asyncio.to_thread(
+        run_store,
+        store.insert,
+        store.OpsMailRow(
+            direction="in",
+            message_id=mail.message_id,
+            ses_message_id=notification["mail"]["messageId"],
+            counterpart=counterpart,
+            from_address=mail.from_address,
+            to_addresses=mail.to_addresses,
+            subject=mail.subject,
+            body_text=mail.body_text,
+            references_ids=mail.references_ids,
+            s3_key=action["objectKey"],
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            sent_by=None,
+        ),
+    )
     print(f"ops 메일 수신 {counterpart} {mail.message_id} → {thread_ts}")
 
 
