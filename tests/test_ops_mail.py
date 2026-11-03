@@ -410,7 +410,6 @@ class _FakeApp:
 
 
 def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypatch):
-    monkeypatch.setenv("OPS_MAIL_FROM", "팀모노리스 <ops@team-mono.com>")
     sent = []
     recorded = []
 
@@ -477,7 +476,6 @@ def _approve(app, slack, draft_id: str) -> None:
 
 
 def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실패하면_멈춘다(monkeypatch):
-    monkeypatch.setenv("OPS_MAIL_FROM", "팀모노리스 <ops@team-mono.com>")
     sent = []
     recorded = []
 

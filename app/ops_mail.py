@@ -19,7 +19,6 @@
 import asyncio
 import hashlib
 import json
-import os
 
 import aiohttp
 from cachetools import TTLCache
@@ -51,6 +50,10 @@ MAX_RECIPIENTS = 500
 # 카드에 보여주는 주소 수. 카드 section text 가 3000자라 전부는 못 싣는다.
 # 넘으면 전체 명단을 같은 스레드에 파일로 올린다.
 PREVIEW_RECIPIENTS = 10
+
+# 보내는 주소. IAM 정책이 From 을 이 주소로만 허용해서 설정으로 바꿀 일이 없다.
+FROM_ADDRESS = "ops@team-mono.com"
+FROM_HEADER = f"팀모노리스 <{FROM_ADDRESS}>"
 
 # 몇 통마다 카드에 진행 상황을 고쳐 쓸지. chat.update 는 분당 50회 남짓이 한도다.
 PROGRESS_EVERY = 20
@@ -341,7 +344,7 @@ def _send(
         tuple[str, str]: (우리가 만든 Message-ID, SES MessageId)
     """
     message_id, raw = mime.build(
-        from_header=os.environ["OPS_MAIL_FROM"],
+        from_header=FROM_HEADER,
         to_address=recipient,
         subject=draft["subject"],
         body=draft["body"],
@@ -369,7 +372,7 @@ def _record(
             message_id=message_id,
             ses_message_id=ses_id,
             counterpart=recipient,
-            from_address=os.environ["OPS_MAIL_FROM"],
+            from_address=FROM_ADDRESS,
             to_addresses=[recipient],
             subject=draft["subject"],
             body_text=draft["body"],
