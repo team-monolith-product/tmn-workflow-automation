@@ -2,9 +2,11 @@
 메일 원문(MIME)을 읽고 만듭니다.
 """
 
+import io
 import re
 from dataclasses import dataclass
 from email import message_from_bytes, policy
+from email.generator import BytesGenerator
 from email.message import EmailMessage
 from email.utils import formatdate, getaddresses, make_msgid, parseaddr
 
@@ -61,6 +63,20 @@ def _body_text(message: EmailMessage) -> str:
     return content.strip()
 
 
+def _as_received(message: EmailMessage) -> bytes:
+    """받은 메일 일부를 받은 바이트 그대로 다시 씁니다.
+
+    한글 헤더를 인코딩하지 않고 날 EUC-KR·UTF-8 로 보내는 메일 서버가 있다.
+    as_bytes() 는 이런 헤더의 문자셋을 몰라 =?unknown-8bit?...?= 로 바꿔 써서,
+    메일 프로그램에서 보낸 사람과 제목이 깨진다. compat32 는 헤더를 받은 대로 둔다.
+    """
+    buffer = io.BytesIO()
+    BytesGenerator(
+        buffer, mangle_from_=False, policy=policy.compat32.clone(linesep="\r\n")
+    ).flatten(message)
+    return buffer.getvalue()
+
+
 def _attachments(message: EmailMessage) -> list[Attachment]:
     """첨부파일을 꺼냅니다.
 
@@ -76,7 +92,7 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
         if part["Content-ID"] and part.get_content_disposition() != "attachment":
             continue
         if part.get_content_maintype() == "message":
-            data = b"".join(inner.as_bytes() for inner in part.iter_parts())
+            data = b"".join(_as_received(inner) for inner in part.iter_parts())
             default_name = f"attachment-{index}.eml"
         else:
             data = part.get_payload(decode=True) or b""

@@ -905,6 +905,28 @@ def test_첨부로_전달한_메일은_eml_로_꺼내고_빈_첨부는_뺀다():
     assert mail.message_id.startswith("<") and mail.message_id.endswith(">")
 
 
+def test_첨부로_전달한_메일의_인코딩_안_된_한글_헤더는_받은_그대로_붙인다():
+    inner = (
+        "From: 김선생 <k@a.kr>\r\nSubject: 견적 문의\r\n"
+        "Content-Type: text/plain; charset=euc-kr\r\n\r\n본문"
+    ).encode("euc-kr")
+    raw = (
+        b"From: c@d.kr\r\nMIME-Version: 1.0\r\n"
+        b"Content-Type: multipart/mixed; boundary=XX\r\n\r\n"
+        b"--XX\r\nContent-Type: text/plain\r\n\r\nfw\r\n"
+        b"--XX\r\nContent-Type: message/rfc822\r\n"
+        b"Content-Disposition: attachment\r\n\r\n" + inner + b"\r\n--XX--\r\n"
+    )
+
+    # When : 헤더의 한글을 인코딩하지 않은 메일을 첨부로 전달받으면
+    mail = mime.parse(raw)
+
+    # Then : .eml 의 헤더가 unknown-8bit 로 바뀌지 않고 받은 바이트 그대로 남는다
+    data = mail.attachments[0].data
+    assert b"unknown-8bit" not in data
+    assert "Subject: 견적 문의".encode("euc-kr") in data
+
+
 def test_받는_사람_한_칸에는_주소_하나만_받는다():
     def make(to, subject="안내"):
         return drafts.make(
