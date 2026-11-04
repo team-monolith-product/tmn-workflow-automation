@@ -66,16 +66,28 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
 
     본문에 박힌 이미지(서명 로고 등)는 뺍니다. 이런 이미지는 Content-ID 가
     있고 attachment 로 표시되지 않습니다.
+
+    "첨부로 전달" 한 메일(message/rfc822)은 디코딩할 본문이 따로 없어 그 메일
+    원문을 .eml 로 붙입니다. 빈 첨부는 뺍니다 -- 슬랙이 0바이트 파일을 받지 않아
+    올리기가 매번 실패한다.
     """
     attachments = []
     for index, part in enumerate(message.iter_attachments(), start=1):
         if part["Content-ID"] and part.get_content_disposition() != "attachment":
             continue
+        if part.get_content_maintype() == "message":
+            data = b"".join(inner.as_bytes() for inner in part.iter_parts())
+            default_name = f"attachment-{index}.eml"
+        else:
+            data = part.get_payload(decode=True) or b""
+            default_name = f"attachment-{index}"
+        if not data:
+            continue
         attachments.append(
             Attachment(
-                filename=part.get_filename() or f"attachment-{index}",
+                filename=part.get_filename() or default_name,
                 content_type=part.get_content_type(),
-                data=part.get_payload(decode=True) or b"",
+                data=data,
             )
         )
     return attachments
@@ -107,8 +119,11 @@ def parse(raw: bytes) -> ParsedMail:
     references = MESSAGE_ID.findall(
         f"{message['References'] or ''} {message['In-Reply-To'] or ''}"
     )
+    # Message-ID 는 답장의 In-Reply-To 로 다시 나간다. 모양이 틀리면 헤더를 만들다
+    # 실패하므로 <...> 하나만 받는다.
+    message_ids = MESSAGE_ID.findall(str(message["Message-ID"] or ""))
     return ParsedMail(
-        message_id=str(message["Message-ID"] or make_msgid()),
+        message_id=message_ids[0] if message_ids else make_msgid(),
         from_header=str(message["From"] or ""),
         from_address=from_address,
         reply_to_address=_address(message["Reply-To"]) or from_address,

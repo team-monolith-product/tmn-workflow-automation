@@ -33,6 +33,8 @@ class OpsMailRow:
     s3_key: str | None
     channel_id: str
     sent_by: str | None
+    # 부재중 같은 자동응답. 답장할 메일을 고를 때 건너뛴다.
+    auto_reply: bool = False
 
 
 # 열 이름은 행 모양에서 딴다. 손으로 나열하면 필드를 추가했을 때 INSERT 가
@@ -41,8 +43,9 @@ COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 
 # 받은 메일 원본을 맡을 수 있는 횟수와, 맡은 쪽이 끝내기를 기다리는 시간.
 # 기다리는 동안 다른 쪽(SNS 재전송, 정리 작업)은 같은 원본을 맡지 못한다.
+# LEASE 는 inbound.DELIVER_TIMEOUT 보다 길어야 처리 중인 원본을 다시 맡지 않는다.
 MAX_ATTEMPTS = 3
-LEASE = "5 minutes"
+LEASE = "15 minutes"
 
 INSERT = f"""
 INSERT INTO ops_mail_message ({", ".join(COLUMNS)})
@@ -66,6 +69,16 @@ RETURNING attempts
 FINISH = """
 UPDATE ops_mail_inbox SET processed_at = now() WHERE ses_message_id = %s
 """
+
+# 횟수를 다 썼고 마지막으로 맡은 쪽도 끝내지 못했는데 아직 알리지 않은 원본.
+GIVEN_UP_KEYS = f"""
+SELECT s3_key FROM ops_mail_inbox
+WHERE processed_at IS NULL AND alerted_at IS NULL
+  AND attempts >= {MAX_ATTEMPTS}
+  AND claimed_at < now() - interval '{LEASE}'
+"""
+
+MARK_ALERTED = "UPDATE ops_mail_inbox SET alerted_at = now() WHERE s3_key = %s"
 
 # 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼다.
 SETTLED_KEYS = f"""
@@ -98,7 +111,7 @@ SELECT m.*
 FROM ops_mail_thread t
 JOIN ops_mail_message m
   ON m.channel_id = t.channel_id AND m.counterpart = t.counterpart
-WHERE t.channel_id = %s AND t.thread_ts = %s
+WHERE t.channel_id = %s AND t.thread_ts = %s AND NOT m.auto_reply
 ORDER BY m.created_at DESC
 LIMIT 1
 """
@@ -125,6 +138,29 @@ def settled_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
         set[str]: 처리가 끝났거나 횟수를 다 쓴 키
     """
     return {row["s3_key"] for row in fetch_all(conn, SETTLED_KEYS, (keys,))}
+
+
+def given_up_keys(conn: psycopg.Connection) -> list[str]:
+    """더 다시 처리하지 않는데 아직 알리지 않은 원본을 찾습니다.
+
+    Args:
+        conn: 커넥션
+
+    Returns:
+        list[str]: S3 객체 키
+    """
+    return [row["s3_key"] for row in fetch_all(conn, GIVEN_UP_KEYS)]
+
+
+def mark_alerted(conn: psycopg.Connection, s3_key: str) -> None:
+    """포기한 원본을 알렸다고 표시합니다.
+
+    Args:
+        conn: 커넥션
+        s3_key: S3 객체 키
+    """
+    with conn.cursor() as cur:
+        cur.execute(MARK_ALERTED, (s3_key,))
 
 
 def claim(conn: psycopg.Connection, ses_message_id: str, s3_key: str) -> int | None:

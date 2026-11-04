@@ -7,7 +7,8 @@
 
 같은 원본을 웹훅과 이 스크립트가 함께 집어도 동시에 둘이 올리지 않습니다.
 process_object 가 원본을 읽기 전에 DB 에 자리를 잡고, 맡은 지 얼마 안 된 원본은
-다른 쪽이 건너뜁니다. 몇 번 넘게 실패한 원본은 채널에 알리고 더 다시 하지 않습니다.
+다른 쪽이 건너뜁니다. 몇 번 넘게 실패한 원본은 더 다시 하지 않고 이 스크립트가
+채널에 한 번 알립니다.
 
 오래된 원본은 보지 않습니다. 하루 넘게 실패하는 원본은 다시 해도 같은 이유로
 실패하니 사람이 봐야 하고, 모든 키를 DB 에 물으면 메일이 쌓일수록 무거워집니다.
@@ -28,9 +29,11 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
+from slack_sdk.web.async_client import AsyncWebClient
+
 from api.s3 import list_objects
-from app.ops_mail_sns import process_object
 from service.ops_mail import store
+from service.ops_mail.inbound import format_given_up, process_object
 
 load_dotenv()
 
@@ -72,6 +75,23 @@ async def reconcile(dry_run: bool) -> None:
             await process_object(bucket, key)
         except Exception as error:
             print(f"ops 메일 재처리 실패 {key} {type(error).__name__}: {error}")
+
+    # 횟수를 다 쓴 원본은 채널에 한 번 알린다. 안 알리면 메일이 조용히 사라진다.
+    # 마지막 시도 중에 프로세스째 죽은 원본도 여기서 잡힌다. 알린 뒤에 표시해서,
+    # 알리기가 실패하면 다음 번에 다시 알린다.
+    given_up = await store.run(store.given_up_keys)
+    if dry_run:
+        for key in given_up:
+            print(f"[dry-run] 포기를 알릴 원본 {key}")
+        return
+    if given_up:
+        client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
+        channel = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
+        for key in given_up:
+            await client.chat_postMessage(
+                channel=channel, text=format_given_up(key, bucket)
+            )
+            await store.run(store.mark_alerted, key)
 
 
 def main(dry_run: bool = False) -> None:

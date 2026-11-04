@@ -3,6 +3,7 @@
 """
 
 from dataclasses import dataclass, field
+from email.utils import getaddresses
 
 from service.ops_mail import mime
 
@@ -77,9 +78,9 @@ def make(
     Raises:
         DraftProblem: 보낼 수 없는 초안
     """
-    recipients = list(
-        dict.fromkeys(address.strip().lower() for address in to if address.strip())
-    )
+    if "\r" in subject or "\n" in subject:
+        raise DraftProblem("제목에 줄바꿈을 넣을 수 없습니다.")
+    recipients = list(dict.fromkeys(_address(entry) for entry in to if entry.strip()))
 
     if latest:
         if recipients and recipients != [latest["counterpart"]]:
@@ -98,9 +99,6 @@ def make(
 
     if not recipients or not subject:
         raise DraftProblem("새 메일은 받는 사람(to)과 제목(subject)이 필요합니다.")
-    invalid = [address for address in recipients if "@" not in address]
-    if invalid:
-        raise DraftProblem(f"메일 주소가 아닙니다: {', '.join(invalid)}")
     if len(recipients) > MAX_RECIPIENTS:
         raise DraftProblem(
             f"받는 사람이 {len(recipients)}명입니다. 한 번에 {MAX_RECIPIENTS}명까지라"
@@ -114,6 +112,24 @@ def make(
         thread_ts=thread_ts,
         is_reply=False,
     )
+
+
+def _address(entry: str) -> str:
+    """받는 사람 항목 하나에서 주소 하나를 꺼냅니다.
+
+    한 항목에 주소를 여럿 넣으면("a@b.kr, c@d.kr") 한 통의 To 에 모두 실려 서로의
+    주소가 보이고, 그 행의 상대방이 주소 하나가 아니게 된다. 그래서 정확히 하나만 받습니다.
+
+    Raises:
+        DraftProblem: 주소가 하나가 아니거나 주소 모양이 아님
+    """
+    parsed = [address for _, address in getaddresses([entry]) if address]
+    if len(parsed) != 1 or "\n" in entry or "\r" in entry:
+        raise DraftProblem(f"받는 사람 하나에 주소 하나만 넣어주세요: {entry}")
+    local, _, domain = parsed[0].rpartition("@")
+    if not local or "." not in domain:
+        raise DraftProblem(f"메일 주소가 아닙니다: {entry}")
+    return parsed[0].lower()
 
 
 def megabytes(size: int) -> str:

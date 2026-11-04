@@ -28,6 +28,8 @@ CREATE TABLE ops_mail_message (
     channel_id      text        NOT NULL,
     -- 보낸 메일의 [보내기] 를 누른 사람의 Slack 사용자 ID.
     sent_by         text,
+    -- 부재중 같은 자동응답. 답장할 메일을 고를 때 건너뛴다.
+    auto_reply      boolean     NOT NULL DEFAULT false,
     created_at      timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT ops_mail_message_direction_check CHECK (direction IN ('in', 'out'))
 );
@@ -39,13 +41,15 @@ CREATE INDEX ops_mail_message_counterpart ON ops_mail_message (channel_id, count
 --
 -- 처리할 쪽(웹훅, 정리 작업)이 원본을 읽기 전에 행을 넣어 자리를 잡는다(claimed_at).
 -- 슬랙에 다 올리면 메일 기록을 넣으면서 processed_at 을 채운다. 중간에 실패하면
--- 자리를 잡은 지 시간이 지난 뒤 attempts 가 남은 쪽이 다시 맡는다.
+-- 자리를 잡은 지 시간이 지난 뒤 attempts 가 남은 쪽이 다시 맡는다. 횟수를 다 쓰면
+-- 정리 작업이 채널에 한 번 알리고 alerted_at 을 채운다.
 CREATE TABLE ops_mail_inbox (
     ses_message_id  text        PRIMARY KEY,
     s3_key          text        NOT NULL,
     attempts        int         NOT NULL,
     claimed_at      timestamptz NOT NULL,
-    processed_at    timestamptz
+    processed_at    timestamptz,
+    alerted_at      timestamptz
 );
 
 CREATE INDEX ops_mail_inbox_s3_key ON ops_mail_inbox (s3_key);

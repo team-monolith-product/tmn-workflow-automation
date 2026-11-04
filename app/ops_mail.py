@@ -26,7 +26,7 @@ from cachetools import TTLCache
 from langchain_core.tools import StructuredTool, tool
 from slack_sdk.web.async_client import AsyncWebClient
 
-from api.ses import send_mime
+from api.ses import rejected_code, send_mime
 from service.ops_mail import mime, store
 from service.ops_mail.draft import Draft, DraftProblem, make, megabytes, pick_files
 from service.slack import escape
@@ -376,14 +376,11 @@ def register_ops_mail_handlers(app, revise=None):
                 problem = f"{escape(recipient)} 에게는 보냈지만 기록하지 못했습니다."
                 await _record(draft, recipient, channel, message_id, ses_id, user)
             except Exception as error:
-                await _stop(
-                    client,
-                    channel,
-                    ts,
-                    draft,
-                    sent,
-                    f"{problem} ({type(error).__name__})",
-                )
+                if code := rejected_code(error):
+                    problem = f"{escape(recipient)} 에게는 안 나갔습니다 ({code})."
+                else:
+                    problem = f"{problem} ({type(error).__name__})"
+                await _stop(client, channel, ts, draft, sent, problem)
                 raise
             if (sent + 1) % PROGRESS_EVERY == 0 and sent + 1 < total:
                 await _progress(
