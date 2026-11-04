@@ -30,10 +30,11 @@ CREATE TABLE ops_mail_message (
     sent_by         text,
     -- 부재중 같은 자동응답. 답장할 메일을 고를 때 건너뛴다.
     auto_reply      boolean     NOT NULL DEFAULT false,
-    -- 받은 메일의 Date 헤더. 답장을 걸 "가장 최근 메일" 을 넣은 순서가 아니라 이
-    -- 순서로 고른다 -- 처리에 실패했다가 나중에 다시 처리된 옛 메일이 최신으로
-    -- 잡히지 않게. 헤더가 없거나 깨졌으면 NULL 이고 created_at 으로 대신한다.
-    sent_at         timestamptz,
+    -- 받은 메일을 우리가 받은 시각. SES 가 맨 위에 붙인 Received 헤더에서 읽는다.
+    -- 답장을 걸 "가장 최근 메일" 을 넣은 순서가 아니라 이 순서로 고른다 -- 처리에
+    -- 실패했다가 나중에 다시 처리된 옛 메일이 최신으로 잡히지 않게. Date 헤더는
+    -- 보낸 쪽 시계라 쓰지 않는다. 없거나 깨졌으면 NULL 이고 created_at 으로 대신한다.
+    received_at     timestamptz,
     created_at      timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT ops_mail_message_direction_check CHECK (direction IN ('in', 'out'))
 );

@@ -180,18 +180,22 @@ def test_나중에_다시_처리된_옛_메일보다_실제로_최근에_온_메
     _call(store.claim_thread, CHANNEL, "office@abc.kr", "ts-office")
     _call(
         store.insert,
-        _row("new", subject="Re: 일정", sent_at=datetime(2026, 11, 4, 9, tzinfo=UTC)),
+        _row(
+            "new", subject="Re: 일정", received_at=datetime(2026, 11, 4, 9, tzinfo=UTC)
+        ),
     )
     # 먼저 왔지만 처리에 실패했다가 정리 작업이 나중에 다시 넣은 메일
     _call(
         store.insert,
-        _row("old", subject="견적 문의", sent_at=datetime(2026, 11, 3, 9, tzinfo=UTC)),
+        _row(
+            "old", subject="견적 문의", received_at=datetime(2026, 11, 3, 9, tzinfo=UTC)
+        ),
     )
 
     # When : 상대방 스레드의 답장 대상을 찾으면
     target = _call(store.reply_target, CHANNEL, "ts-office")
 
-    # Then : 넣은 순서가 아니라 메일이 보내진 순서로 가장 최근 메일에 건다
+    # Then : 넣은 순서가 아니라 우리가 받은 순서로 가장 최근 메일에 건다
     assert target["subject"] == "Re: 일정"
 
 

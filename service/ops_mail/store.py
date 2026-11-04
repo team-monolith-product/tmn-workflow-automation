@@ -34,8 +34,8 @@ class OpsMailRow:
     sent_by: str | None
     # 부재중 같은 자동응답. 답장할 메일을 고를 때 건너뛴다.
     auto_reply: bool = False
-    # 받은 메일의 Date 헤더. 없거나 깨졌으면 None.
-    sent_at: datetime | None = None
+    # 받은 메일을 우리가 받은 시각(맨 위 Received). 없거나 깨졌으면 None.
+    received_at: datetime | None = None
 
 
 # 열 이름은 행 모양에서 딴다. 손으로 나열하면 필드를 추가했을 때 INSERT 가
@@ -129,7 +129,7 @@ LEFT JOIN LATERAL (
   FROM ops_mail_message
   WHERE channel_id = t.channel_id AND counterpart = t.counterpart
     AND direction = 'in' AND NOT auto_reply
-  ORDER BY COALESCE(sent_at, created_at) DESC
+  ORDER BY COALESCE(received_at, created_at) DESC
   LIMIT 1
 ) m ON true
 WHERE t.channel_id = %s AND t.thread_ts = %s

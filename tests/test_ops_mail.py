@@ -1408,17 +1408,26 @@ def test_받은_메일의_슬랙_문법은_글자로_올린다(monkeypatch):
         assert markup not in texts
 
 
-def test_보낸_시각은_Date_헤더에서_읽고_없거나_깨졌으면_비운다():
-    # When : Date 헤더가 정상, 시간대 없음, 깨짐, 없음인 메일을 읽으면
-    normal = mime.parse(_raw_mail({"Date": "Tue, 03 Nov 2026 09:00:00 +0900"}))
-    naive = mime.parse(_raw_mail({"Date": "Tue, 03 Nov 2026 09:00:00 -0000"}))
-    broken = mime.parse(_raw_mail({"Date": "어제 아침"}))
-    missing = mime.parse(_raw_mail())
-
-    # Then : 시간대가 붙은 시각으로 읽고, 깨졌거나 없으면 None 이다
-    assert normal.sent_at == datetime.datetime(
-        2026, 11, 3, 0, 0, tzinfo=datetime.timezone.utc
+def test_받은_시각은_맨_위_Received_헤더에서_읽고_Date_는_쓰지_않는다():
+    ses = (
+        "from mail.abc.kr by inbound-smtp.ap-northeast-2.amazonaws.com with SMTP"
+        " id x for ops@in.team-mono.com; Tue, 03 Nov 2026 00:00:05 +0000 (UTC)"
     )
-    assert naive.sent_at.tzinfo is not None
-    assert broken.sent_at is None
-    assert missing.sent_at is None
+    google = "by mx.google.com with SMTP id y; Mon, 02 Nov 2026 23:59:59 -0800"
+
+    # When : 보낸 쪽 Date 가 18시간 틀렸고 Received 가 여러 개인 메일과,
+    #        Received 가 깨졌거나 없는 메일을 읽으면
+    skewed = mime.parse(
+        b"From: a@b.kr\r\nDate: Tue, 03 Nov 2026 18:00:00 -0000\r\n"
+        + f"Received: {ses}\r\nReceived: {google}\r\n".encode()
+        + b"Subject: s\r\n\r\nbody"
+    )
+    broken = mime.parse(_raw_mail({"Received": "by somewhere; 어제 아침"}))
+    missing = mime.parse(_raw_mail({"Date": "Tue, 03 Nov 2026 18:00:00 -0000"}))
+
+    # Then : Date 가 아니라 맨 위(SES) Received 의 시각을 쓰고, 없거나 깨졌으면 None
+    assert skewed.received_at == datetime.datetime(
+        2026, 11, 3, 0, 0, 5, tzinfo=datetime.timezone.utc
+    )
+    assert broken.received_at is None
+    assert missing.received_at is None

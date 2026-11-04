@@ -45,8 +45,9 @@ class ParsedMail:
     spam: bool
     virus: bool
     auto_reply: bool
-    # Date 헤더. 없거나 깨졌으면 None.
-    sent_at: datetime | None
+    # 우리가 받은 시각. SES 가 맨 위에 붙인 Received 헤더의 시각이다. 없거나
+    # 깨졌으면 None.
+    received_at: datetime | None
 
 
 def _raw(message: EmailMessage, name: str) -> str:
@@ -275,19 +276,27 @@ def parse(raw: bytes) -> ParsedMail:
         spam=str(message["X-SES-Spam-Verdict"] or "") == "FAIL",
         virus=str(message["X-SES-Virus-Verdict"] or "") == "FAIL",
         auto_reply=_is_auto_reply(message),
-        sent_at=_sent_at(_raw(message, "Date")),
+        received_at=_received_at(_raw(message, "Received")),
     )
 
 
-def _sent_at(header: str) -> datetime | None:
-    """Date 헤더를 시각으로 읽습니다. 시간대가 없으면 UTC 로 봅니다."""
+def _received_at(header: str) -> datetime | None:
+    """맨 위 Received 헤더의 시각을 읽습니다. 시간대가 없으면 UTC 로 봅니다.
+
+    Date 헤더는 보낸 쪽이 적어서 시계·시간대가 틀리면 몇 시간씩 어긋난다. 맨 위
+    Received 는 메일을 마지막으로 받은 SES 가 붙이니 우리가 받은 시각이다.
+    헤더 끝의 ";" 뒤가 시각이다.
+
+    Args:
+        header: 맨 위 Received 헤더 (_raw 는 첫 번째 것을 돌려준다)
+    """
     try:
-        sent_at = parsedate_to_datetime(header)
+        received_at = parsedate_to_datetime(header.rpartition(";")[2].strip())
     except (TypeError, ValueError, IndexError):
         return None
-    if sent_at.tzinfo is None:
-        return sent_at.replace(tzinfo=timezone.utc)
-    return sent_at
+    if received_at.tzinfo is None:
+        return received_at.replace(tzinfo=timezone.utc)
+    return received_at
 
 
 def reply_subject(subject: str) -> str:
