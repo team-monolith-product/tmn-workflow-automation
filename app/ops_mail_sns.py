@@ -115,23 +115,40 @@ async def _open_thread(client: AsyncWebClient, channel: str, counterpart: str) -
 async def process_object(bucket: str, key: str) -> None:
     """S3 에 저장된 받은 메일 하나를 슬랙에 올리고 남깁니다.
 
+    슬랙에 올리기 전에 행을 넣어 자리를 잡습니다. SNS 가 같은 알림을 두 번 보내도,
+    정리 작업이 같은 원본을 다시 집어도 한쪽만 올립니다. 올리다 실패하면 정리 작업이
+    다시 맡고, 몇 번 넘게 실패하면 더 올리지 않습니다.
+
     Args:
         bucket: 메일 원본 버킷
         key: 객체 키. 끝이 SES 메시지 ID 입니다.
     """
-    # SNS 는 같은 알림을 두 번 보낼 수 있다. Message-ID 는 없는 메일도 있어
-    # 지어 넣으므로, 늘 같은 값인 객체 키로 거른다.
-    if await store.run(store.processed_keys, [key]):
-        print(f"ops 메일 중복 {key}")
-        return
     raw = await asyncio.to_thread(get_object, bucket, key)
     # 첨부 디코딩과 HTML 파싱이 무거워 이벤트 루프에서 돌리지 않는다.
     mail = await asyncio.to_thread(mime.parse, raw)
 
     channel_id = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
-    client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     counterpart = mail.reply_to_address
+    ses_message_id = key.rsplit("/", 1)[-1]
+    row = store.OpsMailRow(
+        direction="in",
+        message_id=mail.message_id,
+        ses_message_id=ses_message_id,
+        counterpart=counterpart,
+        from_address=mail.from_address,
+        to_addresses=mail.to_addresses,
+        subject=mail.subject,
+        body_text=mail.body_text,
+        references_ids=mail.references_ids,
+        s3_key=key,
+        channel_id=channel_id,
+        sent_by=None,
+    )
+    if not await store.run(store.claim, row):
+        print(f"ops 메일 건너뜀(처리됐거나 처리 중) {key}")
+        return
 
+    client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     thread_ts = await store.run(store.find_thread, channel_id, counterpart)
     # 자동응답은 이미 있는 스레드에만 단다. 없으면 기록만 남긴다.
     if thread_ts is None and not mail.auto_reply:
@@ -153,23 +170,7 @@ async def process_object(bucket: str, key: str) -> None:
                 ],
             )
 
-    await store.run(
-        store.insert,
-        store.OpsMailRow(
-            direction="in",
-            message_id=mail.message_id,
-            ses_message_id=key.rsplit("/", 1)[-1],
-            counterpart=counterpart,
-            from_address=mail.from_address,
-            to_addresses=mail.to_addresses,
-            subject=mail.subject,
-            body_text=mail.body_text,
-            references_ids=mail.references_ids,
-            s3_key=key,
-            channel_id=channel_id,
-            sent_by=None,
-        ),
-    )
+    await store.run(store.mark_processed, ses_message_id)
     print(f"ops 메일 수신 {counterpart} {mail.message_id} → {thread_ts}")
 
 

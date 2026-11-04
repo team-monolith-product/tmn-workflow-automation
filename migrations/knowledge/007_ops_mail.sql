@@ -28,6 +28,13 @@ CREATE TABLE ops_mail_message (
     channel_id      text        NOT NULL,
     -- 보낸 메일의 [보내기] 를 누른 사람의 Slack 사용자 ID.
     sent_by         text,
+    -- 받은 메일 처리 상태. 처리할 쪽이 슬랙에 올리기 전에 행을 넣어 자리를 잡는다
+    -- (claimed_at). 다 올리면 processed_at 을 채운다. 중간에 실패하면 정리 작업이
+    -- attempts 가 남은 것만 다시 맡는다. 먼저 올리고 나중에 남기면, 올린 뒤 실패한
+    -- 메일을 정리 작업이 10분마다 다시 올린다. 보낸 메일은 넣을 때 processed_at 을 채운다.
+    attempts        int         NOT NULL DEFAULT 0,
+    claimed_at      timestamptz,
+    processed_at    timestamptz,
     created_at      timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT ops_mail_message_direction_check CHECK (direction IN ('in', 'out'))
 );

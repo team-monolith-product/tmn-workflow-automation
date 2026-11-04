@@ -283,9 +283,16 @@ def _fake_db(
     latest: dict | None = None,
     sent_to: list[dict] | None = None,
     claimed_by: str | None = None,
+    claimable: bool = True,
 ):
     inserted = []
     claimed = []
+    processed = []
+
+    def claim(conn, row):
+        if claimable:
+            inserted.append(row)
+        return claimable
 
     @contextmanager
     def connect():
@@ -297,7 +304,10 @@ def _fake_db(
 
     # store 함수는 모두 store.run 이 연 커넥션으로 불린다.
     monkeypatch.setattr(module.store, "connect", connect)
-    monkeypatch.setattr(module.store, "processed_keys", lambda conn, keys: set())
+    monkeypatch.setattr(module.store, "claim", claim)
+    monkeypatch.setattr(
+        module.store, "mark_processed", lambda conn, ses_id: processed.append(ses_id)
+    )
     monkeypatch.setattr(module.store, "find_thread", lambda conn, channel, cp: thread)
     monkeypatch.setattr(module.store, "latest_in_thread", lambda conn, c, t: latest)
     monkeypatch.setattr(module.store, "insert", lambda conn, row: inserted.append(row))
@@ -306,6 +316,7 @@ def _fake_db(
     )
     monkeypatch.setattr(module.store, "claim_thread", claim_thread)
     module.store.claimed = claimed
+    module.store.processed = processed
     return inserted
 
 
@@ -325,6 +336,7 @@ def test_같은_상대의_메일은_그_상대_스레드에_첨부와_함께_단
     assert slack.uploads[0]["thread_ts"] == "ts-office"
     assert inserted[0].counterpart == "office@abc.kr"
     assert inserted[0].ses_message_id == "abc"
+    assert ops_mail_sns.store.processed == ["abc"]
 
 
 def test_처음_오는_상대는_스레드를_열고_바이러스_의심이면_첨부를_올리지_않는다(
@@ -377,21 +389,40 @@ def test_같은_상대의_스레드를_다른_쪽이_먼저_열었으면_내_것
     assert slack.posts[1]["thread_ts"] == "ts-other"
 
 
-def test_이미_처리한_원본이면_다시_올리지_않는다(monkeypatch):
+def test_다른_쪽이_처리했거나_처리_중인_원본은_슬랙에_올리지_않는다(monkeypatch):
     monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
     monkeypatch.setattr(ops_mail_sns, "AsyncWebClient", _FakeSlack)
+    monkeypatch.setattr(ops_mail_sns, "get_object", lambda bucket, key: _raw_mail())
     _FakeSlack.last = None
-    inserted = _fake_db(monkeypatch, ops_mail_sns, thread="ts-office")
-    monkeypatch.setattr(
-        ops_mail_sns.store, "processed_keys", lambda conn, keys: set(keys)
-    )
+    _fake_db(monkeypatch, ops_mail_sns, thread="ts-office", claimable=False)
 
-    # When : SNS 가 같은 알림을 다시 보내면
+    # When : SNS 재전송이나 정리 작업이 이미 맡겨진 원본을 다시 집으면
     asyncio.run(ops_mail_sns.process_object("bucket", "ops/abc"))
 
-    # Then : 원본을 읽지도 슬랙에 올리지도 않는다
+    # Then : 자리를 못 잡아서 슬랙에 올리지 않고, 끝났다고 표시하지도 않는다
     assert _FakeSlack.last is None
-    assert inserted == []
+    assert ops_mail_sns.store.processed == []
+
+
+def test_올리다_실패하면_끝났다고_표시하지_않아_정리_작업이_다시_맡는다(monkeypatch):
+    class _FailingUpload(_FakeSlack):
+        async def files_upload_v2(self, **kwargs):
+            raise ConnectionError
+
+    monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(ops_mail_sns, "AsyncWebClient", _FailingUpload)
+    monkeypatch.setattr(ops_mail_sns, "get_object", lambda bucket, key: _raw_mail())
+    inserted = _fake_db(monkeypatch, ops_mail_sns, thread="ts-office")
+
+    # When : 메일은 올렸는데 첨부 올리기가 실패하면
+    with pytest.raises(ConnectionError):
+        asyncio.run(ops_mail_sns.process_object("bucket", "ops/abc"))
+
+    # Then : 자리는 잡혀 있어 그동안 다른 쪽은 건너뛰고, 끝났다는 표시가 없어
+    #        자리를 잡은 지 시간이 지나면 정리 작업이 다시 맡는다
+    assert len(inserted) == 1
+    assert ops_mail_sns.store.processed == []
 
 
 def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():

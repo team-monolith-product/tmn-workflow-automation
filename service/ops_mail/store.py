@@ -38,13 +38,43 @@ class OpsMailRow:
 # 조용히 그 열을 빠뜨린다.
 COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 
+# 받은 메일을 맡을 수 있는 횟수와, 맡은 쪽이 끝내기를 기다리는 시간.
+# 기다리는 동안 다른 쪽(SNS 재전송, 정리 작업)은 같은 메일을 맡지 못한다.
+MAX_ATTEMPTS = 3
+LEASE = "5 minutes"
+
+_VALUES = ", ".join(f"%({name})s" for name in COLUMNS)
+
+# 보낸 메일. 슬랙에 따로 올릴 것이 없어 넣을 때 처리가 끝난다.
 INSERT = f"""
-INSERT INTO ops_mail_message ({", ".join(COLUMNS)})
-VALUES ({", ".join(f"%({name})s" for name in COLUMNS)})
+INSERT INTO ops_mail_message ({", ".join(COLUMNS)}, processed_at)
+VALUES ({_VALUES}, now())
 ON CONFLICT (ses_message_id) DO NOTHING
 """
 
-PROCESSED_KEYS = "SELECT s3_key FROM ops_mail_message WHERE s3_key = ANY(%s)"
+# 받은 메일을 맡는다. 처음이면 넣고, 이미 있으면 아직 안 끝났고 횟수가 남았고
+# 다른 쪽이 맡은 지 LEASE 가 지났을 때만 다시 맡는다. 맡았으면 행이 돌아온다.
+CLAIM = f"""
+INSERT INTO ops_mail_message ({", ".join(COLUMNS)}, attempts, claimed_at)
+VALUES ({_VALUES}, 1, now())
+ON CONFLICT (ses_message_id) DO UPDATE
+SET attempts = ops_mail_message.attempts + 1, claimed_at = now()
+WHERE ops_mail_message.processed_at IS NULL
+  AND ops_mail_message.attempts < {MAX_ATTEMPTS}
+  AND ops_mail_message.claimed_at < now() - interval '{LEASE}'
+RETURNING id
+"""
+
+MARK_PROCESSED = """
+UPDATE ops_mail_message SET processed_at = now() WHERE ses_message_id = %s
+"""
+
+# 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼다.
+SETTLED_KEYS = f"""
+SELECT s3_key FROM ops_mail_message
+WHERE s3_key = ANY(%s)
+  AND (processed_at IS NOT NULL OR attempts >= {MAX_ATTEMPTS})
+"""
 
 FIND_THREAD = """
 SELECT thread_ts FROM ops_mail_thread WHERE channel_id = %s AND counterpart = %s
@@ -86,17 +116,41 @@ async def run(function, *args):
     return await asyncio.to_thread(call)
 
 
-def processed_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
-    """S3 원본 키 중 이미 처리해서 기록된 것을 고릅니다.
+def settled_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
+    """S3 원본 키 중 더 처리할 필요가 없는 것을 고릅니다.
 
     Args:
         conn: 커넥션
         keys: S3 객체 키
 
     Returns:
-        set[str]: 기록돼 있는 키
+        set[str]: 처리가 끝났거나 횟수를 다 쓴 키
     """
-    return {row["s3_key"] for row in fetch_all(conn, PROCESSED_KEYS, (keys,))}
+    return {row["s3_key"] for row in fetch_all(conn, SETTLED_KEYS, (keys,))}
+
+
+def claim(conn: psycopg.Connection, row: OpsMailRow) -> bool:
+    """받은 메일 하나를 이쪽이 처리하겠다고 자리를 잡습니다.
+
+    Args:
+        conn: 커넥션
+        row: 받은 메일 행
+
+    Returns:
+        bool: 맡았으면 True. 이미 끝났거나, 다른 쪽이 처리 중이거나, 횟수를 다 썼으면 False
+    """
+    return bool(fetch_all(conn, CLAIM, asdict(row)))
+
+
+def mark_processed(conn: psycopg.Connection, ses_message_id: str) -> None:
+    """받은 메일을 슬랙에 다 올렸다고 표시합니다.
+
+    Args:
+        conn: 커넥션
+        ses_message_id: SES 메시지 ID
+    """
+    with conn.cursor() as cur:
+        cur.execute(MARK_PROCESSED, (ses_message_id,))
 
 
 def find_thread(
@@ -169,7 +223,7 @@ def latest_in_thread(
 
 
 def insert(conn: psycopg.Connection, row: OpsMailRow) -> None:
-    """메일 한 통을 남깁니다.
+    """보낸 메일 한 통을 남깁니다.
 
     Args:
         conn: 커넥션
