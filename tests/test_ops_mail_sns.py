@@ -126,7 +126,7 @@ def test_SNS_검증은_검사한_URL_에서만_인증서를_받는다(monkeypatc
         return _Response()
 
     monkeypatch.setattr(sns.requests, "get", get)
-    sns._certs.clear()
+    sns._fetch_cert.cache_clear()
     cert_url = "https://sns.ap-northeast-2.amazonaws.com/a.pem"
 
     # When : 서명이 맞는 메시지와, 인증서 URL 만 공격자 쪽으로 바꾼 메시지를 확인하면

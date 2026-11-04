@@ -102,17 +102,13 @@ def format_given_up(row: dict[str, Any], bucket: str) -> str:
     """더 다시 처리하지 않는 원본을 알리는 메시지입니다.
 
     Args:
-        row: store.given_up 한 행 (s3_key, attempts, last_error)
+        row: store.given_up 한 행 (s3_key, last_error)
         bucket: 메일 원본 버킷
     """
-    if row["attempts"] >= store.MAX_ATTEMPTS:
-        why = f"{row['attempts']}번 처리하지 못해"
-    else:
-        why = "맡은 뒤 하루 넘게 끝나지 않아"
-    # 이유가 없으면 처리 중에 프로세스가 죽은 것이다.
+    # 이유가 없으면 마지막 처리 중에 프로세스가 죽은 것이다.
     reason = row["last_error"] or "처리 중에 서버가 멈춤"
     return (
-        f"⚠️ 받은 메일을 {why} 더 다시 하지 않습니다\n"
+        f"⚠️ 받은 메일을 {store.MAX_ATTEMPTS}번 처리하지 못해 더 다시 하지 않습니다\n"
         f"이유: `{escape(reason).replace('`', chr(39))}`\n"
         f"원본: s3://{bucket}/{row['s3_key']}"
     )
@@ -137,6 +133,11 @@ async def _open_thread(client: AsyncWebClient, channel: str, counterpart: str) -
     return thread_ts
 
 
+def ses_message_id(key: str) -> str:
+    """S3 객체 키의 끝이 SES 메시지 ID 입니다. 수신함은 이 값으로 원본을 가립니다."""
+    return key.rsplit("/", 1)[-1]
+
+
 async def process_object(bucket: str, key: str) -> None:
     """S3 에 저장된 받은 메일 하나를 슬랙에 올리고 남깁니다.
 
@@ -149,26 +150,26 @@ async def process_object(bucket: str, key: str) -> None:
         bucket: 메일 원본 버킷
         key: 객체 키. 끝이 SES 메시지 ID 입니다.
     """
-    ses_message_id = key.rsplit("/", 1)[-1]
-    if await asyncio.to_thread(store.claim, ses_message_id, key) is None:
+    ses_id = ses_message_id(key)
+    if await asyncio.to_thread(store.claim, ses_id, key) is None:
         print(f"ops 메일 건너뜀(처리됐거나 처리 중) {key}")
         return
     try:
         await asyncio.wait_for(
-            _deliver(bucket, key, ses_message_id), DELIVER_TIMEOUT.total_seconds()
+            _deliver(bucket, key, ses_id), DELIVER_TIMEOUT.total_seconds()
         )
     except Exception as error:
         # 횟수를 다 쓰면 정리 작업이 이 이유를 채널에 알린다. 남기기마저 실패해도
         # 원래 실패를 가리지 않는다.
         reason = f"{type(error).__name__}: {error}"[:500]
         try:
-            await asyncio.to_thread(store.fail, ses_message_id, reason)
+            await asyncio.to_thread(store.fail, ses_id, reason)
         except Exception as store_error:
             print(f"ops 메일 실패 이유 기록 실패 {key} {type(store_error).__name__}")
         raise
 
 
-async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
+async def _deliver(bucket: str, key: str, ses_id: str) -> None:
     """원본을 읽어 상대방 스레드에 올리고, 다 올리면 남깁니다."""
     raw = await asyncio.to_thread(get_object, bucket, key)
     # 첨부 디코딩과 HTML 파싱이 무거워 이벤트 루프에서 돌리지 않는다.
@@ -206,7 +207,7 @@ async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
         store.OpsMailRow(
             direction="in",
             message_id=mail.message_id,
-            ses_message_id=ses_message_id,
+            ses_message_id=ses_id,
             counterpart=counterpart,
             from_address=mail.from_address,
             to_addresses=mail.to_addresses,

@@ -153,13 +153,11 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
             {
                 "ses_message_id": "bad",
                 "s3_key": "ops/bad",
-                "attempts": 3,
                 "last_error": "ValueError: 깨진 MIME",
             },
             {
                 "ses_message_id": "died",
                 "s3_key": "ops/died",
-                "attempts": 1,
                 "last_error": None,
             },
         ],
@@ -171,8 +169,6 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
     assert "3번 처리하지 못해 더 다시 하지 않습니다" in bad
     assert "ValueError: 깨진 MIME" in bad
     assert "s3://bucket/ops/bad" in bad
-    # 한 번만 맡고 하루가 지난 원본은 세 번 실패했다고 하지 않는다
-    assert "하루 넘게 끝나지 않아" in died and "3번" not in died
     assert "서버가 멈춤" in died
     assert alerted == ["bad", "died"]
 

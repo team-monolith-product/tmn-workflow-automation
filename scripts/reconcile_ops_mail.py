@@ -33,7 +33,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from api.s3 import list_objects
 from service.ops_mail import store
-from service.ops_mail.inbound import format_given_up, process_object
+from service.ops_mail.inbound import format_given_up, process_object, ses_message_id
 
 load_dotenv()
 
@@ -44,14 +44,8 @@ PREFIX = "ops/"
 GRACE = timedelta(minutes=5)
 
 # 이보다 오래된 원본은 보지 않는다. 웹훅과 정리 작업이 함께 며칠 내려가 있었어도
-# (주말 장애 등) 그동안 들어온 메일은 아직 아무도 맡지 않아 수신함에 행이 없으니,
-# 맡은 원본의 포기 기준(store.ABANDON_AFTER)보다 넉넉히 둔다.
+# (주말 장애 등) 그동안 들어온 메일을 놓치지 않게 넉넉히 둔다.
 LOOKBACK = timedelta(days=7)
-
-
-def _ses_message_id(key: str) -> str:
-    """객체 키의 끝이 SES 메시지 ID 입니다."""
-    return key.rsplit("/", 1)[-1]
 
 
 async def reconcile(dry_run: bool) -> None:
@@ -70,9 +64,9 @@ async def reconcile(dry_run: bool) -> None:
     # 끝났거나 횟수를 다 쓴 것은 뺀다. 남은 것을 맡을지는 process_object 가 정한다
     # -- 다른 쪽이 처리 중이면 거기서 건너뛴다.
     settled = await asyncio.to_thread(
-        store.settled, [_ses_message_id(key) for key in keys]
+        store.settled, [ses_message_id(key) for key in keys]
     )
-    missing = [key for key in keys if _ses_message_id(key) not in settled]
+    missing = [key for key in keys if ses_message_id(key) not in settled]
     print(f"ops 메일 원본 {len(keys)}개 중 미처리 {len(missing)}개")
 
     for key in missing:

@@ -7,12 +7,12 @@ https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html
 """
 
 import base64
+from functools import lru_cache
 import re
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from cachetools import TTLCache
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
@@ -34,8 +34,6 @@ SUBSCRIPTION_KEYS = (
 # "sns.<무엇이든>.amazonaws.com" 으로 열어 두면 sns.s3-us-west-2.amazonaws.com 처럼
 # 남이 가진 S3 버킷 "sns" 의 주소가 통과한다.
 REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
-
-_certs: TTLCache = TTLCache(maxsize=10, ttl=3600)
 
 
 def string_to_sign(message: dict[str, Any]) -> bytes:
@@ -85,16 +83,17 @@ def aws_cert_url(url: str, topic_arn: str) -> str | None:
     return f"https://{parsed.hostname}{parsed.path}"
 
 
+@lru_cache(maxsize=10)
 def _fetch_cert(url: str) -> bytes:
-    """인증서를 받아옵니다. 같은 인증서를 메시지마다 다시 받지 않습니다."""
-    # 여러 작업 스레드에서 부른다. 검사와 읽기 사이에 만료돼도 KeyError 가 안 나게 get.
-    cert = _certs.get(url)
-    if cert is None:
-        # 다른 곳으로 넘겨 주면 따라가지 않는다. 검사한 호스트에서만 받는다.
-        response = requests.get(url, timeout=10, allow_redirects=False)
-        response.raise_for_status()
-        cert = _certs[url] = response.content
-    return cert
+    """인증서를 받아옵니다. 같은 인증서를 메시지마다 다시 받지 않습니다.
+
+    인증서 URL 은 바뀌면 이름이 바뀌어 만료가 필요 없다. 여러 작업 스레드에서
+    부르므로 스레드에 안전한 lru_cache 를 쓴다. 실패는 담아 두지 않는다.
+    """
+    # 다른 곳으로 넘겨 주면 따라가지 않는다. 검사한 호스트에서만 받는다.
+    response = requests.get(url, timeout=10, allow_redirects=False)
+    response.raise_for_status()
+    return response.content
 
 
 def verify(message: dict[str, Any], cert_pem: bytes) -> bool:

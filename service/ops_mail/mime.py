@@ -10,7 +10,7 @@ from email.generator import BytesGenerator
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from datetime import datetime, timezone
-from email.utils import formatdate, getaddresses, make_msgid, parsedate_to_datetime
+from email.utils import formatdate, make_msgid, parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
@@ -54,11 +54,12 @@ def _raw(message: EmailMessage, name: str) -> str:
     """헤더를 파이썬 헤더 파서를 거치지 않고 받은 그대로 꺼냅니다.
 
     파서는 모양이 틀린 값(Message-ID: <a@[b> 등)에서 AttributeError 로 터지고,
-    'John Doe [ACME] <a@b.com>' 같은 From 에서는 주소를 버린다.
+    'John Doe [ACME] <a@b.com>' 같은 From 에서는 주소를 버린다. 모든 머리가 이
+    함수를 지나므로 NUL 도 여기서 뺀다.
     """
     for key, value in message.raw_items():
         if key.lower() == name.lower():
-            return " ".join(_unescape(str(value)).split())
+            return " ".join(_text(_unescape(str(value))).split())
     return ""
 
 
@@ -181,8 +182,10 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
 
     맨 위 multipart/mixed 만 보지 않고 모든 파트를 봅니다. 애플 메일이 본문 중간에
     넣은 첨부는 multipart/alternative 안쪽에 있고, 스캐너가 보낸 메일은 메일 전체가
-    파일 하나다. 본문과, 첨부로 표시되지 않은 텍스트(본문의 다른 형식)와,
-    본문에 박힌 이미지(서명 로고 등, Content-ID 가 있음)는 뺍니다.
+    파일 하나다. 본문과, 첨부로 표시되지 않은 텍스트(본문의 다른 형식)는 뺍니다.
+    본문에 박힌 이미지(Content-ID 가 있음)는 올린다 -- 아웃룩·지메일에 붙여 넣은
+    스크린샷이 이 모양이라, 빼면 고객이 보낸 오류 화면이 사라진다. 서명 로고도 같이
+    올라가지만 잃는 것보다 낫다.
 
     "첨부로 전달" 한 메일(message/rfc822)은 디코딩할 본문이 따로 없어 그 메일
     원문을 .eml 로 붙입니다. 빈 첨부는 뺍니다 -- 슬랙이 0바이트 파일을 받지 않아
@@ -193,8 +196,9 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
     for part in _leaves(message):
         if part is body:
             continue
-        if part.get_content_disposition() != "attachment" and (
-            part["Content-ID"] or part.get_content_maintype() == "text"
+        if (
+            part.get_content_disposition() != "attachment"
+            and part.get_content_maintype() == "text"
         ):
             continue
         if part.get_content_maintype() == "message":
@@ -262,13 +266,16 @@ def parse(raw: bytes) -> ParsedMail:
         from_header=from_header,
         from_address=from_address,
         reply_to_address=_address(_raw(message, "Reply-To")) or from_address,
-        to_addresses=[
-            address.lower()
-            for _, address in getaddresses(
-                [_text(_raw(message, "To")), _text(_raw(message, "Cc"))]
+        # From 과 같은 이유로 getaddresses 를 쓰지 않는다. 'Kim, J <a@b.com>' 이면
+        # 'kim' 을 주소로 읽고, 'John Doe [ACME] <a@b.com>' 이면 목록째 버린다.
+        to_addresses=list(
+            dict.fromkeys(
+                address.lower()
+                for address in BARE_ADDRESS.findall(
+                    f"{_raw(message, 'To')} {_raw(message, 'Cc')}"
+                )
             )
-            if address
-        ],
+        ),
         subject=_line(_decoded(_raw(message, "Subject"))),
         references_ids=list(dict.fromkeys(references)),
         body_text=_text(_body_text(message)),

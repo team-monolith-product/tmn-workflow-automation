@@ -6,6 +6,7 @@ SES v2 API 를 씁니다. v1 SendRawEmail 은 한 통에 10MB 까지라 첨부�
 """
 
 import os
+from functools import cache
 
 import boto3
 from botocore.config import Config
@@ -37,16 +38,23 @@ def send_mime(raw: bytes) -> dict:
     Returns:
         dict: SES 응답 (MessageId 포함)
     """
-    # 다시 보내지 않는다. 기본 설정은 타임아웃·5xx 에 같은 원문을 최대 5번 보내는데,
-    # SES 가 이미 받았는데 응답만 끊긴 것이면 같은 사람이 여러 번 받는다.
-    # 세션은 부를 때마다 따로 만든다 -- 작업 스레드에서 불리고, boto3 기본 세션은
-    # 여러 스레드가 동시에 클라이언트를 만들면 깨질 수 있다.
-    client = boto3.session.Session().client(
+    return _client().send_email(Content={"Raw": {"Data": raw}})
+
+
+@cache
+def _client():
+    """SES 클라이언트를 한 번만 만듭니다. 수백 명에게 보낼 때 통마다 만들지 않습니다.
+
+    다시 보내지 않는다. 기본 설정은 타임아웃·5xx 에 같은 원문을 최대 5번 보내는데,
+    SES 가 이미 받았는데 응답만 끊긴 것이면 같은 사람이 여러 번 받는다.
+    boto3 기본 세션은 여러 스레드가 동시에 클라이언트를 만들면 깨질 수 있어 세션을
+    따로 만든다. 만든 클라이언트는 여러 스레드가 함께 써도 된다.
+    """
+    return boto3.session.Session().client(
         "sesv2",
         region_name=os.environ.get("AWS_REGION", "ap-northeast-2"),
         config=Config(retries={"total_max_attempts": 1}),
     )
-    return client.send_email(Content={"Raw": {"Data": raw}})
 
 
 def rejected_code(error: BaseException) -> str | None:

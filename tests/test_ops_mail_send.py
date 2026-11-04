@@ -8,7 +8,7 @@ from api import ses
 from app import ops_mail
 from ops_mail_fakes import CHANNEL, FakeSlack, fake_db
 from service.ops_mail import draft as drafts
-from service.ops_mail import mime
+from service.ops_mail import mime, store
 
 
 def _slack_file(name: str, size: int = 100) -> dict:
@@ -50,12 +50,14 @@ def test_첨부가_너무_크면_초안을_막는다():
 
 
 def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():
-    target = {
-        "counterpart": "office@abc.kr",
-        "subject": "견적 문의",
-        "message_id": "<m2@abc.kr>",
-        "references_ids": ["<m1@abc.kr>"],
-    }
+    target = store.ReplyTarget(
+        counterpart="office@abc.kr",
+        mail=store.RepliedMail(
+            subject="견적 문의",
+            message_id="<m2@abc.kr>",
+            references_ids=["<m1@abc.kr>"],
+        ),
+    )
 
     # When : 상대 스레드에서 본문만 주거나, 다른 사람을 받는 사람으로 주면
     draft = drafts.make(
@@ -104,7 +106,6 @@ def test_스레드_밖에서_새_메일은_받는_사람과_제목이_있어야_
         body="안녕하세요",
         references_ids=[],
         thread_ts="ts-chat",
-        is_reply=False,
     )
 
 
@@ -142,7 +143,6 @@ def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypa
         body="자료 보내드립니다",
         references_ids=["<m2@abc.kr>"],
         thread_ts="ts-office",
-        is_reply=True,
         attachments=[
             drafts.SlackFile(
                 name="계획안.pdf", mimetype="application/pdf", size=4, url="u"
@@ -188,7 +188,6 @@ def _new_mail(recipients: list[str]) -> drafts.Draft:
         body="안녕하세요",
         references_ids=[],
         thread_ts="ts-chat",
-        is_reply=False,
     )
 
 
@@ -239,6 +238,31 @@ def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실
     assert "보내지 않은 1명: c@school.kr" in slack.updates[-1]["text"]
     assert [args[1] for args in recorded] == ["a@school.kr"]
     assert slack.posts == []
+
+
+def test_많은_사람에게_보내다_멈추면_보내지_않은_사람_명단을_파일로_올린다(monkeypatch):
+    recipients = [f"u{n}@school.kr" for n in range(15)]
+
+    def send(raw):
+        if mime.parse(raw).to_addresses == ["u2@school.kr"]:
+            raise TimeoutError
+        return {"MessageId": "s"}
+
+    monkeypatch.setattr(ops_mail, "send_mime", send)
+    monkeypatch.setattr(ops_mail, "_record", _fake_record([]))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d3"] = _new_mail(recipients)
+    slack = FakeSlack()
+
+    # When : 열다섯 명 중 세 번째에서 멈추면
+    with pytest.raises(TimeoutError):
+        _approve(app, slack, "d3")
+
+    # Then : 카드에 못 싣는 남은 열두 명 전체를 초안 스레드에 파일로 올린다
+    (upload,) = slack.uploads
+    assert upload["thread_ts"] == "ts-chat"
+    assert upload["content"].split("\n") == recipients[3:]
 
 
 def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파일로_올린다(monkeypatch):
@@ -309,12 +333,7 @@ def test_진행_표시가_실패해도_발송은_멈추지_않는다(monkeypatch
 
 def test_상대_스레드인데_받은_메일_기록이_없으면_새_메일로_넘어가지_않는다():
     # 스레드는 열렸는데 받은 메일 기록이 아직 없다(처리 중이거나 기록에 실패함)
-    target = {
-        "counterpart": "office@abc.kr",
-        "subject": None,
-        "message_id": None,
-        "references_ids": None,
-    }
+    target = store.ReplyTarget(counterpart="office@abc.kr", mail=None)
 
     # When : 그 스레드에서 다른 사람과 제목을 주고 초안을 만들면
     with pytest.raises(drafts.DraftProblem) as other:
@@ -444,7 +463,6 @@ def test_카드는_본문도_이스케이프해_실제로_나갈_글자를_보�
         body="팀모노리스 <ops@team-mono.com> & <!channel>",
         references_ids=[],
         thread_ts="ts",
-        is_reply=False,
     )
 
     # When : 카드 글을 만들면
@@ -552,11 +570,16 @@ def test_SES_는_다시_보내지_않는_클라이언트로_부른다(monkeypatc
             return _Client()
 
     monkeypatch.setattr(ses.boto3.session, "Session", _Session)
+    ses._client.cache_clear()
 
-    # When : 메일을 보내면
+    # When : 메일을 두 번 보내면
     ses.send_mime(b"raw")
+    ses.send_mime(b"raw")
+    ses._client.cache_clear()
 
-    # Then : 타임아웃·5xx 에 같은 원문을 다시 보내지 않게 한 번만 시도한다
+    # Then : 타임아웃·5xx 에 같은 원문을 다시 보내지 않게 한 번만 시도하고,
+    #        클라이언트는 한 번만 만든다
+    assert len(configs) == 1
     assert configs[0].retries == {"total_max_attempts": 1}
 
 

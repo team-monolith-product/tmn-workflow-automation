@@ -38,6 +38,29 @@ class OpsMailRow:
     received_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class RepliedMail:
+    """답장이 거는 받은 메일."""
+
+    subject: str
+    message_id: str
+    references_ids: list[str]
+
+
+@dataclass(frozen=True)
+class ReplyTarget:
+    """상대방 스레드의 상대와, 답장이 걸 받은 메일.
+
+    Attributes:
+        counterpart: 상대방 주소
+        mail: 그 상대에게서 마지막으로 받은 사람이 쓴 메일. 스레드는 열렸는데
+            아직 기록되지 않았으면(처리 중이거나 기록에 실패함) None
+    """
+
+    counterpart: str
+    mail: RepliedMail | None
+
+
 # 열 이름은 행 모양에서 딴다. 손으로 나열하면 필드를 추가했을 때 INSERT 가
 # 조용히 그 열을 빠뜨린다.
 COLUMNS = tuple(field.name for field in fields(OpsMailRow))
@@ -47,10 +70,6 @@ COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 # inbound.DELIVER_TIMEOUT 은 이 값에서 뺀 값이라 늘 이보다 짧다.
 MAX_ATTEMPTS = 3
 LEASE = timedelta(minutes=15)
-
-# 맡은 지 이만큼 지나도 끝나지 않은 원본은 횟수가 남아도 포기하고 알린다
-# (마지막으로 맡은 쪽이 죽었고, 정리 작업도 그동안 돌지 못한 경우).
-ABANDON_AFTER = timedelta(days=1)
 
 INSERT = f"""
 INSERT INTO ops_mail_message ({", ".join(COLUMNS)})
@@ -82,12 +101,11 @@ UPDATE ops_mail_inbox SET processed_at = now() WHERE ses_message_id = %s
 """
 
 # 끝나지 않았는데 더 다시 하지 않을 원본 중 아직 알리지 않은 것: 횟수를 다 썼고
-# 마지막으로 맡은 쪽도 끝내지 못했거나, ABANDON_AFTER 가 지났다.
+# 마지막으로 맡은 쪽도 끝내지 못했다.
 GIVEN_UP = f"""
-SELECT ses_message_id, s3_key, attempts, last_error FROM ops_mail_inbox i
+SELECT ses_message_id, s3_key, last_error FROM ops_mail_inbox i
 WHERE {_UNFINISHED}
-  AND i.claimed_at < now() - %(lease)s
-  AND (i.attempts >= {MAX_ATTEMPTS} OR i.claimed_at < now() - %(abandon)s)
+  AND i.attempts >= {MAX_ATTEMPTS} AND i.claimed_at < now() - %s
 """
 
 MARK_ALERTED = "UPDATE ops_mail_inbox SET alerted_at = now() WHERE ses_message_id = %s"
@@ -156,11 +174,11 @@ def given_up() -> list[dict[str, Any]]:
     """더 다시 처리하지 않는데 아직 알리지 않은 원본을 찾습니다.
 
     Returns:
-        list[dict[str, Any]]: ses_message_id, s3_key, attempts, 마지막으로 실패한
+        list[dict[str, Any]]: ses_message_id, s3_key, 마지막으로 실패한
             이유(last_error, 없을 수 있음)
     """
     with connect() as conn:
-        return fetch_all(conn, GIVEN_UP, {"lease": LEASE, "abandon": ABANDON_AFTER})
+        return fetch_all(conn, GIVEN_UP, (LEASE,))
 
 
 def fail(ses_message_id: str, error: str) -> None:
@@ -257,7 +275,7 @@ def sent_to(channel_id: str, counterpart: str) -> list[dict[str, Any]]:
         return fetch_all(conn, SENT_TO, (channel_id, counterpart))
 
 
-def reply_target(channel_id: str, thread_ts: str) -> dict[str, Any] | None:
+def reply_target(channel_id: str, thread_ts: str) -> ReplyTarget | None:
     """상대방 스레드라면 그 상대와, 답장이 걸 받은 메일을 찾습니다.
 
     Args:
@@ -265,13 +283,22 @@ def reply_target(channel_id: str, thread_ts: str) -> dict[str, Any] | None:
         thread_ts: 스레드 ts
 
     Returns:
-        dict[str, Any] | None: counterpart, subject, message_id, references_ids.
-            상대방 스레드가 아니면 None. 받은 메일이 아직 기록되지 않았으면
-            counterpart 말고는 None
+        ReplyTarget | None: 상대방 스레드가 아니면 None
     """
     with connect() as conn:
         rows = fetch_all(conn, REPLY_TARGET, (channel_id, thread_ts))
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    row = rows[0]
+    # LEFT JOIN 이라 받은 메일이 없으면 메일 쪽 열이 모두 NULL 이다.
+    mail = None
+    if row["message_id"] is not None:
+        mail = RepliedMail(
+            subject=row["subject"],
+            message_id=row["message_id"],
+            references_ids=row["references_ids"],
+        )
+    return ReplyTarget(counterpart=row["counterpart"], mail=mail)
 
 
 def insert(row: OpsMailRow) -> None:

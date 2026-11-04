@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from email.utils import getaddresses
 
 from service.ops_mail import mime
+from service.ops_mail.store import ReplyTarget
 
 # 첨부 크기 합의 상한. SES v2 는 한 통에 40MB 까지인데 base64 인코딩 뒤
 # 크기로 잰다. 인코딩하면 4/3 배가 되니 원본으로는 30MB 남짓이고, 본문과
@@ -40,7 +41,6 @@ class Draft:
         body: 본문
         references_ids: 답장이 거는 메일들의 Message-ID. 새 메일이면 비어 있습니다
         thread_ts: 초안을 부른 스레드. 카드가 여기 올라가고 [수정] 도 여기로 돌아옵니다
-        is_reply: 상대방 스레드에서 부른 답장이면 True
         attachments: 붙일 슬랙 파일
     """
 
@@ -49,14 +49,18 @@ class Draft:
     body: str
     references_ids: list[str]
     thread_ts: str
-    is_reply: bool
     attachments: list[SlackFile] = field(default_factory=list)
+
+    @property
+    def is_reply(self) -> bool:
+        """상대방 스레드에서 부른 답장이면 True. 답장만 받은 메일에 겁니다."""
+        return bool(self.references_ids)
 
 
 def make(
     *,
     thread_ts: str,
-    target: dict | None,
+    target: ReplyTarget | None,
     body: str,
     to: list[str],
     subject: str,
@@ -83,25 +87,24 @@ def make(
     # 상대방 스레드에서는 늘 그 상대에게만 보낸다. 메일 본문으로 받는 사람을
     # 바꾸게 하지 못하도록, 답장할 메일을 못 찾아도 새 메일로 넘어가지 않는다.
     if target:
-        counterpart = target["counterpart"]
+        counterpart = target.counterpart
         if recipients and recipients != [counterpart]:
             raise DraftProblem(
                 f"이 스레드는 {counterpart} 와의 메일 스레드라 받는 사람을"
                 " 바꿀 수 없습니다. 다른 사람에게는 채널에서 새 메일로 보내주세요."
             )
-        if target["message_id"] is None:
+        if target.mail is None:
             raise DraftProblem(
                 f"{counterpart} 에게서 받은 메일이 아직 기록되지 않아 답장을 만들 수"
                 " 없습니다. 잠시 뒤 다시 해 주세요."
             )
         return Draft(
             recipients=[counterpart],
-            subject=mime.reply_subject(target["subject"]),
+            subject=mime.reply_subject(target.mail.subject),
             body=body,
             # 마지막 것이 In-Reply-To 가 된다.
-            references_ids=[*target["references_ids"], target["message_id"]],
+            references_ids=[*target.mail.references_ids, target.mail.message_id],
             thread_ts=thread_ts,
-            is_reply=True,
         )
 
     if not recipients or not subject:
@@ -117,7 +120,6 @@ def make(
         body=body,
         references_ids=[],
         thread_ts=thread_ts,
-        is_reply=False,
     )
 
 

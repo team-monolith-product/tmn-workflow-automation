@@ -9,13 +9,14 @@ from ops_mail_fakes import parse_headers, raw_mail
 from service.ops_mail import mime
 
 
-def test_메일을_읽으면_텍스트_본문과_첨부만_꺼낸다():
-    # When : 텍스트·HTML 본문, 첨부, 본문 삽입 로고가 든 메일을 읽으면
+def test_메일을_읽으면_텍스트_본문과_첨부를_꺼낸다():
+    # When : 텍스트·HTML 본문, 첨부, 본문에 박힌 이미지가 든 메일을 읽으면
     mail = mime.parse(raw_mail())
 
-    # Then : 텍스트 본문과 진짜 첨부만 남고, 상대 주소는 Reply-To 를 소문자로 쓴다
+    # Then : 텍스트 본문이 남고, 본문에 박힌 이미지도 첨부로 꺼낸다(붙여 넣은
+    #        스크린샷이 이 모양이다). 상대 주소는 Reply-To 를 소문자로 쓴다
     assert mail.body_text == "견적 부탁드립니다"
-    assert [a.filename for a in mail.attachments] == ["계획안.pdf"]
+    assert [a.filename for a in mail.attachments] == ["계획안.pdf", "attachment-2"]
     assert mail.from_address == "kim@abc.kr"
     assert mail.reply_to_address == "office@abc.kr"
     assert mail.references_ids == ["<m0@abc.kr>", "<m1@abc.kr>"]
@@ -132,8 +133,10 @@ def test_보낸_사람_머리가_특이해도_주소를_읽고_못_읽으면_실
 
 
 def test_DB_와_답장을_깨뜨리는_머리와_본문을_미리_다듬는다():
-    # When : NUL 이 든 제목, 줄바꿈이 든 제목, 모르는 문자셋, 모양이 틀린 Message-ID 가 오면
+    # When : NUL 이 든 제목·주소·Message-ID, 줄바꿈이 든 제목, 모르는 문자셋,
+    #        모양이 틀린 Message-ID 가 오면
     nul = parse_headers("From: a@b.kr\nSubject: =?utf-8?b?YQBi?=", b"x\x00y")
+    nul_header = parse_headers("From: a\x00b@c.kr\nMessage-ID: <x\x00y@c>")
     newline = parse_headers("From: a@b.kr\nSubject: =?utf-8?b?bGluZTEKbGluZTI=?=")
     charset = parse_headers(
         "From: a@b.kr\nContent-Type: text/plain; charset=x-windows-949",
@@ -143,6 +146,7 @@ def test_DB_와_답장을_깨뜨리는_머리와_본문을_미리_다듬는다()
 
     # Then : NUL 은 빼고, 제목은 한 줄로, 본문은 읽을 수 있게, 메일은 끝까지 읽는다
     assert (nul.subject, nul.body_text) == ("ab", "xy")
+    assert (nul_header.from_address, nul_header.message_id) == ("ab@c.kr", "<xy@c>")
     assert newline.subject == "line1 line2"
     assert charset.body_text == "안녕하세요"
     assert odd_id.message_id == "<a@[b>"
@@ -252,3 +256,14 @@ def test_받은_시각은_맨_위_Received_헤더에서_읽고_Date_는_쓰지_�
     )
     assert broken.received_at is None
     assert missing.received_at is None
+
+
+def test_받는_사람_머리는_이름_모양이_이상해도_주소를_꺼낸다():
+    # When : 이름에 쉼표나 대괄호가 든 To·Cc 를 읽으면
+    mail = parse_headers(
+        "From: a@b.kr\nTo: John Doe [ACME] <x@acme.com>, Kim, J <Kim@abc.kr>"
+        "\nCc: ops@team-mono.com"
+    )
+
+    # Then : 이름은 버리고 주소만 소문자로, 한 번씩 남긴다
+    assert mail.to_addresses == ["x@acme.com", "kim@abc.kr", "ops@team-mono.com"]

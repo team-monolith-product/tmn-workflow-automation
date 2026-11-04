@@ -119,8 +119,8 @@ def test_끝내기가_실패하면_메일_기록도_남지_않는다(database, m
         assert fetch_all(conn, "SELECT * FROM ops_mail_message") == []
 
 
-def test_포기한_원본은_한_번만_알리고_하루가_지난_원본도_포기로_본다(database):
-    for ses_id in ("tried", "running", "old"):
+def test_포기한_원본은_한_번만_알리고_다시_맡지_않는다(database):
+    for ses_id in ("tried", "running"):
         store.claim(ses_id, f"ops/{ses_id}")
     # 세 번 맡아 끝내지 못한 원본
     for _ in range(2):
@@ -128,23 +128,23 @@ def test_포기한_원본은_한_번만_알리고_하루가_지난_원본도_포
         store.claim("tried", "ops/tried")
     store.fail("tried", "ValueError: 깨진 MIME")
     _age_claim("tried", "1 hour")
-    # 한 번만 맡았지만 하루가 지난 원본(그동안 정리 작업이 돌지 못함)
-    _age_claim("old", "2 days")
+    # 한 번만 맡고 오래 지난 원본은 횟수가 남아 정리 작업이 다시 맡는다
+    _age_claim("running", "2 days")
 
     # When : 포기한 원본을 찾고, 알렸다고 표시한 뒤 다시 찾으면
     given_up = store.given_up()
     for row in given_up:
         store.mark_alerted(row["ses_message_id"])
 
-    # Then : 처리 중인 원본은 빼고, 이유와 함께 한 번만 나온다
-    assert {
-        (r["ses_message_id"], r["attempts"], r["last_error"]) for r in given_up
-    } == {("tried", 3, "ValueError: 깨진 MIME"), ("old", 1, None)}
+    # Then : 횟수를 다 쓴 원본만 이유와 함께 한 번 나오고, 알린 원본은 정리 작업이
+    #        거르며 누가 다시 불러도 맡지 못한다
+    assert [(r["ses_message_id"], r["last_error"]) for r in given_up] == [
+        ("tried", "ValueError: 깨진 MIME")
+    ]
     assert store.given_up() == []
-    # 알린 원본은 정리 작업이 거르고, 누가 다시 불러도 맡지 못한다. "old" 는
-    # 횟수가 남았지만 포기를 알렸으니 다시 올리면 알림과 메일이 엇갈린다
-    assert store.settled(["tried", "old", "running"]) == {"tried", "old"}
-    assert store.claim("old", "ops/old") is None
+    assert store.settled(["tried", "running"]) == {"tried"}
+    assert store.claim("tried", "ops/tried") is None
+    assert store.claim("running", "ops/running") == 2
 
 
 def test_답장은_그_상대에게서_마지막으로_받은_사람이_쓴_메일에_건다(database):
@@ -166,10 +166,14 @@ def test_답장은_그_상대에게서_마지막으로_받은_사람이_쓴_메�
     target = store.reply_target(CHANNEL, "ts-office")
 
     # Then : 보낸 메일과 자동응답은 건너뛰고 사람이 보낸 마지막 메일에 건다
-    assert target["counterpart"] == "office@abc.kr"
-    assert target["subject"] == "견적 문의"
-    assert target["message_id"] == "<in-1@abc.kr>"
-    assert target["references_ids"] == ["<m0@abc.kr>"]
+    assert target == store.ReplyTarget(
+        counterpart="office@abc.kr",
+        mail=store.RepliedMail(
+            subject="견적 문의",
+            message_id="<in-1@abc.kr>",
+            references_ids=["<m0@abc.kr>"],
+        ),
+    )
 
 
 def test_나중에_다시_처리된_옛_메일보다_실제로_최근에_온_메일에_건다(database):
@@ -190,7 +194,7 @@ def test_나중에_다시_처리된_옛_메일보다_실제로_최근에_온_메
     target = store.reply_target(CHANNEL, "ts-office")
 
     # Then : 넣은 순서가 아니라 우리가 받은 순서로 가장 최근 메일에 건다
-    assert target["subject"] == "Re: 일정"
+    assert target.mail.subject == "Re: 일정"
 
 
 def test_상대방_스레드인데_받은_메일_기록이_없으면_상대만_돌려준다(database):
@@ -201,8 +205,7 @@ def test_상대방_스레드인데_받은_메일_기록이_없으면_상대만_�
     other = store.reply_target(CHANNEL, "ts-chat")
 
     # Then : 상대는 알려주되 답장할 메일은 없고, 메일 스레드가 아니면 None 이다
-    assert target["counterpart"] == "office@abc.kr"
-    assert target["message_id"] is None
+    assert target == store.ReplyTarget(counterpart="office@abc.kr", mail=None)
     assert other is None
 
 

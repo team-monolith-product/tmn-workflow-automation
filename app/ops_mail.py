@@ -555,6 +555,21 @@ async def _stop(
         + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
         + f"\n{_summary(draft)}",
     )
+    # 카드에는 앞의 몇 명만 보인다. 남은 사람에게 다시 보내려면 전체 명단이 있어야
+    # 하는데, 처음 올린 명단 파일에서 손으로 잘라내면 이미 받은 사람이 섞인다.
+    if len(left) > PREVIEW_RECIPIENTS:
+        try:
+            await client.files_upload_v2(
+                channel=channel,
+                thread_ts=draft.thread_ts,
+                content="\n".join(left),
+                filename=f"보내지않은사람_{len(left)}명.txt",
+                title=f"보내지 않은 {len(left)}명",
+            )
+        except Exception as error:
+            print(
+                f"ops 메일 남은 명단 올리기 실패 {channel} {ts} {type(error).__name__}"
+            )
 
 
 def _sending(sent: int, total: int) -> str:
