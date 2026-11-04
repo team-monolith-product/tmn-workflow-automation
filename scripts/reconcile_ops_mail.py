@@ -79,19 +79,21 @@ async def reconcile(dry_run: bool) -> None:
     # 횟수를 다 쓴 원본은 채널에 한 번 알린다. 안 알리면 메일이 조용히 사라진다.
     # 마지막 시도 중에 프로세스째 죽은 원본도 여기서 잡힌다. 알린 뒤에 표시해서,
     # 알리기가 실패하면 다음 번에 다시 알린다.
-    given_up = await store.run(store.given_up_keys)
+    given_up = await store.run(store.given_up)
     if dry_run:
-        for key in given_up:
-            print(f"[dry-run] 포기를 알릴 원본 {key}")
+        for row in given_up:
+            print(f"[dry-run] 포기를 알릴 원본 {row['s3_key']} {row['last_error']}")
         return
     if given_up:
         client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
         channel = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
-        for key in given_up:
+        for row in given_up:
+            key = row["s3_key"]
             # 하나를 못 알려도 나머지는 알린다. 못 알린 것은 다음 번에 다시 알린다.
             try:
                 await client.chat_postMessage(
-                    channel=channel, text=format_given_up(key, bucket)
+                    channel=channel,
+                    text=format_given_up(key, bucket, row["last_error"]),
                 )
             except Exception as error:
                 print(f"ops 메일 포기 알림 실패 {key} {type(error).__name__}")

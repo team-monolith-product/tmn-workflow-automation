@@ -90,11 +90,19 @@ def format_thread_root(counterpart: str, sent: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def format_given_up(s3_key: str, bucket: str) -> str:
-    """더 다시 처리하지 않는 원본을 알리는 메시지입니다."""
+def format_given_up(s3_key: str, bucket: str, error: str | None) -> str:
+    """더 다시 처리하지 않는 원본을 알리는 메시지입니다.
+
+    Args:
+        s3_key: 객체 키
+        bucket: 메일 원본 버킷
+        error: 마지막으로 실패한 이유. 처리 중에 프로세스가 죽었으면 없습니다.
+    """
+    reason = error or "처리 중에 서버가 멈춤"
     return (
-        f"⚠️ 받은 메일을 {store.MAX_ATTEMPTS}번 처리하지 못해 더 다시 하지 않습니다"
-        f" — 원본 s3://{bucket}/{s3_key}"
+        f"⚠️ 받은 메일을 {store.MAX_ATTEMPTS}번 처리하지 못해 더 다시 하지 않습니다\n"
+        f"이유: `{escape(reason)}`\n"
+        f"원본: s3://{bucket}/{s3_key}"
     )
 
 
@@ -133,9 +141,19 @@ async def process_object(bucket: str, key: str) -> None:
     if await store.run(store.claim, ses_message_id, key) is None:
         print(f"ops 메일 건너뜀(처리됐거나 처리 중) {key}")
         return
-    await asyncio.wait_for(
-        _deliver(bucket, key, ses_message_id), DELIVER_TIMEOUT.total_seconds()
-    )
+    try:
+        await asyncio.wait_for(
+            _deliver(bucket, key, ses_message_id), DELIVER_TIMEOUT.total_seconds()
+        )
+    except Exception as error:
+        # 횟수를 다 쓰면 정리 작업이 이 이유를 채널에 알린다. 남기기마저 실패해도
+        # 원래 실패를 가리지 않는다.
+        reason = f"{type(error).__name__}: {error}"[:500]
+        try:
+            await store.run(store.fail, ses_message_id, reason)
+        except Exception as store_error:
+            print(f"ops 메일 실패 이유 기록 실패 {key} {type(store_error).__name__}")
+        raise
 
 
 async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:

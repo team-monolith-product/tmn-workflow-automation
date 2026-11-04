@@ -71,14 +71,16 @@ UPDATE ops_mail_inbox SET processed_at = now() WHERE ses_message_id = %s
 """
 
 # 횟수를 다 썼고 마지막으로 맡은 쪽도 끝내지 못했는데 아직 알리지 않은 원본.
-GIVEN_UP_KEYS = f"""
-SELECT s3_key FROM ops_mail_inbox
+GIVEN_UP = f"""
+SELECT s3_key, last_error FROM ops_mail_inbox
 WHERE processed_at IS NULL AND alerted_at IS NULL
   AND attempts >= {MAX_ATTEMPTS}
   AND claimed_at < now() - interval '{LEASE}'
 """
 
 MARK_ALERTED = "UPDATE ops_mail_inbox SET alerted_at = now() WHERE s3_key = %s"
+
+FAIL = "UPDATE ops_mail_inbox SET last_error = %s WHERE ses_message_id = %s"
 
 # 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼다.
 SETTLED_KEYS = f"""
@@ -140,16 +142,28 @@ def settled_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
     return {row["s3_key"] for row in fetch_all(conn, SETTLED_KEYS, (keys,))}
 
 
-def given_up_keys(conn: psycopg.Connection) -> list[str]:
+def given_up(conn: psycopg.Connection) -> list[dict[str, Any]]:
     """더 다시 처리하지 않는데 아직 알리지 않은 원본을 찾습니다.
 
     Args:
         conn: 커넥션
 
     Returns:
-        list[str]: S3 객체 키
+        list[dict[str, Any]]: s3_key 와 마지막으로 실패한 이유(last_error, 없을 수 있음)
     """
-    return [row["s3_key"] for row in fetch_all(conn, GIVEN_UP_KEYS)]
+    return fetch_all(conn, GIVEN_UP)
+
+
+def fail(conn: psycopg.Connection, ses_message_id: str, error: str) -> None:
+    """원본 처리가 실패한 이유를 남깁니다.
+
+    Args:
+        conn: 커넥션
+        ses_message_id: SES 메시지 ID
+        error: 실패한 이유
+    """
+    with conn.cursor() as cur:
+        cur.execute(FAIL, (error, ses_message_id))
 
 
 def mark_alerted(conn: psycopg.Connection, s3_key: str) -> None:

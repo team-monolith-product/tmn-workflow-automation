@@ -431,7 +431,7 @@ def _reconcile(monkeypatch, objects, process, *, settled=(), given_up=()):
     async def run(fn, *args):
         if fn is reconcile_ops_mail.store.settled_keys:
             return set(settled)
-        if fn is reconcile_ops_mail.store.given_up_keys:
+        if fn is reconcile_ops_mail.store.given_up:
             return list(given_up)
         if fn is reconcile_ops_mail.store.mark_alerted:
             alerted.append(args[0])
@@ -455,13 +455,46 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
         raise AssertionError(key)
 
     # When : 횟수를 다 썼는데 아직 알리지 않은 원본이 있으면
-    alerted = _reconcile(monkeypatch, [], process, given_up=["ops/bad"])
+    alerted = _reconcile(
+        monkeypatch,
+        [],
+        process,
+        given_up=[
+            {"s3_key": "ops/bad", "last_error": "ValueError: 깨진 MIME"},
+            {"s3_key": "ops/died", "last_error": None},
+        ],
+    )
 
-    # Then : 더 다시 하지 않는다는 것과 원본 위치를 채널에 남기고, 알렸다고 표시한다
-    text = _FakeSlack.last.posts[0]["text"]
-    assert "더 다시 하지 않습니다" in text
-    assert "s3://bucket/ops/bad" in text
-    assert alerted == ["ops/bad"]
+    # Then : 더 다시 하지 않는다는 것과 이유, 원본 위치를 채널에 남기고, 알렸다고 표시한다.
+    #        이유가 없으면 처리 중에 서버가 멈춘 것이다
+    bad, died = (post["text"] for post in _FakeSlack.last.posts)
+    assert "더 다시 하지 않습니다" in bad
+    assert "ValueError: 깨진 MIME" in bad
+    assert "s3://bucket/ops/bad" in bad
+    assert "서버가 멈춤" in died
+    assert alerted == ["ops/bad", "ops/died"]
+
+
+def test_처리가_실패하면_이유를_남긴다(monkeypatch):
+    def broken(bucket, key):
+        raise ValueError("깨진 MIME")
+
+    failed = []
+    monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
+    monkeypatch.setattr(inbound, "get_object", broken)
+    _fake_db(monkeypatch, inbound, thread=None)
+    monkeypatch.setattr(
+        inbound.store,
+        "fail",
+        lambda conn, ses_id, error: failed.append((ses_id, error)),
+    )
+
+    # When : 원본을 처리하다 실패하면
+    with pytest.raises(ValueError):
+        asyncio.run(inbound.process_object("bucket", "ops/abc"))
+
+    # Then : 그 이유를 남겨 횟수를 다 쓰면 알림에 보이게 한다
+    assert failed == [("abc", "ValueError: 깨진 MIME")]
 
 
 def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():

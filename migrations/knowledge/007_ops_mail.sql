@@ -49,6 +49,8 @@ CREATE TABLE ops_mail_inbox (
     attempts        int         NOT NULL,
     claimed_at      timestamptz NOT NULL,
     processed_at    timestamptz,
+    -- 마지막으로 실패한 이유. 횟수를 다 쓰면 알림에 함께 보여준다.
+    last_error      text,
     alerted_at      timestamptz
 );
 
