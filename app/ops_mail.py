@@ -21,6 +21,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import os
 
 from urllib.parse import urlparse
 
@@ -31,7 +32,14 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from api.ses import rejected_code, send_mime
 from service.ops_mail import mime, store
-from service.ops_mail.draft import Draft, DraftProblem, make, megabytes, pick_files
+from service.ops_mail.draft import (
+    Draft,
+    DraftProblem,
+    SlackFile,
+    make,
+    megabytes,
+    pick_files,
+)
 from service.slack import escape
 
 APPROVE = "ops_mail_approve"
@@ -76,7 +84,7 @@ def _summary(draft: Draft) -> str:
     ]
     if draft.attachments:
         names = ", ".join(
-            f"{escape(file['name'])} ({megabytes(file['size'])})"
+            f"{escape(file.name)} ({megabytes(file.size)})"
             for file in draft.attachments
         )
         lines.append(f"첨부: {names}")
@@ -144,6 +152,27 @@ def _blocks(draft_id: str, draft: Draft) -> list[dict]:
     ]
 
 
+def get_ops_mail_tools(
+    client: AsyncWebClient, channel: str, thread_ts: str
+) -> list[StructuredTool]:
+    """메일 채널이면 메일 초안 도구를 돌려줍니다. 다른 채널이면 빈 목록입니다.
+
+    회사 이름으로 나가는 메일이라 메일 채널에서만 줍니다. 모든 답변이 이 함수를
+    지나므로 환경 변수가 빠져도 터지지 않게 get 으로 읽습니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+
+    Returns:
+        list[StructuredTool]: [초안 도구] 또는 []
+    """
+    if channel != os.environ.get("OPS_MAIL_SLACK_CHANNEL_ID"):
+        return []
+    return [get_draft_ops_mail_tool(client, channel, thread_ts)]
+
+
 def get_draft_ops_mail_tool(
     client: AsyncWebClient, channel: str, thread_ts: str
 ) -> StructuredTool:
@@ -185,7 +214,7 @@ def get_draft_ops_mail_tool(
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        target = await store.run(store.reply_target, channel, thread_ts)
+        target = await asyncio.to_thread(store.reply_target, channel, thread_ts)
         try:
             draft = make(
                 thread_ts=thread_ts,
@@ -236,20 +265,70 @@ def get_draft_ops_mail_tool(
     return draft_ops_mail
 
 
-async def _download(token: str, file: dict) -> mime.Attachment:
+async def _download(token: str, file: SlackFile) -> mime.Attachment:
     """슬랙에 올라온 파일을 내려받습니다. 봇 토큰에 files:read 가 있어야 합니다."""
     # 봇 토큰을 싣고 가니 슬랙 파일 서버가 아니면 가지 않는다.
-    if urlparse(file["url"]).hostname != "files.slack.com":
-        raise ValueError(f"슬랙 파일이 아닙니다: {file['name']}")
+    if urlparse(file.url).hostname != "files.slack.com":
+        raise ValueError(f"슬랙 파일이 아닙니다: {file.name}")
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            file["url"], headers={"Authorization": f"Bearer {token}"}
+            file.url, headers={"Authorization": f"Bearer {token}"}
         ) as response:
             response.raise_for_status()
             data = await response.read()
-    return mime.Attachment(
-        filename=file["name"], content_type=file["mimetype"], data=data
-    )
+    return mime.Attachment(filename=file.name, content_type=file.mimetype, data=data)
+
+
+class _Stopped(Exception):
+    """한 사람에게 보내다 멈춘 이유. 카드에 남길 문구를 담고, 원래 오류를 __cause__ 로 둡니다."""
+
+    def __init__(self, problem: str):
+        super().__init__(problem)
+        self.problem = problem
+
+
+async def _send_one(
+    draft: Draft,
+    recipient: str,
+    attachments: list[mime.Attachment],
+    channel: str,
+    user: str,
+) -> None:
+    """한 사람에게 보내고 남깁니다. 단계마다 무엇이 확실한지가 달라 따로 잡습니다.
+
+    Raises:
+        _Stopped: 원문 만들기(안 나감), 발송(SES 가 거절했으면 안 나감, 그 밖에는
+            나갔는지 모름), 기록(나감) 중 하나가 실패
+    """
+    who = escape(recipient)
+    try:
+        message_id, raw = await asyncio.to_thread(_build, draft, recipient, attachments)
+    except Exception as error:
+        raise _Stopped(
+            f"{who} 에게는 안 나갔습니다. ({type(error).__name__})"
+        ) from error
+
+    try:
+        ses_id = (await asyncio.to_thread(send_mime, raw))["MessageId"]
+    except Exception as error:
+        if code := rejected_code(error):
+            raise _Stopped(f"{who} 에게는 안 나갔습니다 ({code}).") from error
+        # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면 다시 보내고,
+        # 같은 사람이 두 번 받는다.
+        raise _Stopped(
+            f"{who} 는 발송 여부를 모릅니다 — 받는 쪽에 확인하세요."
+            f" ({type(error).__name__})"
+        ) from error
+    print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
+
+    # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때 나간 메일의
+    # 기록이 빠진다.
+    try:
+        await _record(draft, recipient, channel, message_id, ses_id, user)
+    except Exception as error:
+        raise _Stopped(
+            f"{who} 에게는 보냈지만 기록하지 못했습니다. ({type(error).__name__})"
+        ) from error
 
 
 def _build(
@@ -279,7 +358,7 @@ async def _record(
     user: str,
 ) -> None:
     """보낸 메일 한 통을 남깁니다."""
-    await store.run(
+    await asyncio.to_thread(
         store.insert,
         store.OpsMailRow(
             direction="out",
@@ -375,27 +454,11 @@ def register_ops_mail_handlers(app, revise=None):
         for sent, recipient in enumerate(draft.recipients):
             # 무엇이 실패하든 나머지는 보내지 않는다. 같은 원인으로 줄줄이 실패하거나
             # 같은 상태를 늘린다. 카드에는 어디서 멈췄는지 남긴다.
-            problem = f"{escape(recipient)} 에게는 안 나갔습니다."
             try:
-                message_id, raw = await asyncio.to_thread(
-                    _build, draft, recipient, attachments
-                )
-                # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
-                # 다시 보내고, 같은 사람이 두 번 받는다.
-                problem = f"{escape(recipient)} 는 발송 여부를 모릅니다 — 받는 쪽에 확인하세요."
-                ses_id = (await asyncio.to_thread(send_mime, raw))["MessageId"]
-                print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
-                # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
-                # 나간 메일의 기록이 빠진다.
-                problem = f"{escape(recipient)} 에게는 보냈지만 기록하지 못했습니다."
-                await _record(draft, recipient, channel, message_id, ses_id, user)
-            except Exception as error:
-                if code := rejected_code(error):
-                    problem = f"{escape(recipient)} 에게는 안 나갔습니다 ({code})."
-                else:
-                    problem = f"{problem} ({type(error).__name__})"
-                await _stop(client, channel, ts, draft, sent, problem)
-                raise
+                await _send_one(draft, recipient, attachments, channel, user)
+            except _Stopped as stopped:
+                await _stop(client, channel, ts, draft, sent, stopped.problem)
+                raise stopped.__cause__
             if (sent + 1) % PROGRESS_EVERY == 0 and sent + 1 < total:
                 await _note(client, channel, ts, _sending(sent + 1, total))
 

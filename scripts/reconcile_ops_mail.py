@@ -69,7 +69,9 @@ async def reconcile(dry_run: bool) -> None:
     ]
     # 끝났거나 횟수를 다 쓴 것은 뺀다. 남은 것을 맡을지는 process_object 가 정한다
     # -- 다른 쪽이 처리 중이면 거기서 건너뛴다.
-    settled = await store.run(store.settled, [_ses_message_id(key) for key in keys])
+    settled = await asyncio.to_thread(
+        store.settled, [_ses_message_id(key) for key in keys]
+    )
     missing = [key for key in keys if _ses_message_id(key) not in settled]
     print(f"ops 메일 원본 {len(keys)}개 중 미처리 {len(missing)}개")
 
@@ -86,7 +88,7 @@ async def reconcile(dry_run: bool) -> None:
     # 횟수를 다 쓴 원본은 채널에 한 번 알린다. 안 알리면 메일이 조용히 사라진다.
     # 마지막 시도 중에 프로세스째 죽은 원본도 여기서 잡힌다. 알린 뒤에 표시해서,
     # 알리기가 실패하면 다음 번에 다시 알린다.
-    given_up = await store.run(store.given_up)
+    given_up = await asyncio.to_thread(store.given_up)
     if dry_run:
         for row in given_up:
             print(f"[dry-run] 포기를 알릴 원본 {row['s3_key']} {row['last_error']}")
@@ -101,7 +103,7 @@ async def reconcile(dry_run: bool) -> None:
                     channel=channel,
                     text=format_given_up(row, bucket),
                 )
-                await store.run(store.mark_alerted, row["ses_message_id"])
+                await asyncio.to_thread(store.mark_alerted, row["ses_message_id"])
             except Exception as error:
                 print(f"ops 메일 포기 알림 실패 {row['s3_key']} {type(error).__name__}")
 

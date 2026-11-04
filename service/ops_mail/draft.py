@@ -21,6 +21,16 @@ class DraftProblem(ValueError):
 
 
 @dataclass(frozen=True)
+class SlackFile:
+    """스레드에 올라온 슬랙 파일 하나. [보내기] 를 누를 때 내려받아 붙입니다."""
+
+    name: str
+    mimetype: str
+    size: int
+    url: str
+
+
+@dataclass(frozen=True)
 class Draft:
     """[보내기] 를 기다리는 메일.
 
@@ -31,7 +41,7 @@ class Draft:
         references_ids: 답장이 거는 메일들의 Message-ID. 새 메일이면 비어 있습니다
         thread_ts: 초안을 부른 스레드. 카드가 여기 올라가고 [수정] 도 여기로 돌아옵니다
         is_reply: 상대방 스레드에서 부른 답장이면 True
-        attachments: 슬랙 파일 (name, mimetype, size, url)
+        attachments: 붙일 슬랙 파일
     """
 
     recipients: list[str]
@@ -40,7 +50,7 @@ class Draft:
     references_ids: list[str]
     thread_ts: str
     is_reply: bool
-    attachments: list[dict] = field(default_factory=list)
+    attachments: list[SlackFile] = field(default_factory=list)
 
 
 def make(
@@ -141,7 +151,7 @@ def megabytes(size: int) -> str:
     return f"{size / 1024 / 1024:.1f}MB"
 
 
-def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
+def pick_files(messages: list[dict], names: list[str]) -> list[SlackFile]:
     """스레드에 올라온 파일 중 붙일 것을 이름으로 고릅니다.
 
     에이전트가 파일을 지어내지 못하게 스레드에 실제로 있는 파일만 받습니다.
@@ -152,7 +162,7 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
         names: 붙일 파일 이름
 
     Returns:
-        list[dict]: 고른 파일
+        list[SlackFile]: 고른 파일
 
     Raises:
         DraftProblem: 없는 이름이 있거나 너무 큼
@@ -182,11 +192,11 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
             f"{megabytes(MAX_ATTACHMENT_BYTES)} 까지입니다."
         )
     return [
-        {
-            "name": file["name"],
-            "mimetype": file.get("mimetype", ""),
-            "size": file.get("size", 0),
-            "url": file["url"],
-        }
+        SlackFile(
+            name=file["name"],
+            mimetype=file.get("mimetype", ""),
+            size=file.get("size", 0),
+            url=file["url"],
+        )
         for file in picked
     ]

@@ -1,0 +1,581 @@
+"""ops@ 메일 초안과 발송 카드 테스트"""
+
+import asyncio
+
+import pytest
+
+from api import ses
+from app import ops_mail
+from ops_mail_fakes import CHANNEL, FakeSlack, fake_db
+from service.ops_mail import draft as drafts
+from service.ops_mail import mime
+
+
+def _slack_file(name: str, size: int = 100) -> dict:
+    return {
+        "name": name,
+        "mimetype": "application/pdf",
+        "size": size,
+        "url_private_download": f"https://files.slack.com/{name}",
+    }
+
+
+def test_첨부는_스레드에_올라온_파일에서만_고른다():
+    messages = [
+        {"text": "자료", "files": [_slack_file("계획안.pdf", 1)]},
+        {"text": "고친 것", "files": [_slack_file("계획안.pdf", 2)]},
+        {"text": "답장해줘"},
+    ]
+
+    # When : 있는 파일과 없는 파일을 고르면
+    picked = drafts.pick_files(messages, ["계획안.pdf"])
+    with pytest.raises(drafts.DraftProblem) as missing:
+        drafts.pick_files(messages, ["견적서.pdf"])
+
+    # Then : 있는 것은 나중에 올린 것을 쓰고, 없으면 스레드의 파일 목록을 알려준다
+    assert [(f.name, f.size) for f in picked] == [("계획안.pdf", 2)]
+    assert "견적서.pdf 파일이 없습니다" in str(missing.value)
+    assert "계획안.pdf" in str(missing.value)
+
+
+def test_첨부가_너무_크면_초안을_막는다():
+    messages = [{"files": [_slack_file("큰파일.zip", drafts.MAX_ATTACHMENT_BYTES + 1)]}]
+
+    # When : 상한을 넘는 파일을 고르면
+    with pytest.raises(drafts.DraftProblem) as result:
+        drafts.pick_files(messages, ["큰파일.zip"])
+
+    # Then : 보낼 수 없다고 한다
+    assert "보낼 수 없습니다" in str(result.value)
+
+
+def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():
+    target = {
+        "counterpart": "office@abc.kr",
+        "subject": "견적 문의",
+        "message_id": "<m2@abc.kr>",
+        "references_ids": ["<m1@abc.kr>"],
+    }
+
+    # When : 상대 스레드에서 본문만 주거나, 다른 사람을 받는 사람으로 주면
+    draft = drafts.make(
+        thread_ts="ts-office", target=target, body="안내드립니다", to=[], subject=""
+    )
+    with pytest.raises(drafts.DraftProblem) as other:
+        drafts.make(
+            thread_ts="ts-office",
+            target=target,
+            body="안내드립니다",
+            to=["x@y.kr"],
+            subject="",
+        )
+
+    # Then : 그 상대에게 마지막 메일에 거는 답장이 되고, 받는 사람은 바꿀 수 없다
+    assert draft.is_reply
+    assert draft.recipients == ["office@abc.kr"]
+    assert draft.subject == "Re: 견적 문의"
+    assert draft.references_ids == ["<m1@abc.kr>", "<m2@abc.kr>"]
+    assert "바꿀 수 없습니다" in str(other.value)
+
+
+def test_스레드_밖에서_새_메일은_받는_사람과_제목이_있어야_한다():
+    # When : 메일 스레드가 아닌 곳에서 제목 없이 부르거나, 같은 주소를 겹쳐 주면
+    with pytest.raises(drafts.DraftProblem) as missing:
+        drafts.make(
+            thread_ts="ts-chat",
+            target=None,
+            body="안녕하세요",
+            to=["a@b.kr"],
+            subject="",
+        )
+    draft = drafts.make(
+        thread_ts="ts-chat",
+        target=None,
+        body="안녕하세요",
+        to=["A@B.kr", "c@d.kr", "a@b.kr"],
+        subject="안내",
+    )
+
+    # Then : 제목을 달라고 하고, 다 있으면 받는 사람을 소문자로 한 번씩만 둔 새 메일이 된다
+    assert "제목" in str(missing.value)
+    assert draft == drafts.Draft(
+        recipients=["a@b.kr", "c@d.kr"],
+        subject="안내",
+        body="안녕하세요",
+        references_ids=[],
+        thread_ts="ts-chat",
+        is_reply=False,
+    )
+
+
+class _FakeApp:
+    def __init__(self):
+        self.handlers = {}
+
+    def action(self, action_id):
+        def register(handler):
+            self.handlers[action_id] = handler
+            return handler
+
+        return register
+
+    view = action
+
+
+def test_보내기를_누르면_첨부를_내려받아_함께_보낸다(monkeypatch):
+    sent = []
+    recorded = []
+
+    async def download(token, file):
+        return mime.Attachment(file.name, file.mimetype, b"%PDF")
+
+    monkeypatch.setattr(ops_mail, "_download", download)
+    monkeypatch.setattr(
+        ops_mail, "send_mime", lambda raw: sent.append(raw) or {"MessageId": "s"}
+    )
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d1"] = drafts.Draft(
+        recipients=["office@abc.kr"],
+        subject="Re: 견적 문의",
+        body="자료 보내드립니다",
+        references_ids=["<m2@abc.kr>"],
+        thread_ts="ts-office",
+        is_reply=True,
+        attachments=[
+            drafts.SlackFile(
+                name="계획안.pdf", mimetype="application/pdf", size=4, url="u"
+            )
+        ],
+    )
+    slack = FakeSlack()
+
+    async def ack():
+        pass
+
+    # When : 카드의 [보내기] 를 누르면
+    asyncio.run(
+        app.handlers[ops_mail.APPROVE](
+            ack=ack,
+            body={
+                "actions": [{"value": "d1"}],
+                "container": {"channel_id": CHANNEL, "message_ts": "ts-card"},
+                "user": {"id": "U1"},
+            },
+            client=slack,
+        )
+    )
+
+    # Then : 첨부가 든 메일이 한 통 나가고, 카드에 첨부가 보이고, 기록이 남는다
+    assert len(sent) == 1
+    assert [a.filename for a in mime.parse(sent[0]).attachments] == ["계획안.pdf"]
+    assert "첨부: 계획안.pdf" in slack.updates[-1]["text"]
+    assert len(recorded) == 1
+
+
+def _fake_record(recorded: list):
+    async def record(*args):
+        recorded.append(args)
+
+    return record
+
+
+def _new_mail(recipients: list[str]) -> drafts.Draft:
+    return drafts.Draft(
+        recipients=recipients,
+        subject="안내",
+        body="안녕하세요",
+        references_ids=[],
+        thread_ts="ts-chat",
+        is_reply=False,
+    )
+
+
+def _approve(app, slack, draft_id: str) -> None:
+    async def ack():
+        pass
+
+    asyncio.run(
+        app.handlers[ops_mail.APPROVE](
+            ack=ack,
+            body={
+                "actions": [{"value": draft_id}],
+                "container": {"channel_id": CHANNEL, "message_ts": "ts-card"},
+                "user": {"id": "U1"},
+            },
+            client=slack,
+        )
+    )
+
+
+def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실패하면_멈춘다(monkeypatch):
+    sent = []
+    recorded = []
+
+    def send(raw):
+        to = mime.parse(raw).to_addresses
+        if to == ["b@school.kr"]:
+            raise TimeoutError
+        sent.append(to)
+        return {"MessageId": "s"}
+
+    monkeypatch.setattr(ops_mail, "send_mime", send)
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d2"] = _new_mail(["a@school.kr", "b@school.kr", "c@school.kr"])
+    slack = FakeSlack()
+
+    # When : 세 명 중 두 번째에게 보내다 타임아웃이 나면
+    with pytest.raises(TimeoutError):
+        _approve(app, slack, "d2")
+
+    # Then : 첫 번째만 혼자 받은 메일로 나가고, 세 번째는 보내지 않으며,
+    #        카드에 누가 받았고 누가 모르는지 남기고, 나간 것만 기록하며,
+    #        상대별 스레드에는 아무것도 올리지 않는다
+    assert sent == [["a@school.kr"]]
+    assert "b@school.kr 는 발송 여부를 모릅니다" in slack.updates[-1]["text"]
+    assert "보내지 않은 1명: c@school.kr" in slack.updates[-1]["text"]
+    assert [args[1] for args in recorded] == ["a@school.kr"]
+    assert slack.posts == []
+
+
+def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파일로_올린다(monkeypatch):
+    fake_db(monkeypatch, ops_mail, thread=None)
+    slack = FakeSlack()
+    draft_ops_mail = ops_mail.get_draft_ops_mail_tool(slack, CHANNEL, "ts-chat")
+    recipients = [f"school{i}@abc.kr" for i in range(12)]
+
+    # When : 받는 사람 12명으로 새 메일 초안을 만들면
+    answer = asyncio.run(
+        draft_ops_mail.coroutine(body="안내드립니다", to=recipients, subject="안내")
+    )
+
+    # Then : 카드 한 장에 인원수와 앞쪽 10명만 보이고, 12명 전체 명단은 파일로 올라간다
+    card = slack.posts[0]["blocks"][0]["text"]["text"]
+    assert len(slack.posts) == 1
+    assert "*12명*" in card and "외 2명" in card
+    assert slack.uploads[0]["file_uploads"][0]["content"].splitlines() == recipients
+    assert "12명" in answer
+
+
+def test_본문이_길면_카드에는_앞부분만_싣고_전체는_파일로_올린다(monkeypatch):
+    fake_db(monkeypatch, ops_mail, thread=None)
+    slack = FakeSlack()
+    draft_ops_mail = ops_mail.get_draft_ops_mail_tool(slack, CHANNEL, "ts-chat")
+    body = "가" * 4000
+
+    # When : 카드 한도(3000자)를 넘는 본문으로 초안을 만들면
+    asyncio.run(draft_ops_mail.coroutine(body=body, to=["a@b.kr"], subject="안내"))
+
+    # Then : 카드는 한도 안에 들어가고, 본문 전체는 파일로 올라간다
+    card = slack.posts[0]["blocks"][0]["text"]["text"]
+    assert len(card) < 3000
+    assert slack.uploads[0]["file_uploads"] == [
+        {"content": body, "filename": "본문.txt", "title": "본문"}
+    ]
+
+
+def test_진행_표시가_실패해도_발송은_멈추지_않는다(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(ops_mail, "PROGRESS_EVERY", 1)
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: {"MessageId": "s"})
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d4"] = _new_mail(["a@school.kr", "b@school.kr", "c@school.kr"])
+    slack = FakeSlack()
+    updates = slack.updates
+
+    async def chat_update(**kwargs):
+        if "보내는 중… 1/" in kwargs["text"]:
+            raise TimeoutError
+        updates.append(kwargs)
+
+    slack.chat_update = chat_update
+
+    # When : 중간 진행 표시가 실패하면
+    _approve(app, slack, "d4")
+
+    # Then : 세 명 모두에게 나가고 카드는 결과로 바뀐다
+    assert [args[1] for args in recorded] == [
+        "a@school.kr",
+        "b@school.kr",
+        "c@school.kr",
+    ]
+    assert "3명에게 보냈습니다" in updates[-1]["text"]
+
+
+def test_상대_스레드인데_받은_메일_기록이_없으면_새_메일로_넘어가지_않는다():
+    # 스레드는 열렸는데 받은 메일 기록이 아직 없다(처리 중이거나 기록에 실패함)
+    target = {
+        "counterpart": "office@abc.kr",
+        "subject": None,
+        "message_id": None,
+        "references_ids": None,
+    }
+
+    # When : 그 스레드에서 다른 사람과 제목을 주고 초안을 만들면
+    with pytest.raises(drafts.DraftProblem) as other:
+        drafts.make(
+            thread_ts="ts-office", target=target, body="x", to=["x@y.kr"], subject="s"
+        )
+    with pytest.raises(drafts.DraftProblem) as unrecorded:
+        drafts.make(thread_ts="ts-office", target=target, body="x", to=[], subject="")
+
+    # Then : 받는 사람은 여전히 그 상대로 고정되고, 기록이 생길 때까지 답장도 막는다
+    assert "바꿀 수 없습니다" in str(other.value)
+    assert "아직 기록되지 않아" in str(unrecorded.value)
+
+
+def test_보낸_뒤_기록이_실패하면_멈추고_카드에_남긴다(monkeypatch):
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: {"MessageId": "s"})
+
+    async def record(*args):
+        raise ConnectionError
+
+    monkeypatch.setattr(ops_mail, "_record", record)
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d3"] = _new_mail(["a@school.kr", "b@school.kr"])
+    slack = FakeSlack()
+
+    # When : 첫 번째에게 보낸 뒤 기록이 실패하면
+    with pytest.raises(ConnectionError):
+        _approve(app, slack, "d3")
+
+    # Then : 카드가 "보내는 중" 에 멈추지 않고, 보냈지만 기록이 없다는 것과
+    #        보내지 않은 사람을 남긴다
+    text = slack.updates[-1]["text"]
+    assert "a@school.kr 에게는 보냈지만 기록하지 못했습니다" in text
+    assert "보내지 않은 1명: b@school.kr" in text
+
+
+def test_받는_사람_한_칸에는_주소_하나만_받는다():
+    def make(to, subject="안내"):
+        return drafts.make(
+            thread_ts="ts-chat", target=None, body="안녕하세요", to=to, subject=subject
+        )
+
+    # When / Then : 한 칸에 여럿, 주소 아닌 것, 줄바꿈 제목은 막고 이름 붙은 주소는 주소만 쓴다
+    for bad in (
+        ["a@b.kr, c@d.kr"],
+        ["@"],
+        ["a@b"],
+        ["a b@c.kr"],
+        ["a@b..kr"],
+        ["홍길동@회사.kr"],
+    ):
+        with pytest.raises(drafts.DraftProblem):
+            make(bad)
+    with pytest.raises(drafts.DraftProblem):
+        make(["a@b.kr"], subject="안내\nBcc: x@y.kr")
+    assert make(["김선생 <Kim@ABC.kr>"]).recipients == ["kim@abc.kr"]
+
+
+def test_SES가_받지_않았다고_답하면_안_나갔다고_카드에_남긴다(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    def send(raw):
+        raise ClientError({"Error": {"Code": "TooManyRequestsException"}}, "SendEmail")
+
+    monkeypatch.setattr(ops_mail, "send_mime", send)
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d5"] = _new_mail(["a@school.kr", "b@school.kr"])
+    slack = FakeSlack()
+
+    # When : SES 가 보내기 한도로 거절하면
+    with pytest.raises(ClientError):
+        _approve(app, slack, "d5")
+
+    # Then : 발송 여부를 모른다고 하지 않고 안 나갔다고 남긴다
+    text = slack.updates[-1]["text"]
+    assert "a@school.kr 에게는 안 나갔습니다 (TooManyRequestsException)" in text
+    assert ses.rejected_code(ValueError()) is None
+
+
+def test_스레드의_지운_파일이나_외부_파일은_첨부_후보에서_뺀다():
+    messages = [
+        {"files": [{"id": "F1", "mode": "tombstone"}]},
+        {
+            "files": [
+                {
+                    "name": "링크.pdf",
+                    "mode": "external",
+                    "is_external": True,
+                    "url_private": "https://docs.google.com/d/abc",
+                    "url_private_download": "https://docs.google.com/d/abc",
+                }
+            ]
+        },
+        {"files": [_slack_file("계획안.pdf")]},
+    ]
+
+    # When : 지운 파일과 외부 파일이 섞인 스레드에서 고르면
+    picked = drafts.pick_files(messages, ["계획안.pdf"])
+    with pytest.raises(drafts.DraftProblem) as external:
+        drafts.pick_files(messages, ["링크.pdf"])
+
+    # Then : 터지지 않고 슬랙에 올라간 파일만 고른다. 외부 파일은 봇 토큰을 실어
+    #        슬랙 밖으로 내려받게 되므로 후보에 없다
+    assert [f.url for f in picked] == ["https://files.slack.com/계획안.pdf"]
+    assert "링크.pdf 파일이 없습니다" in str(external.value)
+
+
+def test_슬랙_밖_주소의_파일은_내려받지_않는다():
+    # When / Then : 슬랙 파일 서버가 아닌 주소면 봇 토큰을 싣고 가지 않는다
+    with pytest.raises(ValueError):
+        asyncio.run(
+            ops_mail._download(
+                "xoxb-secret",
+                drafts.SlackFile(
+                    name="a.pdf", mimetype="", size=0, url="https://evil.kr/a.pdf"
+                ),
+            )
+        )
+
+
+def test_카드는_본문도_이스케이프해_실제로_나갈_글자를_보여준다():
+    draft = drafts.Draft(
+        recipients=["a@b.kr"],
+        subject="안내",
+        body="팀모노리스 <ops@team-mono.com> & <!channel>",
+        references_ids=[],
+        thread_ts="ts",
+        is_reply=False,
+    )
+
+    # When : 카드 글을 만들면
+    summary = ops_mail._summary(draft)
+
+    # Then : 슬랙 문법으로 읽히지 않게 바꾼다
+    assert "&lt;ops@team-mono.com&gt; &amp; &lt;!channel&gt;" in summary
+    assert "<!channel>" not in summary
+
+
+def test_원문을_만들다_실패하면_안_나갔다고_남기고_SES_를_부르지_않는다(monkeypatch):
+    called = []
+
+    def build(draft, recipient, attachments):
+        raise ValueError("bad header")
+
+    monkeypatch.setattr(ops_mail, "_build", build)
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: called.append(raw))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d6"] = _new_mail(["a@school.kr", "b@school.kr"])
+    slack = FakeSlack()
+
+    # When : 원문을 만들다 실패하면
+    with pytest.raises(ValueError):
+        _approve(app, slack, "d6")
+
+    # Then : 발송 여부를 모른다고 하지 않고 안 나갔다고 남긴다
+    assert called == []
+    assert "a@school.kr 에게는 안 나갔습니다. (ValueError)" in slack.updates[-1]["text"]
+
+
+def test_버튼을_못_걷으면_초안을_되돌려_다시_누를_수_있게_한다(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: sent.append(raw))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d7"] = _new_mail(["a@school.kr"])
+    slack = FakeSlack()
+
+    async def chat_update(**kwargs):
+        raise ConnectionError
+
+    slack.chat_update = chat_update
+
+    # When : [보내기] 를 눌렀는데 카드의 버튼을 걷지 못하면
+    with pytest.raises(ConnectionError):
+        _approve(app, slack, "d7")
+
+    # Then : 아무것도 보내지 않고 초안을 되돌린다
+    assert sent == []
+    assert "d7" in ops_mail._DRAFTS
+    ops_mail._DRAFTS.pop("d7")
+
+
+def test_다_보낸_뒤_카드를_못_고쳐도_실패로_올리지_않는다(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: {"MessageId": "s"})
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d8"] = _new_mail(["a@school.kr"])
+    slack = FakeSlack()
+    updates = slack.updates
+
+    async def chat_update(**kwargs):
+        if "보냈습니다" in kwargs["text"]:
+            raise TimeoutError
+        updates.append(kwargs)
+
+    slack.chat_update = chat_update
+
+    # When : 메일은 다 나갔는데 결과 카드로 고치다 실패하면
+    _approve(app, slack, "d8")
+
+    # Then : 던지지 않고(다시 보내게 만들지 않고), 기록은 남아 있다
+    assert [args[1] for args in recorded] == ["a@school.kr"]
+
+
+def test_처리됐거나_만료된_카드의_버튼은_누른_사람에게만_알린다():
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    slack = FakeSlack()
+
+    # When : 초안이 없는 카드의 [보내기] 를 누르면
+    _approve(app, slack, "gone")
+
+    # Then : 카드는 건드리지 않고 누른 사람에게만 알린다
+    assert slack.updates == []
+    assert slack.ephemerals[0]["user"] == "U1"
+    assert "이미 처리됐거나 만료됐습니다" in slack.ephemerals[0]["text"]
+
+
+def test_SES_는_다시_보내지_않는_클라이언트로_부른다(monkeypatch):
+    configs = []
+
+    class _Session:
+        def client(self, name, region_name, config):
+            configs.append(config)
+
+            class _Client:
+                def send_email(self, Content):
+                    return {"MessageId": "s"}
+
+            return _Client()
+
+    monkeypatch.setattr(ses.boto3.session, "Session", _Session)
+
+    # When : 메일을 보내면
+    ses.send_mime(b"raw")
+
+    # Then : 타임아웃·5xx 에 같은 원문을 다시 보내지 않게 한 번만 시도한다
+    assert configs[0].retries == {"total_max_attempts": 1}
+
+
+def test_보내기를_두_번_눌러도_한_번만_보낸다(monkeypatch):
+    sent = []
+    recorded = []
+    monkeypatch.setattr(
+        ops_mail, "send_mime", lambda raw: sent.append(raw) or {"MessageId": "s"}
+    )
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d9"] = _new_mail(["a@school.kr"])
+    slack = FakeSlack()
+
+    # When : 같은 카드의 [보내기] 를 두 번 누르면
+    _approve(app, slack, "d9")
+    _approve(app, slack, "d9")
+
+    # Then : 한 번만 나가고, 두 번째 누른 사람에게는 이미 처리됐다고 알린다
+    assert len(sent) == 1
+    assert len(slack.ephemerals) == 1

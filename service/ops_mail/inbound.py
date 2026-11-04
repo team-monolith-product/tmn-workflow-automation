@@ -125,11 +125,11 @@ async def _open_thread(client: AsyncWebClient, channel: str, counterpart: str) -
     둘 다 스레드를 연다. 등록은 하나만 되니, 진 쪽은 자기가 연 것을 지우고
     이긴 스레드를 씁니다.
     """
-    sent = await store.run(store.sent_to, channel, counterpart)
+    sent = await asyncio.to_thread(store.sent_to, channel, counterpart)
     response = await client.chat_postMessage(
         channel=channel, text=format_thread_root(counterpart, sent)
     )
-    thread_ts = await store.run(
+    thread_ts = await asyncio.to_thread(
         store.claim_thread, channel, counterpart, response["ts"]
     )
     if thread_ts != response["ts"]:
@@ -150,7 +150,7 @@ async def process_object(bucket: str, key: str) -> None:
         key: 객체 키. 끝이 SES 메시지 ID 입니다.
     """
     ses_message_id = key.rsplit("/", 1)[-1]
-    if await store.run(store.claim, ses_message_id, key) is None:
+    if await asyncio.to_thread(store.claim, ses_message_id, key) is None:
         print(f"ops 메일 건너뜀(처리됐거나 처리 중) {key}")
         return
     try:
@@ -162,7 +162,7 @@ async def process_object(bucket: str, key: str) -> None:
         # 원래 실패를 가리지 않는다.
         reason = f"{type(error).__name__}: {error}"[:500]
         try:
-            await store.run(store.fail, ses_message_id, reason)
+            await asyncio.to_thread(store.fail, ses_message_id, reason)
         except Exception as store_error:
             print(f"ops 메일 실패 이유 기록 실패 {key} {type(store_error).__name__}")
         raise
@@ -181,7 +181,7 @@ async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
     thread_ts = None
     if counterpart:
         client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
-        thread_ts = await store.run(store.find_thread, channel_id, counterpart)
+        thread_ts = await asyncio.to_thread(store.find_thread, channel_id, counterpart)
         # 자동응답은 이미 있는 스레드에만 단다. 없으면 기록만 남긴다.
         if thread_ts is None and not mail.auto_reply:
             thread_ts = await _open_thread(client, channel_id, counterpart)
@@ -201,7 +201,7 @@ async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
                     ],
                 )
 
-    await store.run(
+    await asyncio.to_thread(
         store.finish,
         store.OpsMailRow(
             direction="in",
