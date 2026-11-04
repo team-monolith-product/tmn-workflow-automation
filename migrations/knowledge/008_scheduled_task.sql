@@ -5,11 +5,12 @@
 -- 꺼내 예약한 스레드에서 그 요청(prompt)을 다시 에이전트에게 맡긴다.
 --
 -- 상태: pending → running → done | failed. pending 일 때만 canceled 로 바꿀 수 있다.
--- 반복 예약(cron)은 실행이 끝나면 다음 시각으로 run_at 을 옮기고 pending 으로
--- 돌아온다 -- 실패해도 다음 회차는 돈다. until 을 넘으면 done 이 된다.
+-- 반복 예약(cron)은 회차를 꺼내는 자리에서 run_at 을 다음 회차로 옮기고 pending 에
+-- 둔다 -- 회차가 도중에 죽거나 실패해도 다음 회차는 돌고, 도는 중에도 취소된다.
+-- 한 번짜리와 until 직전 마지막 회차만 running 을 거친다.
 --
 -- running 에서 프로세스가 죽으면 그대로 남는다 -- 다시 돌리지 않는다. 에이전트가
--- 채널 공지나 문자·메일 초안처럼 밖에 흔적을 남기므로 두 번 도는 쪽이 더 나쁘다.
+-- 채널 공지나 노션 페이지처럼 밖에 흔적을 남기므로 두 번 도는 쪽이 더 나쁘다.
 
 CREATE TABLE scheduled_task (
     id          bigserial   PRIMARY KEY,

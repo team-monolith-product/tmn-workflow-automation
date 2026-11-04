@@ -5,7 +5,7 @@ SCHEDULED_TASK_TEST_DATABASE_URL 이 없으면 건너뜁니다. 테스트마다 
 """
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,6 +16,11 @@ from psycopg.conninfo import make_conninfo
 
 from service import scheduled_task as store
 from service.db import connect, fetch_one
+from service.scheduled_task import KST, Schedule
+
+# 수요일 오전 10시
+NOW = datetime(2026, 11, 4, 10, 0, tzinfo=KST)
+WEEKLY = "0 16 * * wed"
 
 
 @pytest.fixture
@@ -45,76 +50,99 @@ def database(monkeypatch):
             )
 
 
-def _status(task_id: int) -> str:
+def _create(prompt: str, schedule: Schedule, channel: str = "C1"):
+    return store.create(channel, "1.1", "U1", prompt, schedule)
+
+
+def _row(task_id: int) -> dict:
     with connect() as conn:
         return fetch_one(
-            conn, "SELECT status FROM scheduled_task WHERE id = %s", (task_id,)
-        )["status"]
+            conn,
+            "SELECT status, run_at, last_error FROM scheduled_task WHERE id = %s",
+            (task_id,),
+        )
 
 
-def test_시각이_된_대기_예약만_한_번_맡고_끝내면_done_이_된다(database):
-    now = datetime.now(UTC)
-    due = store.create("C1", "1.1", "U1", "지금 할 일", now - timedelta(minutes=1))
-    later = store.create("C1", "1.1", "U1", "나중 할 일", now + timedelta(hours=1))
+def test_한_번짜리는_시각이_되면_한_번만_맡고_끝내면_done_이_된다(database):
+    due = _create("지금", Schedule(NOW - timedelta(minutes=1)))
+    later = _create("나중", Schedule(NOW + timedelta(hours=1)))
 
-    # When : 두 번 연달아 맡고, 맡은 예약을 끝내면
-    first = store.claim_due()
-    second = store.claim_due()
-    store.finish(due.id, None, None)
+    # When : 두 번 연달아 꺼내고, 꺼낸 회차를 끝내면
+    first = store.claim_due(NOW)
+    second = store.claim_due(NOW)
+    store.finish(due.id, None)
 
-    # Then : 시각이 된 것만 한 번 맡고, 나중 것은 대기로 남는다
-    assert [t.id for t in first] == [due.id]
+    # Then : 시각이 된 것만 한 번 꺼내고, 나중 것은 대기로 남는다
+    assert [(c.task.id, c.next_run_at) for c in first] == [(due.id, None)]
     assert second == []
-    assert _status(due.id) == "done"
-    assert _status(later.id) == "pending"
+    assert _row(due.id)["status"] == "done"
+    assert _row(later.id)["status"] == "pending"
+
+
+def test_반복은_꺼내는_자리에서_다음_회차로_옮겨_대기하고_도는_중에도_취소된다(
+    database,
+):
+    task = _create("매주 공지", Schedule(NOW - timedelta(minutes=1), WEEKLY))
+
+    # When : 회차를 꺼내면
+    [claim] = store.claim_due(NOW)
+
+    # Then : 이번 회차 시각은 그대로 받고, 표는 오늘 16시로 옮겨져 대기 중이다
+    next_wednesday = datetime(2026, 11, 4, 16, 0, tzinfo=KST)
+    assert claim.task.run_at == NOW - timedelta(minutes=1)
+    assert claim.next_run_at == next_wednesday
+    assert _row(task.id) == {
+        "status": "pending",
+        "run_at": next_wednesday,
+        "last_error": None,
+    }
+
+    # When : 회차가 도는 중에 취소하고, 그 뒤 회차가 실패로 끝나면
+    canceled = store.cancel(task.id, "C1")
+    store.finish(task.id, "RuntimeError('x')")
+
+    # Then : 취소가 되고, 끝난 회차가 취소를 되돌리지 않는다
+    assert canceled is True
+    assert _row(task.id)["status"] == "canceled"
+
+
+def test_반복의_마지막_회차는_running_을_거쳐_끝난다(database):
+    task = _create(
+        "마지막",
+        Schedule(NOW - timedelta(minutes=1), WEEKLY, NOW + timedelta(hours=1)),
+    )
+
+    # When : until 전에 다음 회차가 없는 회차를 꺼내 실패로 끝내면
+    [claim] = store.claim_due(NOW)
+    store.finish(task.id, "RuntimeError('x')")
+
+    # Then : 다음 회차 없이 failed 로 끝난다
+    assert claim.next_run_at is None
+    assert _row(task.id)["status"] == "failed"
 
 
 def test_취소는_같은_채널의_대기_예약만_된다(database):
-    run_at = datetime.now(UTC) + timedelta(hours=1)
-    task = store.create("C1", "1.1", "U1", "할 일", run_at)
-    ran = store.create("C1", "1.1", "U1", "할 일", run_at)
-    with connect() as conn:
-        conn.execute(
-            "UPDATE scheduled_task SET status = 'running' WHERE id = %s", (ran.id,)
-        )
+    task = _create("할 일", Schedule(NOW + timedelta(hours=1)))
 
-    # When : 다른 채널에서, 이미 실행 중인 것을, 같은 채널에서 취소하면
+    # When : 다른 채널에서 취소한 뒤 같은 채널에서 취소하면
     other_channel = store.cancel(task.id, "C2")
-    running = store.cancel(ran.id, "C1")
     same_channel = store.cancel(task.id, "C1")
 
-    # Then : 같은 채널의 대기 예약만 취소되고 목록에서 빠진다
-    assert (other_channel, running, same_channel) == (False, False, True)
+    # Then : 같은 채널에서만 취소되고 목록에서 빠진다
+    assert (other_channel, same_channel) == (False, True)
     assert store.list_pending("C1") == []
 
 
 def test_채널의_대기_예약이_한도면_더_넣지_않는다(database, monkeypatch):
     monkeypatch.setattr(store, "MAX_PENDING_PER_CHANNEL", 2)
-    run_at = datetime.now(UTC) + timedelta(hours=1)
+    schedule = Schedule(NOW + timedelta(hours=1))
 
-    # When : 한도만큼 넣은 뒤 하나 더 넣으면
-    store.create("C1", "1.1", "U1", "a", run_at)
-    store.create("C1", "1.1", "U1", "b", run_at)
-    over = store.create("C1", "1.1", "U1", "c", run_at)
-    other = store.create("C2", "1.1", "U1", "d", run_at)
+    # When : 한도만큼 넣은 뒤 하나 더 넣고, 다른 채널에도 넣으면
+    _create("a", schedule)
+    _create("b", schedule)
+    over = _create("c", schedule)
+    other = _create("d", schedule, channel="C2")
 
     # Then : 그 채널에는 들어가지 않고, 다른 채널은 영향이 없다
     assert over is None
     assert other is not None
-
-
-def test_반복_회차를_끝내면_다음_시각으로_옮겨_다시_대기한다(database):
-    now = datetime.now(UTC)
-    task = store.create(
-        "C1", "1.1", "U1", "매주 공지", now - timedelta(minutes=1), "0 16 * * wed"
-    )
-    store.claim_due()
-
-    # When : 실패한 회차를 다음 주 시각으로 끝내면
-    next_week = now + timedelta(days=7)
-    store.finish(task.id, "RuntimeError('x')", next_week)
-
-    # Then : 다시 대기로 돌아가 목록에 다음 시각과 함께 보이고, 지금은 맡지 않는다
-    assert _status(task.id) == "pending"
-    assert [t.run_at for t in store.list_pending("C1")] == [next_week]
-    assert store.claim_due() == []
