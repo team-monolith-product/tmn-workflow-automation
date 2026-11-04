@@ -88,9 +88,14 @@ async def reconcile(dry_run: bool) -> None:
         client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
         channel = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
         for key in given_up:
-            await client.chat_postMessage(
-                channel=channel, text=format_given_up(key, bucket)
-            )
+            # 하나를 못 알려도 나머지는 알린다. 못 알린 것은 다음 번에 다시 알린다.
+            try:
+                await client.chat_postMessage(
+                    channel=channel, text=format_given_up(key, bucket)
+                )
+            except Exception as error:
+                print(f"ops 메일 포기 알림 실패 {key} {type(error).__name__}")
+                continue
             await store.run(store.mark_alerted, key)
 
 

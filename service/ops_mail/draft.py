@@ -126,10 +126,18 @@ def _address(entry: str) -> str:
     parsed = [address for _, address in getaddresses([entry]) if address]
     if len(parsed) != 1 or "\n" in entry or "\r" in entry:
         raise DraftProblem(f"받는 사람 하나에 주소 하나만 넣어주세요: {entry}")
-    local, _, domain = parsed[0].rpartition("@")
-    if not local or "." not in domain:
+    # SES 가 받지 않는 주소를 여기서 막는다. 보낼 때 걸리면 그 뒤 사람들이 다 밀린다.
+    address = parsed[0]
+    local, _, domain = address.rpartition("@")
+    if (
+        not local
+        or "." not in domain
+        or ".." in domain
+        or not address.isascii()
+        or any(char.isspace() for char in address)
+    ):
         raise DraftProblem(f"메일 주소가 아닙니다: {entry}")
-    return parsed[0].lower()
+    return address.lower()
 
 
 def megabytes(size: int) -> str:

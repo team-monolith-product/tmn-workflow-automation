@@ -879,7 +879,14 @@ def test_받는_사람_한_칸에는_주소_하나만_받는다():
         )
 
     # When / Then : 한 칸에 여럿, 주소 아닌 것, 줄바꿈 제목은 막고 이름 붙은 주소는 주소만 쓴다
-    for bad in (["a@b.kr, c@d.kr"], ["@"], ["a@b"]):
+    for bad in (
+        ["a@b.kr, c@d.kr"],
+        ["@"],
+        ["a@b"],
+        ["a b@c.kr"],
+        ["a@b..kr"],
+        ["홍길동@회사.kr"],
+    ):
         with pytest.raises(drafts.DraftProblem):
             make(bad)
     with pytest.raises(drafts.DraftProblem):
