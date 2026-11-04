@@ -109,6 +109,31 @@ def test_숨긴_탭은_카탈로그에_안_싣는다(monkeypatch):
     assert [tab["title"] for tab in tabs] == ["명단"]
 
 
+def test_링크가_가리킨_숨긴_탭은_목록에_넣는다(monkeypatch):
+    # 사람이 링크로 직접 보여 준 탭이다. 다른 숨긴 탭은 여전히 뺀다.
+    class FakeHTTP:
+        def fetch_sheet_metadata(self, spreadsheet_id, params=None):
+            return {
+                "sheets": [
+                    {"properties": {"sheetId": 0, "title": "명단"}},
+                    {"properties": {"sheetId": 9, "title": "연락처", "hidden": True}},
+                    {"properties": {"sheetId": 8, "title": "대외비", "hidden": True}},
+                ]
+            }
+
+        def values_batch_get(self, spreadsheet_id, ranges, params=None):
+            return {"valueRanges": [{"values": [["성함"]]} for _ in ranges]}
+
+    class FakeClient:
+        http_client = FakeHTTP()
+
+    monkeypatch.setattr(google_sheets, "_get_client", lambda account=None: FakeClient())
+
+    tabs = google_sheets.get_worksheet_headers("X", reveal=9)
+
+    assert [tab["title"] for tab in tabs] == ["명단", "연락처"]
+
+
 def test_안내문에_숨긴_탭_이름을_넣지_않는다():
     # 오타 한 번에 감춰 둔 탭 이름이 딸려 나가면 안 된다. 묻지도 않았는데
     # 봇이 먼저 알려 주는 셈이다.

@@ -187,7 +187,7 @@ def get_worksheet_values(
     return tab.get_all_values(value_render_option=value_render_option)
 
 
-def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
+def get_worksheet_headers(spreadsheet_id: str, reveal: int | None = None) -> list[dict]:
     """탭마다 머리행(1행)만 읽는다. 시트 하나에 **READS_PER_SHEET 회**가 든다.
 
     탭 수만큼 values.get 을 부르면 시트 하나에 1+N 회가 든다. 94개 시트에
@@ -204,6 +204,7 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
 
     Args:
         spreadsheet_id: 스프레드시트 ID
+        reveal: 숨김이어도 넣을 탭의 gid. 사람이 링크로 직접 가리킨 탭이다
 
     Returns:
         list[dict]: id·title·header
@@ -214,10 +215,12 @@ def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
     # 나가면 안 된다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.
     # **막는 것은 발견이지 읽기가 아니다** -- 링크나 gid 를 직접 준 사람에게는
     # _worksheet 이 그대로 열어 준다. 그건 의도적 접근이라 그대로 둔다.
+    # reveal 도 같은 이유다 -- 링크가 가리킨 탭은 사람이 이미 보여 준 것이다.
     tabs = [
         entry["properties"]
         for entry in metadata.get("sheets", [])
         if not entry["properties"].get("hidden")
+        or entry["properties"]["sheetId"] == reveal
     ]
     if not tabs:
         return []

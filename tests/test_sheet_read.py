@@ -360,7 +360,7 @@ def test_탭_목록은_탭마다_이름과_머리행을_준다(monkeypatch):
     monkeypatch.setattr(
         read,
         "get_worksheet_headers",
-        lambda spreadsheet_id: [
+        lambda spreadsheet_id, reveal=None: [
             {
                 "id": 239647898,
                 "title": "학교별 운영 현황",
@@ -378,6 +378,42 @@ def test_탭_목록은_탭마다_이름과_머리행을_준다(monkeypatch):
         {"tab": "학교별 운영 현황", "gid": 239647898, "header": ["순번", "학교명"]},
         {"tab": "[학교DB]_운영확인", "gid": 5, "header": ["학교명", "담당교사"]},
     ]
+
+
+def test_탭_목록의_머리행은_read_sheet_의_키와_같다(monkeypatch):
+    # 여기서 본 이름으로 row[...] 를 꺼내므로, 줄 나눔·겹친 이름이 다르면 KeyError 다.
+    raw = ["휴대전화\n번호", "성함", "성함", ""]
+    monkeypatch.setattr(
+        read,
+        "get_worksheet_headers",
+        lambda spreadsheet_id, reveal=None: [{"id": 0, "title": "명단", "header": raw}],
+    )
+    monkeypatch.setattr(
+        read,
+        "get_worksheet_values",
+        lambda *args, **kwargs: [raw, ["010", "가", "", "x"]],
+    )
+
+    [tab] = read.list_tabs("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd")
+    [row] = read.read_sheet("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd")
+
+    assert tab["header"] == ["휴대전화 번호", "성함", "성함_2", "열4"]
+    assert tab["header"] == list(row)
+
+
+def test_탭_목록은_링크가_가리킨_탭을_숨김이어도_넣게_한다(monkeypatch):
+    # 링크의 탭이 목록에서 빠지면 에이전트는 다른 탭만 읽고 "없다" 고 답한다.
+    asked = {}
+
+    def headers(spreadsheet_id, reveal=None):
+        asked["reveal"] = reveal
+        return []
+
+    monkeypatch.setattr(read, "get_worksheet_headers", headers)
+
+    read.list_tabs("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit#gid=77")
+
+    assert asked["reveal"] == 77
 
 
 def test_탭_목록도_시트가_모호하면_고르지_않는다(monkeypatch):

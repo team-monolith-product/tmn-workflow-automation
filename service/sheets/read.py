@@ -329,6 +329,13 @@ def list_tabs(sheet: str) -> list[dict]:
 
     숨긴 탭은 빠집니다(get_worksheet_headers). 사람이 감춘 탭을 찾아 주는 것은
     이 함수의 일이 아닙니다 -- 그 탭이 필요하면 사람이 이름이나 gid 를 줍니다.
+    **링크가 가리킨 탭만은 숨김이어도 넣습니다.** 사람이 이미 보여 준 탭이고,
+    빼면 에이전트가 목록에 있는 탭만 읽고 "없다" 고 답합니다 -- 이 함수가
+    막으려던 바로 그 사고입니다.
+
+    **머리행은 read_sheet 가 돌려주는 키와 같은 이름입니다.** 셀 안 줄 나눔은
+    공백이 되고, 겹친 이름은 번호가 붙습니다(성함_2). 원본을 주면 여기서 본
+    이름으로 row[...] 를 꺼내다 KeyError 가 나거나 다른 열을 읽습니다.
 
     Args:
         sheet: 시트 링크·ID 또는 이름 일부
@@ -343,7 +350,15 @@ def list_tabs(sheet: str) -> list[dict]:
     if found.sheet is None:
         raise ValueError(locate.render_candidates(found.candidates))
 
+    tabs = get_worksheet_headers(
+        found.sheet.spreadsheet_id, reveal=found.sheet.worksheet_id
+    )
     return [
-        {"tab": tab["title"], "gid": tab["id"], "header": tab["header"]}
-        for tab in get_worksheet_headers(found.sheet.spreadsheet_id)
+        {
+            "tab": tab["title"],
+            "gid": tab["id"],
+            # 빈 탭은 머리행이 [] 다. 아무 열도 없으니 그대로 둔다.
+            "header": unique_header([_clean(cell) for cell in tab["header"]]),
+        }
+        for tab in tabs
     ]
