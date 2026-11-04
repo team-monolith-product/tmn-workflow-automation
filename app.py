@@ -11,12 +11,13 @@ from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
 from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
-from app.general import get_draft_revise, register_general_handlers
+from app.general import get_thread_agent, register_general_handlers
 from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
 from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
 from app.ops_mail import register_ops_mail_handlers
+from app.scheduled_task import run_due_tasks
 from app.sms import register_sms_handlers
 from service.db import get_dsn
 from scheduler import start_scheduler
@@ -62,8 +63,8 @@ register_knowledge_middleware(app)
 # 발송 승인 버튼. 초안은 도구가 올리고, 실제 발송은 이 핸들러가 한다.
 # [수정] 피드백은 초안을 쓴 에이전트에게 되돌린다 — 콜백을 여기서 주입하는 것은
 # 에이전트 진입점을 아는 곳이 여기뿐이고, sms 가 general 을 부르면 순환하기 때문이다.
-register_sms_handlers(app, revise=get_draft_revise(app))
-register_ops_mail_handlers(app, revise=get_draft_revise(app))
+register_sms_handlers(app, revise=get_thread_agent(app))
+register_ops_mail_handlers(app, revise=get_thread_agent(app))
 register_contents_handlers(app_contents)
 register_data_handlers(app_data)
 register_justin_handlers(app_justin)
@@ -75,7 +76,16 @@ async def main():
     get_dsn()
 
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
-    start_scheduler()
+    scheduler = start_scheduler()
+    # 로봇에게 예약한 작업. 실행에 대표 봇이 필요해 config.yaml 이 아니라 여기서 건다.
+    scheduler.add_job(
+        run_due_tasks,
+        "interval",
+        minutes=1,
+        args=[get_thread_agent(app), app.client],
+        id="run_scheduled_tasks",
+        name="run_scheduled_tasks",
+    )
 
     # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
     handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
