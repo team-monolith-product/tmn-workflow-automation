@@ -189,6 +189,14 @@ scheduled_jobs:
       minute: "*/30"
     business_day_only: false
 
+  # 웹훅 처리 중 실패해 S3 에만 남은 ops@ 받은 메일을 다시 처리한다.
+  - name: reconcile_ops_mail
+    module: scripts.reconcile_ops_mail
+    function: main
+    cron:
+      minute: "*/10"
+    business_day_only: false
+
   - name: validate_customer_reports
     module: scripts.validate_customer_reports
     function: main

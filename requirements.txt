@@ -13,6 +13,7 @@ langgraph
 langchain-google-community
 tavily-python
 beautifulsoup4
+cryptography
 lxml
 aiohttp
 browser-use

@@ -14,6 +14,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
+from .ops_mail import get_ops_mail_tools
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
 from .tools.athena_tools import get_execute_athena_query_tool
@@ -228,6 +229,7 @@ async def _build_tools(
         + get_knowledge_channel_tools(client, channel)
         + get_knowledge_query_tools(client, user_id)
         + [draft_sms]
+        + get_ops_mail_tools(client, channel, thread_ts)
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
         # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
         + [
@@ -250,8 +252,8 @@ async def _build_tools(
     )
 
 
-def get_sms_revise(app):
-    """문자 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
+def get_draft_revise(app):
+    """문자·메일 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
 
     카드의 [수정] 은 모달로 피드백만 받습니다. 그 피드백을 스레드의 다음
     질문처럼 다시 태워야 에이전트가 앞의 대화(수신자·문안·의도)를 그대로 두고
@@ -272,7 +274,7 @@ def get_sms_revise(app):
             await app.client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
-                text=payload.get("text", "문자 초안을 다시 썼습니다"),
+                text=payload.get("text", "초안을 다시 썼습니다"),
                 **{k: v for k, v in payload.items() if k != "text"},
             )
 
