@@ -115,40 +115,39 @@ async def _open_thread(client: AsyncWebClient, channel: str, counterpart: str) -
 async def process_object(bucket: str, key: str) -> None:
     """S3 에 저장된 받은 메일 하나를 슬랙에 올리고 남깁니다.
 
-    슬랙에 올리기 전에 행을 넣어 자리를 잡습니다. SNS 가 같은 알림을 두 번 보내도,
-    정리 작업이 같은 원본을 다시 집어도 한쪽만 올립니다. 올리다 실패하면 정리 작업이
-    다시 맡고, 몇 번 넘게 실패하면 더 올리지 않습니다.
+    원본을 읽기 전에 자리를 잡습니다. SNS 가 같은 알림을 두 번 보내도, 정리 작업이
+    같은 원본을 다시 집어도 동시에 둘이 올리지 않습니다. 실패하면 정리 작업이 다시
+    맡습니다 -- 메일은 올렸는데 첨부에서 실패했다면 다시 맡을 때 메일이 한 번 더
+    올라갑니다. 마지막 시도까지 실패하면 채널에 원본 위치를 남깁니다.
 
     Args:
         bucket: 메일 원본 버킷
         key: 객체 키. 끝이 SES 메시지 ID 입니다.
     """
-    raw = await asyncio.to_thread(get_object, bucket, key)
-    # 첨부 디코딩과 HTML 파싱이 무거워 이벤트 루프에서 돌리지 않는다.
-    mail = await asyncio.to_thread(mime.parse, raw)
-
-    channel_id = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
-    counterpart = mail.reply_to_address
-    ses_message_id = key.rsplit("/", 1)[-1]
-    row = store.OpsMailRow(
-        direction="in",
-        message_id=mail.message_id,
-        ses_message_id=ses_message_id,
-        counterpart=counterpart,
-        from_address=mail.from_address,
-        to_addresses=mail.to_addresses,
-        subject=mail.subject,
-        body_text=mail.body_text,
-        references_ids=mail.references_ids,
-        s3_key=key,
-        channel_id=channel_id,
-        sent_by=None,
-    )
-    if not await store.run(store.claim, row):
+    attempt = await store.run(store.claim, key.rsplit("/", 1)[-1], key)
+    if attempt is None:
         print(f"ops 메일 건너뜀(처리됐거나 처리 중) {key}")
         return
 
+    channel_id = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
     client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    try:
+        await _deliver(client, channel_id, bucket, key)
+    except Exception as error:
+        if attempt >= store.MAX_ATTEMPTS:
+            await _give_up(client, channel_id, bucket, key, error)
+        raise
+
+
+async def _deliver(
+    client: AsyncWebClient, channel_id: str, bucket: str, key: str
+) -> None:
+    """원본을 읽어 상대방 스레드에 올리고, 다 올리면 남깁니다."""
+    raw = await asyncio.to_thread(get_object, bucket, key)
+    # 첨부 디코딩과 HTML 파싱이 무거워 이벤트 루프에서 돌리지 않는다.
+    mail = await asyncio.to_thread(mime.parse, raw)
+    counterpart = mail.reply_to_address
+
     thread_ts = await store.run(store.find_thread, channel_id, counterpart)
     # 자동응답은 이미 있는 스레드에만 단다. 없으면 기록만 남긴다.
     if thread_ts is None and not mail.auto_reply:
@@ -170,8 +169,41 @@ async def process_object(bucket: str, key: str) -> None:
                 ],
             )
 
-    await store.run(store.mark_processed, ses_message_id)
+    await store.run(
+        store.finish,
+        store.OpsMailRow(
+            direction="in",
+            message_id=mail.message_id,
+            ses_message_id=key.rsplit("/", 1)[-1],
+            counterpart=counterpart,
+            from_address=mail.from_address,
+            to_addresses=mail.to_addresses,
+            subject=mail.subject,
+            body_text=mail.body_text,
+            references_ids=mail.references_ids,
+            s3_key=key,
+            channel_id=channel_id,
+            sent_by=None,
+        ),
+    )
     print(f"ops 메일 수신 {counterpart} {mail.message_id} → {thread_ts}")
+
+
+async def _give_up(
+    client: AsyncWebClient, channel_id: str, bucket: str, key: str, error: Exception
+) -> None:
+    """더 다시 하지 않는 메일을 채널에 알립니다. 안 알리면 메일이 조용히 사라진다.
+
+    알리기마저 실패하면 로그만 남깁니다. 원래 실패를 가리지 않기 위해서입니다.
+    """
+    text = (
+        f"⚠️ 받은 메일을 {store.MAX_ATTEMPTS}번 처리하지 못해 더 다시 하지 않습니다"
+        f" ({type(error).__name__}) — 원본 s3://{bucket}/{key}"
+    )
+    try:
+        await client.chat_postMessage(channel=channel_id, text=text)
+    except Exception as notify_error:
+        print(f"ops 메일 포기 알림 실패 {key} {type(notify_error).__name__}")
 
 
 @router.post("/ops-mail/sns")

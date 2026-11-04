@@ -2,7 +2,8 @@
 ops@ 메일 기록을 읽고 씁니다.
 
 메일 한 통은 ops_mail_message 한 행이고, 상대방 하나에 슬랙 스레드 하나는
-ops_mail_thread 한 행입니다. 메일은 스레드를 모릅니다 -- 스레드는 상대방 주소로
+ops_mail_thread 한 행입니다. S3 에 들어온 받은 메일 원본의 처리 상태는
+ops_mail_inbox 에 따로 둡니다. 메일은 스레드를 모릅니다 -- 스레드는 상대방 주소로
 찾습니다. 그래서 스레드가 열리기 전에 보낸 메일도, 열린 뒤에 채널에서 새로 보낸
 메일도 따로 묶지 않아도 그 상대의 스레드에서 보입니다.
 """
@@ -38,40 +39,37 @@ class OpsMailRow:
 # 조용히 그 열을 빠뜨린다.
 COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 
-# 받은 메일을 맡을 수 있는 횟수와, 맡은 쪽이 끝내기를 기다리는 시간.
-# 기다리는 동안 다른 쪽(SNS 재전송, 정리 작업)은 같은 메일을 맡지 못한다.
+# 받은 메일 원본을 맡을 수 있는 횟수와, 맡은 쪽이 끝내기를 기다리는 시간.
+# 기다리는 동안 다른 쪽(SNS 재전송, 정리 작업)은 같은 원본을 맡지 못한다.
 MAX_ATTEMPTS = 3
 LEASE = "5 minutes"
 
-_VALUES = ", ".join(f"%({name})s" for name in COLUMNS)
-
-# 보낸 메일. 슬랙에 따로 올릴 것이 없어 넣을 때 처리가 끝난다.
 INSERT = f"""
-INSERT INTO ops_mail_message ({", ".join(COLUMNS)}, processed_at)
-VALUES ({_VALUES}, now())
+INSERT INTO ops_mail_message ({", ".join(COLUMNS)})
+VALUES ({", ".join(f"%({name})s" for name in COLUMNS)})
 ON CONFLICT (ses_message_id) DO NOTHING
 """
 
-# 받은 메일을 맡는다. 처음이면 넣고, 이미 있으면 아직 안 끝났고 횟수가 남았고
-# 다른 쪽이 맡은 지 LEASE 가 지났을 때만 다시 맡는다. 맡았으면 행이 돌아온다.
+# 처음이면 넣고, 이미 있으면 아직 안 끝났고 횟수가 남았고 다른 쪽이 맡은 지
+# LEASE 가 지났을 때만 다시 맡는다. 맡았으면 몇 번째인지가 돌아온다.
 CLAIM = f"""
-INSERT INTO ops_mail_message ({", ".join(COLUMNS)}, attempts, claimed_at)
-VALUES ({_VALUES}, 1, now())
+INSERT INTO ops_mail_inbox (ses_message_id, s3_key, attempts, claimed_at)
+VALUES (%s, %s, 1, now())
 ON CONFLICT (ses_message_id) DO UPDATE
-SET attempts = ops_mail_message.attempts + 1, claimed_at = now()
-WHERE ops_mail_message.processed_at IS NULL
-  AND ops_mail_message.attempts < {MAX_ATTEMPTS}
-  AND ops_mail_message.claimed_at < now() - interval '{LEASE}'
-RETURNING id
+SET attempts = ops_mail_inbox.attempts + 1, claimed_at = now()
+WHERE ops_mail_inbox.processed_at IS NULL
+  AND ops_mail_inbox.attempts < {MAX_ATTEMPTS}
+  AND ops_mail_inbox.claimed_at < now() - interval '{LEASE}'
+RETURNING attempts
 """
 
-MARK_PROCESSED = """
-UPDATE ops_mail_message SET processed_at = now() WHERE ses_message_id = %s
+FINISH = """
+UPDATE ops_mail_inbox SET processed_at = now() WHERE ses_message_id = %s
 """
 
 # 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼다.
 SETTLED_KEYS = f"""
-SELECT s3_key FROM ops_mail_message
+SELECT s3_key FROM ops_mail_inbox
 WHERE s3_key = ANY(%s)
   AND (processed_at IS NOT NULL OR attempts >= {MAX_ATTEMPTS})
 """
@@ -129,28 +127,32 @@ def settled_keys(conn: psycopg.Connection, keys: list[str]) -> set[str]:
     return {row["s3_key"] for row in fetch_all(conn, SETTLED_KEYS, (keys,))}
 
 
-def claim(conn: psycopg.Connection, row: OpsMailRow) -> bool:
-    """받은 메일 하나를 이쪽이 처리하겠다고 자리를 잡습니다.
+def claim(conn: psycopg.Connection, ses_message_id: str, s3_key: str) -> int | None:
+    """받은 메일 원본 하나를 이쪽이 처리하겠다고 자리를 잡습니다.
+
+    Args:
+        conn: 커넥션
+        ses_message_id: SES 메시지 ID (객체 키의 끝)
+        s3_key: 객체 키
+
+    Returns:
+        int | None: 맡았으면 몇 번째 시도인지. 이미 끝났거나, 다른 쪽이 처리 중이거나,
+            횟수를 다 썼으면 None
+    """
+    rows = fetch_all(conn, CLAIM, (ses_message_id, s3_key))
+    return rows[0]["attempts"] if rows else None
+
+
+def finish(conn: psycopg.Connection, row: OpsMailRow) -> None:
+    """받은 메일을 남기고 원본 처리를 끝냈다고 표시합니다. 한 트랜잭션입니다.
 
     Args:
         conn: 커넥션
         row: 받은 메일 행
-
-    Returns:
-        bool: 맡았으면 True. 이미 끝났거나, 다른 쪽이 처리 중이거나, 횟수를 다 썼으면 False
     """
-    return bool(fetch_all(conn, CLAIM, asdict(row)))
-
-
-def mark_processed(conn: psycopg.Connection, ses_message_id: str) -> None:
-    """받은 메일을 슬랙에 다 올렸다고 표시합니다.
-
-    Args:
-        conn: 커넥션
-        ses_message_id: SES 메시지 ID
-    """
+    insert(conn, row)
     with conn.cursor() as cur:
-        cur.execute(MARK_PROCESSED, (ses_message_id,))
+        cur.execute(FINISH, (row.ses_message_id,))
 
 
 def find_thread(
@@ -223,7 +225,7 @@ def latest_in_thread(
 
 
 def insert(conn: psycopg.Connection, row: OpsMailRow) -> None:
-    """보낸 메일 한 통을 남깁니다.
+    """메일 한 통을 남깁니다.
 
     Args:
         conn: 커넥션

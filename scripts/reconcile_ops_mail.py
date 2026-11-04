@@ -5,9 +5,9 @@
 처리가 슬랙·DB 오류로 실패하면 SNS 는 다시 보내지 않습니다. 이 스크립트가 S3 를
 훑어 처리가 끝나지 않은 원본을 같은 함수로 다시 처리합니다.
 
-같은 원본을 웹훅과 이 스크립트가 함께 집어도 슬랙에는 한 번만 올라갑니다.
-process_object 가 올리기 전에 DB 에 자리를 잡고, 맡은 지 얼마 안 된 메일은
-다른 쪽이 건너뜁니다. 몇 번 넘게 실패한 원본은 더 다시 하지 않습니다.
+같은 원본을 웹훅과 이 스크립트가 함께 집어도 동시에 둘이 올리지 않습니다.
+process_object 가 원본을 읽기 전에 DB 에 자리를 잡고, 맡은 지 얼마 안 된 원본은
+다른 쪽이 건너뜁니다. 몇 번 넘게 실패한 원본은 채널에 알리고 더 다시 하지 않습니다.
 
 오래된 원본은 보지 않습니다. 하루 넘게 실패하는 원본은 다시 해도 같은 이유로
 실패하니 사람이 봐야 하고, 모든 키를 DB 에 물으면 메일이 쌓일수록 무거워집니다.
@@ -67,7 +67,11 @@ async def reconcile(dry_run: bool) -> None:
         if dry_run:
             print(f"[dry-run] 처리할 원본 {key}")
             continue
-        await process_object(bucket, key)
+        # 하나가 실패해도 나머지는 처리한다. 던지면 그 뒤 원본이 매번 밀린다.
+        try:
+            await process_object(bucket, key)
+        except Exception as error:
+            print(f"ops 메일 재처리 실패 {key} {type(error).__name__}: {error}")
 
 
 def main(dry_run: bool = False) -> None:
