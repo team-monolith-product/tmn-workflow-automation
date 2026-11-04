@@ -130,8 +130,25 @@ async def test_시각_인자가_잘못되면_넣지_않고_고칠_점을_돌려�
     assert "이름" in result
 
 
+def _client() -> AsyncMock:
+    client = AsyncMock()
+    client.chat_postMessage.return_value = {"ts": "999.1"}
+    return client
+
+
+def _card_text(call) -> str:
+    """카드 블록의 글자를 이어 붙입니다."""
+    texts = []
+    for block in call.kwargs["blocks"]:
+        if block["type"] == "section":
+            texts.append(block["text"]["text"])
+        else:
+            texts.extend(element["text"] for element in block["elements"])
+    return "\n".join(texts)
+
+
 @pytest.mark.asyncio
-async def test_시각이_된_회차는_스레드에_알리고_예약한_사람으로_에이전트를_돌린다(
+async def test_시각이_된_회차는_실행_카드를_올리고_에이전트를_돌린_뒤_완료로_고친다(
     monkeypatch,
 ):
     finished = []
@@ -142,24 +159,27 @@ async def test_시각이_된_회차는_스레드에_알리고_예약한_사람�
         scheduled_task.store, "finish", lambda *args: finished.append(args)
     )
     agent = AsyncMock()
-    client = AsyncMock()
+    client = _client()
 
     # When : 폴러가 돌고 백그라운드 실행이 끝나면
     await scheduled_task.run_due_tasks(agent, client)
     await asyncio.gather(*scheduled_task._running)
 
-    # Then : 다음 회차와 함께 스레드에 알리고, 다시 예약하지 말라는 말과 함께
-    #        요청을 태우고, 에러 없이 끝낸다
-    notice = client.chat_postMessage.await_args.kwargs
-    assert notice["thread_ts"] == "111.222" and "2026-11-11" in notice["text"]
+    # Then : 스레드에 실행 중 카드를 다음 회차와 함께 올리고, 다시 예약하지 말라는
+    #        말과 함께 요청을 태우고, 에러 없이 끝낸 뒤 같은 카드를 완료로 고친다
+    posted = client.chat_postMessage.await_args
+    assert posted.kwargs["thread_ts"] == "111.222"
+    assert "실행 중" in _card_text(posted) and "2026-11-11" in _card_text(posted)
     channel, thread_ts, user, text = agent.await_args.args
     assert (channel, thread_ts, user) == ("C1", "111.222", "U1")
     assert "다시 예약하지 말고" in text and text.endswith("어제 가입자 수 알려줘")
     assert finished == [(7, None)]
+    updated = client.chat_update.await_args
+    assert updated.kwargs["ts"] == "999.1" and "완료" in _card_text(updated)
 
 
 @pytest.mark.asyncio
-async def test_에이전트가_실패하면_이유를_남기고_스레드에_알린다(monkeypatch):
+async def test_에이전트가_실패하면_이유를_남기고_카드를_실패로_고친다(monkeypatch):
     finished = []
     monkeypatch.setattr(
         scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
@@ -168,12 +188,37 @@ async def test_에이전트가_실패하면_이유를_남기고_스레드에_알
         scheduled_task.store, "finish", lambda *args: finished.append(args)
     )
     agent = AsyncMock(side_effect=RuntimeError("notion down"))
-    client = AsyncMock()
+    client = _client()
 
     # When : 에이전트가 예외를 던지면
     await scheduled_task.run_due_tasks(agent, client)
     await asyncio.gather(*scheduled_task._running)
 
-    # Then : 이유와 함께 끝내고, 실패를 스레드에 올린다
+    # Then : 이유와 함께 끝내고, 따로 글을 올리지 않고 실행 카드를 실패와 이유로 고친다
     assert finished[0][0] == 7 and "notion down" in finished[0][1]
-    assert "실패" in client.chat_postMessage.await_args.kwargs["text"]
+    assert client.chat_postMessage.await_count == 1
+    card = _card_text(client.chat_update.await_args)
+    assert "실패" in card and "notion down" in card
+
+
+@pytest.mark.asyncio
+async def test_카드조차_못_올리면_에이전트를_돌리지_않고_실패로_남긴다(monkeypatch):
+    finished = []
+    monkeypatch.setattr(
+        scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
+    )
+    monkeypatch.setattr(
+        scheduled_task.store, "finish", lambda *args: finished.append(args)
+    )
+    agent = AsyncMock()
+    client = _client()
+    client.chat_postMessage.side_effect = RuntimeError("is_archived")
+
+    # When : 채널이 보관돼 카드를 못 올리면
+    await scheduled_task.run_due_tasks(agent, client)
+    await asyncio.gather(*scheduled_task._running)
+
+    # Then : 에이전트는 돌지 않고, 이유를 남겨 끝내며, 고칠 카드가 없어 고치지 않는다
+    agent.assert_not_awaited()
+    assert "is_archived" in finished[0][1]
+    client.chat_update.assert_not_awaited()

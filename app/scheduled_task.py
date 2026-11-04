@@ -5,7 +5,8 @@
        "1월까지 매주 수요일 16시에 @운영 태그해서 회의록 쓰라고 채널에 올려줘" 라고 말한다
     ② 에이전트가 schedule_task 로 예약을 넣는다 (scheduled_task 표)
     ③ 1분마다 도는 run_due_tasks 가 시각이 된 회차를 꺼내, 예약을 건 스레드에
-       알림을 올리고 그 요청을 예약한 사람이 물은 것처럼 에이전트에게 맡긴다
+       실행 카드를 올리고 그 요청을 예약한 사람이 물은 것처럼 에이전트에게 맡긴다.
+       끝나면 카드를 완료·실패로 고쳐 쓴다
     ④ "예약 뭐 있어?", "3번 취소해줘" 는 list_scheduled_tasks·cancel_scheduled_task
 
 회차는 예약을 건 스레드에서 돌아 그 스레드가 실행 기록이 됩니다. 실행할 때의
@@ -158,27 +159,69 @@ def get_scheduled_task_tools(
     return [schedule_task, list_scheduled_tasks, cancel_scheduled_task]
 
 
-async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None:
-    """꺼낸 회차 하나를 실행하고 결과를 표에 남깁니다.
+# 카드 section text 는 3000자가 한도다. 할 일과 에러는 앞부분만 싣는다.
+CARD_PROMPT_CHARS = 2000
+CARD_ERROR_CHARS = 500
 
-    백그라운드 태스크라 예외를 여기서 잡지 않으면 아무도 모르게 사라지고 한 번짜리
-    예약은 running 에 남습니다. 잡아서 기록하고 스레드에 알립니다.
+
+def _card(claim: Claim, status: str, error: Exception | None = None) -> dict:
+    """회차 실행 카드. 시작할 때 올리고, 끝나면 같은 카드를 결과로 고쳐 씁니다.
+
+    Args:
+        claim: 실행하는 회차
+        status: 맨 앞에 보일 상태. 예: ":hourglass_flowing_sand: 실행 중"
+        error: 실패했으면 그 예외
+
+    Returns:
+        dict: chat_postMessage·chat_update 에 넘길 text 와 blocks
     """
     task = claim.task
     if claim.next_run_at:
-        next_text = f"다음 회차는 {format_time(claim.next_run_at)} 입니다."
+        when = f"반복 `{task.cron}` · 다음 회차 {format_time(claim.next_run_at)}"
     else:
-        next_text = "마지막 회차입니다." if task.cron else ""
+        when = f"반복 `{task.cron}` · 마지막 회차" if task.cron else "한 번"
+    prompt = escape(task.prompt[:CARD_PROMPT_CHARS])
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{status} *예약 #{task.id}*\n> {prompt}",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": f"<@{task.created_by}> 님 예약 · {when}"}
+            ],
+        },
+    ]
+    if error is not None:
+        detail = escape(str(error)[:CARD_ERROR_CHARS]).replace("`", "'")
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"```{detail}```"}}
+        )
+    return {"text": f"{status} 예약 #{task.id}", "blocks": blocks}
+
+
+async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None:
+    """꺼낸 회차 하나를 실행하고 결과를 표와 카드에 남깁니다.
+
+    백그라운드 작업이라 시작하자마자 스레드에 카드를 올리고, 끝나면 그 카드를
+    완료·실패로 고쳐 씁니다. 카드만 보면 지금 돌고 있는지, 어떻게 끝났는지 압니다.
+
+    예외를 여기서 잡지 않으면 아무도 모르게 사라지고 한 번짜리 예약은 running 에
+    남습니다. 잡아서 표에 기록하고 카드에 보여줍니다.
+    """
+    task = claim.task
+    card_ts = None
     try:
-        await client.chat_postMessage(
+        card = await client.chat_postMessage(
             channel=task.channel_id,
             thread_ts=task.thread_ts,
-            text=(
-                f":alarm_clock: 예약 #{task.id} 실행"
-                f" (<@{task.created_by}> 님 예약) {next_text}\n"
-                f"> {escape(task.prompt)}"
-            ),
+            **_card(claim, ":hourglass_flowing_sand: 실행 중"),
         )
+        card_ts = card["ts"]
         # 예약할 때의 "매주 해줘" 가 스레드에 남아 있어 에이전트가 또 예약하려
         # 들 수 있다. 지금이 그 시각이라고 못 박는다.
         await agent(
@@ -191,13 +234,18 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
     except Exception as error:
         traceback.print_exc()
         await asyncio.to_thread(store.finish, task.id, repr(error))
-        await client.chat_postMessage(
-            channel=task.channel_id,
-            thread_ts=task.thread_ts,
-            text=f":x: 예약 #{task.id} 실행에 실패했습니다. {next_text}\n```{error}```",
-        )
+        # 카드조차 못 올렸으면(채널 보관 등) 고칠 카드가 없다. 기록은 표와 로그다.
+        if card_ts is not None:
+            await client.chat_update(
+                channel=task.channel_id,
+                ts=card_ts,
+                **_card(claim, ":x: 실패", error),
+            )
         return
     await asyncio.to_thread(store.finish, task.id, None)
+    await client.chat_update(
+        channel=task.channel_id, ts=card_ts, **_card(claim, ":white_check_mark: 완료")
+    )
 
 
 async def run_due_tasks(agent: ThreadAgent, client: AsyncWebClient) -> None:
