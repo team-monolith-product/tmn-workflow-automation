@@ -26,13 +26,11 @@ def group_totals(
         label = sql.SQL("coalesce(nullif({}, ''), '미기재')").format(label)
     return fetch_all(
         conn,
-        sql.SQL(
-            """
+        sql.SQL("""
         SELECT {} AS label, sum(amount) AS amount FROM {}
         WHERE year=%s AND status='issued'
         GROUP BY label ORDER BY amount DESC LIMIT %s
-    """
-        ).format(label, source),
+    """).format(label, source),
         (year, limit),
     )
 
@@ -158,14 +156,12 @@ def chart_data(conn, year: int | None, dimension: str, search: str) -> dict:
         label = sql.SQL("coalesce(budget, '미기재')")
     groups = fetch_all(
         conn,
-        sql.SQL(
-            """
+        sql.SQL("""
         SELECT year, {} AS label, sum(amount) AS amount, count(*) AS count,
                count(*) FILTER (WHERE strpos(lower(concat_ws(' ', customer, item, note)), lower(%s)) > 0) AS matched
         FROM {} WHERE status='issued'
         GROUP BY year, label ORDER BY year, amount DESC, label
-        """
-        ).format(label, source),
+        """).format(label, source),
         (search,),
     )
     subgroups = (
