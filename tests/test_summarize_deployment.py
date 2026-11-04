@@ -38,6 +38,7 @@ def clients(monkeypatch):
     )
     notion = Mock()
     slack = Mock()
+    slack.chat_postMessage.return_value = {"ts": "1234567890.123456"}
     monkeypatch.setattr(report, "NotionClient", Mock(return_value=notion))
     monkeypatch.setattr(report, "WebClient", Mock(return_value=slack))
     monkeypatch.setattr(report, "get_email_to_user_id", lambda client: {})
@@ -58,14 +59,26 @@ def test_services_without_a_deployment_task_still_request_sync(clients):
     report.summarize_deployment()
 
     apps.assert_called_once_with("argocd-global")
-    slack.chat_postMessage.assert_called_once()
-    message = slack.chat_postMessage.call_args.kwargs["text"]
+    assert slack.chat_postMessage.call_count == 2
+    parent, reply = slack.chat_postMessage.call_args_list
+    message = parent.kwargs["text"]
     assert "오늘 예정된 배포가 없네요" in message
-    assert "OutOfSync · 1개" in message
-    assert "변경사항을 검토한 뒤 Argo CD에서 Sync해 주세요." in message
+    assert "추가 배포 검토 대상: 1개 앱" in message
+    assert "user-rails-service-apne2-prd" not in message
+    assert "thread_ts" not in parent.kwargs
+    assert reply.kwargs["channel"] == parent.kwargs["channel"]
+    assert reply.kwargs["thread_ts"] == "1234567890.123456"
+    assert reply.kwargs["reply_broadcast"] is False
+    details = reply.kwargs["text"]
+    assert "OutOfSync · 1개 앱" in details
+    assert "하루에 한두 개씩은 꼭 배포해서 이 목록을 줄여야 합니다." in details
+    assert (
+        "변경사항을 검토한 뒤 Argo CD에서 Sync하고 정상 동작을 확인해 주세요."
+        in details
+    )
     assert (
         "<https://argocd.example.com/applications/argocd-global/user-rails-service-apne2-prd|"
-        in message
+        in details
     )
 
 
@@ -76,9 +89,10 @@ def test_closed_pr_only_tasks_do_not_hide_sync_requests(clients, monkeypatch):
 
     report.summarize_deployment()
 
-    message = slack.chat_postMessage.call_args.kwargs["text"]
+    parent, reply = slack.chat_postMessage.call_args_list
+    message = parent.kwargs["text"]
     assert "오늘 예정된 배포가 없네요" in message
-    assert "user-rails-service-apne2-prd" in message
+    assert "user-rails-service-apne2-prd" in reply.kwargs["text"]
 
 
 def test_task_and_repository_notice_remain_alongside_sync_requests(
@@ -106,19 +120,20 @@ def test_task_and_repository_notice_remain_alongside_sync_requests(
 
     report.summarize_deployment(caller_slack_user_id="U123")
 
-    slack.chat_postMessage.assert_called_once()
-    message = slack.chat_postMessage.call_args.kwargs["text"]
+    parent, reply = slack.chat_postMessage.call_args_list
+    message = parent.kwargs["text"]
     assert "by <@U123>" in message
     assert "수정 배포" in message
     assert "example#1>✅" in message
     assert "• example" in message
-    assert "user-rails-service-apne2-prd" in message
+    assert "user-rails-service-apne2-prd" not in message
+    assert "user-rails-service-apne2-prd" in reply.kwargs["text"]
 
 
 def test_only_out_of_sync_production_services_are_listed_once_in_name_order():
     multisource = application("b-jupyter", repository="jce-jupyter-hub-helm.git")
     multisource["spec"]["sources"] = [multisource["spec"].pop("source")]
-    message = report.format_sync_requests(
+    summary, message = report.format_sync_requests(
         [
             multisource,
             application("a-user"),
@@ -131,7 +146,8 @@ def test_only_out_of_sync_production_services_are_listed_once_in_name_order():
         "https://argocd.example.com",
     )
 
-    assert "OutOfSync · 2개" in message
+    assert "추가 배포 검토 대상: 2개 앱" in summary
+    assert "OutOfSync · 2개 앱" in message
     assert message.index("|a-user>") < message.index("|b-jupyter>")
     assert message.count("|a-user>") == 1
     for name in ["synced", "unknown", "development", "infrastructure"]:
@@ -147,6 +163,7 @@ def test_lookup_failure_is_reported_instead_of_claiming_no_pending_services(
 
     report.summarize_deployment()
 
+    slack.chat_postMessage.assert_called_once()
     message = slack.chat_postMessage.call_args.kwargs["text"]
     assert "Argo CD 상태 조회에 실패했습니다" in message
     assert "OutOfSync · 0개" not in message
@@ -158,6 +175,42 @@ def test_no_pending_services_preserves_empty_deployment_notice(clients):
 
     report.summarize_deployment()
 
+    slack.chat_postMessage.assert_called_once()
     message = slack.chat_postMessage.call_args.kwargs["text"]
     assert "오늘 예정된 배포가 없네요" in message
-    assert "추가 동기화" not in message
+    assert "추가 배포 검토 대상" not in message
+
+
+def test_many_pending_apps_only_add_a_count_to_the_channel_message(clients):
+    slack, _, apps = clients
+    apps.return_value = {"items": [application(f"service-{i:02}") for i in range(19)]}
+
+    report.summarize_deployment()
+
+    parent, reply = slack.chat_postMessage.call_args_list
+    assert "추가 배포 검토 대상: 19개 앱" in parent.kwargs["text"]
+    assert "argocd.example.com/applications/" not in parent.kwargs["text"]
+    assert reply.kwargs["text"].count("argocd.example.com/applications/") == 19
+
+
+def test_failed_parent_message_does_not_send_an_orphaned_reply(clients):
+    slack, _, _ = clients
+    slack.chat_postMessage.side_effect = RuntimeError("Slack send failed")
+
+    with pytest.raises(RuntimeError, match="Slack send failed"):
+        report.summarize_deployment()
+
+    slack.chat_postMessage.assert_called_once()
+
+
+def test_failed_thread_reply_is_not_silenced(clients):
+    slack, _, _ = clients
+    slack.chat_postMessage.side_effect = [
+        {"ts": "1234567890.123456"},
+        RuntimeError("Slack reply failed"),
+    ]
+
+    with pytest.raises(RuntimeError, match="Slack reply failed"):
+        report.summarize_deployment()
+
+    assert slack.chat_postMessage.call_count == 2
