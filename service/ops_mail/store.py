@@ -46,8 +46,8 @@ COLUMNS = tuple(field.name for field in fields(OpsMailRow))
 MAX_ATTEMPTS = 3
 LEASE = timedelta(minutes=15)
 
-# 이만큼 지나도 끝나지 않은 원본은 횟수가 남아도 포기하고 알린다. 정리 작업은
-# 이보다 오래된 원본을 보지 않는다(봇이 그동안 내려가 있었던 경우).
+# 맡은 지 이만큼 지나도 끝나지 않은 원본은 횟수가 남아도 포기하고 알린다
+# (마지막으로 맡은 쪽이 죽었고, 정리 작업도 그동안 돌지 못한 경우).
 ABANDON_AFTER = timedelta(days=1)
 
 INSERT = f"""
@@ -76,7 +76,7 @@ UPDATE ops_mail_inbox SET processed_at = now() WHERE ses_message_id = %s
 # 끝나지 않았는데 더 다시 하지 않을 원본 중 아직 알리지 않은 것: 횟수를 다 썼고
 # 마지막으로 맡은 쪽도 끝내지 못했거나, ABANDON_AFTER 가 지났다.
 GIVEN_UP = f"""
-SELECT ses_message_id, s3_key, last_error FROM ops_mail_inbox
+SELECT ses_message_id, s3_key, attempts, last_error FROM ops_mail_inbox
 WHERE processed_at IS NULL AND alerted_at IS NULL
   AND claimed_at < now() - %(lease)s
   AND (attempts >= {MAX_ATTEMPTS} OR claimed_at < now() - %(abandon)s)
@@ -86,11 +86,14 @@ MARK_ALERTED = "UPDATE ops_mail_inbox SET alerted_at = now() WHERE ses_message_i
 
 FAIL = "UPDATE ops_mail_inbox SET last_error = %s WHERE ses_message_id = %s"
 
-# 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼다.
+# 정리 작업이 더 볼 필요 없는 원본: 처리가 끝났거나, 횟수를 다 썼거나, 포기를
+# 알렸다. 알린 뒤에 다시 올리면 "포기" 알림과 메일이 엇갈린다.
 SETTLED = f"""
 SELECT ses_message_id FROM ops_mail_inbox
 WHERE ses_message_id = ANY(%s)
-  AND (processed_at IS NOT NULL OR attempts >= {MAX_ATTEMPTS})
+  AND (
+    processed_at IS NOT NULL OR attempts >= {MAX_ATTEMPTS} OR alerted_at IS NOT NULL
+  )
 """
 
 FIND_THREAD = """
@@ -162,8 +165,8 @@ def given_up(conn: psycopg.Connection) -> list[dict[str, Any]]:
         conn: 커넥션
 
     Returns:
-        list[dict[str, Any]]: ses_message_id, s3_key, 마지막으로 실패한 이유
-            (last_error, 없을 수 있음)
+        list[dict[str, Any]]: ses_message_id, s3_key, attempts, 마지막으로 실패한
+            이유(last_error, 없을 수 있음)
     """
     return fetch_all(conn, GIVEN_UP, {"lease": LEASE, "abandon": ABANDON_AFTER})
 

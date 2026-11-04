@@ -22,6 +22,8 @@ import dataclasses
 import hashlib
 import json
 
+from urllib.parse import urlparse
+
 import aiohttp
 from cachetools import TTLCache
 from langchain_core.tools import StructuredTool, tool
@@ -236,6 +238,9 @@ def get_draft_ops_mail_tool(
 
 async def _download(token: str, file: dict) -> mime.Attachment:
     """슬랙에 올라온 파일을 내려받습니다. 봇 토큰에 files:read 가 있어야 합니다."""
+    # 봇 토큰을 싣고 가니 슬랙 파일 서버가 아니면 가지 않는다.
+    if urlparse(file["url"]).hostname != "files.slack.com":
+        raise ValueError(f"슬랙 파일이 아닙니다: {file['name']}")
     async with aiohttp.ClientSession() as session:
         async with session.get(
             file["url"], headers={"Authorization": f"Bearer {token}"}
@@ -346,7 +351,7 @@ def register_ops_mail_handlers(app, revise=None):
         # 눌러도 아무 일도 안 일어나는데, 누른 사람은 막았다고 믿는다. 못 걷었으면
         # 아직 아무것도 안 했으니 초안을 되돌려 다시 누를 수 있게 한다.
         try:
-            await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
+            await _replace(client, channel, ts, _sending(0, total))
         except BaseException:
             _DRAFTS[draft_id] = draft
             raise
@@ -392,7 +397,7 @@ def register_ops_mail_handlers(app, revise=None):
                 await _stop(client, channel, ts, draft, sent, problem)
                 raise
             if (sent + 1) % PROGRESS_EVERY == 0 and sent + 1 < total:
-                await _note(client, channel, ts, f"📤 보내는 중… {sent + 1}/{total}")
+                await _note(client, channel, ts, _sending(sent + 1, total))
 
         await _note(
             client,
@@ -486,6 +491,19 @@ async def _stop(
         f"⚠️ {sent}명에게 보냈습니다. {problem}"
         + (f"\n보내지 않은 {len(left)}명: {_preview(left)}" if left else "")
         + f"\n{_summary(draft)}",
+    )
+
+
+def _sending(sent: int, total: int) -> str:
+    """보내는 중인 카드 문구입니다.
+
+    봇이 보내다 재시작되면 카드가 이 문구에서 멈춘다. 숫자는 20통마다 고치므로
+    실제로는 더 나갔을 수 있다. 그대로 다시 보내면 이미 받은 사람이 또 받는다.
+    """
+    return (
+        f"📤 보내는 중… {sent}/{total}\n"
+        "_오래 멈춰 있으면 봇이 재시작된 것입니다. 이미 받은 사람이 있으니"
+        " 전체를 다시 보내지 말고 개발팀에 물어보세요._"
     )
 
 

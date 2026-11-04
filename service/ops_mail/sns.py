@@ -30,10 +30,10 @@ SUBSCRIPTION_KEYS = (
     "Type",
 )
 
-# 인증서 URL 이 AWS 가 아니면 공격자가 자기 인증서로 서명한 것이다. 리전 자리를
-# 3자 이상으로 두는 것은 sns.s3.amazonaws.com(남의 S3 버킷 주소)을 막기 위해서다.
-# AWS SDK 가 쓰는 패턴과 같다.
-CERT_HOST = re.compile(r"^sns\.[a-z0-9-]{3,}\.amazonaws\.com$")
+# 토픽 ARN 의 리전 자리. 인증서 호스트는 이 리전의 sns.<region>.amazonaws.com 이어야 한다.
+# "sns.<무엇이든>.amazonaws.com" 으로 열어 두면 sns.s3-us-west-2.amazonaws.com 처럼
+# 남이 가진 S3 버킷 "sns" 의 주소가 통과한다.
+REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 
 _certs: TTLCache = TTLCache(maxsize=10, ttl=3600)
 
@@ -54,8 +54,9 @@ def string_to_sign(message: dict[str, Any]) -> bytes:
     ).encode()
 
 
-def aws_cert_url(url: str) -> str | None:
-    """인증서 URL 이 AWS SNS 것이면, 받아올 URL 을 검사한 부분만으로 다시 만듭니다.
+def aws_cert_url(url: str, topic_arn: str) -> str | None:
+    """인증서 URL 이 이 토픽 리전의 AWS SNS 것이면, 받아올 URL 을 검사한 부분만으로
+    다시 만듭니다.
 
     받은 문자열을 그대로 requests 에 넘기면 안 된다. "https://공격자\\@sns.<리전>
     .amazonaws.com/x.pem" 을 urlparse 는 AWS 호스트로, requests 는 공격자 호스트로
@@ -63,16 +64,20 @@ def aws_cert_url(url: str) -> str | None:
 
     Args:
         url: SigningCertURL
+        topic_arn: 서명된 TopicArn. arn:aws:sns:<region>:<account>:<name>
 
     Returns:
-        str | None: https://sns.<region>.amazonaws.com/....pem. AWS 것이 아니면 None
+        str | None: https://sns.<region>.amazonaws.com/....pem. 아니면 None
     """
+    parts = topic_arn.split(":")
+    region = parts[3] if len(parts) == 6 else ""
     parsed = urlparse(url)
     if (
-        parsed.scheme != "https"
+        REGION.match(region) is None
+        or parsed.scheme != "https"
         or parsed.username is not None
         or parsed.port is not None
-        or CERT_HOST.match(parsed.hostname or "") is None
+        or parsed.hostname != f"sns.{region}.amazonaws.com"
         or not parsed.path.endswith(".pem")
         or "\\" in url
     ):
@@ -85,7 +90,8 @@ def _fetch_cert(url: str) -> bytes:
     # 여러 작업 스레드에서 부른다. 검사와 읽기 사이에 만료돼도 KeyError 가 안 나게 get.
     cert = _certs.get(url)
     if cert is None:
-        response = requests.get(url, timeout=10)
+        # 다른 곳으로 넘겨 주면 따라가지 않는다. 검사한 호스트에서만 받는다.
+        response = requests.get(url, timeout=10, allow_redirects=False)
         response.raise_for_status()
         cert = _certs[url] = response.content
     return cert
@@ -124,7 +130,7 @@ def is_authentic(message: dict[str, Any]) -> bool:
     Returns:
         bool: AWS SNS 가 보낸 것이 맞으면 True
     """
-    url = aws_cert_url(message["SigningCertURL"])
+    url = aws_cert_url(message["SigningCertURL"], message["TopicArn"])
     if url is None:
         return False
     return verify(message, _fetch_cert(url))

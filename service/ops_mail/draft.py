@@ -160,10 +160,11 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
     files = {}
     for message in messages:
         for file in message.get("files", []):
-            # 지운 파일(tombstone), 요금제로 가려진 파일, 외부 링크 파일은 이름이나
-            # 내려받을 주소가 없다.
-            url = file.get("url_private_download") or file.get("url_private")
-            if file.get("name") and url:
+            # 슬랙에 올라간 파일만 받는다. 지운 파일(tombstone)·가려진 파일은 이름이나
+            # 주소가 없고, 외부 파일(구글 드라이브 링크 등)은 주소가 슬랙 밖이라
+            # 봇 토큰을 실어 내려받으면 토큰이 새고 로그인 화면이 첨부로 나간다.
+            url = file.get("url_private_download")
+            if file.get("name") and url and not file.get("is_external"):
                 files[file["name"]] = {**file, "url": url}
 
     missing = [name for name in names if name not in files]

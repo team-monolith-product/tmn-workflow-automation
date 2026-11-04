@@ -10,8 +10,8 @@ process_object 가 원본을 읽기 전에 DB 에 자리를 잡고, 맡은 지 �
 다른 쪽이 건너뜁니다. 몇 번 넘게 실패한 원본은 더 다시 하지 않고 이 스크립트가
 채널에 한 번 알립니다.
 
-오래된 원본은 보지 않습니다. 하루 넘게 실패하는 원본은 다시 해도 같은 이유로
-실패하니 사람이 봐야 하고, 모든 키를 DB 에 물으면 메일이 쌓일수록 무거워집니다.
+일주일보다 오래된 원본은 보지 않습니다. 모든 키를 DB 에 물으면 메일이 쌓일수록
+무거워집니다.
 
 사용:
   python scripts/reconcile_ops_mail.py --dry-run
@@ -43,9 +43,10 @@ PREFIX = "ops/"
 # 웹훅이 처리할 시간. 이보다 최근 객체는 건너뛴다.
 GRACE = timedelta(minutes=5)
 
-# 이보다 오래된 원본은 다시 처리하지 않는다. 그동안 끝나지 않은 원본은
-# store.GIVEN_UP 이 포기로 잡아 알린다.
-LOOKBACK = store.ABANDON_AFTER
+# 이보다 오래된 원본은 보지 않는다. 웹훅과 정리 작업이 함께 며칠 내려가 있었어도
+# (주말 장애 등) 그동안 들어온 메일은 아직 아무도 맡지 않아 수신함에 행이 없으니,
+# 맡은 원본의 포기 기준(store.ABANDON_AFTER)보다 넉넉히 둔다.
+LOOKBACK = timedelta(days=7)
 
 
 def _ses_message_id(key: str) -> str:
@@ -98,7 +99,7 @@ async def reconcile(dry_run: bool) -> None:
             try:
                 await client.chat_postMessage(
                     channel=channel,
-                    text=format_given_up(row["s3_key"], bucket, row["last_error"]),
+                    text=format_given_up(row, bucket),
                 )
                 await store.run(store.mark_alerted, row["ses_message_id"])
             except Exception as error:

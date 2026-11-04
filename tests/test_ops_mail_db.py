@@ -106,21 +106,21 @@ def test_끝낸_원본은_다시_맡지_않고_메일_기록과_끝_표시가_�
         assert len(fetch_all(conn, "SELECT * FROM ops_mail_message")) == 1
 
 
-def test_끝내기가_실패하면_메일_기록도_남지_않는다(database):
+def test_끝내기가_실패하면_메일_기록도_남지_않는다(database, monkeypatch):
     _call(store.claim, "m1", "ops/m1")
-    _call(store.finish, _row("m1"))
-    _call(store.claim, "m2", "ops/m2")
+    # 메일 기록은 들어간 뒤, 끝 표시가 실패하게 한다
+    monkeypatch.setattr(
+        store, "FINISH", "UPDATE ops_mail_inbox SET nope = 1 WHERE ses_message_id = %s"
+    )
 
-    # When : 같은 SES 메시지 ID 로 이미 기록된 행과 부딪히는 일 없이, 표 제약에 걸려
-    #        트랜잭션이 실패하면(방향이 틀린 행)
-    with pytest.raises(psycopg.errors.CheckViolation):
-        _call(store.finish, _row("m2", direction="sideways"))
+    # When : 끝내기의 두 번째 단계가 실패하면
+    with pytest.raises(psycopg.errors.UndefinedColumn):
+        _call(store.finish, _row("m1"))
 
-    # Then : m2 는 기록도, 끝 표시도 없어 다시 맡을 수 있다
-    assert _call(store.settled, ["m2"]) == set()
+    # Then : 먼저 넣은 메일 기록도 함께 되돌아가, 다시 맡을 때 중복으로 남지 않는다
+    assert _call(store.settled, ["m1"]) == set()
     with connect() as conn:
-        rows = fetch_all(conn, "SELECT ses_message_id FROM ops_mail_message")
-    assert [row["ses_message_id"] for row in rows] == ["m1"]
+        assert fetch_all(conn, "SELECT * FROM ops_mail_message") == []
 
 
 def test_포기한_원본은_한_번만_알리고_하루가_지난_원본도_포기로_본다(database):
@@ -141,11 +141,12 @@ def test_포기한_원본은_한_번만_알리고_하루가_지난_원본도_포
         _call(store.mark_alerted, row["ses_message_id"])
 
     # Then : 처리 중인 원본은 빼고, 이유와 함께 한 번만 나온다
-    assert {(r["ses_message_id"], r["last_error"]) for r in given_up} == {
-        ("tried", "ValueError: 깨진 MIME"),
-        ("old", None),
-    }
+    assert {
+        (r["ses_message_id"], r["attempts"], r["last_error"]) for r in given_up
+    } == {("tried", 3, "ValueError: 깨진 MIME"), ("old", 1, None)}
     assert _call(store.given_up) == []
+    # 알린 원본은 정리 작업이 다시 맡지 않는다
+    assert _call(store.settled, ["tried", "old", "running"]) == {"tried", "old"}
 
 
 def test_답장은_그_상대에게서_마지막으로_받은_사람이_쓴_메일에_건다(database):

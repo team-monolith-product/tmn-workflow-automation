@@ -198,7 +198,7 @@ def test_인증서_URL이_AWS가_아니면_막는다():
 
     # When / Then : sns.<region>.amazonaws.com 의 https .pem 만 받고, 받아올 URL 은
     #               검사한 호스트와 경로로만 다시 만든다
-    assert sns.aws_cert_url(good) == good
+    assert sns.aws_cert_url(good, TOPIC) == good
     for bad in (
         "https://sns.ap-northeast-2.amazonaws.com.evil.kr/a.pem",
         "http://sns.ap-northeast-2.amazonaws.com/a.pem",
@@ -206,10 +206,13 @@ def test_인증서_URL이_AWS가_아니면_막는다():
         "https://evil.kr\\@sns.ap-northeast-2.amazonaws.com/a.pem",
         "https://u@sns.ap-northeast-2.amazonaws.com/a.pem",
         "https://sns.ap-northeast-2.amazonaws.com:8443/a.pem",
-        # 남의 S3 버킷 주소
+        # 남의 S3 버킷 "sns" 의 주소들
         "https://sns.s3.amazonaws.com/a.pem",
+        "https://sns.s3-us-west-2.amazonaws.com/a.pem",
+        # 토픽과 다른 리전
+        "https://sns.us-east-1.amazonaws.com/a.pem",
     ):
-        assert sns.aws_cert_url(bad) is None, bad
+        assert sns.aws_cert_url(bad, TOPIC) is None, bad
 
 
 def test_SNS_서명_대상은_AWS_문서의_모양이다():
@@ -246,9 +249,13 @@ def test_SNS_검증은_검사한_URL_에서만_인증서를_받는다(monkeypatc
         def raise_for_status(self):
             pass
 
-    monkeypatch.setattr(
-        sns.requests, "get", lambda url, timeout: fetched.append(url) or _Response()
-    )
+    def get(url, timeout, allow_redirects):
+        # 다른 곳으로 넘겨 주면 따라가지 않는다
+        assert allow_redirects is False
+        fetched.append(url)
+        return _Response()
+
+    monkeypatch.setattr(sns.requests, "get", get)
     sns._certs.clear()
     cert_url = "https://sns.ap-northeast-2.amazonaws.com/a.pem"
 
@@ -532,18 +539,26 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
             {
                 "ses_message_id": "bad",
                 "s3_key": "ops/bad",
+                "attempts": 3,
                 "last_error": "ValueError: 깨진 MIME",
             },
-            {"ses_message_id": "died", "s3_key": "ops/died", "last_error": None},
+            {
+                "ses_message_id": "died",
+                "s3_key": "ops/died",
+                "attempts": 1,
+                "last_error": None,
+            },
         ],
     )
 
     # Then : 더 다시 하지 않는다는 것과 이유, 원본 위치를 채널에 남기고, 알렸다고 표시한다.
     #        이유가 없으면 처리 중에 서버가 멈춘 것이다
     bad, died = (post["text"] for post in _FakeSlack.last.posts)
-    assert "더 다시 하지 않습니다" in bad
+    assert "3번 처리하지 못해 더 다시 하지 않습니다" in bad
     assert "ValueError: 깨진 MIME" in bad
     assert "s3://bucket/ops/bad" in bad
+    # 한 번만 맡고 하루가 지난 원본은 세 번 실패했다고 하지 않는다
+    assert "하루 넘게 끝나지 않아" in died and "3번" not in died
     assert "서버가 멈춤" in died
     assert alerted == ["bad", "died"]
 
@@ -904,7 +919,9 @@ def test_정리_작업은_오래된_미처리_원본만_다시_처리한다(monk
         {"Key": "ops/done", "LastModified": now - datetime.timedelta(hours=1)},
         {"Key": "ops/lost", "LastModified": now - datetime.timedelta(hours=1)},
         {"Key": "ops/new", "LastModified": now},
-        {"Key": "ops/old", "LastModified": now - datetime.timedelta(days=2)},
+        # 아무도 맡지 못한 채 며칠 지난 원본(주말 장애)은 다시 처리한다
+        {"Key": "ops/weekend", "LastModified": now - datetime.timedelta(days=3)},
+        {"Key": "ops/old", "LastModified": now - datetime.timedelta(days=8)},
     ]
     handled = []
 
@@ -916,7 +933,7 @@ def test_정리_작업은_오래된_미처리_원본만_다시_처리한다(monk
 
     # Then : 웹훅이 처리 중일 수 있는 방금 것과 오래된 것은 두고,
     #        처리 안 된 것만 다시 처리하며, 알릴 것이 없으면 슬랙을 부르지 않는다
-    assert handled == ["ops/lost"]
+    assert handled == ["ops/lost", "ops/weekend"]
     assert _FakeSlack.last is None
 
 
@@ -1123,15 +1140,40 @@ def test_회신_주소가_보낸_사람과_다르면_드러낸다():
 def test_스레드의_지운_파일이나_외부_파일은_첨부_후보에서_뺀다():
     messages = [
         {"files": [{"id": "F1", "mode": "tombstone"}]},
-        {"files": [{"name": "링크.pdf", "mode": "external", "url_private": "u"}]},
+        {
+            "files": [
+                {
+                    "name": "링크.pdf",
+                    "mode": "external",
+                    "is_external": True,
+                    "url_private": "https://docs.google.com/d/abc",
+                    "url_private_download": "https://docs.google.com/d/abc",
+                }
+            ]
+        },
         {"files": [_slack_file("계획안.pdf")]},
     ]
 
     # When : 지운 파일과 외부 파일이 섞인 스레드에서 고르면
-    picked = drafts.pick_files(messages, ["계획안.pdf", "링크.pdf"])
+    picked = drafts.pick_files(messages, ["계획안.pdf"])
+    with pytest.raises(drafts.DraftProblem) as external:
+        drafts.pick_files(messages, ["링크.pdf"])
 
-    # Then : 터지지 않고, 내려받을 주소가 있는 파일은 고른다
-    assert [f["url"] for f in picked] == ["https://files.slack.com/계획안.pdf", "u"]
+    # Then : 터지지 않고 슬랙에 올라간 파일만 고른다. 외부 파일은 봇 토큰을 실어
+    #        슬랙 밖으로 내려받게 되므로 후보에 없다
+    assert [f["url"] for f in picked] == ["https://files.slack.com/계획안.pdf"]
+    assert "링크.pdf 파일이 없습니다" in str(external.value)
+
+
+def test_슬랙_밖_주소의_파일은_내려받지_않는다():
+    # When / Then : 슬랙 파일 서버가 아닌 주소면 봇 토큰을 싣고 가지 않는다
+    with pytest.raises(ValueError):
+        asyncio.run(
+            ops_mail._download(
+                "xoxb-secret",
+                {"name": "a.pdf", "mimetype": "", "url": "https://evil.kr/a.pdf"},
+            )
+        )
 
 
 def test_카드는_본문도_이스케이프해_실제로_나갈_글자를_보여준다():
@@ -1255,3 +1297,112 @@ def test_SES_는_다시_보내지_않는_클라이언트로_부른다(monkeypatc
 
     # Then : 타임아웃·5xx 에 같은 원문을 다시 보내지 않게 한 번만 시도한다
     assert configs[0].retries == {"total_max_attempts": 1}
+
+
+def test_인코딩_안_된_한글_머리와_charset_없는_한글_본문도_읽는다():
+    raw = (
+        "From: 김선생 <k@a.kr>\r\nSubject: 견적 요청드립니다\r\n"
+        "Content-Type: text/plain\r\n\r\n견적 부탁드립니다"
+    ).encode("euc-kr")
+
+    # When : 머리와 본문을 날 EUC-KR 로, charset 없이 보낸 메일을 읽으면
+    mail = mime.parse(raw)
+
+    # Then : 깨지지 않고, DB 에 넣을 수 있는 글자다
+    assert mail.subject == "견적 요청드립니다"
+    assert mail.from_header == "김선생 <k@a.kr>"
+    assert mail.body_text == "견적 부탁드립니다"
+    mail.subject.encode("utf-8")
+
+
+def test_사진_뒤에_쓴_글도_본문에_남는다():
+    raw = (
+        b"From: a@b.kr\r\nMIME-Version: 1.0\r\n"
+        b"Content-Type: multipart/mixed; boundary=M\r\n\r\n"
+        b"--M\r\nContent-Type: text/plain\r\n\r\nPlease see the photo:\r\n"
+        b"--M\r\nContent-Type: image/jpeg\r\nContent-Disposition: inline;"
+        b" filename=IMG_1.jpg\r\nContent-Transfer-Encoding: base64\r\n\r\n/9j/\r\n"
+        b"--M\r\nContent-Type: text/plain\r\n\r\nThe crack is at the left edge.\r\n"
+        b"--M--\r\n"
+    )
+
+    # When : 애플 메일처럼 "글, 사진, 글" 로 온 메일을 읽으면
+    mail = mime.parse(raw)
+
+    # Then : 사진 뒤의 글도 본문에 있고, 사진은 첨부로 꺼낸다
+    assert "Please see the photo:" in mail.body_text
+    assert "The crack is at the left edge." in mail.body_text
+    assert [a.filename for a in mail.attachments] == ["IMG_1.jpg"]
+
+
+def test_메일링_리스트나_대량_메일은_처음_오는_상대여도_스레드를_연다(monkeypatch):
+    # When : 처음 오는 상대의 메일이 구글 그룹·대량 발송 표시를 달고 오면
+    slack, inserted, claimed = _inbound(
+        monkeypatch,
+        {"Precedence": "list", "Auto-Submitted": "auto-generated"},
+        thread=None,
+    )
+
+    # Then : 자동응답으로 치지 않고 스레드를 열어 올린다
+    assert claimed == [("office@abc.kr", "ts-1")]
+    assert len(slack.posts) == 2
+    assert not inserted[0].auto_reply
+
+
+def test_긴_Message_ID_도_답장_머리에_그대로_싣는다():
+    outlook = "<DM6PR11MB4691C2B1E6B0A9A1D2F3B4C5D6E7F8A9@DM6PR11MB4691.namprd11.prod.outlook.com>"
+
+    # When : 아웃룩의 긴 Message-ID 에 거는 답장을 만들면
+    _, raw = mime.build(
+        from_header="팀모노리스 <ops@team-mono.com>",
+        to_address="a@b.kr",
+        subject="Re: 견적",
+        body="안녕하세요",
+        references_ids=[outlook],
+        attachments=[],
+    )
+
+    # Then : 인코딩하지 않고 받은 그대로 실어, 받는 쪽이 대화에 붙일 수 있다
+    assert f"In-Reply-To: {outlook}".encode() in raw
+    assert mime.parse(raw).references_ids == [outlook]
+
+
+def test_보내기를_두_번_눌러도_한_번만_보낸다(monkeypatch):
+    sent = []
+    recorded = []
+    monkeypatch.setattr(
+        ops_mail, "send_mime", lambda raw: sent.append(raw) or {"MessageId": "s"}
+    )
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d9"] = _new_mail(["a@school.kr"])
+    slack = _FakeSlack()
+
+    # When : 같은 카드의 [보내기] 를 두 번 누르면
+    _approve(app, slack, "d9")
+    _approve(app, slack, "d9")
+
+    # Then : 한 번만 나가고, 두 번째 누른 사람에게는 이미 처리됐다고 알린다
+    assert len(sent) == 1
+    assert len(slack.ephemerals) == 1
+
+
+def test_받은_메일의_슬랙_문법은_글자로_올린다(monkeypatch):
+    raw = (
+        b"From: <!channel> <x@evil.kr>\r\nSubject: <https://evil.kr|https://bank.com>\r\n\r\n"
+        b"<!here> <@U123>\r\n"
+    )
+    monkeypatch.setenv("OPS_MAIL_SLACK_CHANNEL_ID", CHANNEL)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(inbound, "AsyncWebClient", _FakeSlack)
+    monkeypatch.setattr(inbound, "get_object", lambda bucket, key: raw)
+    _fake_db(monkeypatch, inbound, thread=None)
+
+    # When : 보낸 사람·제목·본문에 멘션과 위장 링크를 넣은 메일이 오면
+    asyncio.run(inbound.process_object("bucket", "ops/abc"))
+
+    # Then : 스레드 첫 글과 메일 글 어디에도 슬랙 문법이 살아 있지 않다
+    texts = " ".join(post["text"] for post in _FakeSlack.last.posts)
+    for markup in ("<!channel>", "<!here>", "<@U123>", "<https://evil.kr|"):
+        assert markup not in texts

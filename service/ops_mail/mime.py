@@ -17,10 +17,6 @@ MESSAGE_ID = re.compile(r"<[^<>\s]+>")
 ANGLE_ADDRESS = re.compile(r"<\s*([^<>\s@]+@[^<>\s@]+)\s*>")
 BARE_ADDRESS = re.compile(r"[^\s<>,;:\"'()\[\]]+@[^\s<>,;:\"'()\[\]]+")
 
-# 사람이 쓰지 않은 메일을 알리는 헤더. 부재중 자동응답, 메일링 리스트 등.
-# RFC 3834 의 Auto-Submitted 와, 그걸 안 따르는 메일 서버들이 쓰는 관용 헤더다.
-AUTO_PRECEDENCE = {"auto_reply", "bulk", "junk", "list"}
-
 
 @dataclass(frozen=True)
 class Attachment:
@@ -58,8 +54,29 @@ def _raw(message: EmailMessage, name: str) -> str:
     """
     for key, value in message.raw_items():
         if key.lower() == name.lower():
-            return " ".join(str(value).split())
+            return " ".join(_unescape(str(value)).split())
     return ""
+
+
+def _to_text(data: bytes) -> str:
+    """문자셋을 모르는 바이트를 글자로 읽습니다. UTF-8, CP949 순으로 해 봅니다."""
+    for encoding in ("utf-8", "cp949"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _unescape(value: str) -> str:
+    """인코딩하지 않은 8비트 헤더를 글자로 읽습니다.
+
+    날 EUC-KR·UTF-8 로 쓴 한글 헤더를 파이썬은 서로게이트 문자로 들고 있다. 그대로
+    두면 슬랙에는 깨져 올라가고, DB 에 넣다 실패해 같은 메일이 세 번 올라간다.
+    """
+    if not any("\udc80" <= char <= "\udcff" for char in value):
+        return value
+    return _to_text(value.encode("utf-8", "surrogateescape"))
 
 
 def _decoded(value: str) -> str:
@@ -98,28 +115,36 @@ def _address(value: str) -> str:
 def _decode(part: EmailMessage) -> str:
     """텍스트 파트를 글자로 읽습니다.
 
-    x-windows-949 처럼 파이썬이 모르는 문자셋 이름이 붙어 오면 get_content() 가
-    LookupError 로 터진다. 그때는 UTF-8, CP949 순으로 읽어 본다.
+    문자셋이 없거나(옛 그룹웨어가 EUC-KR 본문을 charset 없이 보낸다 -- 그러면
+    get_content() 가 ASCII 로 읽어 전부 �가 된다), 파이썬이 모르는 이름이면
+    (x-windows-949 -- LookupError) 바이트를 직접 읽는다.
     """
-    try:
-        return part.get_content()
-    except LookupError:
-        data = part.get_payload(decode=True) or b""
-        for encoding in ("utf-8", "cp949"):
-            try:
-                return data.decode(encoding)
-            except UnicodeDecodeError:
-                continue
-        return data.decode("utf-8", errors="replace")
+    if part.get_content_charset() is not None:
+        try:
+            return part.get_content()
+        except LookupError:
+            pass
+    return _to_text(part.get_payload(decode=True) or b"")
 
 
 def _body_text(message: EmailMessage) -> str:
-    """본문 텍스트를 꺼냅니다. 텍스트가 없고 HTML 만 있으면 태그를 걷어냅니다."""
-    part = message.get_body(preferencelist=("plain", "html"))
-    if part is None:
+    """본문 텍스트를 꺼냅니다. 텍스트가 없고 HTML 만 있으면 태그를 걷어냅니다.
+
+    본문과 같은 형식의 텍스트 파트가 여럿이면 이어 붙입니다. 애플 메일은 본문
+    중간에 사진을 넣으면 "글, 사진, 글" 세 파트로 보내서, 첫 파트만 읽으면 사진
+    뒤에 쓴 글이 사라진다.
+    """
+    body = message.get_body(preferencelist=("plain", "html"))
+    if body is None:
         return ""
-    content = _decode(part)
-    if part.get_content_type() == "text/html":
+    parts = [
+        part
+        for part in _leaves(message)
+        if part.get_content_type() == body.get_content_type()
+        and part.get_content_disposition() != "attachment"
+    ]
+    content = "\n\n".join(_decode(part) for part in parts)
+    if body.get_content_type() == "text/html":
         return BeautifulSoup(content, "html.parser").get_text("\n").strip()
     return content.strip()
 
@@ -187,14 +212,21 @@ def _attachments(message: EmailMessage) -> list[Attachment]:
 
 
 def _is_auto_reply(message: EmailMessage) -> bool:
-    """자동응답이나 대량 발송처럼 사람이 쓰지 않은 메일인지 봅니다."""
-    auto_submitted = str(message["Auto-Submitted"] or "no").strip().lower()
-    precedence = str(message["Precedence"] or "").strip().lower()
+    """부재중 같은 자동응답인지 봅니다.
+
+    RFC 3834 의 Auto-Submitted: auto-replied 와, 그걸 안 따르는 메일 서버들이 쓰는
+    관용 헤더를 봅니다. 메일링 리스트·대량 발송(Precedence: list/bulk,
+    Auto-Submitted: auto-generated)은 자동응답으로 치지 않는다 -- 치면 처음 오는
+    상대의 그런 메일은 스레드를 못 열어 슬랙에 아예 안 올라간다. 구글 그룹을 거쳐
+    오는 메일에도 Precedence: list 가 붙는다.
+    """
+    auto_submitted = _raw(message, "Auto-Submitted").lower()
+    precedence = _raw(message, "Precedence").lower()
     return (
-        auto_submitted != "no"
-        or precedence in AUTO_PRECEDENCE
-        or message["X-Autoreply"] is not None
-        or message["X-Autorespond"] is not None
+        auto_submitted.startswith("auto-replied")
+        or precedence == "auto_reply"
+        or bool(_raw(message, "X-Autoreply"))
+        or bool(_raw(message, "X-Autorespond"))
     )
 
 
@@ -295,4 +327,9 @@ def build(
             subtype=subtype,
             filename=attachment.filename,
         )
-    return message_id, message.as_bytes()
+    # 머리 한 줄을 998자까지 둔다. 기본(78자)이면 아웃룩·SES 의 긴 Message-ID 를
+    # 접지 못해 In-Reply-To·References 를 =?utf-8?q?...?= 로 바꿔 써서, 받는 쪽이
+    # 답장을 원래 대화에 붙이지 못한다. 본문 인코딩은 set_content 가 이미 정했다.
+    return message_id, message.as_bytes(
+        policy=message.policy.clone(max_line_length=998)
+    )

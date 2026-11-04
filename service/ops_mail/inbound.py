@@ -10,7 +10,8 @@ S3 에 저장된 받은 메일을 슬랙에 올리고 남깁니다.
 
 자동응답(부재중 등)은 이미 있는 스레드에만 달고 새 스레드를 열지 않습니다.
 여러 명에게 보낸 메일에 돌아오는 자동응답이 채널을 덮지 않게 하려는 것입니다.
-답장할 메일을 고를 때도 자동응답은 건너뜁니다.
+답장할 메일을 고를 때도 자동응답은 건너뜁니다. 메일링 리스트·대량 발송 메일은
+사람이 보낸 메일처럼 다룹니다.
 
 처리는 S3 객체 키 하나로 끝납니다. 검사 결과는 SES 가 원문 헤더에 붙이고,
 객체 키의 끝이 SES 메시지 ID 라 SNS 알림 본문이 따로 필요 없습니다.
@@ -97,19 +98,23 @@ def format_thread_root(counterpart: str, sent: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def format_given_up(s3_key: str, bucket: str, error: str | None) -> str:
+def format_given_up(row: dict[str, Any], bucket: str) -> str:
     """더 다시 처리하지 않는 원본을 알리는 메시지입니다.
 
     Args:
-        s3_key: 객체 키
+        row: store.given_up 한 행 (s3_key, attempts, last_error)
         bucket: 메일 원본 버킷
-        error: 마지막으로 실패한 이유. 처리 중에 프로세스가 죽었으면 없습니다.
     """
-    reason = error or "처리 중에 서버가 멈춤"
+    if row["attempts"] >= store.MAX_ATTEMPTS:
+        why = f"{row['attempts']}번 처리하지 못해"
+    else:
+        why = "맡은 뒤 하루 넘게 끝나지 않아"
+    # 이유가 없으면 처리 중에 프로세스가 죽은 것이다.
+    reason = row["last_error"] or "처리 중에 서버가 멈춤"
     return (
-        f"⚠️ 받은 메일을 {store.MAX_ATTEMPTS}번 처리하지 못해 더 다시 하지 않습니다\n"
-        f"이유: `{escape(reason)}`\n"
-        f"원본: s3://{bucket}/{s3_key}"
+        f"⚠️ 받은 메일을 {why} 더 다시 하지 않습니다\n"
+        f"이유: `{escape(reason).replace('`', chr(39))}`\n"
+        f"원본: s3://{bucket}/{row['s3_key']}"
     )
 
 
