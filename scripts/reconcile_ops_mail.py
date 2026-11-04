@@ -43,8 +43,14 @@ PREFIX = "ops/"
 # 웹훅이 처리할 시간. 이보다 최근 객체는 건너뛴다.
 GRACE = timedelta(minutes=5)
 
-# 이보다 오래된 원본은 다시 처리하지 않는다.
-LOOKBACK = timedelta(days=1)
+# 이보다 오래된 원본은 다시 처리하지 않는다. 그동안 끝나지 않은 원본은
+# store.GIVEN_UP 이 포기로 잡아 알린다.
+LOOKBACK = store.ABANDON_AFTER
+
+
+def _ses_message_id(key: str) -> str:
+    """객체 키의 끝이 SES 메시지 ID 입니다."""
+    return key.rsplit("/", 1)[-1]
 
 
 async def reconcile(dry_run: bool) -> None:
@@ -62,8 +68,8 @@ async def reconcile(dry_run: bool) -> None:
     ]
     # 끝났거나 횟수를 다 쓴 것은 뺀다. 남은 것을 맡을지는 process_object 가 정한다
     # -- 다른 쪽이 처리 중이면 거기서 건너뛴다.
-    settled = await store.run(store.settled_keys, keys)
-    missing = [key for key in keys if key not in settled]
+    settled = await store.run(store.settled, [_ses_message_id(key) for key in keys])
+    missing = [key for key in keys if _ses_message_id(key) not in settled]
     print(f"ops 메일 원본 {len(keys)}개 중 미처리 {len(missing)}개")
 
     for key in missing:
@@ -88,17 +94,15 @@ async def reconcile(dry_run: bool) -> None:
         client = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
         channel = os.environ["OPS_MAIL_SLACK_CHANNEL_ID"]
         for row in given_up:
-            key = row["s3_key"]
             # 하나를 못 알려도 나머지는 알린다. 못 알린 것은 다음 번에 다시 알린다.
             try:
                 await client.chat_postMessage(
                     channel=channel,
-                    text=format_given_up(key, bucket, row["last_error"]),
+                    text=format_given_up(row["s3_key"], bucket, row["last_error"]),
                 )
+                await store.run(store.mark_alerted, row["ses_message_id"])
             except Exception as error:
-                print(f"ops 메일 포기 알림 실패 {key} {type(error).__name__}")
-                continue
-            await store.run(store.mark_alerted, key)
+                print(f"ops 메일 포기 알림 실패 {row['s3_key']} {type(error).__name__}")
 
 
 def main(dry_run: bool = False) -> None:

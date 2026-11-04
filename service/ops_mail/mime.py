@@ -7,12 +7,15 @@ import re
 from dataclasses import dataclass
 from email import message_from_bytes, policy
 from email.generator import BytesGenerator
+from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import formatdate, getaddresses, make_msgid, parseaddr
+from email.utils import formatdate, getaddresses, make_msgid
 
 from bs4 import BeautifulSoup
 
 MESSAGE_ID = re.compile(r"<[^<>\s]+>")
+ANGLE_ADDRESS = re.compile(r"<\s*([^<>\s@]+@[^<>\s@]+)\s*>")
+BARE_ADDRESS = re.compile(r"[^\s<>,;:\"'()\[\]]+@[^\s<>,;:\"'()\[\]]+")
 
 # 사람이 쓰지 않은 메일을 알리는 헤더. 부재중 자동응답, 메일링 리스트 등.
 # RFC 3834 의 Auto-Submitted 와, 그걸 안 따르는 메일 서버들이 쓰는 관용 헤더다.
@@ -47,9 +50,67 @@ class ParsedMail:
     auto_reply: bool
 
 
-def _address(header: str | None) -> str:
-    """'이름 <a@b.com>' 에서 소문자 주소만 꺼냅니다."""
-    return parseaddr(header or "")[1].lower()
+def _raw(message: EmailMessage, name: str) -> str:
+    """헤더를 파이썬 헤더 파서를 거치지 않고 받은 그대로 꺼냅니다.
+
+    파서는 모양이 틀린 값(Message-ID: <a@[b> 등)에서 AttributeError 로 터지고,
+    'John Doe [ACME] <a@b.com>' 같은 From 에서는 주소를 버린다.
+    """
+    for key, value in message.raw_items():
+        if key.lower() == name.lower():
+            return " ".join(str(value).split())
+    return ""
+
+
+def _decoded(value: str) -> str:
+    """=?utf-8?b?...?= 같은 인코딩을 풀어 사람이 읽는 글자로 만듭니다."""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
+
+
+def _text(value: str) -> str:
+    """DB 에 넣을 수 없는 NUL 문자를 뺍니다. 넣다 실패하면 같은 메일이 슬랙에 세 번 올라간다."""
+    return value.replace("\x00", "")
+
+
+def _line(value: str) -> str:
+    """한 줄로 만듭니다. 받은 제목에 줄바꿈이 있으면 그 제목으로 답장을 만들 수 없다."""
+    return " ".join(_text(value).split())
+
+
+def _address(value: str) -> str:
+    """헤더 값에서 소문자 주소 하나를 꺼냅니다. 없으면 빈 문자열입니다.
+
+    parseaddr 는 'Kim, J <a@b.com>' 처럼 이름에 따옴표 없는 쉼표가 있으면 빈 값을,
+    'John Doe [ACME] <a@b.com>' 이면 'john doe' 를 돌려준다. 그래서 꺾쇠 안의 주소를
+    직접 찾는다. 이름 자리에 '"<partner@x>" <me@y>' 처럼 남의 주소를 넣을 수
+    있으니 마지막 꺾쇠를 쓴다.
+    """
+    angled = ANGLE_ADDRESS.findall(value)
+    if angled:
+        return angled[-1].lower()
+    bare = BARE_ADDRESS.search(value)
+    return bare.group(0).lower() if bare else ""
+
+
+def _decode(part: EmailMessage) -> str:
+    """텍스트 파트를 글자로 읽습니다.
+
+    x-windows-949 처럼 파이썬이 모르는 문자셋 이름이 붙어 오면 get_content() 가
+    LookupError 로 터진다. 그때는 UTF-8, CP949 순으로 읽어 본다.
+    """
+    try:
+        return part.get_content()
+    except LookupError:
+        data = part.get_payload(decode=True) or b""
+        for encoding in ("utf-8", "cp949"):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return data.decode("utf-8", errors="replace")
 
 
 def _body_text(message: EmailMessage) -> str:
@@ -57,7 +118,7 @@ def _body_text(message: EmailMessage) -> str:
     part = message.get_body(preferencelist=("plain", "html"))
     if part is None:
         return ""
-    content = part.get_content()
+    content = _decode(part)
     if part.get_content_type() == "text/html":
         return BeautifulSoup(content, "html.parser").get_text("\n").strip()
     return content.strip()
@@ -77,26 +138,42 @@ def _as_received(message: EmailMessage) -> bytes:
     return buffer.getvalue()
 
 
+def _leaves(part: EmailMessage):
+    """multipart 를 펼쳐 맨 끝 파트들을 돌려줍니다. 전달한 메일(message/*) 속은 펼치지 않습니다."""
+    if part.get_content_maintype() == "multipart":
+        for child in part.iter_parts():
+            yield from _leaves(child)
+    else:
+        yield part
+
+
 def _attachments(message: EmailMessage) -> list[Attachment]:
     """첨부파일을 꺼냅니다.
 
-    본문에 박힌 이미지(서명 로고 등)는 뺍니다. 이런 이미지는 Content-ID 가
-    있고 attachment 로 표시되지 않습니다.
+    맨 위 multipart/mixed 만 보지 않고 모든 파트를 봅니다. 애플 메일이 본문 중간에
+    넣은 첨부는 multipart/alternative 안쪽에 있고, 스캐너가 보낸 메일은 메일 전체가
+    파일 하나다. 본문과, 첨부로 표시되지 않은 텍스트(본문의 다른 형식)와,
+    본문에 박힌 이미지(서명 로고 등, Content-ID 가 있음)는 뺍니다.
 
     "첨부로 전달" 한 메일(message/rfc822)은 디코딩할 본문이 따로 없어 그 메일
     원문을 .eml 로 붙입니다. 빈 첨부는 뺍니다 -- 슬랙이 0바이트 파일을 받지 않아
     올리기가 매번 실패한다.
     """
+    body = message.get_body(preferencelist=("plain", "html"))
     attachments = []
-    for index, part in enumerate(message.iter_attachments(), start=1):
-        if part["Content-ID"] and part.get_content_disposition() != "attachment":
+    for part in _leaves(message):
+        if part is body:
+            continue
+        if part.get_content_disposition() != "attachment" and (
+            part["Content-ID"] or part.get_content_maintype() == "text"
+        ):
             continue
         if part.get_content_maintype() == "message":
             data = b"".join(_as_received(inner) for inner in part.iter_parts())
-            default_name = f"attachment-{index}.eml"
+            default_name = f"attachment-{len(attachments) + 1}.eml"
         else:
             data = part.get_payload(decode=True) or b""
-            default_name = f"attachment-{index}"
+            default_name = f"attachment-{len(attachments) + 1}"
         if not data:
             continue
         attachments.append(
@@ -131,28 +208,34 @@ def parse(raw: bytes) -> ParsedMail:
         ParsedMail: 읽은 값
     """
     message = message_from_bytes(raw, policy=policy.default)
-    from_address = _address(message["From"])
+    from_raw = _raw(message, "From")
+    from_header = _line(_decoded(from_raw))
+    from_address = _address(from_raw)
+    # From 이 있는데 주소를 못 읽으면 조용히 넘기지 않는다. 실패로 처리해야 횟수를
+    # 다 쓴 뒤 채널에 알린다. From 이 아예 없는 원본(SES 안내 등)은 그대로 둔다.
+    if from_raw and not from_address:
+        raise ValueError(f"보낸 사람 주소를 읽지 못했습니다: {from_header[:200]}")
     references = MESSAGE_ID.findall(
-        f"{message['References'] or ''} {message['In-Reply-To'] or ''}"
+        f"{_raw(message, 'References')} {_raw(message, 'In-Reply-To')}"
     )
     # Message-ID 는 답장의 In-Reply-To 로 다시 나간다. 모양이 틀리면 헤더를 만들다
     # 실패하므로 <...> 하나만 받는다.
-    message_ids = MESSAGE_ID.findall(str(message["Message-ID"] or ""))
+    message_ids = MESSAGE_ID.findall(_raw(message, "Message-ID"))
     return ParsedMail(
         message_id=message_ids[0] if message_ids else make_msgid(),
-        from_header=str(message["From"] or ""),
+        from_header=from_header,
         from_address=from_address,
-        reply_to_address=_address(message["Reply-To"]) or from_address,
+        reply_to_address=_address(_raw(message, "Reply-To")) or from_address,
         to_addresses=[
             address.lower()
             for _, address in getaddresses(
-                [str(message["To"] or ""), str(message["Cc"] or "")]
+                [_text(_raw(message, "To")), _text(_raw(message, "Cc"))]
             )
             if address
         ],
-        subject=str(message["Subject"] or ""),
+        subject=_line(_decoded(_raw(message, "Subject"))),
         references_ids=list(dict.fromkeys(references)),
-        body_text=_body_text(message),
+        body_text=_text(_body_text(message)),
         attachments=_attachments(message),
         spam=str(message["X-SES-Spam-Verdict"] or "") == "FAIL",
         virus=str(message["X-SES-Virus-Verdict"] or "") == "FAIL",
@@ -202,7 +285,10 @@ def build(
         message["References"] = " ".join(references_ids)
     message.set_content(body)
     for attachment in attachments:
-        maintype, subtype = attachment.content_type.split("/", 1)
+        # 슬랙 파일의 mimetype 이 비어 오기도 한다.
+        maintype, _, subtype = attachment.content_type.partition("/")
+        if not subtype:
+            maintype, subtype = "application", "octet-stream"
         message.add_attachment(
             attachment.data,
             maintype=maintype,

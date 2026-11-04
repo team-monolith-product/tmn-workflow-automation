@@ -30,8 +30,10 @@ SUBSCRIPTION_KEYS = (
     "Type",
 )
 
-# 인증서 URL 이 AWS 가 아니면 공격자가 자기 인증서로 서명한 것이다.
-CERT_HOST = re.compile(r"^sns\.[a-z0-9-]+\.amazonaws\.com$")
+# 인증서 URL 이 AWS 가 아니면 공격자가 자기 인증서로 서명한 것이다. 리전 자리를
+# 3자 이상으로 두는 것은 sns.s3.amazonaws.com(남의 S3 버킷 주소)을 막기 위해서다.
+# AWS SDK 가 쓰는 패턴과 같다.
+CERT_HOST = re.compile(r"^sns\.[a-z0-9-]{3,}\.amazonaws\.com$")
 
 _certs: TTLCache = TTLCache(maxsize=10, ttl=3600)
 
@@ -52,30 +54,41 @@ def string_to_sign(message: dict[str, Any]) -> bytes:
     ).encode()
 
 
-def is_aws_cert_url(url: str) -> bool:
-    """인증서 URL 이 AWS SNS 것인지 봅니다.
+def aws_cert_url(url: str) -> str | None:
+    """인증서 URL 이 AWS SNS 것이면, 받아올 URL 을 검사한 부분만으로 다시 만듭니다.
+
+    받은 문자열을 그대로 requests 에 넘기면 안 된다. "https://공격자\\@sns.<리전>
+    .amazonaws.com/x.pem" 을 urlparse 는 AWS 호스트로, requests 는 공격자 호스트로
+    읽는다. SigningCertURL 은 서명 대상이 아니라서 서명 뒤에 바꿀 수 있다.
 
     Args:
         url: SigningCertURL
 
     Returns:
-        bool: https 이고 sns.<region>.amazonaws.com 의 .pem 이면 True
+        str | None: https://sns.<region>.amazonaws.com/....pem. AWS 것이 아니면 None
     """
     parsed = urlparse(url)
-    return (
-        parsed.scheme == "https"
-        and CERT_HOST.match(parsed.hostname or "") is not None
-        and parsed.path.endswith(".pem")
-    )
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.port is not None
+        or CERT_HOST.match(parsed.hostname or "") is None
+        or not parsed.path.endswith(".pem")
+        or "\\" in url
+    ):
+        return None
+    return f"https://{parsed.hostname}{parsed.path}"
 
 
 def _fetch_cert(url: str) -> bytes:
     """인증서를 받아옵니다. 같은 인증서를 메시지마다 다시 받지 않습니다."""
-    if url not in _certs:
+    # 여러 작업 스레드에서 부른다. 검사와 읽기 사이에 만료돼도 KeyError 가 안 나게 get.
+    cert = _certs.get(url)
+    if cert is None:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        _certs[url] = response.content
-    return _certs[url]
+        cert = _certs[url] = response.content
+    return cert
 
 
 def verify(message: dict[str, Any], cert_pem: bytes) -> bool:
@@ -111,7 +124,7 @@ def is_authentic(message: dict[str, Any]) -> bool:
     Returns:
         bool: AWS SNS 가 보낸 것이 맞으면 True
     """
-    url = message["SigningCertURL"]
-    if not is_aws_cert_url(url):
+    url = aws_cert_url(message["SigningCertURL"])
+    if url is None:
         return False
     return verify(message, _fetch_cert(url))

@@ -194,12 +194,78 @@ def test_SNS_서명이_맞으면_통과하고_본문이_바뀌면_막는다():
 
 
 def test_인증서_URL이_AWS가_아니면_막는다():
-    # When / Then : sns.<region>.amazonaws.com 의 https .pem 만 받는다
-    assert sns.is_aws_cert_url("https://sns.ap-northeast-2.amazonaws.com/a.pem")
-    assert not sns.is_aws_cert_url(
-        "https://sns.ap-northeast-2.amazonaws.com.evil.kr/a.pem"
+    good = "https://sns.ap-northeast-2.amazonaws.com/SimpleNotificationService-a.pem"
+
+    # When / Then : sns.<region>.amazonaws.com 의 https .pem 만 받고, 받아올 URL 은
+    #               검사한 호스트와 경로로만 다시 만든다
+    assert sns.aws_cert_url(good) == good
+    for bad in (
+        "https://sns.ap-northeast-2.amazonaws.com.evil.kr/a.pem",
+        "http://sns.ap-northeast-2.amazonaws.com/a.pem",
+        # urlparse 는 AWS 로, requests 는 evil.kr 로 읽는다
+        "https://evil.kr\\@sns.ap-northeast-2.amazonaws.com/a.pem",
+        "https://u@sns.ap-northeast-2.amazonaws.com/a.pem",
+        "https://sns.ap-northeast-2.amazonaws.com:8443/a.pem",
+        # 남의 S3 버킷 주소
+        "https://sns.s3.amazonaws.com/a.pem",
+    ):
+        assert sns.aws_cert_url(bad) is None, bad
+
+
+def test_SNS_서명_대상은_AWS_문서의_모양이다():
+    message = {
+        "Type": "Notification",
+        "MessageId": "id-1",
+        "TopicArn": TOPIC,
+        "Message": "{}",
+        "Timestamp": "2026-11-03T00:00:00.000Z",
+    }
+
+    # When : Subject 없는 알림의 서명 대상을 만들면
+    signed = sns.string_to_sign(message)
+
+    # Then : 정해진 키 순서로 "키\n값\n" 을 잇고, 없는 Subject 는 키째 빠진다
+    #        (https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html)
+    assert (
+        signed
+        == (
+            "Message\n{}\nMessageId\nid-1\n"
+            "Timestamp\n2026-11-03T00:00:00.000Z\n"
+            f"TopicArn\n{TOPIC}\nType\nNotification\n"
+        ).encode()
     )
-    assert not sns.is_aws_cert_url("http://sns.ap-northeast-2.amazonaws.com/a.pem")
+
+
+def test_SNS_검증은_검사한_URL_에서만_인증서를_받는다(monkeypatch):
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    fetched = []
+
+    class _Response:
+        content = _cert(key)
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(
+        sns.requests, "get", lambda url, timeout: fetched.append(url) or _Response()
+    )
+    sns._certs.clear()
+    cert_url = "https://sns.ap-northeast-2.amazonaws.com/a.pem"
+
+    # When : 서명이 맞는 메시지와, 인증서 URL 만 공격자 쪽으로 바꾼 메시지를 확인하면
+    good = sns.is_authentic(_signed_message(key, {"SigningCertURL": cert_url}))
+    forged = sns.is_authentic(
+        _signed_message(
+            key,
+            {
+                "SigningCertURL": "https://evil.kr\\@sns.ap-northeast-2.amazonaws.com/a.pem"
+            },
+        )
+    )
+
+    # Then : 맞는 것만 통과하고, 인증서는 AWS 호스트에서만 받는다
+    assert good and not forged
+    assert fetched == [cert_url]
 
 
 def _client(monkeypatch, authentic: bool = True):
@@ -260,6 +326,7 @@ class _FakeSlack:
         self.uploads = []
         self.updates = []
         self.deletes = []
+        self.ephemerals = []
         _FakeSlack.last = self
 
     async def chat_postMessage(self, **kwargs):
@@ -275,13 +342,16 @@ class _FakeSlack:
     async def chat_delete(self, **kwargs):
         self.deletes.append(kwargs)
 
+    async def chat_postEphemeral(self, **kwargs):
+        self.ephemerals.append(kwargs)
+
 
 def _fake_db(
     monkeypatch,
     module,
     *,
     thread: str | None,
-    latest: dict | None = None,
+    target: dict | None = None,
     sent_to: list[dict] | None = None,
     claimed_by: str | None = None,
     attempt: int | None = 1,
@@ -305,13 +375,12 @@ def _fake_db(
     monkeypatch.setattr(module.store, "claim", lambda conn, ses_id, key: attempt)
     monkeypatch.setattr(module.store, "finish", finish)
     monkeypatch.setattr(module.store, "find_thread", lambda conn, channel, cp: thread)
-    monkeypatch.setattr(module.store, "latest_in_thread", lambda conn, c, t: latest)
-    monkeypatch.setattr(module.store, "insert", lambda conn, row: inserted.append(row))
+    monkeypatch.setattr(module.store, "reply_target", lambda conn, c, t: target)
     monkeypatch.setattr(
         module.store, "sent_to", lambda conn, c, cp: list(sent_to or [])
     )
     monkeypatch.setattr(module.store, "claim_thread", claim_thread)
-    module.store.claimed = claimed
+    monkeypatch.setattr(module.store, "claimed", claimed, raising=False)
     return inserted
 
 
@@ -429,8 +498,8 @@ def _reconcile(monkeypatch, objects, process, *, settled=(), given_up=()):
     alerted = []
 
     async def run(fn, *args):
-        if fn is reconcile_ops_mail.store.settled_keys:
-            return set(settled)
+        if fn is reconcile_ops_mail.store.settled:
+            return {key.rsplit("/", 1)[-1] for key in settled}
         if fn is reconcile_ops_mail.store.given_up:
             return list(given_up)
         if fn is reconcile_ops_mail.store.mark_alerted:
@@ -460,8 +529,12 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
         [],
         process,
         given_up=[
-            {"s3_key": "ops/bad", "last_error": "ValueError: 깨진 MIME"},
-            {"s3_key": "ops/died", "last_error": None},
+            {
+                "ses_message_id": "bad",
+                "s3_key": "ops/bad",
+                "last_error": "ValueError: 깨진 MIME",
+            },
+            {"ses_message_id": "died", "s3_key": "ops/died", "last_error": None},
         ],
     )
 
@@ -472,7 +545,7 @@ def test_정리_작업은_횟수를_다_쓴_원본을_채널에_한_번_알린�
     assert "ValueError: 깨진 MIME" in bad
     assert "s3://bucket/ops/bad" in bad
     assert "서버가 멈춤" in died
-    assert alerted == ["ops/bad", "ops/died"]
+    assert alerted == ["bad", "died"]
 
 
 def test_처리가_실패하면_이유를_남긴다(monkeypatch):
@@ -498,8 +571,7 @@ def test_처리가_실패하면_이유를_남긴다(monkeypatch):
 
 
 def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():
-    latest = {
-        "direction": "in",
+    target = {
         "counterpart": "office@abc.kr",
         "subject": "견적 문의",
         "message_id": "<m2@abc.kr>",
@@ -508,12 +580,12 @@ def test_상대_스레드_안에서는_그_상대에게_답장을_만든다():
 
     # When : 상대 스레드에서 본문만 주거나, 다른 사람을 받는 사람으로 주면
     draft = drafts.make(
-        thread_ts="ts-office", latest=latest, body="안내드립니다", to=[], subject=""
+        thread_ts="ts-office", target=target, body="안내드립니다", to=[], subject=""
     )
     with pytest.raises(drafts.DraftProblem) as other:
         drafts.make(
             thread_ts="ts-office",
-            latest=latest,
+            target=target,
             body="안내드립니다",
             to=["x@y.kr"],
             subject="",
@@ -532,14 +604,14 @@ def test_스레드_밖에서_새_메일은_받는_사람과_제목이_있어야_
     with pytest.raises(drafts.DraftProblem) as missing:
         drafts.make(
             thread_ts="ts-chat",
-            latest=None,
+            target=None,
             body="안녕하세요",
             to=["a@b.kr"],
             subject="",
         )
     draft = drafts.make(
         thread_ts="ts-chat",
-        latest=None,
+        target=None,
         body="안녕하세요",
         to=["A@B.kr", "c@d.kr", "a@b.kr"],
         subject="안내",
@@ -689,7 +761,7 @@ def test_받는_사람이_여럿이면_한_명씩_따로_보내고_중간에_실
 
 
 def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파일로_올린다(monkeypatch):
-    _fake_db(monkeypatch, ops_mail, thread=None, latest=None)
+    _fake_db(monkeypatch, ops_mail, thread=None)
     slack = _FakeSlack()
     draft_ops_mail = ops_mail.get_draft_ops_mail_tool(slack, CHANNEL, "ts-chat")
     recipients = [f"school{i}@abc.kr" for i in range(12)]
@@ -708,7 +780,7 @@ def test_받는_사람이_많아도_카드는_한_장이고_전체_명단은_파
 
 
 def test_본문이_길면_카드에는_앞부분만_싣고_전체는_파일로_올린다(monkeypatch):
-    _fake_db(monkeypatch, ops_mail, thread=None, latest=None)
+    _fake_db(monkeypatch, ops_mail, thread=None)
     slack = _FakeSlack()
     draft_ops_mail = ops_mail.get_draft_ops_mail_tool(slack, CHANNEL, "ts-chat")
     body = "가" * 4000
@@ -761,42 +833,46 @@ def _inbound(monkeypatch, headers: dict[str, str], *, thread: str | None):
     monkeypatch.setattr(inbound, "get_object", lambda bucket, key: _raw_mail(headers))
     inserted = _fake_db(monkeypatch, inbound, thread=thread)
     asyncio.run(inbound.process_object("bucket", "ops/abc"))
-    return _FakeSlack.last, inserted
+    return _FakeSlack.last, inserted, inbound.store.claimed
 
 
 def test_자동응답은_스레드가_없으면_슬랙에_올리지_않고_있으면_그_스레드에_단다(
     monkeypatch,
 ):
     # When : 부재중 자동응답이 스레드 없는 상대와 스레드 있는 상대에게서 오면
-    new_slack, new_inserted = _inbound(
+    new_slack, new_inserted, new_claimed = _inbound(
         monkeypatch, {"Auto-Submitted": "auto-replied"}, thread=None
     )
-    old_slack, _ = _inbound(monkeypatch, {"Precedence": "auto_reply"}, thread="ts-x")
+    old_slack, _, _ = _inbound(monkeypatch, {"Precedence": "auto_reply"}, thread="ts-x")
 
     # Then : 스레드 없는 상대는 기록만 남기고, 있는 상대는 그 스레드에 단다.
     #        자동응답이라고 남겨 답장할 메일을 고를 때 건너뛴다
     assert new_slack.posts == [] and len(new_inserted) == 1
     assert new_inserted[0].auto_reply
-    assert inbound.store.claimed == []
+    assert new_claimed == []
     assert [post["thread_ts"] for post in old_slack.posts] == ["ts-x"]
 
 
-def test_우리가_마지막에_보낸_스레드의_답장은_상대_메일에_건다():
-    latest = {
-        "direction": "out",
+def test_상대_스레드인데_받은_메일_기록이_없으면_새_메일로_넘어가지_않는다():
+    # 스레드는 열렸는데 받은 메일 기록이 아직 없다(처리 중이거나 기록에 실패함)
+    target = {
         "counterpart": "office@abc.kr",
-        "subject": "Re: 견적 문의",
-        "message_id": "<ours@team-mono.com>",
-        "references_ids": ["<m1@abc.kr>", "<m2@abc.kr>"],
+        "subject": None,
+        "message_id": None,
+        "references_ids": None,
     }
 
-    # When : 마지막 메일이 우리가 보낸 것인 스레드에서 다시 답장하면
-    draft = drafts.make(
-        thread_ts="ts-office", latest=latest, body="추가 안내", to=[], subject=""
-    )
+    # When : 그 스레드에서 다른 사람과 제목을 주고 초안을 만들면
+    with pytest.raises(drafts.DraftProblem) as other:
+        drafts.make(
+            thread_ts="ts-office", target=target, body="x", to=["x@y.kr"], subject="s"
+        )
+    with pytest.raises(drafts.DraftProblem) as unrecorded:
+        drafts.make(thread_ts="ts-office", target=target, body="x", to=[], subject="")
 
-    # Then : SES 가 바꿔 쓴 우리 Message-ID 는 빼고 상대 메일까지만 잇는다
-    assert draft.references_ids == ["<m1@abc.kr>", "<m2@abc.kr>"]
+    # Then : 받는 사람은 여전히 그 상대로 고정되고, 기록이 생길 때까지 답장도 막는다
+    assert "바꿀 수 없습니다" in str(other.value)
+    assert "아직 기록되지 않아" in str(unrecorded.value)
 
 
 def test_보낸_뒤_기록이_실패하면_멈추고_카드에_남긴다(monkeypatch):
@@ -930,7 +1006,7 @@ def test_첨부로_전달한_메일의_인코딩_안_된_한글_헤더는_받은
 def test_받는_사람_한_칸에는_주소_하나만_받는다():
     def make(to, subject="안내"):
         return drafts.make(
-            thread_ts="ts-chat", latest=None, body="안녕하세요", to=to, subject=subject
+            thread_ts="ts-chat", target=None, body="안녕하세요", to=to, subject=subject
         )
 
     # When / Then : 한 칸에 여럿, 주소 아닌 것, 줄바꿈 제목은 막고 이름 붙은 주소는 주소만 쓴다
@@ -969,3 +1045,213 @@ def test_SES가_받지_않았다고_답하면_안_나갔다고_카드에_남긴�
     text = slack.updates[-1]["text"]
     assert "a@school.kr 에게는 안 나갔습니다 (TooManyRequestsException)" in text
     assert ses.rejected_code(ValueError()) is None
+
+
+def _parse_headers(headers: str, body: bytes = b"body") -> mime.ParsedMail:
+    return mime.parse(headers.replace("\n", "\r\n").encode() + b"\r\n\r\n" + body)
+
+
+def test_보낸_사람_머리가_특이해도_주소를_읽고_못_읽으면_실패로_올린다():
+    # When / Then : 이름에 따옴표 없는 쉼표·대괄호가 있어도 꺾쇠 안 주소를 쓴다
+    assert _parse_headers("From: Kim, J <a@b.com>").reply_to_address == "a@b.com"
+    assert _parse_headers("From: John Doe [ACME] <A@B.com>").from_address == "a@b.com"
+    # 이름 자리에 남의 주소를 넣어도 진짜 주소(마지막 꺾쇠)를 쓴다
+    spoof = _parse_headers('From: "<partner@school.kr>" <me@evil.kr>')
+    assert spoof.from_address == "me@evil.kr"
+    # 주소를 못 읽으면 조용히 넘기지 않고 실패로 올려 포기 알림까지 가게 한다
+    with pytest.raises(ValueError):
+        _parse_headers("From: undisclosed-recipients")
+    # From 이 아예 없는 원본(SES 안내)은 빈 주소다
+    assert _parse_headers("Subject: setup").from_address == ""
+
+
+def test_DB_와_답장을_깨뜨리는_머리와_본문을_미리_다듬는다():
+    # When : NUL 이 든 제목, 줄바꿈이 든 제목, 모르는 문자셋, 모양이 틀린 Message-ID 가 오면
+    nul = _parse_headers("From: a@b.kr\nSubject: =?utf-8?b?YQBi?=", b"x\x00y")
+    newline = _parse_headers("From: a@b.kr\nSubject: =?utf-8?b?bGluZTEKbGluZTI=?=")
+    charset = _parse_headers(
+        "From: a@b.kr\nContent-Type: text/plain; charset=x-windows-949",
+        "안녕하세요".encode("cp949"),
+    )
+    odd_id = _parse_headers("From: a@b.kr\nMessage-ID: <a@[b>")
+
+    # Then : NUL 은 빼고, 제목은 한 줄로, 본문은 읽을 수 있게, 메일은 끝까지 읽는다
+    assert (nul.subject, nul.body_text) == ("ab", "xy")
+    assert newline.subject == "line1 line2"
+    assert charset.body_text == "안녕하세요"
+    assert odd_id.message_id == "<a@[b>"
+
+
+def test_본문_안쪽에_있거나_메일_전체가_파일인_첨부도_꺼낸다():
+    apple = (
+        b"From: a@b.kr\r\nMIME-Version: 1.0\r\n"
+        b"Content-Type: multipart/alternative; boundary=A\r\n\r\n"
+        b"--A\r\nContent-Type: text/plain\r\n\r\nhi\r\n"
+        b"--A\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n"
+        b"--B\r\nContent-Type: text/html\r\n\r\n<p>hi</p>\r\n"
+        b"--B\r\nContent-Type: application/pdf\r\n"
+        b"Content-Disposition: attachment; filename=x.pdf\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--B--\r\n--A--\r\n"
+    )
+    scanner = (
+        b"From: a@b.kr\r\nContent-Type: application/pdf\r\n"
+        b"Content-Disposition: attachment; filename=scan.pdf\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n"
+    )
+
+    # When : 애플 메일이 본문 중간에 넣은 첨부와, 메일 전체가 파일 하나인 메일을 읽으면
+    nested = mime.parse(apple)
+    single = mime.parse(scanner)
+
+    # Then : 둘 다 첨부를 꺼내고, 본문의 다른 형식(HTML)은 첨부로 치지 않는다
+    assert [a.filename for a in nested.attachments] == ["x.pdf"]
+    assert nested.body_text == "hi"
+    assert [a.filename for a in single.attachments] == ["scan.pdf"]
+
+
+def test_회신_주소가_보낸_사람과_다르면_드러낸다():
+    # When : 회신 주소에 다른 사람 주소를 적은 메일을 슬랙 글로 만들면
+    text = inbound.format_inbound(
+        _parse_headers("From: me@evil.kr\nReply-To: partner@school.kr"), "s3://b/k"
+    )
+
+    # Then : 답장이 어디로 가는지 경고한다
+    assert "회신 주소가 보낸 사람과 다릅니다" in text
+    assert "partner@school.kr" in text
+
+
+def test_스레드의_지운_파일이나_외부_파일은_첨부_후보에서_뺀다():
+    messages = [
+        {"files": [{"id": "F1", "mode": "tombstone"}]},
+        {"files": [{"name": "링크.pdf", "mode": "external", "url_private": "u"}]},
+        {"files": [_slack_file("계획안.pdf")]},
+    ]
+
+    # When : 지운 파일과 외부 파일이 섞인 스레드에서 고르면
+    picked = drafts.pick_files(messages, ["계획안.pdf", "링크.pdf"])
+
+    # Then : 터지지 않고, 내려받을 주소가 있는 파일은 고른다
+    assert [f["url"] for f in picked] == ["https://files.slack.com/계획안.pdf", "u"]
+
+
+def test_카드는_본문도_이스케이프해_실제로_나갈_글자를_보여준다():
+    draft = drafts.Draft(
+        recipients=["a@b.kr"],
+        subject="안내",
+        body="팀모노리스 <ops@team-mono.com> & <!channel>",
+        references_ids=[],
+        thread_ts="ts",
+        is_reply=False,
+    )
+
+    # When : 카드 글을 만들면
+    summary = ops_mail._summary(draft)
+
+    # Then : 슬랙 문법으로 읽히지 않게 바꾼다
+    assert "&lt;ops@team-mono.com&gt; &amp; &lt;!channel&gt;" in summary
+    assert "<!channel>" not in summary
+
+
+def test_원문을_만들다_실패하면_안_나갔다고_남기고_SES_를_부르지_않는다(monkeypatch):
+    called = []
+
+    def build(draft, recipient, attachments):
+        raise ValueError("bad header")
+
+    monkeypatch.setattr(ops_mail, "_build", build)
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: called.append(raw))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d6"] = _new_mail(["a@school.kr", "b@school.kr"])
+    slack = _FakeSlack()
+
+    # When : 원문을 만들다 실패하면
+    with pytest.raises(ValueError):
+        _approve(app, slack, "d6")
+
+    # Then : 발송 여부를 모른다고 하지 않고 안 나갔다고 남긴다
+    assert called == []
+    assert "a@school.kr 에게는 안 나갔습니다. (ValueError)" in slack.updates[-1]["text"]
+
+
+def test_버튼을_못_걷으면_초안을_되돌려_다시_누를_수_있게_한다(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: sent.append(raw))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d7"] = _new_mail(["a@school.kr"])
+    slack = _FakeSlack()
+
+    async def chat_update(**kwargs):
+        raise ConnectionError
+
+    slack.chat_update = chat_update
+
+    # When : [보내기] 를 눌렀는데 카드의 버튼을 걷지 못하면
+    with pytest.raises(ConnectionError):
+        _approve(app, slack, "d7")
+
+    # Then : 아무것도 보내지 않고 초안을 되돌린다
+    assert sent == []
+    assert "d7" in ops_mail._DRAFTS
+    ops_mail._DRAFTS.pop("d7")
+
+
+def test_다_보낸_뒤_카드를_못_고쳐도_실패로_올리지_않는다(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(ops_mail, "send_mime", lambda raw: {"MessageId": "s"})
+    monkeypatch.setattr(ops_mail, "_record", _fake_record(recorded))
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    ops_mail._DRAFTS["d8"] = _new_mail(["a@school.kr"])
+    slack = _FakeSlack()
+    updates = slack.updates
+
+    async def chat_update(**kwargs):
+        if "보냈습니다" in kwargs["text"]:
+            raise TimeoutError
+        updates.append(kwargs)
+
+    slack.chat_update = chat_update
+
+    # When : 메일은 다 나갔는데 결과 카드로 고치다 실패하면
+    _approve(app, slack, "d8")
+
+    # Then : 던지지 않고(다시 보내게 만들지 않고), 기록은 남아 있다
+    assert [args[1] for args in recorded] == ["a@school.kr"]
+
+
+def test_처리됐거나_만료된_카드의_버튼은_누른_사람에게만_알린다():
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app)
+    slack = _FakeSlack()
+
+    # When : 초안이 없는 카드의 [보내기] 를 누르면
+    _approve(app, slack, "gone")
+
+    # Then : 카드는 건드리지 않고 누른 사람에게만 알린다
+    assert slack.updates == []
+    assert slack.ephemerals[0]["user"] == "U1"
+    assert "이미 처리됐거나 만료됐습니다" in slack.ephemerals[0]["text"]
+
+
+def test_SES_는_다시_보내지_않는_클라이언트로_부른다(monkeypatch):
+    configs = []
+
+    class _Session:
+        def client(self, name, region_name, config):
+            configs.append(config)
+
+            class _Client:
+                def send_email(self, Content):
+                    return {"MessageId": "s"}
+
+            return _Client()
+
+    monkeypatch.setattr(ses.boto3.session, "Session", _Session)
+
+    # When : 메일을 보내면
+    ses.send_mime(b"raw")
+
+    # Then : 타임아웃·5xx 에 같은 원문을 다시 보내지 않게 한 번만 시도한다
+    assert configs[0].retries == {"total_max_attempts": 1}

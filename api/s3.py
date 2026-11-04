@@ -7,6 +7,14 @@ import os
 import boto3
 
 
+def _client():
+    # 작업 스레드에서 부른다. boto3 기본 세션은 여러 스레드가 동시에 클라이언트를
+    # 만들면 깨질 수 있어 부를 때마다 세션을 따로 만든다.
+    return boto3.session.Session().client(
+        "s3", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
+    )
+
+
 def get_object(bucket: str, key: str) -> bytes:
     """
     S3 객체 본문을 받아옵니다.
@@ -18,9 +26,7 @@ def get_object(bucket: str, key: str) -> bytes:
     Returns:
         bytes: 객체 본문
     """
-    client = boto3.client(
-        "s3", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
-    )
+    client = _client()
     response = client.get_object(Bucket=bucket, Key=key)
     return response["Body"].read()
 
@@ -36,9 +42,7 @@ def list_objects(bucket: str, prefix: str) -> list[dict]:
     Returns:
         list[dict]: ListObjectsV2 의 Contents 를 이어붙인 것 (Key, LastModified 등)
     """
-    client = boto3.client(
-        "s3", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
-    )
+    client = _client()
     paginator = client.get_paginator("list_objects_v2")
     return [
         item

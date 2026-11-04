@@ -36,8 +36,8 @@ MAX_BODY_CHARS = 3500
 # 원본 하나를 처리하며 기다리는 시간의 상한. 자리를 잡아 두는 시간(store.LEASE)보다
 # 짧아야 한다 -- 길면 아직 처리 중인 원본을 다른 쪽이 다시 맡아 두 번 올린다.
 # 넘으면 슬랙·DB 다음 단계로 넘어가지 않게 끊을 뿐, 이미 스레드로 넘긴 S3 읽기나
-# 파싱, DB 호출은 끝까지 돈다.
-DELIVER_TIMEOUT = timedelta(minutes=10)
+# 파싱, DB 호출은 끝까지 돈다. 그 시간을 남겨 LEASE 보다 5분 짧게 둔다.
+DELIVER_TIMEOUT = store.LEASE - timedelta(minutes=5)
 
 
 def format_inbound(mail: mime.ParsedMail, s3_uri: str) -> str:
@@ -55,6 +55,13 @@ def format_inbound(mail: mime.ParsedMail, s3_uri: str) -> str:
         warnings.append("⚠️ 스팸 의심")
     if mail.virus:
         warnings.append("⚠️ 바이러스 의심 — 첨부파일을 올리지 않았습니다")
+    # 스레드는 회신 주소로 고른다. 회신 주소에 남의 주소를 적으면 그 사람 스레드에
+    # 들어오니, 보낸 사람과 다르면 드러낸다.
+    if mail.reply_to_address != mail.from_address:
+        warnings.append(
+            f"⚠️ 회신 주소가 보낸 사람과 다릅니다 — 답장은"
+            f" {escape(mail.reply_to_address)} 로 갑니다"
+        )
 
     body = mail.body_text
     if len(body) > MAX_BODY_CHARS:
@@ -201,7 +208,6 @@ async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
             subject=mail.subject,
             body_text=mail.body_text,
             references_ids=mail.references_ids,
-            s3_key=key,
             channel_id=channel_id,
             sent_by=None,
             auto_reply=mail.auto_reply,

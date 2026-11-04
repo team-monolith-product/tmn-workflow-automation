@@ -11,9 +11,10 @@
 
 문자와 같은 이유로 도구를 부르는 것만으로는 나가지 않습니다.
 
-받은 메일은 app/ops_mail_sns.py 가 슬랙에 올립니다. 스레드는 상대방 주소 하나에
-하나입니다. 답장은 그 스레드에 남고, 새 메일은 카드 하나가 기록입니다 -- 상대가
-회신해서 스레드가 열릴 때 먼저 보낸 메일이 그 스레드에 함께 보입니다.
+받은 메일은 service/ops_mail/inbound.py 가 슬랙에 올립니다. 스레드는 상대방 주소
+하나에 하나입니다. 답장은 그 스레드에 남고, 새 메일은 카드 하나가 기록입니다 --
+아직 스레드가 없던 상대가 회신하면, 스레드를 열 때 먼저 보낸 메일을 첫 메시지에
+보여줍니다. 이미 스레드가 있는 상대에게 보낸 새 메일은 그 스레드에 따로 남지 않습니다.
 """
 
 import asyncio
@@ -80,7 +81,9 @@ def _summary(draft: Draft) -> str:
     body = draft.body
     if len(body) > PREVIEW_BODY_CHARS:
         body = body[:PREVIEW_BODY_CHARS] + f"\n…(전체 {len(draft.body)}자는 본문 파일)"
-    lines.append(f"```{body.replace('`', chr(39))}```")
+    # 본문도 이스케이프한다. 안 하면 서명의 "<ops@team-mono.com>" 같은 글자가
+    # 슬랙 문법으로 읽혀, 승인하는 사람이 실제로 나갈 본문과 다른 것을 본다.
+    lines.append(f"```{escape(body).replace('`', chr(39))}```")
     return "\n".join(lines)
 
 
@@ -180,11 +183,11 @@ def get_draft_ops_mail_tool(
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
         """
-        latest = await store.run(store.latest_in_thread, channel, thread_ts)
+        target = await store.run(store.reply_target, channel, thread_ts)
         try:
             draft = make(
                 thread_ts=thread_ts,
-                latest=latest,
+                target=target,
                 body=body,
                 to=to or [],
                 subject=subject,
@@ -244,15 +247,15 @@ async def _download(token: str, file: dict) -> mime.Attachment:
     )
 
 
-def _send(
+def _build(
     draft: Draft, recipient: str, attachments: list[mime.Attachment]
-) -> tuple[str, str]:
-    """한 사람에게 SES 로 보냅니다.
+) -> tuple[str, bytes]:
+    """한 사람에게 보낼 원문을 만듭니다.
 
     Returns:
-        tuple[str, str]: (우리가 만든 Message-ID, SES MessageId)
+        tuple[str, bytes]: (우리가 만든 Message-ID, MIME 원문)
     """
-    message_id, raw = mime.build(
+    return mime.build(
         from_header=FROM_HEADER,
         to_address=recipient,
         subject=draft.subject,
@@ -260,8 +263,6 @@ def _send(
         references_ids=draft.references_ids,
         attachments=attachments,
     )
-    response = send_mime(raw)
-    return message_id, response["MessageId"]
 
 
 async def _record(
@@ -285,7 +286,6 @@ async def _record(
             subject=draft.subject,
             body_text=draft.body,
             references_ids=draft.references_ids,
-            s3_key=None,
             channel_id=channel,
             sent_by=user,
         ),
@@ -331,13 +331,25 @@ def register_ops_mail_handlers(app, revise=None):
     @app.action(APPROVE)
     async def approve(ack, body, client):
         await ack()
+        draft_id = body["actions"][0]["value"]
         # 꺼내면서 지운다. 두 번 눌러도 두 번 보내지 않는다.
-        draft = _DRAFTS.pop(body["actions"][0]["value"], None)
+        draft = _DRAFTS.pop(draft_id, None)
         if draft is None:
+            await _gone(client, body)
             return
         channel = body["container"]["channel_id"]
         ts = body["container"]["message_ts"]
         user = body["user"]["id"]
+        total = len(draft.recipients)
+
+        # 버튼부터 걷는다. 첨부를 받고 수백 명에게 보내는 동안 다른 사람이 [취소] 를
+        # 눌러도 아무 일도 안 일어나는데, 누른 사람은 막았다고 믿는다. 못 걷었으면
+        # 아직 아무것도 안 했으니 초안을 되돌려 다시 누를 수 있게 한다.
+        try:
+            await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
+        except BaseException:
+            _DRAFTS[draft_id] = draft
+            raise
 
         # 내려받기는 보내기 전이라 실패해도 메일은 나가지 않았다.
         try:
@@ -345,7 +357,7 @@ def register_ops_mail_handlers(app, revise=None):
                 await _download(client.token, file) for file in draft.attachments
             ]
         except Exception as error:
-            await _replace(
+            await _note(
                 client,
                 channel,
                 ts,
@@ -355,21 +367,18 @@ def register_ops_mail_handlers(app, revise=None):
 
         # 한 명씩 따로 보낸다. 받는 사람끼리 서로의 주소가 보이지 않고, 회신은
         # 각자의 상대방 스레드로 들어온다.
-        total = len(draft.recipients)
-        # 버튼을 먼저 걷는다. 수백 명이면 다 보내는 데 1분 남짓 걸린다.
-        await _replace(client, channel, ts, f"📤 보내는 중… 0/{total}")
         for sent, recipient in enumerate(draft.recipients):
             # 무엇이 실패하든 나머지는 보내지 않는다. 같은 원인으로 줄줄이 실패하거나
             # 같은 상태를 늘린다. 카드에는 어디서 멈췄는지 남긴다.
-            # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
-            # 다시 보내고, 같은 사람이 두 번 받는다.
-            problem = (
-                f"{escape(recipient)} 는 발송 여부를 모릅니다 — 받는 쪽에 확인하세요."
-            )
+            problem = f"{escape(recipient)} 에게는 안 나갔습니다."
             try:
-                message_id, ses_id = await asyncio.to_thread(
-                    _send, draft, recipient, attachments
+                message_id, raw = await asyncio.to_thread(
+                    _build, draft, recipient, attachments
                 )
+                # 타임아웃·5xx 는 SES 가 이미 접수했을 수 있다. "실패" 라고 하면
+                # 다시 보내고, 같은 사람이 두 번 받는다.
+                problem = f"{escape(recipient)} 는 발송 여부를 모릅니다 — 받는 쪽에 확인하세요."
+                ses_id = (await asyncio.to_thread(send_mime, raw))["MessageId"]
                 print(f"OPS MAIL SENT {channel} {user} {recipient} {ses_id}")
                 # 나가자마자 남긴다. 다 보낸 뒤에 몰아서 남기면, 그 사이에 멈췄을 때
                 # 나간 메일의 기록이 빠진다.
@@ -383,11 +392,9 @@ def register_ops_mail_handlers(app, revise=None):
                 await _stop(client, channel, ts, draft, sent, problem)
                 raise
             if (sent + 1) % PROGRESS_EVERY == 0 and sent + 1 < total:
-                await _progress(
-                    client, channel, ts, f"📤 보내는 중… {sent + 1}/{total}"
-                )
+                await _note(client, channel, ts, f"📤 보내는 중… {sent + 1}/{total}")
 
-        await _replace(
+        await _note(
             client,
             channel,
             ts,
@@ -401,6 +408,7 @@ def register_ops_mail_handlers(app, revise=None):
         draft = _DRAFTS.get(draft_id)
         # 여기서는 꺼내지 않는다. 모달을 닫아 버리면 멀쩡한 카드의 [보내기] 가 죽는다.
         if draft is None:
+            await _gone(client, body)
             return
         await client.views_open(
             trigger_id=body["trigger_id"],
@@ -445,6 +453,7 @@ def register_ops_mail_handlers(app, revise=None):
         await ack()
         draft = _DRAFTS.pop(body["actions"][0]["value"], None)
         if draft is None:
+            await _gone(client, body)
             return
         await _replace(
             client,
@@ -470,7 +479,7 @@ async def _stop(
         problem: 문제가 생긴 사람에게 무슨 일이 있었는지
     """
     left = draft.recipients[sent + 1 :]
-    await _replace(
+    await _note(
         client,
         channel,
         ts,
@@ -480,17 +489,34 @@ async def _stop(
     )
 
 
-async def _progress(client, channel: str, ts: str, text: str) -> None:
-    """진행 상황을 카드에 고쳐 씁니다. 실패해도 발송은 멈추지 않습니다.
+async def _note(client, channel: str, ts: str, text: str) -> None:
+    """발송을 시작한 뒤 카드에 진행 상황이나 결과를 고쳐 씁니다. 실패해도 던지지 않습니다.
 
-    여기서 던지면 발송 루프가 카드에 아무 말도 남기지 못한 채 빠져나가, 카드가
-    "보내는 중" 에 멈추고 남은 사람에게는 아무도 모르게 안 나간다. 끝나면
-    결과 문구가 어차피 덮어쓴다.
+    여기서 던지면 발송 루프가 남은 사람을 아무도 모르게 건너뛰거나, 발송이 멈춘
+    원래 이유가 이 오류에 가려진다. 이때는 로그가 기록이다.
     """
     try:
         await _replace(client, channel, ts, text)
     except Exception as error:
-        print(f"ops 메일 진행 표시 실패 {channel} {ts} {type(error).__name__}")
+        print(
+            f"ops 메일 카드 고치기 실패 {channel} {ts} {type(error).__name__}: {text}"
+        )
+
+
+async def _gone(client, body: dict) -> None:
+    """만료됐거나 이미 처리된 카드의 버튼을 누른 사람에게만 알립니다.
+
+    카드는 고치지 않는다. 다른 사람이 막 [보내기] 를 눌러 보내는 중일 수 있다.
+    """
+    try:
+        await client.chat_postEphemeral(
+            channel=body["container"]["channel_id"],
+            user=body["user"]["id"],
+            text="이 메일 카드는 이미 처리됐거나 만료됐습니다(봇 재시작·1시간 경과)."
+            " 카드에 보이는 상태를 확인하고, 필요하면 초안을 다시 만들어주세요.",
+        )
+    except Exception as error:
+        print(f"ops 메일 만료 안내 실패 {type(error).__name__}")
 
 
 async def _replace(client, channel: str, ts: str, text: str) -> None:

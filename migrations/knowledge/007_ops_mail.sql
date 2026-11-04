@@ -1,7 +1,8 @@
 -- ops@team-mono.com 으로 주고받은 메일.
 --
 -- 한 행이 메일 한 통이다. 받은 메일(in)과 보낸 메일(out)을 한 표에 둔다 --
--- 답장할 메일을 고를 때 방향과 상관없이 "이 상대와 마지막으로 오간 메일" 을 찾는다.
+-- 상대방과 주고받은 기록을 한곳에서 본다. 답장은 그 상대에게서 마지막으로 받은
+-- 메일(자동응답 제외)에 건다.
 --
 -- 메일 원본(첨부 포함)은 S3 에 있다. 여기에는 슬랙과 답장에 필요한 머리와
 -- 본문 텍스트만 둔다.
@@ -24,7 +25,6 @@ CREATE TABLE ops_mail_message (
     body_text       text        NOT NULL,
     -- 답장의 References 헤더를 이어 쓰려고 받은 값을 그대로 둔다.
     references_ids  text[]      NOT NULL DEFAULT '{}',
-    s3_key          text,
     channel_id      text        NOT NULL,
     -- 보낸 메일의 [보내기] 를 누른 사람의 Slack 사용자 ID.
     sent_by         text,
@@ -53,8 +53,6 @@ CREATE TABLE ops_mail_inbox (
     last_error      text,
     alerted_at      timestamptz
 );
-
-CREATE INDEX ops_mail_inbox_s3_key ON ops_mail_inbox (s3_key);
 
 -- 상대방 하나에 슬랙 스레드 하나. 같은 상대와 주고받은 메일은 방향과 상관없이
 -- 이 스레드에 쌓인다. 새 메일로 먼저 보낸 상대는 회신이 와서 스레드가 열리기

@@ -8,6 +8,7 @@ SES v2 API 를 씁니다. v1 SendRawEmail 은 한 통에 10MB 까지라 첨부�
 import os
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # SES 가 메일을 받지 않았다고 확실히 답하는 오류. 이때는 메일이 나가지 않았다.
@@ -36,8 +37,14 @@ def send_mime(raw: bytes) -> dict:
     Returns:
         dict: SES 응답 (MessageId 포함)
     """
-    client = boto3.client(
-        "sesv2", region_name=os.environ.get("AWS_REGION", "ap-northeast-2")
+    # 다시 보내지 않는다. 기본 설정은 타임아웃·5xx 에 같은 원문을 최대 5번 보내는데,
+    # SES 가 이미 받았는데 응답만 끊긴 것이면 같은 사람이 여러 번 받는다.
+    # 세션은 부를 때마다 따로 만든다 -- 작업 스레드에서 불리고, boto3 기본 세션은
+    # 여러 스레드가 동시에 클라이언트를 만들면 깨질 수 있다.
+    client = boto3.session.Session().client(
+        "sesv2",
+        region_name=os.environ.get("AWS_REGION", "ap-northeast-2"),
+        config=Config(retries={"total_max_attempts": 1}),
     )
     return client.send_email(Content={"Raw": {"Data": raw}})
 

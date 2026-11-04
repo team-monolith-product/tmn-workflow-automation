@@ -43,22 +43,10 @@ class Draft:
     attachments: list[dict] = field(default_factory=list)
 
 
-def _reply_references(latest: dict) -> list[str]:
-    """답장의 References 를 만듭니다. 마지막 것이 In-Reply-To 가 됩니다.
-
-    SES 는 보낼 때 Message-ID 를 자기 값으로 바꿔 씁니다. 그래서 우리가 보낸 메일의
-    message_id 는 상대가 본 적 없는 값이라 넣지 않습니다. 우리가 보낸 메일의
-    references_ids 에는 그때까지 상대 메일의 ID 가 이미 들어 있습니다.
-    """
-    if latest["direction"] == "out":
-        return latest["references_ids"]
-    return [*latest["references_ids"], latest["message_id"]]
-
-
 def make(
     *,
     thread_ts: str,
-    latest: dict | None,
+    target: dict | None,
     body: str,
     to: list[str],
     subject: str,
@@ -67,7 +55,7 @@ def make(
 
     Args:
         thread_ts: 도구를 부른 스레드
-        latest: 그 스레드의 상대와 마지막으로 오간 메일. 상대방 스레드가 아니면 None
+        target: store.reply_target. 상대방 스레드가 아니면 None
         body: 본문
         to: 받는 사람 주소들. 답장이면 비워도 됩니다
         subject: 제목. 답장이면 비워도 됩니다
@@ -82,17 +70,26 @@ def make(
         raise DraftProblem("제목에 줄바꿈을 넣을 수 없습니다.")
     recipients = list(dict.fromkeys(_address(entry) for entry in to if entry.strip()))
 
-    if latest:
-        if recipients and recipients != [latest["counterpart"]]:
+    # 상대방 스레드에서는 늘 그 상대에게만 보낸다. 메일 본문으로 받는 사람을
+    # 바꾸게 하지 못하도록, 답장할 메일을 못 찾아도 새 메일로 넘어가지 않는다.
+    if target:
+        counterpart = target["counterpart"]
+        if recipients and recipients != [counterpart]:
             raise DraftProblem(
-                f"이 스레드는 {latest['counterpart']} 와의 메일 스레드라 받는 사람을"
+                f"이 스레드는 {counterpart} 와의 메일 스레드라 받는 사람을"
                 " 바꿀 수 없습니다. 다른 사람에게는 채널에서 새 메일로 보내주세요."
             )
+        if target["message_id"] is None:
+            raise DraftProblem(
+                f"{counterpart} 에게서 받은 메일이 아직 기록되지 않아 답장을 만들 수"
+                " 없습니다. 잠시 뒤 다시 해 주세요."
+            )
         return Draft(
-            recipients=[latest["counterpart"]],
-            subject=mime.reply_subject(latest["subject"]),
+            recipients=[counterpart],
+            subject=mime.reply_subject(target["subject"]),
             body=body,
-            references_ids=_reply_references(latest),
+            # 마지막 것이 In-Reply-To 가 된다.
+            references_ids=[*target["references_ids"], target["message_id"]],
             thread_ts=thread_ts,
             is_reply=True,
         )
@@ -163,7 +160,11 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
     files = {}
     for message in messages:
         for file in message.get("files", []):
-            files[file["name"]] = file
+            # 지운 파일(tombstone), 요금제로 가려진 파일, 외부 링크 파일은 이름이나
+            # 내려받을 주소가 없다.
+            url = file.get("url_private_download") or file.get("url_private")
+            if file.get("name") and url:
+                files[file["name"]] = {**file, "url": url}
 
     missing = [name for name in names if name not in files]
     if missing:
@@ -173,7 +174,7 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
         )
 
     picked = [files[name] for name in dict.fromkeys(names)]
-    total = sum(file["size"] for file in picked)
+    total = sum(file.get("size", 0) for file in picked)
     if total > MAX_ATTACHMENT_BYTES:
         raise DraftProblem(
             f"첨부가 합쳐서 {megabytes(total)} 라 보낼 수 없습니다. "
@@ -182,9 +183,9 @@ def pick_files(messages: list[dict], names: list[str]) -> list[dict]:
     return [
         {
             "name": file["name"],
-            "mimetype": file["mimetype"],
-            "size": file["size"],
-            "url": file["url_private_download"],
+            "mimetype": file.get("mimetype", ""),
+            "size": file.get("size", 0),
+            "url": file["url"],
         }
         for file in picked
     ]
