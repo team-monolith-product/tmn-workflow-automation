@@ -5,6 +5,7 @@ OPS_MAIL_TEST_DATABASE_URL 이 없으면 건너뜁니다. 테스트마다 스키
 """
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -173,6 +174,25 @@ def test_답장은_그_상대에게서_마지막으로_받은_사람이_쓴_메�
     assert target["subject"] == "견적 문의"
     assert target["message_id"] == "<in-1@abc.kr>"
     assert target["references_ids"] == ["<m0@abc.kr>"]
+
+
+def test_나중에_다시_처리된_옛_메일보다_실제로_최근에_온_메일에_건다(database):
+    _call(store.claim_thread, CHANNEL, "office@abc.kr", "ts-office")
+    _call(
+        store.insert,
+        _row("new", subject="Re: 일정", sent_at=datetime(2026, 11, 4, 9, tzinfo=UTC)),
+    )
+    # 먼저 왔지만 처리에 실패했다가 정리 작업이 나중에 다시 넣은 메일
+    _call(
+        store.insert,
+        _row("old", subject="견적 문의", sent_at=datetime(2026, 11, 3, 9, tzinfo=UTC)),
+    )
+
+    # When : 상대방 스레드의 답장 대상을 찾으면
+    target = _call(store.reply_target, CHANNEL, "ts-office")
+
+    # Then : 넣은 순서가 아니라 메일이 보내진 순서로 가장 최근 메일에 건다
+    assert target["subject"] == "Re: 일정"
 
 
 def test_상대방_스레드인데_받은_메일_기록이_없으면_상대만_돌려준다(database):

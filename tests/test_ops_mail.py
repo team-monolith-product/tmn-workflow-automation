@@ -1406,3 +1406,19 @@ def test_받은_메일의_슬랙_문법은_글자로_올린다(monkeypatch):
     texts = " ".join(post["text"] for post in _FakeSlack.last.posts)
     for markup in ("<!channel>", "<!here>", "<@U123>", "<https://evil.kr|"):
         assert markup not in texts
+
+
+def test_보낸_시각은_Date_헤더에서_읽고_없거나_깨졌으면_비운다():
+    # When : Date 헤더가 정상, 시간대 없음, 깨짐, 없음인 메일을 읽으면
+    normal = mime.parse(_raw_mail({"Date": "Tue, 03 Nov 2026 09:00:00 +0900"}))
+    naive = mime.parse(_raw_mail({"Date": "Tue, 03 Nov 2026 09:00:00 -0000"}))
+    broken = mime.parse(_raw_mail({"Date": "어제 아침"}))
+    missing = mime.parse(_raw_mail())
+
+    # Then : 시간대가 붙은 시각으로 읽고, 깨졌거나 없으면 None 이다
+    assert normal.sent_at == datetime.datetime(
+        2026, 11, 3, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    assert naive.sent_at.tzinfo is not None
+    assert broken.sent_at is None
+    assert missing.sent_at is None

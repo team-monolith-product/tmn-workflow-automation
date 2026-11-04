@@ -216,6 +216,7 @@ async def _deliver(bucket: str, key: str, ses_message_id: str) -> None:
             channel_id=channel_id,
             sent_by=None,
             auto_reply=mail.auto_reply,
+            sent_at=mail.sent_at,
         ),
     )
     print(f"ops 메일 수신 {counterpart} {mail.message_id} → {thread_ts}")

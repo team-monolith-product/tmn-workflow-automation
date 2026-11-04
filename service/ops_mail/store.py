@@ -9,7 +9,7 @@ ops_mail_inbox 에 따로 둡니다. 메일은 스레드를 모릅니다 -- 스�
 
 import asyncio
 from dataclasses import asdict, dataclass, fields
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -34,6 +34,8 @@ class OpsMailRow:
     sent_by: str | None
     # 부재중 같은 자동응답. 답장할 메일을 고를 때 건너뛴다.
     auto_reply: bool = False
+    # 받은 메일의 Date 헤더. 없거나 깨졌으면 None.
+    sent_at: datetime | None = None
 
 
 # 열 이름은 행 모양에서 딴다. 손으로 나열하면 필드를 추가했을 때 INSERT 가
@@ -127,7 +129,7 @@ LEFT JOIN LATERAL (
   FROM ops_mail_message
   WHERE channel_id = t.channel_id AND counterpart = t.counterpart
     AND direction = 'in' AND NOT auto_reply
-  ORDER BY created_at DESC
+  ORDER BY COALESCE(sent_at, created_at) DESC
   LIMIT 1
 ) m ON true
 WHERE t.channel_id = %s AND t.thread_ts = %s

@@ -9,7 +9,8 @@ from email import message_from_bytes, policy
 from email.generator import BytesGenerator
 from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import formatdate, getaddresses, make_msgid
+from datetime import datetime, timezone
+from email.utils import formatdate, getaddresses, make_msgid, parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 
@@ -44,6 +45,8 @@ class ParsedMail:
     spam: bool
     virus: bool
     auto_reply: bool
+    # Date 헤더. 없거나 깨졌으면 None.
+    sent_at: datetime | None
 
 
 def _raw(message: EmailMessage, name: str) -> str:
@@ -272,7 +275,19 @@ def parse(raw: bytes) -> ParsedMail:
         spam=str(message["X-SES-Spam-Verdict"] or "") == "FAIL",
         virus=str(message["X-SES-Virus-Verdict"] or "") == "FAIL",
         auto_reply=_is_auto_reply(message),
+        sent_at=_sent_at(_raw(message, "Date")),
     )
+
+
+def _sent_at(header: str) -> datetime | None:
+    """Date 헤더를 시각으로 읽습니다. 시간대가 없으면 UTC 로 봅니다."""
+    try:
+        sent_at = parsedate_to_datetime(header)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if sent_at.tzinfo is None:
+        return sent_at.replace(tzinfo=timezone.utc)
+    return sent_at
 
 
 def reply_subject(subject: str) -> str:
