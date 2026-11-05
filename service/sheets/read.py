@@ -11,12 +11,9 @@
 
 from typing import Any
 
-from api.google_sheets import (
-    OPERATING_ACCOUNT,
-    get_worksheet_headers,
-    get_worksheet_values,
-)
+from api.google_sheets import OPERATING_ACCOUNT, get_worksheet_values
 from service.sheets import locate
+from service.sheets.tabs import read_headers
 
 
 def _clean(cell: Any) -> str:
@@ -63,6 +60,24 @@ def unique_header(header: list[str]) -> list[str]:
         taken.add(unique)
         out.append(unique)
     return out
+
+
+def row_keys(row: list[Any]) -> list[str]:
+    """시트 1행을 read_sheet 가 돌려주는 dict 의 키로 바꿉니다.
+
+    read_sheet 와 list_tabs 가 **이 함수 하나**로 키를 만듭니다. 따로 만들면
+    한쪽만 고쳐졌을 때 list_tabs 에서 본 이름으로 row[...] 를 꺼내다 KeyError 가
+    납니다.
+    """
+    return unique_header([_clean(cell) for cell in row])
+
+
+def _one_sheet(sheet: str) -> locate.Sheet:
+    """시트를 하나로 좁힙니다. 여럿이 걸리면 고르지 않고 후보를 담아 던집니다."""
+    found = locate.locate(sheet)
+    if found.sheet is None:
+        raise ValueError(locate.render_candidates(found.candidates))
+    return found.sheet
 
 
 def _column_of(
@@ -202,7 +217,7 @@ def pick(
     # 열은 **원본 이름**으로 찾습니다. 유일화한 이름으로 찾으면 "성함" 이 "성함_2" 와
     # 다른 이름이 되어, 중복 중 값이 든 쪽을 고르는 판정(_column_of)이 무력해집니다.
     raw_header = [_clean(cell) for cell in values[0]]
-    unique = unique_header(raw_header)
+    unique = row_keys(values[0])
     if not columns:
         # 전부 달라고 했으니 시트에 있는 이름을 그대로 쓰되, 겹치는 것만 번호를 답니다.
         # 여기서는 합치지 않습니다 -- 유일화한 이름으로 열이 하나씩 다 보입니다.
@@ -299,13 +314,10 @@ def read_sheet(
     Raises:
         ValueError: 시트를 하나로 좁히지 못했거나, 찾는 열·탭이 없을 때
     """
-    found = locate.locate(sheet)
-    if found.sheet is None:
-        raise ValueError(locate.render_candidates(found.candidates))
-
+    found = _one_sheet(sheet)
     values = get_worksheet_values(
-        found.sheet.spreadsheet_id,
-        found.sheet.worksheet_id if tab is None else tab,
+        found.spreadsheet_id,
+        found.worksheet_id if tab is None else tab,
         account=OPERATING_ACCOUNT,
     )
     if isinstance(columns, str):
@@ -327,15 +339,16 @@ def list_tabs(sheet: str) -> list[dict]:
     (11/3 실측: 담당교사 연락처가 [학교DB]_운영확인 탭에 있었는데 링크는 다른
     탭이었다). 탭 목록을 먼저 보고 어느 탭을 읽을지 고르게 합니다.
 
-    숨긴 탭은 빠집니다(get_worksheet_headers). 사람이 감춘 탭을 찾아 주는 것은
+    숨긴 탭은 빠집니다(read_headers). 사람이 감춘 탭을 찾아 주는 것은
     이 함수의 일이 아닙니다 -- 그 탭이 필요하면 사람이 이름이나 gid 를 줍니다.
     **링크가 가리킨 탭만은 숨김이어도 넣습니다.** 사람이 이미 보여 준 탭이고,
     빼면 에이전트가 목록에 있는 탭만 읽고 "없다" 고 답합니다 -- 이 함수가
     막으려던 바로 그 사고입니다.
 
-    **머리행은 read_sheet 가 돌려주는 키와 같은 이름입니다.** 셀 안 줄 나눔은
-    공백이 되고, 겹친 이름은 번호가 붙습니다(성함_2). 원본을 주면 여기서 본
-    이름으로 row[...] 를 꺼내다 KeyError 가 나거나 다른 열을 읽습니다.
+    **머리행은 read_sheet 키의 앞부분입니다(row_keys).** 다만 뒤가 짧을 수
+    있습니다. 여기서는 1행만 받아 오른쪽 끝 빈칸이 잘리고, read_sheet 는 가장
+    넓은 행에 맞춰 칸을 채웁니다. 머리행보다 오른쪽에 값이 있는 탭이면
+    read_sheet 에만 이름 없는 열(열3 …)이 더 붙습니다.
 
     Args:
         sheet: 시트 링크·ID 또는 이름 일부
@@ -346,19 +359,13 @@ def list_tabs(sheet: str) -> list[dict]:
     Raises:
         ValueError: 시트를 하나로 좁히지 못했을 때
     """
-    found = locate.locate(sheet)
-    if found.sheet is None:
-        raise ValueError(locate.render_candidates(found.candidates))
-
-    tabs = get_worksheet_headers(
-        found.sheet.spreadsheet_id, reveal=found.sheet.worksheet_id
-    )
+    found = _one_sheet(sheet)
     return [
         {
             "tab": tab["title"],
             "gid": tab["id"],
             # 빈 탭은 머리행이 [] 다. 아무 열도 없으니 그대로 둔다.
-            "header": unique_header([_clean(cell) for cell in tab["header"]]),
+            "header": row_keys(tab["header"]),
         }
-        for tab in tabs
+        for tab in read_headers(found.spreadsheet_id, shown_gid=found.worksheet_id)
     ]

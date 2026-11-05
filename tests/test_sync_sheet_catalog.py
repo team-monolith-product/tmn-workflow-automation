@@ -42,7 +42,7 @@ def _drive(monkeypatch, files, broken=()):
             raise RuntimeError("400 range 가 깨졌습니다")
         return TABS
 
-    monkeypatch.setattr(sync, "get_worksheet_headers", headers)
+    monkeypatch.setattr(sync, "read_headers", headers)
     return napped
 
 
