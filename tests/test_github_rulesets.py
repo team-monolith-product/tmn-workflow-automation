@@ -15,7 +15,7 @@ def ruleset_setup(monkeypatch):
     config = {
         repo.name: {
             "skip": ["ruleset.json"],
-            "add": ["ruleset_main_no_review.json"],
+            "add": ["ruleset_main_force_push_only.json"],
         }
         for repo in repos
     }

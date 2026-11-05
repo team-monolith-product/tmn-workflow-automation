@@ -59,6 +59,6 @@
   },
   "tmn-workflow-automation": {
     "skip": ["ruleset.json"],
-    "add": ["ruleset_main_no_review.json"]
+    "add": ["ruleset_main_force_push_only.json"]
   }
 }
