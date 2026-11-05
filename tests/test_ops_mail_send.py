@@ -711,3 +711,59 @@ def test_외부_파일과_지운_파일은_붙일_후보가_아니다():
     assert not is_slack_hosted_file({**_slack_file("a.pdf"), "is_external": True})
     assert not is_slack_hosted_file({"id": "F1", "mode": "tombstone"})
     assert not is_slack_hosted_file({"name": "a.pdf"})
+
+
+def test_메일_수정_창은_고른_것과_앞_초안을_에이전트에게_넘긴다():
+    """적은 글이 보낼 문장인지 고칠 점인지는 적은 사람이 창에서 고른다"""
+    from app import draft_revise
+
+    revised = []
+
+    async def revise(**kwargs):
+        revised.append(kwargs)
+
+    app = _FakeApp()
+    ops_mail.register_ops_mail_handlers(app, revise=revise)
+    ops_mail._DRAFTS["d-rev"] = _new_mail(["a@school.kr"])
+    view = ops_mail._revise_view(
+        "d-rev", CHANNEL, "card-ts", _new_mail(["a@school.kr"])
+    )
+    slack = FakeSlack()
+
+    async def ack():
+        pass
+
+    # When : "이 글 그대로" 를 골라 내면
+    asyncio.run(
+        app.handlers[ops_mail.REVISE_VIEW](
+            ack=ack,
+            body={
+                "view": {
+                    "private_metadata": view["private_metadata"],
+                    "state": {
+                        "values": {
+                            ops_mail.FEEDBACK_BLOCK: {
+                                ops_mail.FEEDBACK_INPUT: {
+                                    "value": "회의는 언제 마쳐요?"
+                                }
+                            },
+                            draft_revise.MODE_BLOCK: {
+                                draft_revise.MODE_INPUT: {
+                                    "selected_option": {"value": draft_revise.VERBATIM}
+                                }
+                            },
+                        }
+                    },
+                },
+                "user": {"id": "U1"},
+            },
+            client=slack,
+        )
+    )
+
+    # Then : 창에 선택이 있고, 고른 것·적은 글·앞 초안이 에이전트로 가며, 옛 카드는 못 보낸다
+    assert draft_revise.MODE_BLOCK in [b.get("block_id") for b in view["blocks"]]
+    assert revised[0]["verbatim"] is True
+    assert revised[0]["text"] == "회의는 언제 마쳐요?"
+    assert "본문:\n안녕하세요" in revised[0]["previous"]
+    assert "d-rev" not in ops_mail._DRAFTS

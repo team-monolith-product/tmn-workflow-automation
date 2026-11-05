@@ -40,6 +40,7 @@ from service.ops_mail.draft import (
     megabytes,
     pick_files,
 )
+from app.draft_revise import is_verbatim, mode_block
 from service.slack import escape
 
 APPROVE = "ops_mail_approve"
@@ -425,7 +426,10 @@ def _revise_previous(draft: Draft) -> str:
 
 
 def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
-    """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다."""
+    """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다.
+
+    적은 글이 고칠 점인지 보낼 문장인지는 적은 사람이 고릅니다(mode_block).
+    """
     return {
         "type": "modal",
         "callback_id": REVISE_VIEW,
@@ -440,13 +444,14 @@ def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
             {
                 "type": "input",
                 "block_id": FEEDBACK_BLOCK,
-                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "label": {"type": "plain_text", "text": "고칠 점이나 보낼 문장"},
                 "element": {
                     "type": "plain_text_input",
                     "action_id": FEEDBACK_INPUT,
                     "multiline": True,
                 },
             },
+            mode_block(),
         ],
     }
 
@@ -457,7 +462,7 @@ def register_ops_mail_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text, previous) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous, verbatim) -> None` 입니다.
     """
 
     @app.action(APPROVE)
@@ -563,6 +568,7 @@ def register_ops_mail_handlers(app, revise=None):
             user=user,
             text=feedback,
             previous=_revise_previous(draft),
+            verbatim=is_verbatim(body["view"]["state"]["values"]),
         )
 
     @app.action(CANCEL)

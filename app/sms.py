@@ -22,6 +22,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import history
 from service.sms import send as sms_send
+from app.draft_revise import is_verbatim, mode_block
 from service.sms import transport
 
 APPROVE = "sms_approve"
@@ -314,7 +315,7 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
             {
                 "type": "input",
                 "block_id": FEEDBACK_BLOCK,
-                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "label": {"type": "plain_text", "text": "고칠 점이나 보낼 문장"},
                 "hint": {
                     "type": "plain_text",
                     "text": "문안·받는 사람·예약 시각 무엇이든 됩니다.",
@@ -329,6 +330,7 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
                     },
                 },
             },
+            mode_block(),
         ],
     }
 
@@ -339,7 +341,7 @@ def register_sms_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text, previous) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous, verbatim) -> None` 입니다.
             없으면 [수정] 은 피드백을 스레드에 남기기만 합니다 —
             에이전트 진입점을 아는 것은 app.py 뿐이라 여기서 import 하면
             general → sms → general 로 순환합니다.
@@ -464,6 +466,7 @@ def register_sms_handlers(app, revise=None):
             user=user,
             text=feedback,
             previous=_revise_previous(draft),
+            verbatim=is_verbatim(body["view"]["state"]["values"]),
         )
 
     @app.action(CANCEL)
