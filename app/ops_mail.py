@@ -73,6 +73,31 @@ def _preview(addresses: list[str]) -> str:
     return shown
 
 
+def _attachment(file: SlackFile) -> str:
+    """첨부 하나를 카드에 보일 글로 만듭니다.
+
+    이름만 보이면 같은 이름이 여럿이거나 비슷할 때 실제로 나갈 파일을 확인할 수
+    없습니다. 이름을 슬랙의 그 파일로 걸고 올린 시각을 붙여 눌러 보고 가리게 합니다.
+
+    Args:
+        file: 붙일 슬랙 파일
+
+    Returns:
+        str: "<permalink|a.pdf> (0.1MB · 11월 5일 14:02 올림)" 꼴의 슬랙 텍스트
+    """
+    # 링크 글자에 | 가 있으면 슬랙이 거기서 링크를 끊는다.
+    name = escape(file.name)
+    if file.permalink:
+        name = f"<{file.permalink}|{name.replace('|', '¦')}>"
+    detail = megabytes(file.size)
+    if file.created:
+        # 보는 사람의 시간대로 보여준다. 대체 글자는 날짜를 못 그릴 때만 쓴다.
+        detail += (
+            f" · <!date^{file.created}^{{date_short_pretty}} {{time}}|올린 시각> 올림"
+        )
+    return f"{name} ({detail})"
+
+
 def _summary(draft: Draft) -> str:
     """받는 사람·제목·첨부·본문을 슬랙 텍스트로 만듭니다."""
     to = _preview(draft.recipients)
@@ -83,10 +108,7 @@ def _summary(draft: Draft) -> str:
         f"제목: {escape(draft.subject)}",
     ]
     if draft.attachments:
-        names = ", ".join(
-            f"{escape(file.name)} ({megabytes(file.size)})"
-            for file in draft.attachments
-        )
+        names = ", ".join(_attachment(file) for file in draft.attachments)
         lines.append(f"첨부: {names}")
     body = draft.body
     if len(body) > PREVIEW_BODY_CHARS:
@@ -122,7 +144,7 @@ def _blocks(draft_id: str, draft: Draft) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*메일 발송 확인* — {kind}\n{_summary(draft)}",
+                "text": f"*이렇게 보내려고 합니다* — {kind}\n{_summary(draft)}",
             },
         },
         {
@@ -259,7 +281,7 @@ def get_draft_ops_mail_tool(
             await client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
-                text=f"메일 발송 확인 — {count}명",
+                text=f"이렇게 보내려고 합니다 — {count}명",
                 blocks=_blocks(draft_id, draft),
             )
         except BaseException:
@@ -382,11 +404,20 @@ async def _record(
 
 
 def _revise_previous(draft: Draft) -> str:
-    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다. 슬랙용 이스케이프는 하지 않습니다."""
-    to = ", ".join(draft.recipients[:PREVIEW_RECIPIENTS])
-    if len(draft.recipients) > PREVIEW_RECIPIENTS:
-        to += f" 외 {len(draft.recipients) - PREVIEW_RECIPIENTS}명"
-    lines = [f"받는 사람: {to}", f"제목: {draft.subject}"]
+    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다.
+
+    카드 미리보기처럼 받는 사람을 줄이면, "나머지는 그대로" 다시 쓰는 에이전트가
+    보이는 몇 명만으로 초안을 올립니다. 그래서 받는 사람은 모두 싣습니다(최대
+    500명). 사람이 아니라 에이전트가 읽으므로 슬랙용 이스케이프는 하지 않습니다.
+
+    Args:
+        draft: [수정] 을 누른 초안
+
+    Returns:
+        str: 받는 사람·제목·첨부·본문을 적은 글
+    """
+    to = ", ".join(draft.recipients)
+    lines = [f"받는 사람({len(draft.recipients)}명): {to}", f"제목: {draft.subject}"]
     if draft.attachments:
         lines.append(f"첨부: {', '.join(file.name for file in draft.attachments)}")
     lines.append(f"본문:\n{draft.body}")

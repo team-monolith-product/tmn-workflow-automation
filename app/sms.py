@@ -250,9 +250,18 @@ def _revise_previous(draft: dict) -> str:
     """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다.
 
     수신자 번호와 치환값은 싣지 않습니다. 에이전트가 앞 대화에서 다시 만들 수 있고,
-    수백 명이면 질문이 너무 길어집니다.
+    수백 명이면 질문이 너무 길어집니다. 대신 같은 사람 수로 다시 만들라고 적습니다.
+
+    Args:
+        draft: [수정] 을 누른 초안(_DRAFTS 의 값)
+
+    Returns:
+        str: 받는 사람 수·예약·문안을 적은 글
     """
-    lines = [f"받는 사람: {len(draft['rows'])}명"]
+    lines = [
+        f"받는 사람: {len(draft['rows'])}명"
+        " (앞 대화에서 같은 사람들로 다시 만듭니다. 한 명도 빠지면 안 됩니다)"
+    ]
     if draft["send_at"]:
         lines.append(f"예약: {draft['send_at']}")
     lines.append(f"문안:\n{draft['content']}")

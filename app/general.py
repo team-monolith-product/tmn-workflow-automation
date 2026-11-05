@@ -316,6 +316,7 @@ def get_draft_revise(app):
             app.client,
             tools,
             ROBOT_INSTRUCTIONS,
+            asked_in_thread=False,
         )
 
     return revise

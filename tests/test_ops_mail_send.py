@@ -632,8 +632,82 @@ def test_수정할_때_앞_초안을_에이전트가_읽을_글로_넘긴다():
 
     # 슬랙 이스케이프(&amp;) 없이 그대로 넘겨야 에이전트가 그대로 옮겨 쓴다
     assert previous == (
-        "받는 사람: chk@team-mono.com\n"
+        "받는 사람(1명): chk@team-mono.com\n"
         "제목: 회의 & 일정\n"
         "첨부: 가이드.pdf\n"
         "본문:\n안녕하세요.\n\n회의는 언제쯤 마치실 예정이신가요?"
     )
+
+
+def test_카드의_첨부는_슬랙_파일로_걸고_올린_시각을_보여준다():
+    """이름만 보이면 같은 이름이 여럿일 때 실제로 나갈 파일을 확인할 수 없다"""
+    file = {
+        **_slack_file("계약서|최종.pdf", 1024 * 1024),
+        "permalink": "https://monolith.slack.com/files/U1/F1/a.pdf",
+        "created": 1762318920,
+    }
+    messages = [{"text": "이 파일과 함께 보내", "files": [file]}]
+
+    # When : 고른 파일로 카드 글을 만들면
+    picked = drafts.pick_files(messages, ["계약서|최종.pdf"])
+    draft = drafts.Draft(
+        recipients=["a@b.kr"],
+        subject="안내",
+        body="본문",
+        references_ids=[],
+        thread_ts="ts",
+        attachments=picked,
+    )
+    summary = ops_mail._summary(draft)
+
+    # Then : 이름을 그 파일로 걸고(| 는 링크를 끊으므로 바꾼다), 올린 시각을 붙인다
+    assert (
+        "첨부: <https://monolith.slack.com/files/U1/F1/a.pdf|계약서¦최종.pdf>"
+        " (1.0MB · <!date^1762318920^{date_short_pretty} {time}|올린 시각> 올림)"
+    ) in summary
+
+
+def test_링크가_없는_첨부는_이름만_보여준다():
+    draft = drafts.Draft(
+        recipients=["a@b.kr"],
+        subject="안내",
+        body="본문",
+        references_ids=[],
+        thread_ts="ts",
+        attachments=[drafts.SlackFile("a<b>.pdf", "application/pdf", 0, "u")],
+    )
+
+    # When / Then : 링크·시각이 없으면 이스케이프한 이름과 크기만 보인다
+    assert "첨부: a&lt;b&gt;.pdf (0.0MB)" in ops_mail._summary(draft)
+
+
+def test_초안_카드는_이렇게_보내려고_한다고_말한다():
+    blocks = ops_mail._blocks("d1", _new_mail(["a@school.kr"]))
+
+    # Then : 머리말이 확인을 구하는 말투이고, 보내기·수정·취소 버튼이 그대로 있다
+    assert blocks[0]["text"]["text"].startswith("*이렇게 보내려고 합니다* — 새 메일")
+    assert [e["action_id"] for e in blocks[1]["elements"]] == [
+        ops_mail.APPROVE,
+        ops_mail.REVISE,
+        ops_mail.CANCEL,
+    ]
+
+
+def test_수정할_때_받는_사람은_줄이지_않고_모두_넘긴다():
+    """카드처럼 \"외 N명\" 으로 줄이면 에이전트가 보이는 10명만으로 다시 쓴다"""
+    recipients = [f"t{i}@school.kr" for i in range(ops_mail.PREVIEW_RECIPIENTS + 5)]
+
+    previous = ops_mail._revise_previous(_new_mail(recipients))
+
+    assert f"받는 사람({len(recipients)}명): " + ", ".join(recipients) in previous
+    assert "외" not in previous
+
+
+def test_외부_파일과_지운_파일은_붙일_후보가_아니다():
+    """대화 기록의 [첨부 파일] 과 같은 기준이라, 보인 파일은 늘 고를 수 있다"""
+    from service.slack import is_slack_hosted_file
+
+    assert is_slack_hosted_file(_slack_file("a.pdf"))
+    assert not is_slack_hosted_file({**_slack_file("a.pdf"), "is_external": True})
+    assert not is_slack_hosted_file({"id": "F1", "mode": "tombstone"})
+    assert not is_slack_hosted_file({"name": "a.pdf"})

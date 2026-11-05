@@ -246,3 +246,5 @@ async def test_수정_요청은_적은_문장을_그대로_쓰라는_안내와_�
     assert "[수정 창에 적은 글]\n안녕하세요.\n\n회의는 언제 마쳐요?\n" in question
     assert question.endswith("[앞 초안]\n본문:\n회의는 언제쯤 마치실 예정이신가요?")
     assert "그 문장 그대로" in question
+    # 질문이 스레드 메시지가 아니라고 알려야 마지막 메시지를 질문으로 보고 자르지 않는다
+    assert mock_answer.call_args.kwargs["asked_in_thread"] is False

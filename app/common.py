@@ -23,7 +23,7 @@ from langchain_community.tools import TavilySearchResults
 from slack_sdk.web.async_client import AsyncWebClient
 from md2notionpage.core import parse_md
 
-from service.slack import slack_users_list
+from service.slack import is_slack_hosted_file, slack_users_list
 from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 from service.notion_transport import build_client as build_notion_http_client
 from service.notion_markdown import page_to_markdown
@@ -681,7 +681,8 @@ def _files_note(message: dict) -> str:
     """메시지에 올라온 파일 이름을 대화 기록 끝에 붙일 한 줄로 만듭니다.
 
     슬랙 메시지의 text 에는 파일이 없어서, 이 줄이 없으면 에이전트가 "이 파일"
-    이 어느 파일인지 모릅니다. 지운 파일처럼 이름이 없는 것은 뺍니다.
+    이 어느 파일인지 모릅니다. 메일에 붙일 수 없는 파일(지운 파일·외부 파일)은
+    보여주면 에이전트가 골랐다가 "없는 파일" 이 되므로 뺍니다.
 
     Args:
         message: conversations_replies 의 메시지
@@ -693,7 +694,7 @@ def _files_note(message: dict) -> str:
     names = [
         unicodedata.normalize("NFC", file["name"])
         for file in message.get("files", [])
-        if file.get("name")
+        if is_slack_hosted_file(file)
     ]
     if not names:
         return ""
@@ -709,6 +710,7 @@ async def answer(
     client,
     tools: list,
     instructions: str = "",
+    asked_in_thread: bool = True,
 ):
     """
     슬랙에서 질문을 받아 답변을 생성하여 슬랙에 전송한다.
@@ -722,6 +724,8 @@ async def answer(
         client: 슬랙 클라이언트
         tools: 외부에서 주입할 도구들의 리스트.
         instructions: 시스템 프롬프트 끝에 덧붙일 봇별 지침.
+        asked_in_thread: 질문이 스레드의 마지막 메시지면 True. [수정] 창처럼
+            스레드 밖에서 온 질문이면 False 로, 마지막 메시지도 대화 기록에 남깁니다.
 
     Returns:
         None
@@ -765,8 +769,11 @@ async def answer(
         )
     ]
 
+    # 질문 메시지는 text 로 따로 받으므로 대화 기록에서 뺀다. [수정] 창처럼
+    # 질문이 스레드 밖에서 오면 마지막 메시지는 질문이 아니니 그대로 둔다.
+    history = result["messages"][:-1] if asked_in_thread else result["messages"]
     threads = []
-    for message in result["messages"][:-1]:
+    for message in history:
         slack_user_id = message.get("user", None)
         if slack_user_id:
             user_profile = user_dict.get(slack_user_id, {})
@@ -780,11 +787,11 @@ async def answer(
     user_profile = user_dict.get(slack_user_id, {})
     user_real_name = user_profile.get("real_name", "Unknown")
 
-    # 질문 메시지는 text 로 따로 받으므로 위 목록에서 빠진다. 그 메시지에 올린
-    # 파일("이 파일과 함께 보내")은 여기서 붙인다. [수정] 처럼 질문이 스레드
-    # 메시지가 아닐 때는 마지막 메시지가 질문한 사람 것이 아니므로 붙이지 않는다.
+    # 질문 메시지에 올린 파일("이 파일과 함께 보내")은 질문에 붙인다. 질문 뒤에
+    # 다른 사람이 먼저 글을 올렸으면 마지막 메시지가 질문이 아니므로 붙이지 않는다.
     last = result["messages"][-1]
-    asked_files = _files_note(last) if last.get("user") == user else ""
+    asked = asked_in_thread and last.get("user") == user
+    asked_files = _files_note(last) if asked else ""
 
     threads_joined = "\n\n".join(threads)
     messages.append(
