@@ -222,3 +222,23 @@ async def test_카드조차_못_올리면_에이전트를_돌리지_않고_실�
     agent.assert_not_awaited()
     assert "is_archived" in finished[0][1]
     client.chat_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_표_기록이_실패해도_카드는_결과로_고친다(monkeypatch):
+    def broken_finish(*args):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(
+        scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
+    )
+    monkeypatch.setattr(scheduled_task.store, "finish", broken_finish)
+    client = _client()
+
+    # When : 에이전트는 끝났는데 표에 기록하다 실패하면
+    await scheduled_task.run_due_tasks(AsyncMock(), client)
+    results = await asyncio.gather(*scheduled_task._running, return_exceptions=True)
+
+    # Then : 기록 실패는 드러나고, 카드는 실행 중에 남지 않고 완료로 바뀐다
+    assert isinstance(results[0], RuntimeError)
+    assert "완료" in _card_text(client.chat_update.await_args)

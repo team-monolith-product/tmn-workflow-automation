@@ -42,13 +42,21 @@ ThreadAgent = Callable[[str, str, str, str], Awaitable[None]]
 _running: set[asyncio.Task] = set()
 
 
+def _repeat_text(task: ScheduledTask) -> str:
+    """반복 주기와 끝. 한 번짜리면 빈 글자입니다."""
+    if not task.cron:
+        return ""
+    text = f"반복 `{task.cron}`"
+    if task.until:
+        text += f" ~{format_time(task.until)}"
+    return text
+
+
 def _describe(task: ScheduledTask) -> str:
     """예약 한 줄 요약. 반복이면 주기와 끝을 붙입니다."""
     text = f"#{task.id} 다음 {format_time(task.run_at)} KST"
     if task.cron:
-        text += f" · 반복 `{task.cron}`"
-        if task.until:
-            text += f" ~{format_time(task.until)}"
+        text += f" · {_repeat_text(task)}"
     return text
 
 
@@ -176,10 +184,12 @@ def _card(claim: Claim, status: str, error: Exception | None = None) -> dict:
         dict: chat_postMessage·chat_update 에 넘길 text 와 blocks
     """
     task = claim.task
-    if claim.next_run_at:
-        when = f"반복 `{task.cron}` · 다음 회차 {format_time(claim.next_run_at)}"
+    if not task.cron:
+        when = "한 번"
+    elif claim.next_run_at:
+        when = f"{_repeat_text(task)} · 다음 회차 {format_time(claim.next_run_at)}"
     else:
-        when = f"반복 `{task.cron}` · 마지막 회차" if task.cron else "한 번"
+        when = f"{_repeat_text(task)} · 마지막 회차"
     prompt = escape(task.prompt[:CARD_PROMPT_CHARS])
     blocks = [
         {
@@ -215,6 +225,7 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
     """
     task = claim.task
     card_ts = None
+    error = None
     try:
         card = await client.chat_postMessage(
             channel=task.channel_id,
@@ -231,21 +242,21 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
             f"[예약 #{task.id} 실행] 지금이 예약한 시각입니다."
             f" 다시 예약하지 말고 바로 수행하세요.\n{task.prompt}",
         )
-    except Exception as error:
+    except Exception as caught:
         traceback.print_exc()
-        await asyncio.to_thread(store.finish, task.id, repr(error))
-        # 카드조차 못 올렸으면(채널 보관 등) 고칠 카드가 없다. 기록은 표와 로그다.
-        if card_ts is not None:
-            await client.chat_update(
-                channel=task.channel_id,
-                ts=card_ts,
-                **_card(claim, ":x: 실패", error),
+        error = caught
+
+    # 표 기록과 카드 고치기는 서로 기다리지 않는다. 한쪽이 실패해도 다른 쪽은 끝난다.
+    endings = [asyncio.to_thread(store.finish, task.id, repr(error) if error else None)]
+    # 카드조차 못 올렸으면(채널 보관 등) 고칠 카드가 없다. 기록은 표와 로그다.
+    if card_ts is not None:
+        status = ":x: 실패" if error else ":white_check_mark: 완료"
+        endings.append(
+            client.chat_update(
+                channel=task.channel_id, ts=card_ts, **_card(claim, status, error)
             )
-        return
-    await asyncio.to_thread(store.finish, task.id, None)
-    await client.chat_update(
-        channel=task.channel_id, ts=card_ts, **_card(claim, ":white_check_mark: 완료")
-    )
+        )
+    await asyncio.gather(*endings)
 
 
 async def run_due_tasks(agent: ThreadAgent, client: AsyncWebClient) -> None:

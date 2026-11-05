@@ -65,6 +65,10 @@ _PLAIN_BLOCKS = {
 # 외부 링크일 때만 다시 만들 수 있는 파일 블록. 노션에 올린 파일 주소는 한 시간 뒤 만료된다.
 _FILE_BLOCKS = {"image", "video", "file", "pdf", "audio"}
 
+# 옮기는 블록 전부. 동기화 블록은 원본을 가리키게 만들고, 표와 단은 만들 때 하위를
+# 함께 보낸다. 나머지(하위 페이지, 데이터베이스 등)는 건너뛰고 알린다.
+_COPYABLE = _PLAIN_BLOCKS | _FILE_BLOCKS | {"synced_block", "table", "column_list"}
+
 
 @dataclass
 class _Copy:
@@ -74,9 +78,20 @@ class _Copy:
     omit: set[str]
     replacements: list[tuple[str, str]]
     skipped: list[str] = field(default_factory=list)
-    # 단(column) ID → 그 단에서 옮긴 블록. 단은 첫 단계를 만들 때 같이 넣으므로
-    # 그 아래를 옮길 때 같은 목록을 다시 쓴다.
-    columns: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _Planned:
+    """만들 블록 하나.
+
+    inline 은 만들 때 함께 보내서, 만든 뒤 그 아래로 더 내려가야 하는 하위 블록입니다.
+    None 이면 함께 보낸 것이 없어 만든 뒤에 하위를 옮깁니다. 빈 목록이면 더 옮길
+    것이 없습니다(동기화 블록은 원본과 이어지고, 표의 행은 아래가 없음).
+    """
+
+    source: dict[str, Any]
+    payload: dict[str, Any]
+    inline: list["_Planned"] | None
 
 
 @dataclass(frozen=True)
@@ -187,74 +202,63 @@ def _kept(copy: _Copy, parent_id: str) -> list[dict[str, Any]]:
         kind = block["type"]
         if kind in _FILE_BLOCKS and block[kind]["type"] != "external":
             copy.skipped.append(f"{_describe(block)} (노션에 올린 파일)")
-        elif kind in _PLAIN_BLOCKS | _FILE_BLOCKS | {
-            "synced_block",
-            "table",
-            "column_list",
-        }:
+        elif kind in _COPYABLE:
             kept.append(block)
         else:
             copy.skipped.append(_describe(block))
     return kept
 
 
-def _payload(block: dict[str, Any], copy: _Copy) -> dict[str, Any]:
-    """만들 블록. 만들 때 하위 블록이 함께 있어야 하는 표와 단은 하위까지 담습니다."""
+def _plan(block: dict[str, Any], copy: _Copy) -> _Planned:
+    """블록을 만들 모양으로 바꿉니다. 표·단·칸은 만들 때 하위를 함께 담습니다."""
     kind = block["type"]
     if kind == "synced_block":
         # 원본이면 그 블록을, 이미 사본이면 그 원본을 가리킨다.
         source = block["synced_block"]["synced_from"]
         origin = source["block_id"] if source else block["id"]
-        return {"type": kind, kind: {"synced_from": {"block_id": origin}}}
-    content = _content(block, copy)
-    if kind == "table":
-        rows = list(_children(copy.client, block["id"]))
-        content["children"] = [
-            {"type": "table_row", "table_row": _content(row, copy)} for row in rows
-        ]
-    elif kind == "column_list":
-        columns = []
-        for column in _children(copy.client, block["id"]):
-            kept = copy.columns[column["id"]] = _kept(copy, column["id"])
-            children = [_payload(child, copy) for child in kept]
-            columns.append(
-                {
-                    "type": "column",
-                    "column": {**_content(column, copy), "children": children},
-                }
-            )
-        content["children"] = columns
-    return {"type": kind, kind: content}
-
-
-def _copy_descendants(
-    source: dict[str, Any], created: dict[str, Any], copy: _Copy
-) -> None:
-    """만든 블록 아래로 원본 블록의 하위 블록을 옮깁니다."""
-    kind = source["type"]
-    if kind == "column_list":
-        # 단 안의 첫 단계는 만들 때 같이 넣었다. 그 아래만 옮긴다.
-        columns = zip(
-            _children(copy.client, source["id"]), _children(copy.client, created["id"])
+        return _Planned(
+            block, {"type": kind, kind: {"synced_from": {"block_id": origin}}}, []
         )
-        for source_column, created_column in columns:
-            kept = copy.columns[source_column["id"]]
-            pairs = zip(kept, _children(copy.client, created_column["id"]))
-            for child, created_child in pairs:
-                _copy_descendants(child, created_child, copy)
-    elif source["has_children"] and kind not in ("synced_block", "table"):
-        _copy_children(source["id"], created["id"], copy)
+    content = _content(block, copy)
+    inline = None
+    if kind == "table":
+        content["children"] = [
+            {"type": "table_row", "table_row": _content(row, copy)}
+            for row in _children(copy.client, block["id"])
+        ]
+        inline = []
+    elif kind in ("column_list", "column"):
+        children = (
+            _children(copy.client, block["id"])
+            if kind == "column_list"
+            else _kept(copy, block["id"])
+        )
+        inline = [_plan(child, copy) for child in children]
+        content["children"] = [child.payload for child in inline]
+    return _Planned(block, {"type": kind, kind: content}, inline)
+
+
+def _copy_descendants(planned: _Planned, created: dict[str, Any], copy: _Copy) -> None:
+    """만든 블록 아래로 원본 블록의 하위 블록을 옮깁니다."""
+    if planned.inline is None:
+        if planned.source["has_children"]:
+            _copy_children(planned.source["id"], created["id"], copy)
+        return
+    if planned.inline:
+        made = _children(copy.client, created["id"])
+        for child, created_child in zip(planned.inline, made):
+            _copy_descendants(child, created_child, copy)
 
 
 def _copy_children(source_id: str, target_id: str, copy: _Copy) -> None:
-    blocks = _kept(copy, source_id)
-    for start in range(0, len(blocks), APPEND_LIMIT):
-        chunk = blocks[start : start + APPEND_LIMIT]
+    planned = [_plan(block, copy) for block in _kept(copy, source_id)]
+    for start in range(0, len(planned), APPEND_LIMIT):
+        chunk = planned[start : start + APPEND_LIMIT]
         created = copy.client.blocks.children.append(
-            block_id=target_id, children=[_payload(block, copy) for block in chunk]
+            block_id=target_id, children=[p.payload for p in chunk]
         )["results"]
-        for source, made in zip(chunk, created):
-            _copy_descendants(source, made, copy)
+        for item, made in zip(chunk, created):
+            _copy_descendants(item, made, copy)
 
 
 def _properties(page: dict[str, Any], title: str) -> dict[str, Any]:

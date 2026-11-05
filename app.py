@@ -78,7 +78,7 @@ async def main():
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
     scheduler = start_scheduler()
     # 로봇에게 예약한 작업. 실행에 대표 봇이 필요해 config.yaml 이 아니라 여기서 건다.
-    # [수정] 피드백과 같은 길로, 스레드의 다음 질문처럼 에이전트를 돌린다.
+    # 회차마다 예약한 스레드에서, 예약한 사람이 다음 질문을 한 것처럼 에이전트를 돌린다.
     scheduler.add_job(
         run_due_tasks,
         "interval",
