@@ -40,6 +40,7 @@ from service.ops_mail.draft import (
     megabytes,
     pick_files,
 )
+from app.draft_revise import is_verbatim, mode_block
 from service.slack import escape
 
 APPROVE = "ops_mail_approve"
@@ -73,6 +74,31 @@ def _preview(addresses: list[str]) -> str:
     return shown
 
 
+def _attachment(file: SlackFile) -> str:
+    """첨부 하나를 카드에 보일 글로 만듭니다.
+
+    이름만 보이면 같은 이름이 여럿이거나 비슷할 때 실제로 나갈 파일을 확인할 수
+    없습니다. 이름을 슬랙의 그 파일로 걸고 올린 시각을 붙여 눌러 보고 가리게 합니다.
+
+    Args:
+        file: 붙일 슬랙 파일
+
+    Returns:
+        str: "<permalink|a.pdf> (0.1MB · 11월 5일 14:02 올림)" 꼴의 슬랙 텍스트
+    """
+    # 링크 글자에 | 가 있으면 슬랙이 거기서 링크를 끊는다.
+    name = escape(file.name)
+    if file.permalink:
+        name = f"<{file.permalink}|{name.replace('|', '¦')}>"
+    detail = megabytes(file.size)
+    if file.created:
+        # 보는 사람의 시간대로 보여준다. 대체 글자는 날짜를 못 그릴 때만 쓴다.
+        detail += (
+            f" · <!date^{file.created}^{{date_short_pretty}} {{time}}|올린 시각> 올림"
+        )
+    return f"{name} ({detail})"
+
+
 def _summary(draft: Draft) -> str:
     """받는 사람·제목·첨부·본문을 슬랙 텍스트로 만듭니다."""
     to = _preview(draft.recipients)
@@ -83,10 +109,7 @@ def _summary(draft: Draft) -> str:
         f"제목: {escape(draft.subject)}",
     ]
     if draft.attachments:
-        names = ", ".join(
-            f"{escape(file.name)} ({megabytes(file.size)})"
-            for file in draft.attachments
-        )
+        names = ", ".join(_attachment(file) for file in draft.attachments)
         lines.append(f"첨부: {names}")
     body = draft.body
     if len(body) > PREVIEW_BODY_CHARS:
@@ -122,7 +145,7 @@ def _blocks(draft_id: str, draft: Draft) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*메일 발송 확인* — {kind}\n{_summary(draft)}",
+                "text": f"*이렇게 보내려고 합니다* — {kind}\n{_summary(draft)}",
             },
         },
         {
@@ -205,11 +228,16 @@ def get_draft_ops_mail_tool(
         subject(제목)가 필요합니다. 받는 사람이 여럿이면 한 명씩 따로 보내서
         서로의 주소가 보이지 않습니다. 한 번에 500명까지입니다.
 
-        body 는 메일 본문 텍스트입니다. 인사와 서명까지 완성된 문장으로 씁니다.
+        body 는 메일 본문 텍스트입니다. 사용자가 보낼 문장을 직접 주면("반갑고 라고
+        보내줘") 한 글자도 고치지 않고 그 문장 그대로 씁니다. 인사·서명·이모지를
+        덧붙이거나 말투를 바꾸지 않습니다. 사용자가 내용만 말했을 때("회의 언제
+        끝나는지 물어봐")에만 문장을 지어 씁니다.
 
         attachments 는 붙일 파일 이름입니다. 이 스레드에 올라온 파일만 붙일 수
-        있습니다. 이름이 틀리면 스레드에 있는 파일 목록을 돌려주니, 그중에서
-        골라 다시 부릅니다. 첨부가 없으면 비웁니다.
+        있습니다. 대화의 각 메시지 끝 [첨부 파일: ...] 이 그 메시지에 올라온
+        파일입니다. "이 파일" 은 요청한 메시지에 함께 올라온 파일입니다. 어느 파일인지
+        정말 모를 때만 되묻습니다. 이름이 틀리면 스레드에 있는 파일 목록을
+        돌려주니, 그중에서 골라 다시 부릅니다. 첨부가 없으면 비웁니다.
 
         Returns:
             초안을 올렸다는 안내. 발송 결과가 아닙니다.
@@ -254,7 +282,7 @@ def get_draft_ops_mail_tool(
             await client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
-                text=f"메일 발송 확인 — {count}명",
+                text=f"이렇게 보내려고 합니다 — {count}명",
                 blocks=_blocks(draft_id, draft),
             )
         except BaseException:
@@ -376,8 +404,32 @@ async def _record(
     )
 
 
+def _revise_previous(draft: Draft) -> str:
+    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다.
+
+    카드 미리보기처럼 받는 사람을 줄이면, "나머지는 그대로" 다시 쓰는 에이전트가
+    보이는 몇 명만으로 초안을 올립니다. 그래서 받는 사람은 모두 싣습니다(최대
+    500명). 사람이 아니라 에이전트가 읽으므로 슬랙용 이스케이프는 하지 않습니다.
+
+    Args:
+        draft: [수정] 을 누른 초안
+
+    Returns:
+        str: 받는 사람·제목·첨부·본문을 적은 글
+    """
+    to = ", ".join(draft.recipients)
+    lines = [f"받는 사람({len(draft.recipients)}명): {to}", f"제목: {draft.subject}"]
+    if draft.attachments:
+        lines.append(f"첨부: {', '.join(file.name for file in draft.attachments)}")
+    lines.append(f"본문:\n{draft.body}")
+    return "\n".join(lines)
+
+
 def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
-    """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다."""
+    """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다.
+
+    적은 글이 고칠 점인지 보낼 문장인지는 적은 사람이 고릅니다(mode_block).
+    """
     return {
         "type": "modal",
         "callback_id": REVISE_VIEW,
@@ -392,13 +444,14 @@ def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
             {
                 "type": "input",
                 "block_id": FEEDBACK_BLOCK,
-                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "label": {"type": "plain_text", "text": "고칠 점이나 보낼 문장"},
                 "element": {
                     "type": "plain_text_input",
                     "action_id": FEEDBACK_INPUT,
                     "multiline": True,
                 },
             },
+            mode_block(),
         ],
     }
 
@@ -409,7 +462,7 @@ def register_ops_mail_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous, verbatim) -> None` 입니다.
     """
 
     @app.action(APPROVE)
@@ -514,6 +567,8 @@ def register_ops_mail_handlers(app, revise=None):
             thread_ts=draft.thread_ts,
             user=user,
             text=feedback,
+            previous=_revise_previous(draft),
+            verbatim=is_verbatim(body["view"]["state"]["values"]),
         )
 
     @app.action(CANCEL)

@@ -14,6 +14,25 @@ def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def is_slack_hosted_file(file: dict) -> bool:
+    """슬랙에 실제로 올라가 봇이 내려받을 수 있는 파일이면 True 입니다.
+
+    지운 파일(tombstone)·가려진 파일은 이름이나 주소가 없고, 외부 파일(구글 드라이브
+    링크 등)은 주소가 슬랙 밖이라 봇 토큰을 실어 내려받으면 토큰이 샙니다.
+
+    Args:
+        file: conversations_replies 메시지의 files 항목
+
+    Returns:
+        bool: 이름과 슬랙 내려받기 주소가 있고 외부 파일이 아니면 True
+    """
+    return bool(
+        file.get("name")
+        and file.get("url_private_download")
+        and not file.get("is_external")
+    )
+
+
 def find_thread_ts_by_text(
     slack_client: WebClient,
     channel_id: str,

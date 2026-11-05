@@ -22,6 +22,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.sms import history
 from service.sms import send as sms_send
+from app.draft_revise import is_verbatim, mode_block
 from service.sms import transport
 
 APPROVE = "sms_approve"
@@ -246,6 +247,28 @@ def get_draft_sms_tool(
     return draft_sms
 
 
+def _revise_previous(draft: dict) -> str:
+    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다.
+
+    수신자 번호와 치환값은 싣지 않습니다. 에이전트가 앞 대화에서 다시 만들 수 있고,
+    수백 명이면 질문이 너무 길어집니다. 대신 같은 사람 수로 다시 만들라고 적습니다.
+
+    Args:
+        draft: [수정] 을 누른 초안(_DRAFTS 의 값)
+
+    Returns:
+        str: 받는 사람 수·예약·문안을 적은 글
+    """
+    lines = [
+        f"받는 사람: {len(draft['rows'])}명"
+        " (앞 대화에서 같은 사람들로 다시 만듭니다. 한 명도 빠지면 안 됩니다)"
+    ]
+    if draft["send_at"]:
+        lines.append(f"예약: {draft['send_at']}")
+    lines.append(f"문안:\n{draft['content']}")
+    return "\n".join(lines)
+
+
 def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> dict:
     """수정 요청 모달입니다. 고칠 것을 옆에 두고 피드백을 받습니다.
 
@@ -292,7 +315,7 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
             {
                 "type": "input",
                 "block_id": FEEDBACK_BLOCK,
-                "label": {"type": "plain_text", "text": "어디를 어떻게 고칠까요?"},
+                "label": {"type": "plain_text", "text": "고칠 점이나 보낼 문장"},
                 "hint": {
                     "type": "plain_text",
                     "text": "문안·받는 사람·예약 시각 무엇이든 됩니다.",
@@ -307,6 +330,7 @@ def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> d
                     },
                 },
             },
+            mode_block(),
         ],
     }
 
@@ -317,7 +341,7 @@ def register_sms_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous, verbatim) -> None` 입니다.
             없으면 [수정] 은 피드백을 스레드에 남기기만 합니다 —
             에이전트 진입점을 아는 것은 app.py 뿐이라 여기서 import 하면
             general → sms → general 로 순환합니다.
@@ -441,6 +465,8 @@ def register_sms_handlers(app, revise=None):
             thread_ts=draft["thread_ts"],
             user=user,
             text=feedback,
+            previous=_revise_previous(draft),
+            verbatim=is_verbatim(body["view"]["state"]["values"]),
         )
 
     @app.action(CANCEL)

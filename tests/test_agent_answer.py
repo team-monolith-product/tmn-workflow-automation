@@ -1,5 +1,6 @@
 """에이전트 답변을 슬랙 블록에 담는 경로 테스트"""
 
+import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -153,3 +154,123 @@ class TestAnswer:
 
         assert default.endswith("(백틱 3개)")
         assert with_instructions == default + "\n\n데이터 지침"
+
+
+def _file(name: str) -> dict:
+    return {"name": name, "url_private_download": f"https://files.slack.com/{name}"}
+
+
+class TestThreadFiles:
+    """메시지 text 에는 파일이 없어서, 에이전트가 "이 파일" 을 고르려면 이름이 필요하다"""
+
+    async def _human_message(
+        self, slack_client, messages, user="U1", asked_in_thread=True
+    ):
+        slack_client.conversations_replies = AsyncMock(
+            return_value={"messages": messages}
+        )
+        executor = MagicMock()
+        executor.ainvoke = AsyncMock(
+            return_value={"messages": [AIMessage(content="답")]}
+        )
+        with patch("app.common.ChatOpenAI"), patch(
+            "app.common.create_react_agent", return_value=executor
+        ):
+            await common.answer(
+                "1793846401.327239",
+                "C0CE8EQ3XK5",
+                user,
+                messages[-1]["text"],
+                AsyncMock(),
+                slack_client,
+                [],
+                asked_in_thread=asked_in_thread,
+            )
+        return executor.ainvoke.call_args.args[0]["messages"][1].content
+
+    async def test_질문_메시지에_올린_파일을_그_질문에_붙인다(self, slack_client):
+        content = await self._human_message(
+            slack_client,
+            [
+                {
+                    "user": "U1",
+                    "text": "이거 메일로보내",
+                    "files": [_file("IMG_5467-2 (2).heic")],
+                },
+                {
+                    "user": "U1",
+                    "text": "감사합니다 를 메일로 보내 이파일과 함께",
+                    "files": [_file("1.codap (3).json")],
+                },
+            ],
+        )
+
+        assert "이거 메일로보내\n[첨부 파일: IMG_5467-2 (2).heic]" in content
+        assert (
+            "감사합니다 를 메일로 보내 이파일과 함께\n[첨부 파일: 1.codap (3).json]"
+            in content
+        )
+
+    async def test_이름_없는_파일과_파일_없는_메시지에는_줄을_붙이지_않는다(
+        self, slack_client
+    ):
+        content = await self._human_message(
+            slack_client,
+            [
+                {"user": "U1", "text": "지운 파일", "files": [{"id": "F1"}]},
+                {"user": "U1", "text": "질문"},
+            ],
+        )
+
+        assert "첨부 파일" not in content
+
+    async def test_마지막_메시지가_질문한_사람_것이_아니면_그_파일을_붙이지_않는다(
+        self, slack_client
+    ):
+        """[수정] 처럼 질문이 스레드 메시지가 아닐 때 남의 파일을 질문에 붙이지 않는다"""
+        content = await self._human_message(
+            slack_client,
+            [{"text": "초안 카드", "files": [_file("남의 파일.pdf")]}],
+        )
+
+        assert "남의 파일.pdf" not in content
+
+    async def test_수정_창에서_온_질문이면_마지막_메시지를_기록에_남기고_파일은_붙이지_않는다(
+        self, slack_client
+    ):
+        """[수정] 은 스레드 메시지가 아니라, 마지막 메시지를 질문으로 보고 자르면 안 된다"""
+        content = await self._human_message(
+            slack_client,
+            [
+                {"user": "U1", "text": "초안 써줘"},
+                {"user": "U1", "text": "참고용", "files": [_file("참고.xlsx")]},
+            ],
+            asked_in_thread=False,
+        )
+
+        # Then : 마지막 메시지는 대화 기록에 그 파일과 함께 남고, 질문에는 붙지 않는다
+        history, question = content.split("위는 슬랙에서 진행된 대화이다.")
+        assert "참고용\n[첨부 파일: 참고.xlsx]" in history
+        assert "참고.xlsx" not in question
+
+    async def test_붙일_수_없는_외부_파일은_보여주지_않는다(self, slack_client):
+        """보이면 에이전트가 골랐다가 pick_files 에서 없는 파일이 된다"""
+        content = await self._human_message(
+            slack_client,
+            [
+                {
+                    "user": "U1",
+                    "text": "보내",
+                    "files": [{**_file("링크.pdf"), "is_external": True}],
+                }
+            ],
+        )
+
+        assert "링크.pdf" not in content
+
+
+async def test_대화에_보여주는_파일_이름은_완성형이다():
+    """맥에서 올린 NFD 이름을 그대로 보여주면 에이전트가 이름을 옮겨 쓰다 어긋난다"""
+    nfd = unicodedata.normalize("NFD", "가이드.pdf")
+
+    assert common._files_note({"files": [_file(nfd)]}) == "\n[첨부 파일: 가이드.pdf]"
