@@ -239,8 +239,10 @@ async def test_수정_요청은_적은_문장을_그대로_쓰라는_안내와_�
             thread_ts="1793857410.183719",
             user="U1",
             text="안녕하세요.\n\n회의는 언제 마쳐요?",
+            previous="본문:\n회의는 언제쯤 마치실 예정이신가요?",
         )
 
     question = mock_answer.call_args.args[3]
-    assert question.endswith("\n\n안녕하세요.\n\n회의는 언제 마쳐요?")
+    assert "[수정 창에 적은 글]\n안녕하세요.\n\n회의는 언제 마쳐요?\n" in question
+    assert question.endswith("[앞 초안]\n본문:\n회의는 언제쯤 마치실 예정이신가요?")
     assert "그 문장 그대로" in question

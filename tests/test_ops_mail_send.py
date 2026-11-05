@@ -615,3 +615,25 @@ def test_맥에서_올린_한글_파일_이름도_완성형_이름으로_고른�
 
     # Then : 그 파일을 고르고, 메일에도 완성형 이름으로 붙인다
     assert [f.name for f in picked] == ["카카오비즈메시지_가이드.pdf"]
+
+
+def test_수정할_때_앞_초안을_에이전트가_읽을_글로_넘긴다():
+    """카드가 수정 요청 문구로 바뀌어, 넘기지 않으면 에이전트가 앞 본문을 모른다"""
+    draft = drafts.Draft(
+        recipients=["chk@team-mono.com"],
+        subject="회의 & 일정",
+        body="안녕하세요.\n\n회의는 언제쯤 마치실 예정이신가요?",
+        references_ids=[],
+        thread_ts="1.0",
+        attachments=[drafts.SlackFile("가이드.pdf", "application/pdf", 1, "u")],
+    )
+
+    previous = ops_mail._revise_previous(draft)
+
+    # 슬랙 이스케이프(&amp;) 없이 그대로 넘겨야 에이전트가 그대로 옮겨 쓴다
+    assert previous == (
+        "받는 사람: chk@team-mono.com\n"
+        "제목: 회의 & 일정\n"
+        "첨부: 가이드.pdf\n"
+        "본문:\n안녕하세요.\n\n회의는 언제쯤 마치실 예정이신가요?"
+    )

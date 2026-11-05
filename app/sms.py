@@ -246,6 +246,19 @@ def get_draft_sms_tool(
     return draft_sms
 
 
+def _revise_previous(draft: dict) -> str:
+    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다.
+
+    수신자 번호와 치환값은 싣지 않습니다. 에이전트가 앞 대화에서 다시 만들 수 있고,
+    수백 명이면 질문이 너무 길어집니다.
+    """
+    lines = [f"받는 사람: {len(draft['rows'])}명"]
+    if draft["send_at"]:
+        lines.append(f"예약: {draft['send_at']}")
+    lines.append(f"문안:\n{draft['content']}")
+    return "\n".join(lines)
+
+
 def _revise_view(draft_id: str, channel: str, ts: str, plan: sms_send.Plan) -> dict:
     """수정 요청 모달입니다. 고칠 것을 옆에 두고 피드백을 받습니다.
 
@@ -317,7 +330,7 @@ def register_sms_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous) -> None` 입니다.
             없으면 [수정] 은 피드백을 스레드에 남기기만 합니다 —
             에이전트 진입점을 아는 것은 app.py 뿐이라 여기서 import 하면
             general → sms → general 로 순환합니다.
@@ -441,6 +454,7 @@ def register_sms_handlers(app, revise=None):
             thread_ts=draft["thread_ts"],
             user=user,
             text=feedback,
+            previous=_revise_previous(draft),
         )
 
     @app.action(CANCEL)

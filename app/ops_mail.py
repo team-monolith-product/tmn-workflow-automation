@@ -381,6 +381,18 @@ async def _record(
     )
 
 
+def _revise_previous(draft: Draft) -> str:
+    """[수정] 을 누른 초안을 에이전트가 다시 쓸 수 있게 글로 풉니다. 슬랙용 이스케이프는 하지 않습니다."""
+    to = ", ".join(draft.recipients[:PREVIEW_RECIPIENTS])
+    if len(draft.recipients) > PREVIEW_RECIPIENTS:
+        to += f" 외 {len(draft.recipients) - PREVIEW_RECIPIENTS}명"
+    lines = [f"받는 사람: {to}", f"제목: {draft.subject}"]
+    if draft.attachments:
+        lines.append(f"첨부: {', '.join(file.name for file in draft.attachments)}")
+    lines.append(f"본문:\n{draft.body}")
+    return "\n".join(lines)
+
+
 def _revise_view(draft_id: str, channel: str, ts: str, draft: Draft) -> dict:
     """수정 요청 모달입니다. 직접 고치게 하지 않고 피드백만 받습니다."""
     return {
@@ -414,7 +426,7 @@ def register_ops_mail_handlers(app, revise=None):
     Args:
         app: slack_bolt AsyncApp
         revise: 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백.
-            `async (channel, thread_ts, user, text) -> None` 입니다.
+            `async (channel, thread_ts, user, text, previous) -> None` 입니다.
     """
 
     @app.action(APPROVE)
@@ -519,6 +531,7 @@ def register_ops_mail_handlers(app, revise=None):
             thread_ts=draft.thread_ts,
             user=user,
             text=feedback,
+            previous=_revise_previous(draft),
         )
 
     @app.action(CANCEL)

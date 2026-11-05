@@ -252,24 +252,29 @@ async def _build_tools(
     )
 
 
-def revise_request(feedback: str) -> str:
+def revise_request(feedback: str, previous: str) -> str:
     """[수정] 창에 적은 글을 에이전트에게 줄 질문으로 감쌉니다.
 
     창에는 고칠 점("더 짧게")을 적기도, 보낼 문장 자체를 적기도 합니다. 글만
     넘기면 에이전트가 둘을 가리지 못하고 적어 준 문장까지 다시 다듬습니다.
 
+    앞 초안도 함께 넘깁니다. 카드는 수정 요청 문구로 바뀌고 에이전트는 스레드의
+    글만 읽으므로, 넘기지 않으면 "나머지는 그대로" 둘 앞 초안을 모릅니다.
+
     Args:
         feedback: [수정] 창에 적은 글
+        previous: 수정을 누른 초안의 내용
 
     Returns:
         str: 에이전트에게 줄 질문
     """
     return (
-        "[초안 수정 요청] 방금 올린 초안 카드의 [수정] 창에 아래처럼 적었습니다.\n"
+        "[초안 수정 요청] 아래 초안의 [수정] 창에 이렇게 적었습니다.\n"
         "보낼 문장을 직접 적었으면 한 글자도 고치지 말고 그 문장 그대로 새 초안을"
         " 올리세요. 인사·서명·이모지를 덧붙이거나 말투를 바꾸지 않습니다.\n"
         "고칠 점을 적었으면 그 부분만 고치고 나머지는 앞 초안 그대로 둡니다.\n\n"
-        f"{feedback}"
+        f"[수정 창에 적은 글]\n{feedback}\n\n"
+        f"[앞 초안]\n{previous}"
     )
 
 
@@ -287,10 +292,12 @@ def get_draft_revise(app):
         app: slack_bolt AsyncApp
 
     Returns:
-        `async (channel, thread_ts, user, text) -> None` 콜백
+        `async (channel, thread_ts, user, text, previous) -> None` 콜백
     """
 
-    async def revise(channel: str, thread_ts: str, user: str, text: str) -> None:
+    async def revise(
+        channel: str, thread_ts: str, user: str, text: str, previous: str
+    ) -> None:
         async def say(payload, thread_ts=thread_ts):
             await app.client.chat_postMessage(
                 channel=channel,
@@ -304,7 +311,7 @@ def get_draft_revise(app):
             thread_ts,
             channel,
             user,
-            revise_request(text),
+            revise_request(text, previous),
             say,
             app.client,
             tools,

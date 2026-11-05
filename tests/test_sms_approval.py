@@ -535,6 +535,8 @@ async def test_수정을_내면_피드백이_에이전트로_간다(
     )
 
     assert revised[0]["text"] == "마감일을 8월 30일로"
+    # 카드가 수정 요청 문구로 바뀌니, 앞 문안을 넘겨야 "나머지는 그대로" 둘 수 있다.
+    assert "문안:\n" in revised[0]["previous"]
     # 스레드를 벗어나면 에이전트가 앞의 대화를 못 읽어 처음부터 다시 묻는다.
     assert revised[0]["thread_ts"] == "111.000"
     assert "마감일을 8월 30일로" in client.updated[-1]["text"]
