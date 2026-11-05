@@ -5,6 +5,7 @@
 import asyncio
 import os
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
@@ -676,6 +677,11 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
     return create_notion_follow_up_task
 
 
+# 스레드에서 사람이 다음 질문을 한 것처럼 에이전트를 돌리는 콜백
+# (channel, thread_ts, user, text). app.general.get_thread_agent 가 만든다.
+ThreadAgent = Callable[[str, str, str, str], Awaitable[None]]
+
+
 async def answer(
     thread_ts: str,
     channel: str,
@@ -803,9 +809,11 @@ async def answer(
     for chunk in chunks:
         await say(
             {
+                # 알림 미리보기에 답변이 보이도록 text 도 함께 싣는다.
+                "text": chunk,
                 "blocks": [
                     {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
-                ]
+                ],
             },
             thread_ts=thread_ts,
         )

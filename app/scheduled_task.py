@@ -18,7 +18,6 @@
 
 import asyncio
 import traceback
-from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from langchain_core.tools import StructuredTool, tool
@@ -34,12 +33,8 @@ from service.scheduled_task import (
 )
 from service.slack import escape
 
-# 스레드에서 에이전트를 돌리는 콜백 (channel, thread_ts, user, text).
-# app.general.get_draft_revise 가 만든다.
-ThreadAgent = Callable[[str, str, str, str], Awaitable[None]]
-
-# 실행 중인 회차. create_task 참조를 들고 있어야 GC 되지 않는다.
-_running: set[asyncio.Task] = set()
+from .background import spawn
+from .common import ThreadAgent
 
 
 def _repeat_text(task: ScheduledTask) -> str:
@@ -115,20 +110,14 @@ def get_scheduled_task_tools(
         Returns:
             예약 번호와 다음 실행 시각, 또는 고칠 점
         """
+        now = datetime.now(KST)
         try:
-            schedule = store.resolve_schedule(
-                run_at, in_minutes, repeat, until, datetime.now(KST)
+            schedule = store.resolve_schedule(run_at, in_minutes, repeat, until, now)
+            task = await asyncio.to_thread(
+                store.create, channel, thread_ts, user_id, prompt, schedule
             )
         except ScheduleProblem as problem:
-            return str(problem)
-        task = await asyncio.to_thread(
-            store.create, channel, thread_ts, user_id, prompt, schedule
-        )
-        if task is None:
-            return (
-                f"이 채널에 대기 중인 예약이 {store.MAX_PENDING_PER_CHANNEL}개라"
-                " 더 걸 수 없습니다. 필요 없는 예약을 먼저 취소해 주세요."
-            )
+            return f"{problem} 지금은 {format_time(now)} KST 입니다."
         return f"예약했습니다: {_describe(task)}"
 
     @tool
@@ -220,8 +209,8 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
     백그라운드 작업이라 시작하자마자 스레드에 카드를 올리고, 끝나면 그 카드를
     완료·실패로 고쳐 씁니다. 카드만 보면 지금 돌고 있는지, 어떻게 끝났는지 압니다.
 
-    예외를 여기서 잡지 않으면 아무도 모르게 사라지고 한 번짜리 예약은 running 에
-    남습니다. 잡아서 표에 기록하고 카드에 보여줍니다.
+    예외를 여기서 잡지 않으면 백그라운드 태스크와 함께 아무도 모르게 사라집니다.
+    잡아서 표에 기록하고 카드에 보여줍니다.
     """
     task = claim.task
     card_ts = None
@@ -247,7 +236,9 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
         error = caught
 
     # 표 기록과 카드 고치기는 서로 기다리지 않는다. 한쪽이 실패해도 다른 쪽은 끝난다.
-    endings = [asyncio.to_thread(store.finish, task.id, repr(error) if error else None)]
+    endings = [
+        asyncio.to_thread(store.record_result, task.id, repr(error) if error else None)
+    ]
     # 카드조차 못 올렸으면(채널 보관 등) 고칠 카드가 없다. 기록은 표와 로그다.
     if card_ts is not None:
         status = ":x: 실패" if error else ":white_check_mark: 완료"
@@ -259,7 +250,9 @@ async def _run(claim: Claim, agent: ThreadAgent, client: AsyncWebClient) -> None
     await asyncio.gather(*endings)
 
 
-async def run_due_tasks(agent: ThreadAgent, client: AsyncWebClient) -> None:
+async def run_due_tasks(
+    agent: ThreadAgent, client: AsyncWebClient
+) -> list[asyncio.Task]:
     """시각이 된 회차를 꺼내 각각 백그라운드로 실행합니다.
 
     스케줄러가 1분마다 부릅니다. 에이전트는 몇 분씩 걸리므로 기다리지 않고 바로
@@ -268,9 +261,12 @@ async def run_due_tasks(agent: ThreadAgent, client: AsyncWebClient) -> None:
     Args:
         agent: 스레드에서 에이전트를 돌리는 콜백
         client: 슬랙 클라이언트
+
+    Returns:
+        list[asyncio.Task]: 띄운 회차. 스케줄러는 기다리지 않습니다(테스트용).
     """
+    jobs = []
     for claim in await asyncio.to_thread(store.claim_due, datetime.now(KST)):
         print(f"[scheduled_task] #{claim.task.id} 실행 시작")
-        job = asyncio.create_task(_run(claim, agent, client))
-        _running.add(job)
-        job.add_done_callback(_running.discard)
+        jobs.append(spawn(_run(claim, agent, client)))
+    return jobs

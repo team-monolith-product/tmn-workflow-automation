@@ -73,17 +73,18 @@ def test_반복은_다음_해당_시각부터_until_날짜_끝까지다():
         (("2026-11-05 09:00", None, "0 16 * * wed", None), "하나만"),
         ((None, None, "0 16 * * 3", None), "이름"),
         ((None, None, "* * * * *", None), "간격"),
+        # 첫 두 회차(09:30, 다음 날 09:00)만 보면 넓지만 매일 30분 간격으로 돈다
+        ((None, None, "0,30 9 * * *", None), "간격"),
         ((None, 30, None, "2027-01-31"), "repeat 와 함께"),
     ],
 )
-def test_잘못된_시각_인자는_지금_시각을_붙인_안내로_거절한다(args, message):
-    # When : 지난 시각, 겹친 인자, 요일 숫자, 매분, 반복 없는 until 을 주면
+def test_잘못된_시각_인자는_고칠_점을_알려_거절한다(args, message):
+    # When : 지난 시각, 겹친 인자, 요일 숫자, 1시간보다 잦은 반복, 반복 없는 until 을 주면
     with pytest.raises(ScheduleProblem) as problem:
         resolve_schedule(*args, NOW)
 
-    # Then : 고칠 점과 지금 시각을 함께 알려준다
+    # Then : 고칠 점을 알려준다
     assert message in str(problem.value)
-    assert "지금은 2026-11-04" in str(problem.value)
 
 
 def test_사람이_묻지_않은_질문에는_예약_도구를_주지_않는다():
@@ -125,9 +126,23 @@ async def test_시각_인자가_잘못되면_넣지_않고_고칠_점을_돌려�
         {"prompt": "x", "repeat": "0 16 * * 3"}
     )
 
-    # Then : 저장하지 않고 안내문을 돌려준다
+    # Then : 저장하지 않고 지금 시각을 붙인 안내문을 돌려준다
     create.assert_not_called()
-    assert "이름" in result
+    assert "이름" in result and "지금은" in result
+
+
+@pytest.mark.asyncio
+async def test_채널_예약이_한도면_저장_쪽_안내를_그대로_돌려준다(monkeypatch):
+    def full(*args):
+        raise ScheduleProblem("대기 중인 예약이 50개라 더 걸 수 없습니다.")
+
+    monkeypatch.setattr(scheduled_task.store, "create", full)
+
+    # When : 저장에서 한도로 거절되면
+    result = await _tools()["schedule_task"].ainvoke({"prompt": "x", "in_minutes": 30})
+
+    # Then : 시각 인자 문제와 같은 길로 안내문을 돌려준다
+    assert "50개" in result
 
 
 def _client() -> AsyncMock:
@@ -156,14 +171,14 @@ async def test_시각이_된_회차는_실행_카드를_올리고_에이전트�
     claim = Claim(_task(cron="0 16 * * wed"), following)
     monkeypatch.setattr(scheduled_task.store, "claim_due", lambda now: [claim])
     monkeypatch.setattr(
-        scheduled_task.store, "finish", lambda *args: finished.append(args)
+        scheduled_task.store, "record_result", lambda *args: finished.append(args)
     )
     agent = AsyncMock()
     client = _client()
 
     # When : 폴러가 돌고 백그라운드 실행이 끝나면
-    await scheduled_task.run_due_tasks(agent, client)
-    await asyncio.gather(*scheduled_task._running)
+    jobs = await scheduled_task.run_due_tasks(agent, client)
+    await asyncio.gather(*jobs)
 
     # Then : 스레드에 실행 중 카드를 다음 회차와 함께 올리고, 다시 예약하지 말라는
     #        말과 함께 요청을 태우고, 에러 없이 끝낸 뒤 같은 카드를 완료로 고친다
@@ -185,14 +200,14 @@ async def test_에이전트가_실패하면_이유를_남기고_카드를_실패
         scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
     )
     monkeypatch.setattr(
-        scheduled_task.store, "finish", lambda *args: finished.append(args)
+        scheduled_task.store, "record_result", lambda *args: finished.append(args)
     )
     agent = AsyncMock(side_effect=RuntimeError("notion down"))
     client = _client()
 
     # When : 에이전트가 예외를 던지면
-    await scheduled_task.run_due_tasks(agent, client)
-    await asyncio.gather(*scheduled_task._running)
+    jobs = await scheduled_task.run_due_tasks(agent, client)
+    await asyncio.gather(*jobs)
 
     # Then : 이유와 함께 끝내고, 따로 글을 올리지 않고 실행 카드를 실패와 이유로 고친다
     assert finished[0][0] == 7 and "notion down" in finished[0][1]
@@ -208,15 +223,15 @@ async def test_카드조차_못_올리면_에이전트를_돌리지_않고_실�
         scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
     )
     monkeypatch.setattr(
-        scheduled_task.store, "finish", lambda *args: finished.append(args)
+        scheduled_task.store, "record_result", lambda *args: finished.append(args)
     )
     agent = AsyncMock()
     client = _client()
     client.chat_postMessage.side_effect = RuntimeError("is_archived")
 
     # When : 채널이 보관돼 카드를 못 올리면
-    await scheduled_task.run_due_tasks(agent, client)
-    await asyncio.gather(*scheduled_task._running)
+    jobs = await scheduled_task.run_due_tasks(agent, client)
+    await asyncio.gather(*jobs)
 
     # Then : 에이전트는 돌지 않고, 이유를 남겨 끝내며, 고칠 카드가 없어 고치지 않는다
     agent.assert_not_awaited()
@@ -232,12 +247,12 @@ async def test_표_기록이_실패해도_카드는_결과로_고친다(monkeypa
     monkeypatch.setattr(
         scheduled_task.store, "claim_due", lambda now: [Claim(_task(), None)]
     )
-    monkeypatch.setattr(scheduled_task.store, "finish", broken_finish)
+    monkeypatch.setattr(scheduled_task.store, "record_result", broken_finish)
     client = _client()
 
     # When : 에이전트는 끝났는데 표에 기록하다 실패하면
-    await scheduled_task.run_due_tasks(AsyncMock(), client)
-    results = await asyncio.gather(*scheduled_task._running, return_exceptions=True)
+    jobs = await scheduled_task.run_due_tasks(AsyncMock(), client)
+    results = await asyncio.gather(*jobs, return_exceptions=True)
 
     # Then : 기록 실패는 드러나고, 카드는 실행 중에 남지 않고 완료로 바뀐다
     assert isinstance(results[0], RuntimeError)

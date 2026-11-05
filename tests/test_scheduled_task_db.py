@@ -16,7 +16,7 @@ from psycopg.conninfo import make_conninfo
 
 from service import scheduled_task as store
 from service.db import connect, fetch_one
-from service.scheduled_task import KST, Schedule
+from service.scheduled_task import KST, Schedule, ScheduleProblem
 
 # 수요일 오전 10시
 NOW = datetime(2026, 11, 4, 10, 0, tzinfo=KST)
@@ -63,16 +63,15 @@ def _row(task_id: int) -> dict:
         )
 
 
-def test_한_번짜리는_시각이_되면_한_번만_맡고_끝내면_done_이_된다(database):
+def test_한_번짜리는_꺼내는_자리에서_done_이_돼_한_번만_맡는다(database):
     due = _create("지금", Schedule(NOW - timedelta(minutes=1)))
     later = _create("나중", Schedule(NOW + timedelta(hours=1)))
 
-    # When : 두 번 연달아 꺼내고, 꺼낸 회차를 끝내면
+    # When : 두 번 연달아 꺼내면
     first = store.claim_due(NOW)
     second = store.claim_due(NOW)
-    store.finish(due.id, None)
 
-    # Then : 시각이 된 것만 한 번 꺼내고, 나중 것은 대기로 남는다
+    # Then : 시각이 된 것만 한 번 꺼내 바로 done 이 되고, 나중 것은 대기로 남는다
     assert [(c.task.id, c.next_run_at) for c in first] == [(due.id, None)]
     assert second == []
     assert _row(due.id)["status"] == "done"
@@ -99,26 +98,27 @@ def test_반복은_꺼내는_자리에서_다음_회차로_옮겨_대기하고_�
 
     # When : 회차가 도는 중에 취소하고, 그 뒤 회차가 실패로 끝나면
     canceled = store.cancel(task.id, "C1")
-    store.finish(task.id, "RuntimeError('x')")
+    store.record_result(task.id, "RuntimeError('x')")
 
     # Then : 취소가 되고, 끝난 회차가 취소를 되돌리지 않는다
     assert canceled is True
     assert _row(task.id)["status"] == "canceled"
 
 
-def test_반복의_마지막_회차는_running_을_거쳐_끝난다(database):
+def test_반복의_마지막_회차는_꺼낼_때_끝나고_실패는_이유로_남는다(database):
     task = _create(
         "마지막",
         Schedule(NOW - timedelta(minutes=1), WEEKLY, NOW + timedelta(hours=1)),
     )
 
-    # When : until 전에 다음 회차가 없는 회차를 꺼내 실패로 끝내면
+    # When : until 전에 다음 회차가 없는 회차를 꺼내 실패로 기록하면
     [claim] = store.claim_due(NOW)
-    store.finish(task.id, "RuntimeError('x')")
+    store.record_result(task.id, "RuntimeError('x')")
 
-    # Then : 다음 회차 없이 failed 로 끝난다
+    # Then : 다음 회차 없이 done 으로 끝나고 실패 이유가 남는다
     assert claim.next_run_at is None
-    assert _row(task.id)["status"] == "failed"
+    assert _row(task.id)["status"] == "done"
+    assert _row(task.id)["last_error"] == "RuntimeError('x')"
 
 
 def test_취소는_같은_채널의_대기_예약만_된다(database):
@@ -140,9 +140,9 @@ def test_채널의_대기_예약이_한도면_더_넣지_않는다(database, mon
     # When : 한도만큼 넣은 뒤 하나 더 넣고, 다른 채널에도 넣으면
     _create("a", schedule)
     _create("b", schedule)
-    over = _create("c", schedule)
+    with pytest.raises(ScheduleProblem):
+        _create("c", schedule)
     other = _create("d", schedule, channel="C2")
 
     # Then : 그 채널에는 들어가지 않고, 다른 채널은 영향이 없다
-    assert over is None
-    assert other is not None
+    assert other.channel_id == "C2"

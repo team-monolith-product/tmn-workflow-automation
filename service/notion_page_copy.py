@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from notion_client import Client
+from notion_client.helpers import iterate_paginated_api
 
 # 한 번의 children.append 에 실을 수 있는 블록 수
 APPEND_LIMIT = 100
@@ -82,16 +83,19 @@ class _Copy:
 
 @dataclass(frozen=True)
 class _Planned:
-    """만들 블록 하나.
+    """만들 블록 하나와, 만든 뒤 그 아래로 할 일.
 
-    inline 은 만들 때 함께 보내서, 만든 뒤 그 아래로 더 내려가야 하는 하위 블록입니다.
-    None 이면 함께 보낸 것이 없어 만든 뒤에 하위를 옮깁니다. 빈 목록이면 더 옮길
-    것이 없습니다(동기화 블록은 원본과 이어지고, 표의 행은 아래가 없음).
+    대부분의 블록은 만든 뒤 원본의 하위(children_from)를 옮깁니다. 단·칸은 만들 때
+    하위를 함께 보내야 해서, 함께 보낸 하위(inline)를 만든 블록과 짝지어 그 아래로
+    다시 내려갑니다. 동기화 블록과 표는 둘 다 없습니다(원본과 이어지거나, 행을 함께
+    보내고 행 아래는 없음).
     """
 
-    source: dict[str, Any]
     payload: dict[str, Any]
-    inline: list["_Planned"] | None
+    # 만든 뒤 하위를 옮겨 올 원본 블록 ID
+    children_from: str | None = None
+    # 만들 때 함께 보낸 하위. payload 의 children 과 같은 순서다.
+    inline: list["_Planned"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -112,13 +116,7 @@ def _plain_text(rich_text: list[dict[str, Any]]) -> str:
 
 def _children(client: Client, block_id: str) -> Iterator[dict[str, Any]]:
     """블록의 바로 아래 블록을 순서대로 돌려줍니다."""
-    cursor = None
-    while True:
-        page = client.blocks.children.list(block_id=block_id, start_cursor=cursor)
-        yield from page["results"]
-        if not page["has_more"]:
-            return
-        cursor = page["next_cursor"]
+    return iterate_paginated_api(client.blocks.children.list, block_id=block_id)
 
 
 def _replace(text: str, replacements: list[tuple[str, str]]) -> str:
@@ -216,18 +214,16 @@ def _plan(block: dict[str, Any], copy: _Copy) -> _Planned:
         # 원본이면 그 블록을, 이미 사본이면 그 원본을 가리킨다.
         source = block["synced_block"]["synced_from"]
         origin = source["block_id"] if source else block["id"]
-        return _Planned(
-            block, {"type": kind, kind: {"synced_from": {"block_id": origin}}}, []
-        )
+        return _Planned({"type": kind, kind: {"synced_from": {"block_id": origin}}})
     content = _content(block, copy)
-    inline = None
+    payload = {"type": kind, kind: content}
     if kind == "table":
         content["children"] = [
             {"type": "table_row", "table_row": _content(row, copy)}
             for row in _children(copy.client, block["id"])
         ]
-        inline = []
-    elif kind in ("column_list", "column"):
+        return _Planned(payload)
+    if kind in ("column_list", "column"):
         children = (
             _children(copy.client, block["id"])
             if kind == "column_list"
@@ -235,18 +231,19 @@ def _plan(block: dict[str, Any], copy: _Copy) -> _Planned:
         )
         inline = [_plan(child, copy) for child in children]
         content["children"] = [child.payload for child in inline]
-    return _Planned(block, {"type": kind, kind: content}, inline)
+        return _Planned(payload, inline=inline)
+    return _Planned(
+        payload, children_from=block["id"] if block["has_children"] else None
+    )
 
 
 def _copy_descendants(planned: _Planned, created: dict[str, Any], copy: _Copy) -> None:
     """만든 블록 아래로 원본 블록의 하위 블록을 옮깁니다."""
-    if planned.inline is None:
-        if planned.source["has_children"]:
-            _copy_children(planned.source["id"], created["id"], copy)
-        return
+    if planned.children_from is not None:
+        _copy_children(planned.children_from, created["id"], copy)
     if planned.inline:
         made = _children(copy.client, created["id"])
-        for child, created_child in zip(planned.inline, made):
+        for child, created_child in zip(planned.inline, made, strict=True):
             _copy_descendants(child, created_child, copy)
 
 
@@ -257,7 +254,7 @@ def _copy_children(source_id: str, target_id: str, copy: _Copy) -> None:
         created = copy.client.blocks.children.append(
             block_id=target_id, children=[p.payload for p in chunk]
         )["results"]
-        for item, made in zip(chunk, created):
+        for item, made in zip(chunk, created, strict=True):
             _copy_descendants(item, made, copy)
 
 

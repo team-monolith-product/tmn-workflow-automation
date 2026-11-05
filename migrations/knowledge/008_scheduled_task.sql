@@ -4,13 +4,12 @@
 -- 라고 하면 에이전트가 행을 넣고, 1분마다 도는 스케줄러 작업이 시각이 된 행을
 -- 꺼내 예약한 스레드에서 그 요청(prompt)을 다시 에이전트에게 맡긴다.
 --
--- 상태: pending → running → done | failed. pending 일 때만 canceled 로 바꿀 수 있다.
--- 반복 예약(cron)은 회차를 꺼내는 자리에서 run_at 을 다음 회차로 옮기고 pending 에
--- 둔다 -- 회차가 도중에 죽거나 실패해도 다음 회차는 돌고, 도는 중에도 취소된다.
--- 한 번짜리와 until 직전 마지막 회차만 running 을 거친다.
+-- 상태: pending → done | canceled. 회차를 꺼내는 자리에서 다음 회차가 있으면
+-- run_at 을 옮겨 pending 에 두고, 없으면(한 번짜리·마지막 회차) done 으로 끝낸다.
+-- 실패는 상태가 아니라 last_error 로 남는다.
 --
--- running 에서 프로세스가 죽으면 그대로 남는다 -- 다시 돌리지 않는다. 에이전트가
--- 채널 공지나 노션 페이지처럼 밖에 흔적을 남기므로 두 번 도는 쪽이 더 나쁘다.
+-- 꺼낸 회차가 도중에 죽어도 다시 돌리지 않는다. 에이전트가 채널 공지나 노션
+-- 페이지처럼 밖에 흔적을 남기므로 두 번 도는 쪽이 더 나쁘다.
 
 CREATE TABLE scheduled_task (
     id          bigserial   PRIMARY KEY,
@@ -29,13 +28,11 @@ CREATE TABLE scheduled_task (
     -- 반복을 멈출 시각. 이 시각 뒤로는 돌지 않는다. 끝없이 돌면 NULL.
     until       timestamptz,
     status      text        NOT NULL DEFAULT 'pending',
-    started_at  timestamptz,
-    finished_at timestamptz,
-    -- 마지막으로 실패한 이유. 반복 예약은 다음 회차가 성공하면 지운다.
+    -- 마지막 회차가 실패한 이유. 다음 회차가 성공하면 지운다.
     last_error  text,
     created_at  timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT scheduled_task_status_check
-        CHECK (status IN ('pending', 'running', 'done', 'failed', 'canceled'))
+        CHECK (status IN ('pending', 'done', 'canceled'))
 );
 
 -- 폴러가 시각이 된 대기 행만 훑는다.

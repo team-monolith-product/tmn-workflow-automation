@@ -13,6 +13,7 @@ from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
+from .background import spawn
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .ops_mail import get_ops_mail_tools
 from .scheduled_task import get_scheduled_task_tools
@@ -30,6 +31,7 @@ from .tools.redash_tools import (
 from .event_dedup import is_duplicate_event
 from .common import (
     KST,
+    ThreadAgent,
     answer,
     search_tool,
     get_web_page_from_url,
@@ -100,9 +102,6 @@ ROBOT_INSTRUCTIONS: str = (
 
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
-
-# create_task 참조를 유지하여 GC 방지
-_background_jobs: set[asyncio.Task] = set()
 
 
 async def _get_user_squad(client: AsyncWebClient, user_id: str | None) -> Squad | None:
@@ -257,29 +256,31 @@ async def _build_tools(
     )
 
 
-def get_draft_revise(app):
-    """문자·메일 초안 수정 피드백을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
+def get_thread_agent(app) -> ThreadAgent:
+    """스레드에서 사람이 다음 질문을 한 것처럼 에이전트를 돌리는 콜백을 만듭니다.
 
-    카드의 [수정] 은 모달로 피드백만 받습니다. 그 피드백을 스레드의 다음
-    질문처럼 다시 태워야 에이전트가 앞의 대화(수신자·문안·의도)를 그대로 두고
-    문안만 고쳐 새 초안을 올립니다.
+    슬랙 이벤트 없이 에이전트를 태울 때 씁니다.
+        - 문자·메일 초안 카드의 [수정]: 모달로 받은 피드백을 스레드의 다음 질문처럼
+          태워, 앞의 대화(수신자·문안·의도)를 둔 채 문안만 고친 새 초안을 올린다
+        - 예약 작업의 회차: 예약을 건 스레드에서 예약한 사람이 물은 것처럼 돈다
 
-    app/sms.py 가 아니라 여기서 만듭니다. 저쪽에서 이 모듈을 부르면
+    app/sms.py 등이 아니라 여기서 만듭니다. 저쪽에서 이 모듈을 부르면
     general → sms → general 로 순환합니다.
 
     Args:
         app: slack_bolt AsyncApp
 
     Returns:
-        `async (channel, thread_ts, user, text) -> None` 콜백
+        ThreadAgent: `async (channel, thread_ts, user, text) -> None` 콜백
     """
 
-    async def revise(channel: str, thread_ts: str, user: str, text: str) -> None:
+    async def run(channel: str, thread_ts: str, user: str, text: str) -> None:
         async def say(payload, thread_ts=thread_ts):
+            # 표·코드 블록처럼 blocks 만 오는 글도 있다. 알림 미리보기에 쓸 글자다.
             await app.client.chat_postMessage(
                 channel=channel,
                 thread_ts=thread_ts,
-                text=payload.get("text", "초안을 다시 썼습니다"),
+                text=payload.get("text", "로봇 답변"),
                 **{k: v for k, v in payload.items() if k != "text"},
             )
 
@@ -295,7 +296,7 @@ def get_draft_revise(app):
             ROBOT_INSTRUCTIONS,
         )
 
-    return revise
+    return run
 
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"
@@ -559,8 +560,4 @@ def register_general_handlers(app):
         kwargs = {kw: body.get(bk) for kw, bk in (body_kwargs or {}).items()}
         # 슬래시 커맨드 응답은 리스너가 끝나야 나가므로, 작업을 기다리면 3초 제한에 걸려
         # ack 대신 타임아웃이 뜬다. 작업 결과와 실패는 _run_wa_job 이 response_url 로 보낸다.
-        task = asyncio.create_task(
-            _run_wa_job(func, args, kwargs, description, respond)
-        )
-        _background_jobs.add(task)
-        task.add_done_callback(_background_jobs.discard)
+        spawn(_run_wa_job(func, args, kwargs, description, respond))
