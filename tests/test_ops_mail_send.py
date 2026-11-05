@@ -1,6 +1,7 @@
 """ops@ 메일 초안과 발송 카드 테스트"""
 
 import asyncio
+import unicodedata
 
 import pytest
 
@@ -602,3 +603,15 @@ def test_보내기를_두_번_눌러도_한_번만_보낸다(monkeypatch):
     # Then : 한 번만 나가고, 두 번째 누른 사람에게는 이미 처리됐다고 알린다
     assert len(sent) == 1
     assert len(slack.ephemerals) == 1
+
+
+def test_맥에서_올린_한글_파일_이름도_완성형_이름으로_고른다():
+    """맥은 한글 파일 이름을 자모가 풀린 NFD 로 올리고, 에이전트는 NFC 로 쓴다"""
+    nfd = unicodedata.normalize("NFD", "카카오비즈메시지_가이드.pdf")
+    messages = [{"files": [_slack_file(nfd)]}]
+
+    # When : 에이전트가 완성형으로 쓴 이름으로 고르면
+    picked = drafts.pick_files(messages, ["카카오비즈메시지_가이드.pdf"])
+
+    # Then : 그 파일을 고르고, 메일에도 완성형 이름으로 붙인다
+    assert [f.name for f in picked] == ["카카오비즈메시지_가이드.pdf"]

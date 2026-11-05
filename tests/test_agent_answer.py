@@ -1,5 +1,6 @@
 """에이전트 답변을 슬랙 블록에 담는 경로 테스트"""
 
+import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -226,3 +227,10 @@ class TestThreadFiles:
         )
 
         assert "남의 파일.pdf" not in content
+
+
+async def test_대화에_보여주는_파일_이름은_완성형이다():
+    """맥에서 올린 NFD 이름을 그대로 보여주면 에이전트가 이름을 옮겨 쓰다 어긋난다"""
+    nfd = unicodedata.normalize("NFD", "가이드.pdf")
+
+    assert common._files_note({"files": [{"name": nfd}]}) == "\n[첨부 파일: 가이드.pdf]"

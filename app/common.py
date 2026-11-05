@@ -5,6 +5,7 @@
 import asyncio
 import os
 import re
+import unicodedata
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
@@ -688,7 +689,12 @@ def _files_note(message: dict) -> str:
     Returns:
         str: "\\n[첨부 파일: a.pdf, b.png]". 파일이 없으면 빈 문자열
     """
-    names = [file["name"] for file in message.get("files", []) if file.get("name")]
+    # 맥에서 올린 한글 이름은 NFD 로 온다. 에이전트가 쓰는 완성형(NFC)으로 보여준다.
+    names = [
+        unicodedata.normalize("NFC", file["name"])
+        for file in message.get("files", [])
+        if file.get("name")
+    ]
     if not names:
         return ""
     return f"\n[첨부 파일: {', '.join(names)}]"
