@@ -30,6 +30,15 @@ SCHEMA_GUIDE = """
   content는 치환 전 문안, change_word의 var1~var8은 [*1*]~[*8*] 치환값.
   name은 미사용 시 NULL, 치환값 누락 시 빈 문자열. phone은 하이픈 없는 번호.
   project는 발송 당시 사업명. channel_id는 슬랙 채널 ID.
+- ops_mail_message(id, direction, counterpart, from_address, to_addresses text[],
+  subject, body_text, channel_id, sent_by, auto_reply, received_at, created_at):
+  ops@team-mono.com이 주고받은 메일 한 통당 한 행.
+  direction은 in(받음)·out(보냄). counterpart는 상대방 주소(소문자).
+  sent_by는 보낸 메일의 [보내기]를 누른 슬랙 사용자 ID. auto_reply는 부재중 등 자동응답.
+  메일 시각은 COALESCE(received_at, created_at). channel_id는 메일을 올린 슬랙 채널 ID.
+- ops_mail_thread(channel_id, counterpart, thread_ts, created_at): 상대방별 슬랙 스레드.
+  같은 상대의 메일은 방향과 상관없이 이 스레드에 쌓인다. 먼저 보낸 상대는 회신 전까지 행이 없다.
+  ops_mail_message와 (channel_id, counterpart)로 잇는다.
 - revenue_transactions(year, issued_on, status, customer, item, quantity, unit_price,
   amount, tax, total, category, subcategory, note, school_level, edu_office,
   budget_sources text[], terms text[], program_name, program_client,

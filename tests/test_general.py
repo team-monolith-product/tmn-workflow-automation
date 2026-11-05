@@ -226,3 +226,35 @@ async def test_athena_tool_posts_result_to_thread():
     assert all(
         call.kwargs["thread_ts"] == "1700000000.000100" for call in say.await_args_list
     )
+
+
+async def test_수정_요청은_적은_문장을_그대로_쓰라는_안내와_함께_넘긴다():
+    """[수정] 창의 글만 넘기면 에이전트가 적어 준 문장까지 다시 다듬는다"""
+    app = AsyncMock()
+    with patch.object(
+        general, "_build_tools", AsyncMock(return_value=[])
+    ), patch.object(general, "answer", AsyncMock()) as mock_answer:
+        await general.get_draft_revise(app)(
+            channel="C0CE8EQ3XK5",
+            thread_ts="1793857410.183719",
+            user="U1",
+            text="안녕하세요.\n\n회의는 언제 마쳐요?",
+            previous="본문:\n회의는 언제쯤 마치실 예정이신가요?",
+            verbatim=True,
+        )
+
+    question = mock_answer.call_args.args[3]
+    assert "[수정 창에 적은 글]\n안녕하세요.\n\n회의는 언제 마쳐요?\n" in question
+    assert question.endswith("[앞 초안]\n본문:\n회의는 언제쯤 마치실 예정이신가요?")
+    assert "보낼 문장을 적었다" in question
+    assert "한 글자도 고치지" in question
+    # 질문이 스레드 메시지가 아니라고 알려야 마지막 메시지를 질문으로 보고 자르지 않는다
+    assert mock_answer.call_args.kwargs["asked_in_thread"] is False
+
+
+def test_고칠_점을_골랐으면_적은_글을_본문에_옮기지_말라고_한다():
+    question = general.revise_request("더 짧게", "본문:\n긴 글", verbatim=False)
+
+    assert "고칠 점을 적었다" in question
+    assert "그대로 옮기지" in question
+    assert "한 글자도 고치지" not in question

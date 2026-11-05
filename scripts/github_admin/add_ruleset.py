@@ -443,8 +443,16 @@ def main():
 
     # repo별 config 로드 및 glob 패턴 확장
     # config 검증·glob 확장은 항상 org 전체 목록 기준으로 수행한다.
-    all_repo_names = [repo.name for repo in get_all_repos(org)]
-    repo_config = expand_repo_config(load_repo_rulesets_config(), all_repo_names)
+    all_repos = list(get_all_repos(org, include_archived=True))
+    all_repo_names = [repo.name for repo in all_repos if not repo.archived]
+    repo_config = expand_repo_config(
+        load_repo_rulesets_config(), [repo.name for repo in all_repos]
+    )
+    repo_config = {
+        repo_name: conf
+        for repo_name, conf in repo_config.items()
+        if repo_name in all_repo_names
+    }
 
     skip_repos_by_file: dict[str, set[str]] = {}
     for repo_name, conf in repo_config.items():

@@ -45,7 +45,7 @@
     "skip": ["ruleset.json", "ruleset_develop.json"],
     "add": ["ruleset_main_force_push_only.json"]
   },
-  "tko-game-godot": {
+  "tmg-ppa-godot": {
     "skip": ["ruleset.json"],
     "add": ["ruleset_main_force_push_only.json"]
   },
@@ -54,6 +54,10 @@
     "add": ["ruleset_main_ad_python.json"]
   },
   "jce-orange3-wasm": {
+    "skip": ["ruleset.json"],
+    "add": ["ruleset_main_force_push_only.json"]
+  },
+  "tmn-workflow-automation": {
     "skip": ["ruleset.json"],
     "add": ["ruleset_main_force_push_only.json"]
   }

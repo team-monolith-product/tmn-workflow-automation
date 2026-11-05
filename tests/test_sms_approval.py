@@ -10,6 +10,7 @@ from service.sms import send as sms_send
 from service.sms import transport
 
 from app import sms
+from app import draft_revise
 from app.tools import python_tools
 from app.tools.python_tools import get_execute_python_tool
 
@@ -172,7 +173,7 @@ async def _ack():
     return None
 
 
-def _submit(client, feedback: str) -> dict:
+def _submit(client, feedback: str, mode: str = draft_revise.FIX) -> dict:
     """열린 모달에 피드백을 적어 낸다.
 
     private_metadata 를 손으로 만들지 않고 모달에 실린 값을 그대로 쓴다.
@@ -184,7 +185,10 @@ def _submit(client, feedback: str) -> dict:
             "private_metadata": view["private_metadata"],
             "state": {
                 "values": {
-                    sms.FEEDBACK_BLOCK: {sms.FEEDBACK_INPUT: {"value": feedback}}
+                    sms.FEEDBACK_BLOCK: {sms.FEEDBACK_INPUT: {"value": feedback}},
+                    draft_revise.MODE_BLOCK: {
+                        draft_revise.MODE_INPUT: {"selected_option": {"value": mode}}
+                    },
                 }
             },
         },
@@ -535,9 +539,34 @@ async def test_수정을_내면_피드백이_에이전트로_간다(
     )
 
     assert revised[0]["text"] == "마감일을 8월 30일로"
+    # 카드가 수정 요청 문구로 바뀌니, 앞 문안을 넘겨야 "나머지는 그대로" 둘 수 있다.
+    assert "문안:\n" in revised[0]["previous"]
     # 스레드를 벗어나면 에이전트가 앞의 대화를 못 읽어 처음부터 다시 묻는다.
     assert revised[0]["thread_ts"] == "111.000"
     assert "마감일을 8월 30일로" in client.updated[-1]["text"]
+    # 기본은 "고칠 점" 이다
+    assert revised[0]["verbatim"] is False
+
+
+async def test_이_글_그대로를_고르면_에이전트에게_그대로_쓰라고_넘긴다(
+    client, handlers_with_revise, revised
+):
+    """섞인 글을 에이전트가 가리지 않게, 적은 사람이 고른 것을 넘긴다"""
+    await _draft(client)
+    await _click(handlers_with_revise, sms.REVISE, _press(client, sms.REVISE), client)
+
+    # 수정 창에 "고칠 점 / 이 글 그대로" 선택이 있다
+    assert draft_revise.MODE_BLOCK in [
+        b.get("block_id") for b in client.views[-1]["blocks"]
+    ]
+
+    await handlers_with_revise[sms.REVISE_VIEW](
+        ack=_ack,
+        body=_submit(client, "안녕하세요. 회의는 언제 마쳐요?", draft_revise.VERBATIM),
+        client=client,
+    )
+
+    assert revised[0]["verbatim"] is True
 
 
 async def test_수정을_낸_뒤에는_옛_문안이_안_나간다(

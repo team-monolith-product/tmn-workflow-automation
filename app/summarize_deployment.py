@@ -27,12 +27,14 @@
 import os
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from notion_client import Client as NotionClient
 from slack_sdk import WebClient
 import dotenv
+import requests
 
+from api.argocd import get_applications
 from service.config import NotionDBConfig, load_config
 from service.slack import get_email_to_user_id
 
@@ -40,6 +42,58 @@ dotenv.load_dotenv()
 
 
 SLACK_CHANNEL_ID: str = "C02VA2LLXH9"
+
+
+def format_sync_requests(
+    applications: list[dict[str, Any]], base_url: str
+) -> tuple[str, str]:
+    services: set[tuple[str, str]] = set()
+    for application in applications:
+        if application.get("status", {}).get("sync", {}).get("status") != "OutOfSync":
+            continue
+        spec = application["spec"]
+        sources = spec.get("sources") or [spec.get("source", {})]
+        if not any(
+            source.get("targetRevision") == "main"
+            and source.get("repoURL", "").removesuffix(".git")
+            in {
+                "https://github.com/team-monolith-product/jce-service-helm",
+                "https://github.com/team-monolith-product/jce-jupyter-hub-helm",
+            }
+            for source in sources
+        ):
+            continue
+        metadata = application["metadata"]
+        services.add((metadata["namespace"], metadata["name"]))
+    if not services:
+        return "", ""
+    summary = f"\n추가 배포 검토 대상: {len(services)}개 앱. 목록은 이 메시지의 스레드에 안내합니다.\n"
+    lines = [
+        f"추가 배포 검토 대상 (OutOfSync · {len(services)}개 앱)",
+        "",
+        "아래 앱은 Git에 정의된 상태와 운영 상태가 다릅니다.",
+        "하루에 한두 개씩은 꼭 배포해서 이 목록을 줄여야 합니다.",
+        "변경사항을 검토한 뒤 Argo CD에서 Sync하고 정상 동작을 확인해 주세요.",
+        "",
+    ]
+    for namespace, name in sorted(services):
+        url = f"{base_url.rstrip('/')}/applications/{quote(namespace, safe='')}/{quote(name, safe='')}"
+        lines.append(f"• <{url}|{name}>")
+    return summary, "\n".join(lines)
+
+
+def get_sync_request_messages() -> tuple[str, str]:
+    try:
+        applications = get_applications(os.environ["ARGOCD_NAMESPACE"])
+        return format_sync_requests(
+            applications["items"], os.environ["ARGOCD_BASE_URL"]
+        )
+    except (OSError, requests.RequestException, KeyError, ValueError) as error:
+        print(f"Argo CD 상태 조회 실패: {type(error).__name__}: {error}")
+        return (
+            "\n⚠️ Argo CD 상태 조회에 실패했습니다. 동기화가 필요한 서비스가 있는지 Argo CD에서 확인해 주세요.\n",
+            "",
+        )
 
 
 def get_pr_links(
@@ -155,15 +209,6 @@ def summarize_deployment(
         for task in squad_tasks:
             db_by_task_url[task["url"]] = db
         tasks.extend(squad_tasks)
-    if not tasks:
-        # 오늘 배포할 과업이 없으면 Slack 메시지 전송 후 종료
-        slack_client.chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(`/wa summarize-deployment` 명령어를 사용해보세요!)",
-        )
-        print("No tasks scheduled for deployment today.")
-        return
-
     # 여러 PR에서 뽑은 레포지토리들
     repos_to_deploy: set[str] = set()
 
@@ -231,14 +276,8 @@ def summarize_deployment(
         )
         message += message_line
 
-    # PR 필터링 후 과업이 없으면 메시지 전송 후 종료
     if task_index == 0:
-        slack_client.chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text="오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n(`/wa summarize-deployment` 명령어를 사용해보세요!)",
-        )
-        print("No tasks with open PRs scheduled for deployment today.")
-        return
+        message = "오늘 예정된 배포가 없네요. 놓치신 과업은 없으실까요?\n"
 
     # 레포지토리 안내 추가
     if repos_to_deploy:
@@ -246,10 +285,19 @@ def summarize_deployment(
         for repo in sorted(repos_to_deploy):
             message += f"• {repo}\n"
 
+    sync_summary, sync_details = get_sync_request_messages()
+    message += sync_summary
     message += "\n(`/wa summarize-deployment` 명령어를 사용해보세요!)\n"
 
     # 최종 메시지 전송
-    slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=message)
+    response = slack_client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=message)
+    if sync_details:
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text=sync_details,
+            thread_ts=response["ts"],
+            reply_broadcast=False,
+        )
     print("Message sent to Slack.")
 
 

@@ -256,12 +256,50 @@ async def _build_tools(
     )
 
 
+def revise_request(feedback: str, previous: str, verbatim: bool) -> str:
+    """[수정] 창에 적은 글을 에이전트에게 줄 질문으로 감쌉니다.
+
+    창에는 고칠 점("더 짧게")을 적기도, 보낼 문장 자체를 적기도 합니다. 에이전트가
+    글만 보고 가리면 섞인 글을 잘못 읽으므로, 적은 사람이 창에서 고른 것을 그대로
+    알려 줍니다.
+
+    앞 초안도 함께 넘깁니다. 카드는 수정 요청 문구로 바뀌고 에이전트는 스레드의
+    글만 읽으므로, 넘기지 않으면 "나머지는 그대로" 둘 앞 초안을 모릅니다.
+
+    Args:
+        feedback: [수정] 창에 적은 글
+        previous: 수정을 누른 초안의 내용
+        verbatim: 적은 사람이 "보낼 문장을 적었다" 고 골랐으면 True
+
+    Returns:
+        str: 에이전트에게 줄 질문
+    """
+    if verbatim:
+        how = (
+            "적은 사람이 *보낼 문장을 적었다* 고 골랐습니다. 아래 글을 한 글자도 고치지"
+            " 말고 그대로 메일 본문·문자 문안 전체로 써서 새 초안을 올리세요."
+            " 인사·서명·이모지를 덧붙이거나 말투를 바꾸지 않습니다."
+            " 받는 사람·제목·첨부·예약은 앞 초안 그대로 둡니다.\n"
+        )
+    else:
+        how = (
+            "적은 사람이 *고칠 점을 적었다* 고 골랐습니다. 아래 글을 본문에 그대로 옮기지"
+            " 말고, 말한 부분만 고치고 나머지는 앞 초안 그대로 둔 새 초안을 올리세요.\n"
+        )
+    return (
+        "[초안 수정 요청] 아래 초안의 [수정] 창에 이렇게 적었습니다.\n"
+        f"{how}\n"
+        f"[수정 창에 적은 글]\n{feedback}\n\n"
+        f"[앞 초안]\n{previous}"
+    )
+
+
 def get_thread_agent(app) -> ThreadAgent:
     """스레드에서 사람이 다음 질문을 한 것처럼 에이전트를 돌리는 콜백을 만듭니다.
 
-    슬랙 이벤트 없이 에이전트를 태울 때 씁니다.
-        - 문자·메일 초안 카드의 [수정]: 모달로 받은 피드백을 스레드의 다음 질문처럼
-          태워, 앞의 대화(수신자·문안·의도)를 둔 채 문안만 고친 새 초안을 올린다
+    슬랙 이벤트 없이 에이전트를 태울 때 씁니다. 질문(text)은 스레드의 메시지가
+    아니라 밖에서 오므로, 스레드의 마지막 메시지도 대화 기록에 남깁니다.
+        - 문자·메일 초안 카드의 [수정]: get_draft_revise 가 수정 요청으로 감싸 태운다
         - 예약 작업의 회차: 예약을 건 스레드에서 예약한 사람이 물은 것처럼 돈다
 
     app/sms.py 등이 아니라 여기서 만듭니다. 저쪽에서 이 모듈을 부르면
@@ -294,9 +332,38 @@ def get_thread_agent(app) -> ThreadAgent:
             app.client,
             tools,
             ROBOT_INSTRUCTIONS,
+            asked_in_thread=False,
         )
 
     return run
+
+
+def get_draft_revise(app):
+    """문자·메일 초안 [수정] 창의 글을 초안을 쓴 에이전트에게 되돌리는 콜백을 만듭니다.
+
+    카드의 [수정] 은 모달로 글만 받습니다. 그 글을 revise_request 로 감싸 스레드의
+    다음 질문처럼 태워야, 에이전트가 앞의 대화(수신자·문안·의도)를 그대로 두고
+    문안만 고쳐 새 초안을 올립니다.
+
+    Args:
+        app: slack_bolt AsyncApp
+
+    Returns:
+        `async (channel, thread_ts, user, text, previous, verbatim) -> None` 콜백
+    """
+    agent = get_thread_agent(app)
+
+    async def revise(
+        channel: str,
+        thread_ts: str,
+        user: str,
+        text: str,
+        previous: str,
+        verbatim: bool,
+    ) -> None:
+        await agent(channel, thread_ts, user, revise_request(text, previous, verbatim))
+
+    return revise
 
 
 SLACK_DAILY_SCRUM_CHANNEL_ID = "C02JX95U7AP"

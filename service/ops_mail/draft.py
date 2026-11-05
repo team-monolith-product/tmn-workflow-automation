@@ -2,11 +2,13 @@
 보낼 메일 초안을 만들고 검사합니다. 슬랙 카드와 버튼은 app/ops_mail.py 가 맡습니다.
 """
 
+import unicodedata
 from dataclasses import dataclass, field
 from email.utils import getaddresses
 
 from service.ops_mail import mime
 from service.ops_mail.store import ReplyTarget
+from service.slack import is_slack_hosted_file
 
 # 첨부 크기 합의 상한. SES v2 는 한 통에 40MB 까지인데 base64 인코딩 뒤
 # 크기로 잰다. 인코딩하면 4/3 배가 되니 원본으로는 30MB 남짓이고, 본문과
@@ -23,12 +25,23 @@ class DraftProblem(ValueError):
 
 @dataclass(frozen=True)
 class SlackFile:
-    """스레드에 올라온 슬랙 파일 하나. [보내기] 를 누를 때 내려받아 붙입니다."""
+    """스레드에 올라온 슬랙 파일 하나. [보내기] 를 누를 때 내려받아 붙입니다.
+
+    Attributes:
+        name: 파일 이름(NFC)
+        mimetype: MIME 타입
+        size: 바이트 크기
+        url: 내려받을 주소(url_private_download)
+        permalink: 슬랙에서 이 파일을 여는 주소. 카드에서 어느 파일인지 눌러 확인합니다
+        created: 올린 시각(유닉스 초). 같은 이름이 여럿일 때 카드에서 가려 봅니다
+    """
 
     name: str
     mimetype: str
     size: int
     url: str
+    permalink: str = ""
+    created: int = 0
 
 
 @dataclass(frozen=True)
@@ -169,16 +182,23 @@ def pick_files(messages: list[dict], names: list[str]) -> list[SlackFile]:
     Raises:
         DraftProblem: 없는 이름이 있거나 너무 큼
     """
+    # 맥에서 올린 한글 파일 이름은 자모가 풀린 NFD 로 온다("ㅋㅏㅋㅏ"). 에이전트는 이름을
+    # 완성형(NFC)으로 쓰므로 그대로 견주면 늘 "없는 파일" 이 된다. 받는 쪽(윈도·아웃룩)
+    # 에서도 첨부 이름이 자모로 풀려 보이므로, 이름은 NFC 로 맞춰 견주고 붙인다.
     files = {}
     for message in messages:
         for file in message.get("files", []):
-            # 슬랙에 올라간 파일만 받는다. 지운 파일(tombstone)·가려진 파일은 이름이나
-            # 주소가 없고, 외부 파일(구글 드라이브 링크 등)은 주소가 슬랙 밖이라
-            # 봇 토큰을 실어 내려받으면 토큰이 새고 로그인 화면이 첨부로 나간다.
-            url = file.get("url_private_download")
-            if file.get("name") and url and not file.get("is_external"):
-                files[file["name"]] = {**file, "url": url}
+            # 슬랙에 올라간 파일만 받는다. 외부 파일을 받으면 토큰이 새고 로그인
+            # 화면이 첨부로 나간다. 대화 기록의 [첨부 파일] 도 같은 기준으로 보인다.
+            if is_slack_hosted_file(file):
+                name = unicodedata.normalize("NFC", file["name"])
+                files[name] = {
+                    **file,
+                    "name": name,
+                    "url": file["url_private_download"],
+                }
 
+    names = [unicodedata.normalize("NFC", name) for name in names]
     missing = [name for name in names if name not in files]
     if missing:
         raise DraftProblem(
@@ -199,6 +219,8 @@ def pick_files(messages: list[dict], names: list[str]) -> list[SlackFile]:
             mimetype=file.get("mimetype", ""),
             size=file.get("size", 0),
             url=file["url"],
+            permalink=file.get("permalink", ""),
+            created=file.get("created", 0),
         )
         for file in picked
     ]
