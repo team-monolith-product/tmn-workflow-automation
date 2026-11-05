@@ -153,3 +153,76 @@ class TestAnswer:
 
         assert default.endswith("(백틱 3개)")
         assert with_instructions == default + "\n\n데이터 지침"
+
+
+class TestThreadFiles:
+    """메시지 text 에는 파일이 없어서, 에이전트가 "이 파일" 을 고르려면 이름이 필요하다"""
+
+    async def _human_message(self, slack_client, messages, user="U1"):
+        slack_client.conversations_replies = AsyncMock(
+            return_value={"messages": messages}
+        )
+        executor = MagicMock()
+        executor.ainvoke = AsyncMock(
+            return_value={"messages": [AIMessage(content="답")]}
+        )
+        with patch("app.common.ChatOpenAI"), patch(
+            "app.common.create_react_agent", return_value=executor
+        ):
+            await common.answer(
+                "1793846401.327239",
+                "C0CE8EQ3XK5",
+                user,
+                messages[-1]["text"],
+                AsyncMock(),
+                slack_client,
+                [],
+            )
+        return executor.ainvoke.call_args.args[0]["messages"][1].content
+
+    async def test_질문_메시지에_올린_파일을_그_질문에_붙인다(self, slack_client):
+        content = await self._human_message(
+            slack_client,
+            [
+                {
+                    "user": "U1",
+                    "text": "이거 메일로보내",
+                    "files": [{"name": "IMG_5467-2 (2).heic"}],
+                },
+                {
+                    "user": "U1",
+                    "text": "감사합니다 를 메일로 보내 이파일과 함께",
+                    "files": [{"name": "1.codap (3).json"}],
+                },
+            ],
+        )
+
+        assert "이거 메일로보내\n[첨부 파일: IMG_5467-2 (2).heic]" in content
+        assert (
+            "감사합니다 를 메일로 보내 이파일과 함께\n[첨부 파일: 1.codap (3).json]"
+            in content
+        )
+
+    async def test_이름_없는_파일과_파일_없는_메시지에는_줄을_붙이지_않는다(
+        self, slack_client
+    ):
+        content = await self._human_message(
+            slack_client,
+            [
+                {"user": "U1", "text": "지운 파일", "files": [{"id": "F1"}]},
+                {"user": "U1", "text": "질문"},
+            ],
+        )
+
+        assert "첨부 파일" not in content
+
+    async def test_마지막_메시지가_질문한_사람_것이_아니면_그_파일을_붙이지_않는다(
+        self, slack_client
+    ):
+        """[수정] 처럼 질문이 스레드 메시지가 아닐 때 남의 파일을 질문에 붙이지 않는다"""
+        content = await self._human_message(
+            slack_client,
+            [{"text": "초안 카드", "files": [{"name": "남의 파일.pdf"}]}],
+        )
+
+        assert "남의 파일.pdf" not in content

@@ -226,3 +226,21 @@ async def test_athena_tool_posts_result_to_thread():
     assert all(
         call.kwargs["thread_ts"] == "1700000000.000100" for call in say.await_args_list
     )
+
+
+async def test_수정_요청은_적은_문장을_그대로_쓰라는_안내와_함께_넘긴다():
+    """[수정] 창의 글만 넘기면 에이전트가 적어 준 문장까지 다시 다듬는다"""
+    app = AsyncMock()
+    with patch.object(
+        general, "_build_tools", AsyncMock(return_value=[])
+    ), patch.object(general, "answer", AsyncMock()) as mock_answer:
+        await general.get_draft_revise(app)(
+            channel="C0CE8EQ3XK5",
+            thread_ts="1793857410.183719",
+            user="U1",
+            text="안녕하세요.\n\n회의는 언제 마쳐요?",
+        )
+
+    question = mock_answer.call_args.args[3]
+    assert question.endswith("\n\n안녕하세요.\n\n회의는 언제 마쳐요?")
+    assert "그 문장 그대로" in question

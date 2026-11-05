@@ -676,6 +676,24 @@ def get_create_notion_follow_up_task_tool(data_source_id: str):
     return create_notion_follow_up_task
 
 
+def _files_note(message: dict) -> str:
+    """메시지에 올라온 파일 이름을 대화 기록 끝에 붙일 한 줄로 만듭니다.
+
+    슬랙 메시지의 text 에는 파일이 없어서, 이 줄이 없으면 에이전트가 "이 파일"
+    이 어느 파일인지 모릅니다. 지운 파일처럼 이름이 없는 것은 뺍니다.
+
+    Args:
+        message: conversations_replies 의 메시지
+
+    Returns:
+        str: "\\n[첨부 파일: a.pdf, b.png]". 파일이 없으면 빈 문자열
+    """
+    names = [file["name"] for file in message.get("files", []) if file.get("name")]
+    if not names:
+        return ""
+    return f"\n[첨부 파일: {', '.join(names)}]"
+
+
 async def answer(
     thread_ts: str,
     channel: str,
@@ -749,12 +767,18 @@ async def answer(
             user_real_name = user_profile.get("real_name", "Unknown")
         else:
             user_real_name = "Bot"
-        threads.append(f"{user_real_name}:\n{message['text']}")
+        threads.append(f"{user_real_name}:\n{message['text']}{_files_note(message)}")
 
     # 최종 질의한 사용자 정보
     slack_user_id = user
     user_profile = user_dict.get(slack_user_id, {})
     user_real_name = user_profile.get("real_name", "Unknown")
+
+    # 질문 메시지는 text 로 따로 받으므로 위 목록에서 빠진다. 그 메시지에 올린
+    # 파일("이 파일과 함께 보내")은 여기서 붙인다. [수정] 처럼 질문이 스레드
+    # 메시지가 아닐 때는 마지막 메시지가 질문한 사람 것이 아니므로 붙이지 않는다.
+    last = result["messages"][-1]
+    asked_files = _files_note(last) if last.get("user") == user else ""
 
     threads_joined = "\n\n".join(threads)
     messages.append(
@@ -762,7 +786,7 @@ async def answer(
             content=(
                 f"{threads_joined}\n"
                 f"위는 슬랙에서 진행된 대화이다. {user_real_name}이(가) 위 대화에 기반하여 질문함.\n"
-                f"{text}\n"
+                f"{text}{asked_files}\n"
             )
         )
     )
