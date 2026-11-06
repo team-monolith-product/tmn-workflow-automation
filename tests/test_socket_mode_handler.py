@@ -10,10 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.socket_mode_handler import (
-    AsyncImmediateAckSocketModeHandler,
-    _background_tasks,
-)
+from app.background import _running as _background_tasks
+from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
 
 def _make_request(req_type: str = "events_api", envelope_id: str = "env-123"):
@@ -150,7 +148,7 @@ async def test_events_api_dispatch_error_is_logged(handler, mock_client):
 
 @pytest.mark.asyncio
 async def test_background_tasks_tracked(handler, mock_client):
-    """백그라운드 태스크가 _background_tasks set에 추가되고 완료 후 제거됩니다."""
+    """백그라운드 태스크가 app.background 에 붙잡혔다가 완료 후 제거됩니다."""
     req = _make_request("events_api")
     initial_count = len(_background_tasks)
 
