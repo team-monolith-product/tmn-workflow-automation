@@ -35,13 +35,13 @@ from dotenv import load_dotenv
 from api.google_sheets import (
     READS_PER_MINUTE,
     READS_PER_SHEET,
-    get_worksheet_headers,
     list_spreadsheet_files,
 )
 from service.db import connect
 from service.knowledge.ingest import upsert_item
 from service.knowledge.register import upsert_source
 from service.sheets import catalog
+from service.sheets.tabs import read_headers
 
 # 쿼터의 절반만 씁니다. 나머지는 사람이 부르는 read_sheet 몫입니다 -- 같은 계정,
 # 같은 버킷이라 여기서 다 먹으면 봇이 시트를 못 읽습니다.
@@ -102,7 +102,7 @@ def collect(
             time.sleep(PACE_SECONDS)
         read += 1
         try:
-            tabs = get_worksheet_headers(file["id"])
+            tabs = read_headers(file["id"])
         except Exception as error:
             # 한 시트가 막혀도 나머지는 계속합니다. 저장값이 안 바뀌므로 다음
             # 실행에 저절로 다시 후보가 됩니다 -- 재시도 장치가 따로 없습니다.

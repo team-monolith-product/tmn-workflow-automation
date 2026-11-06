@@ -111,7 +111,7 @@ def list_spreadsheet_files() -> list[dict]:
 # 여기서 재우지 않는 이유는, 그러면 사람이 부른 read_sheet 가 동기화 뒤에 줄을
 # 서기 때문이다.
 READS_PER_MINUTE = 60
-# get_worksheet_headers 한 번에 드는 호출 수. get_worksheet_values 는 세 번
+# service.sheets.tabs.read_headers 한 번에 드는 호출 수(메타 1 + batch 1). get_worksheet_values 는 세 번
 # 드는데(gspread 객체를 쓴다), 그쪽은 단발이라 여럿을 도는 쪽만 이 값을 본다.
 READS_PER_SHEET = 2
 
@@ -187,60 +187,45 @@ def get_worksheet_values(
     return tab.get_all_values(value_render_option=value_render_option)
 
 
-def get_worksheet_headers(spreadsheet_id: str) -> list[dict]:
-    """탭마다 머리행(1행)만 읽는다. 시트 하나에 **READS_PER_SHEET 회**가 든다.
-
-    탭 수만큼 values.get 을 부르면 시트 하나에 1+N 회가 든다. 94개 시트에
-    탭 평균 셋이면 30분마다 370회고, Sheets 읽기 쿼터는 사용자당 분당 60회다.
-    batch 로 묶는다.
+def get_spreadsheet_metadata(spreadsheet_id: str) -> dict:
+    """스프레드시트 메타데이터(탭 목록·숨김 여부 등)를 그대로 반환한다. 1회.
 
     **Spreadsheet 객체를 안 만든다.** gspread 의 open_by_key 는 생성자에서
     fetch_sheet_metadata 를 부르고 worksheets() 가 같은 것을 또 부른다. 즉
-    같은 GET 이 두 번 나가 시트당 3회가 된다(8/26 실측). 메타데이터를 한 번만
-    받아 직접 읽으면 2회다.
-
-    예외를 삼키지 않는다. 머리행을 못 읽은 탭을 빈 값으로 적재하면 카탈로그가
-    "이 탭에는 열이 없다"를 최신 정보인 척 들고 있게 됩니다.
+    같은 GET 이 두 번 나간다(8/26 실측). 여기서는 한 번만 부른다.
 
     Args:
         spreadsheet_id: 스프레드시트 ID
 
     Returns:
-        list[dict]: id·title·header
+        dict: spreadsheets.get 응답
     """
     http = _get_client(OPERATING_ACCOUNT).http_client
-    metadata = http.fetch_sheet_metadata(spreadsheet_id)
-    # 숨긴 탭은 뺀다. 사람이 감춰 둔 탭의 열 이름이 query_knowledge 검색 결과로
-    # 나가면 안 된다. 실측(8/26)에 "예산 1차 변경(대외비)" 같은 탭이 있었다.
-    # **막는 것은 발견이지 읽기가 아니다** -- 링크나 gid 를 직접 준 사람에게는
-    # _worksheet 이 그대로 열어 준다. 그건 의도적 접근이라 그대로 둔다.
-    tabs = [
-        entry["properties"]
-        for entry in metadata.get("sheets", [])
-        if not entry["properties"].get("hidden")
-    ]
-    if not tabs:
-        return []
+    return http.fetch_sheet_metadata(spreadsheet_id)
 
+
+def get_header_rows(spreadsheet_id: str, titles: list[str]) -> dict:
+    """탭마다 1행만 batch 한 번으로 읽어 그대로 반환한다. 1회.
+
+    탭 수만큼 values.get 을 부르면 시트 하나에 1+N 회가 든다. 94개 시트에
+    탭 평균 셋이면 30분마다 370회고, Sheets 읽기 쿼터는 사용자당 분당 60회다.
+
+    Args:
+        spreadsheet_id: 스프레드시트 ID
+        titles: 읽을 탭 이름. 응답의 valueRanges 가 이 순서를 따른다
+
+    Returns:
+        dict: values.batchGet 응답
+    """
+    http = _get_client(OPERATING_ACCOUNT).http_client
     # A1 표기에서 탭 이름 안의 작은따옴표는 두 번 겹쳐 써야 한다. 직접 f-string 으로
     # 감싸면 "김'철수 명단" 같은 탭에서 range 가 깨져 400 이 나고, 그 시트는 사람이
     # 탭 이름을 고치기 전까지 영영 카탈로그에 못 들어간다.
-    result = http.values_batch_get(
+    return http.values_batch_get(
         spreadsheet_id,
-        [absolute_range_name(tab["title"], "1:1") for tab in tabs],
+        [absolute_range_name(title, "1:1") for title in titles],
         params={"majorDimension": "ROWS"},
     )
-    ranges = result.get("valueRanges", [])
-    return [
-        {
-            "id": tab["sheetId"],
-            "title": tab["title"],
-            # 빈 탭은 values 키 자체가 없다.
-            "header": (value_range.get("values") or [[]])[0],
-        }
-        # strict -- 응답이 요청보다 짧으면 뒤쪽 탭이 조용히 사라지는 대신 터진다.
-        for tab, value_range in zip(tabs, ranges, strict=True)
-    ]
 
 
 def get_spreadsheet_values_batch(

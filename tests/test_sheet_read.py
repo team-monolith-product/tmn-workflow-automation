@@ -353,3 +353,80 @@ def test_폼_응답을_고쳐_한_행이_겹쳐도_막지_않는다():
 
     assert header == ["성함"]
     assert [row[0] for row in rows] == ["옛응답", "이진선", "김지수"]
+
+
+def test_탭_목록은_탭마다_이름과_머리행을_준다(monkeypatch):
+    # 링크의 탭에 없는 정보를 "없다" 고 답하지 않도록, 다른 탭도 보여야 한다.
+    monkeypatch.setattr(
+        read,
+        "read_headers",
+        lambda spreadsheet_id, shown_gid=None: [
+            {
+                "id": 239647898,
+                "title": "학교별 운영 현황",
+                "header": ["순번", "학교명"],
+            },
+            {"id": 5, "title": "[학교DB]_운영확인", "header": ["학교명", "담당교사"]},
+        ],
+    )
+
+    tabs = read.list_tabs(
+        "https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLdAbCdEfGhIjKlMnOpQrStUvWx/edit#gid=239647898"
+    )
+
+    assert tabs == [
+        {"tab": "학교별 운영 현황", "gid": 239647898, "header": ["순번", "학교명"]},
+        {"tab": "[학교DB]_운영확인", "gid": 5, "header": ["학교명", "담당교사"]},
+    ]
+
+
+def test_탭_목록의_머리행은_read_sheet_키의_앞부분이다(monkeypatch):
+    # 여기서 본 이름으로 row[...] 를 꺼내므로, 줄 나눔·겹친 이름이 다르면 KeyError 다.
+    # 두 API 의 실제 모양을 흉내 낸다: 1행 batch 는 오른쪽 끝 빈칸이 잘려 오고,
+    # get_all_values 는 가장 넓은 행에 맞춰 칸을 채운다.
+    first_row = ["휴대전화\n번호", "성함", "", "성함"]
+    monkeypatch.setattr(
+        read,
+        "read_headers",
+        lambda spreadsheet_id, shown_gid=None: [
+            {"id": 0, "title": "명단", "header": first_row}
+        ],
+    )
+    monkeypatch.setattr(
+        read,
+        "get_worksheet_values",
+        lambda *args, **kwargs: [first_row + [""], ["010", "가", "", "", "메모"]],
+    )
+
+    [tab] = read.list_tabs("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd")
+    [row] = read.read_sheet("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd")
+
+    assert tab["header"] == ["휴대전화 번호", "성함", "열3", "성함_2"]
+    assert list(row) == tab["header"] + ["열5"]
+
+
+def test_탭_목록은_링크가_가리킨_탭을_숨김이어도_넣게_한다(monkeypatch):
+    # 링크의 탭이 목록에서 빠지면 에이전트는 다른 탭만 읽고 "없다" 고 답한다.
+    asked = {}
+
+    def headers(spreadsheet_id, shown_gid=None):
+        asked["shown_gid"] = shown_gid
+        return []
+
+    monkeypatch.setattr(read, "read_headers", headers)
+
+    read.list_tabs("https://docs.google.com/spreadsheets/d/1hW3Yg8x99gfiLd/edit#gid=77")
+
+    assert asked["shown_gid"] == 77
+
+
+def test_탭_목록도_시트가_모호하면_고르지_않는다(monkeypatch):
+    monkeypatch.setattr(
+        read.locate,
+        "locate",
+        lambda target: locate.Found(None, [{"id": "a", "name": "명단 A"}]),
+    )
+    monkeypatch.setattr(read.locate, "render_candidates", lambda candidates: "후보")
+
+    with pytest.raises(ValueError, match="후보"):
+        read.list_tabs("명단")
