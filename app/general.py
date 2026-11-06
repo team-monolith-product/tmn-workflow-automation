@@ -575,6 +575,7 @@ def register_general_handlers(app):
         sub: (mod, fn, desc, rest[0] if rest else None)
         for sub, mod, fn, desc, *rest in _JOBS
     }
+    _JOB_BY_SUB["rd"] = _JOB_BY_SUB["reset-develop"]
 
     def _wa_usage():
         lines = ["사용법: `/wa <작업> [인자]`", "", "작업 목록:"]
