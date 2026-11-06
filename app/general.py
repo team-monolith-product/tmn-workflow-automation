@@ -494,7 +494,6 @@ def register_general_handlers(app):
 
     # 자동화 작업 표 — 단일 진입 커맨드 `/wa <작업>` 로 라우팅한다.
     # 슬랙 앱 UI 에는 `/wa` 하나만 등록하면 되고, 새 작업은 이 표에 한 줄만 추가한다.
-    # 각 튜플: (작업명, module_path, func_name, description[, body_kwargs])
     # 작업명 뒤에 남은 토큰은 함수의 위치 인자로 전달한다.
     # 예: `/wa reset-develop jce-class-rails` → func("jce-class-rails")
     # body_kwargs 는 선택사항으로, body 에서 값을 꺼내 함수 키워드 인자로 전달할 매핑이다.
@@ -502,68 +501,68 @@ def register_general_handlers(app):
     # 함수가 문자열을 반환하면 실행한 사람에게만 보이는 응답으로 되돌려준다.
     _JOBS = [
         (
-            "validate-customer-reports",
+            ("validate-customer-reports", "vcr"),
             "scripts.validate_customer_reports",
             "main",
             "고객 보고서 검증",
         ),
         (
-            "manage-tasks-daily",
+            ("manage-tasks-daily", "mtd"),
             "scripts.manage_tasks_daily",
             "main",
             "일일 작업 알림 처리",
         ),
         (
-            "notify-upcoming-workevent",
+            ("notify-upcoming-workevent", "nuw"),
             "scripts.notify_upcoming_workevent",
             "main",
             "근태 예정 알림 생성",
         ),
         (
-            "notify-worktime-left",
+            ("notify-worktime-left", "nwl"),
             "scripts.notify_worktime_left",
             "main",
             "잔여 근무시간 계산",
         ),
         (
-            "collect-review-stats",
+            ("collect-review-stats", "crs"),
             "scripts.collect_review_stats",
             "main",
             "리뷰 통계 수집",
         ),
         (
-            "collect-coding-rule-feedbacks",
+            ("collect-coding-rule-feedbacks", "ccrf"),
             "scripts.collect_coding_rule_feedbacks",
             "main",
             "코딩 규칙 피드백 수집",
         ),
         (
-            "post-scrum-message",
+            ("post-scrum-message", "psm"),
             "scripts.post_scrum_message",
             "main",
             "스크럼 메시지 발송",
         ),
         (
-            "schedule-scrum-mention",
+            ("schedule-scrum-mention", "ssm"),
             "scripts.schedule_scrum_mention",
             "main",
             "스크럼 멘션 발송",
         ),
         (
-            "summarize-deployment",
+            ("summarize-deployment", "sd"),
             "app.summarize_deployment",
             "summarize_deployment",
             "배포 요약을 작성",
             {"caller_slack_user_id": "user_id"},
         ),
         (
-            "crawl-education-bids",
+            ("crawl-education-bids", "ceb"),
             "scripts.crawl_education_bids",
             "main",
             "교육 외주 입찰공고 수집·평가",
         ),
         (
-            "reset-develop",
+            ("reset-develop", "rd"),
             "scripts.reset_develop",
             "main",
             "develop 을 main 으로 초기화",
@@ -573,12 +572,16 @@ def register_general_handlers(app):
 
     _JOB_BY_SUB = {
         sub: (mod, fn, desc, rest[0] if rest else None)
-        for sub, mod, fn, desc, *rest in _JOBS
+        for names, mod, fn, desc, *rest in _JOBS
+        for sub in names
     }
 
     def _wa_usage():
         lines = ["사용법: `/wa <작업> [인자]`", "", "작업 목록:"]
-        lines += [f"• `{sub}` — {meta[2]}" for sub, meta in _JOB_BY_SUB.items()]
+        lines += [
+            f"• {', '.join(f'`{name}`' for name in names)} — {desc}"
+            for names, _, _, desc, *_ in _JOBS
+        ]
         return "\n".join(lines)
 
     @app.command("/wa")
