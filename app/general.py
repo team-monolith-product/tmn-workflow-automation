@@ -3,9 +3,11 @@
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 import importlib
 import traceback
+from typing import Any
 
 import psycopg
 from cachetools import TTLCache
@@ -52,7 +54,11 @@ PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로�
 # 데이터 분석 지침. app/data_bot.py 시스템 프롬프트의 'Athena 데이터베이스 가이드'부터
 # '파이썬 실행'까지와 Presto 문법 안내를 옮겨 적은 것이다.
 # DB 안내든 도구 사용법이든 어느 쪽을 고치면 두 곳을 함께 고친다.
-ROBOT_INSTRUCTIONS: str = (
+#
+# 어디서 물어도 같은 DB·도구 안내(DATA_GUIDE)와, 결과가 슬랙 스레드로 가는 경우의
+# 지침(SLACK_DATA_GUIDE)을 나눠 둔다. MCP 는 스레드가 없어 앞의 것만 쓴다
+# (app/robot_mcp.py). 슬랙 지침을 MCP 에 주면 에이전트가 결과를 표로 보여주지 못한다.
+DATA_GUIDE: str = (
     "\n\n"
     "Athena 데이터베이스 가이드:\n"
     "- 네이밍: {서비스}_{env}_{region} (env: dev/prd, region: 서울은 생략, 중동=me, 영국=uk)\n"
@@ -86,19 +92,26 @@ ROBOT_INSTRUCTIONS: str = (
     "- 필요시 Redash 대시보드를 검색하여 관련 쿼리 패턴을 참고합니다.\n"
     "- Redash에서 찾은 쿼리를 참고하거나, 직접 Athena에서 SQL 쿼리를 작성하여 실행합니다.\n"
     "\n"
+    "**파이썬 실행**:\n"
+    "- 집계·대조·명단 추출은 execute_python 도구를 사용하세요.\n"
+    "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
+    "- 쿼리 작성 시 Athena(Presto) SQL 문법을 사용합니다.\n"
+)
+
+SLACK_DATA_GUIDE: str = (
+    "\n"
     "**중요**: 사용자에게 쿼리 결과를 보여주고 싶을 때:\n"
     "- execute_athena_query 도구를 호출할 때 반드시 show_result_to_user=True를 설정해야 합니다.\n"
     "- 이 값이 true일 때만 사용자가 Slack에서 결과를 볼 수 있습니다.\n"
     "- 절대로 직접 표를 작성하여 답변하지 마세요. 반드시 show_result_to_user=True를 사용하세요.\n"
     "\n"
-    "**파이썬 실행**:\n"
-    "- 집계·대조·명단 추출·시각화는 execute_python 도구를 사용하세요.\n"
-    "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
-    "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
+    "**파이썬 실행 결과 전달**:\n"
+    "- 시각화도 execute_python 도구로 합니다. 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
     "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
     "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
-    "- 쿼리 작성 시 Athena(Presto) SQL 문법을 사용합니다.\n"
 )
+
+ROBOT_INSTRUCTIONS: str = DATA_GUIDE + SLACK_DATA_GUIDE
 
 # 유저그룹 멤버 캐시 (1시간 TTL)
 _cache_usergroup_members: TTLCache = TTLCache(maxsize=20, ttl=3600)
@@ -294,7 +307,9 @@ def revise_request(feedback: str, previous: str, verbatim: bool) -> str:
     )
 
 
-def thread_say(client: AsyncWebClient, channel: str, thread_ts: str):
+def thread_say(
+    client: AsyncWebClient, channel: str, thread_ts: str
+) -> Callable[..., Awaitable[None]]:
     """슬랙 이벤트 없이 스레드에 글을 올리는 say 를 만듭니다.
 
     Bolt 의 say 와 같은 모양이라 _build_tools 에 그대로 넘깁니다.
@@ -308,7 +323,7 @@ def thread_say(client: AsyncWebClient, channel: str, thread_ts: str):
         `async (payload, thread_ts=...) -> None` 콜백
     """
 
-    async def say(payload, thread_ts=thread_ts):
+    async def say(payload: dict[str, Any], thread_ts: str = thread_ts) -> None:
         # 표·코드 블록처럼 blocks 만 오는 글도 있다. 알림 미리보기에 쓸 글자다.
         await client.chat_postMessage(
             channel=channel,

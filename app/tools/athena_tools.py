@@ -4,7 +4,17 @@ AWS Athena 관련 LangChain Tools
 
 from typing import Annotated, Callable, Any
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+
 from api import athena
+
+
+class PlacelessAthenaQueryInput(BaseModel):
+    """슬랙 스레드 없이 쓸 때의 입력. 결과를 보낼 곳이 없어 show_result_to_user 가 없다."""
+
+    query: str = Field(description="실행할 SQL 쿼리")
+    database: str = Field(description="사용할 Athena 데이터베이스 이름 (필수)")
+
 
 # 슬랙 스레드가 있을 때만 붙인다. 스레드가 없으면 show_result_to_user 가 아무 일도
 # 하지 않으므로, 이 지침이 있으면 에이전트가 결과를 보여줄 길이 없다고 믿는다.
@@ -217,6 +227,9 @@ def get_execute_athena_query_tool(
 
     if say and thread_ts:
         execute_athena_query.description += SLACK_RESULT_GUIDE
+    else:
+        # 보낼 곳이 없는데 인자가 보이면 에이전트가 켜고는 결과가 갔다고 믿는다.
+        execute_athena_query.args_schema = PlacelessAthenaQueryInput
     return execute_athena_query
 
 

@@ -6,6 +6,8 @@ import asyncio
 import functools
 import io
 import os
+import sys
+import time
 import traceback
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +41,11 @@ DRAFT_CALLS_PER_RUN = 50
 # 한 실행이 스레드에 올릴 수 있는 파일 수와 파일 하나의 크기 상한
 FILES_PER_RUN = 10
 FILE_SIZE_LIMIT = 100 * 1024 * 1024
+
+CHART_GUIDE = """
+
+**차트**: 차트를 그리면 슬랙 스레드에 자동으로 올라갑니다. plt.savefig() 와
+plt.show() 는 호출하지 마십시오. 자동으로 처리됩니다."""
 
 UPLOAD_FILE_GUIDE = """
 
@@ -116,8 +123,33 @@ def setup_korean_font():
 setup_korean_font()
 
 
+def _deadline_tracer(deadline: float) -> Callable[..., Any]:
+    """시각이 지나면 실행 중인 코드에 TimeoutError 를 일으키는 추적 함수를 만듭니다.
+
+    워커 스레드는 밖에서 죽일 수 없으므로 코드가 스스로 멈추게 합니다. 함수에
+    들어갈 때마다 시각을 보고, 에이전트 코드(<string>) 안에서는 줄마다 봅니다.
+    라이브러리 안쪽까지 줄마다 보면 느려지므로 거기서는 줄 추적을 끕니다.
+    C 로 된 한 번의 긴 호출(큰 pandas 연산 등)은 끝난 뒤에야 멈춥니다.
+
+    Args:
+        deadline: time.monotonic() 기준 마감 시각
+
+    Returns:
+        sys.settrace 에 넘길 추적 함수
+    """
+
+    def trace(frame, event, arg):
+        if time.monotonic() > deadline:
+            raise TimeoutError("실행 시간 상한을 넘어 코드를 멈췄습니다.")
+        return trace if frame.f_code.co_filename == "<string>" else None
+
+    return trace
+
+
 def _run_code(
-    code: str, injected: dict[str, Callable[..., Any]]
+    code: str,
+    injected: dict[str, Callable[..., Any]],
+    timeout_seconds: float | None = None,
 ) -> tuple[str, io.BytesIO | None, str | None]:
     """
     LLM이 만든 코드를 실행하고 결과를 반환합니다.
@@ -127,6 +159,7 @@ def _run_code(
     Args:
         code: 실행할 파이썬 코드
         injected: 코드에 주입할 함수들. 이름이 그대로 코드 안의 이름이 된다
+        timeout_seconds: 실행 시간 상한. 없으면 끝날 때까지 돕니다
 
     Returns:
         tuple: (STDOUT 출력, 차트 PNG 버퍼 또는 None, 실패 시 스택트레이스)
@@ -143,7 +176,11 @@ def _run_code(
     }
 
     try:
+        if timeout_seconds is not None:
+            # 추적은 이 워커 스레드에만 걸린다. finally 에서 반드시 푼다.
+            sys.settrace(_deadline_tracer(time.monotonic() + timeout_seconds))
         exec(code, exec_globals)
+        sys.settrace(None)
 
         fig = plt.gcf()
         if not fig.get_axes():
@@ -156,6 +193,7 @@ def _run_code(
     except Exception:
         return captured_output.getvalue(), None, traceback.format_exc()
     finally:
+        sys.settrace(None)
         plt.close("all")
 
 
@@ -181,6 +219,7 @@ def get_execute_python_tool(
     slack_client: Any | None = None,
     channel: str | None = None,
     draft_sms: Callable[..., Awaitable[str]] | None = None,
+    timeout_seconds: float | None = None,
 ):
     """
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
@@ -192,6 +231,8 @@ def get_execute_python_tool(
         draft_sms: 문자 초안 도구의 코루틴. 주면 코드가 같은 이름으로 부를 수
             있다. 수백 명짜리 명단을 도구 인자로 다시 받아쓰면 상한에 걸려
             잘리므로, 명단을 다루려면 이 길이 필요하다
+        timeout_seconds: 한 번 실행의 시간 상한. 코드 실행 워커는 봇 넷이 나눠
+            쓰는 하나뿐이라, 누구나 부를 수 있는 곳(MCP)에서는 상한을 건다
 
     Returns:
         execute_python tool
@@ -207,9 +248,9 @@ def get_execute_python_tool(
         """
         파이썬 코드를 실행합니다. 표를 다루는 일은 전부 이 도구로 하십시오.
 
-        구글 시트와 Athena 를 읽어 pandas 로 집계·대조·명단 추출을 하고, 차트를
-        그리면 슬랙에 자동으로 올라갑니다. 두 명단을 맞춰 보거나 인원을 세는 일을
-        눈으로 하지 마십시오 -- 수십 행만 넘어가도 틀리고, 틀린 것이 티가 안 납니다.
+        구글 시트와 Athena 를 읽어 pandas 로 집계·대조·명단 추출을 합니다. 두 명단을
+        맞춰 보거나 인원을 세는 일을 눈으로 하지 마십시오 -- 수십 행만 넘어가도
+        틀리고, 틀린 것이 티가 안 납니다.
 
         **사용 가능한 라이브러리 및 함수**:
         코드 컨텍스트 내에서 다음을 사용할 수 있습니다:
@@ -240,8 +281,6 @@ def get_execute_python_tool(
         - 호출할 때마다 빈 상태에서 시작합니다. 앞선 호출에서 만든 변수는 남지
           않으니, 필요한 데이터는 매번 다시 읽으십시오. 다만 같은 시트를 여러 번
           읽으면 그만큼 쿼터를 쓰므로 한 번에 끝내는 코드를 쓰는 편이 낫습니다.
-        - matplotlib을 사용할 때는 plt.savefig()를 호출하지 마세요. 자동으로 처리됩니다.
-        - plt.show()도 호출하지 마세요.
 
         **Athena 결과 해체**:
         ```python
@@ -315,7 +354,8 @@ def get_execute_python_tool(
             injected["upload_file"] = upload_file
 
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
-            _code_executor, functools.partial(_run_code, code, injected)
+            _code_executor,
+            functools.partial(_run_code, code, injected, timeout_seconds),
         )
         # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
         if len(stdout_output) > STDOUT_LIMIT:
@@ -381,10 +421,15 @@ def get_execute_python_tool(
         return result_message
 
     if slack_client and channel and thread_ts:
-        execute_python.description += UPLOAD_FILE_GUIDE
+        execute_python.description += CHART_GUIDE + UPLOAD_FILE_GUIDE
     else:
         execute_python.description += NO_UPLOAD_GUIDE
     if draft_sms:
         execute_python.description += DRAFT_SMS_GUIDE
+    if timeout_seconds is not None:
+        execute_python.description += (
+            f"\n\n**시간 상한**: 한 번 실행은 {timeout_seconds:g}초까지입니다. 넘으면"
+            " TimeoutError 로 멈춥니다. 오래 걸리는 일은 쿼리에서 먼저 줄이십시오."
+        )
 
     return execute_python

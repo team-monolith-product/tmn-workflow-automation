@@ -8,11 +8,20 @@ from langchain_core.tools import tool
 from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.errors import SlackApiError
 
-from app.general import _build_tools
+from app.general import (
+    DATA_GUIDE,
+    ROBOT_INSTRUCTIONS,
+    SLACK_DATA_GUIDE,
+    _build_tools,
+)
 from app.knowledge_mcp import build_mcp
 from app.robot_mcp import _as_text, parse_slack_thread_url, placeless_tools
 from app.tools.athena_tools import SLACK_RESULT_GUIDE, get_execute_athena_query_tool
-from app.tools.python_tools import NO_UPLOAD_GUIDE
+from app.tools.python_tools import (
+    CHART_GUIDE,
+    NO_UPLOAD_GUIDE,
+    get_execute_python_tool,
+)
 
 THREAD_URL = "https://monolith-keb2010.slack.com/archives/C01ROBOT/p1700000000123456"
 REQUESTER = SimpleNamespace(email="operator@team-mono.com")
@@ -25,11 +34,20 @@ def mcp_env(monkeypatch):
     monkeypatch.setenv("MCP_RESOURCE_URL", "https://wfa.codle.io")
 
 
-def _slack(members: list[str], *, bot_is_member: bool = True) -> AsyncMock:
+def _slack_error(error: str) -> SlackApiError:
+    return SlackApiError(error, {"ok": False, "error": error})
+
+
+def _slack(
+    members: list[str], *, bot_is_member: bool = True, kind: str = "channel"
+) -> AsyncMock:
     client = AsyncMock()
-    client.conversations_info.return_value = {
-        "channel": {"id": "C01ROBOT", "is_member": bot_is_member}
-    }
+    channel = {"id": "C01ROBOT", "is_im": kind == "im", "is_mpim": kind == "mpim"}
+    # DM 과 그룹 DM 응답에는 is_member 가 없다.
+    if kind == "channel":
+        channel["is_member"] = bot_is_member
+    client.conversations_info.return_value = {"channel": channel}
+    client.users_lookupByEmail.side_effect = _slack_error("users_not_found")
     client.conversations_members.return_value = {
         "members": members,
         "response_metadata": {"next_cursor": ""},
@@ -220,20 +238,26 @@ async def test_로봇이_없는_공개_채널은_초대하라고_알려준다(mc
             )
 
 
-async def test_로봇이_볼_수_없는_채널은_초대하라고_알려준다(mcp_env):
+async def test_로봇이_볼_수_없는_채널은_채널에_없는_것과_같은_문구다(mcp_env):
+    """문구가 다르면 비공개 채널이 있는지와 로봇이 있는지가 드러납니다."""
     slack = _slack(["U01OWNER"])
-    slack.conversations_info.side_effect = SlackApiError(
-        "channel_not_found", {"ok": False, "error": "channel_not_found"}
-    )
+    slack.conversations_members.side_effect = _slack_error("channel_not_found")
 
     with patch("app.robot_mcp.get_access_token", return_value=REQUESTER), patch(
         "app.robot_mcp.get_email_to_user_id_async",
         AsyncMock(return_value={"operator@team-mono.com": "U01OWNER"}),
     ):
-        with pytest.raises(ToolError, match="로봇이 볼 수 없는 채널"):
+        with pytest.raises(ToolError) as hidden:
             await build_mcp(slack).call_tool(
                 "list_robot_tools", {"slack_thread_url": THREAD_URL}
             )
+        with pytest.raises(ToolError) as outsider:
+            await build_mcp(_slack(["U02OTHER"])).call_tool(
+                "list_robot_tools", {"slack_thread_url": THREAD_URL}
+            )
+
+    assert str(hidden.value) == str(outsider.value)
+    slack.conversations_info.assert_not_awaited()
 
 
 def test_목록_결과는_JSON으로_돌려준다():
@@ -280,3 +304,94 @@ async def test_list로_만든_도구를_바로_이은_call이_한_번_쓴다(mcp
         assert build_tools.await_count == 2
 
     assert '"properties": {"text"' in listed.content[0].text
+
+
+async def test_사용자_목록_캐시에_없으면_이메일로_다시_찾는다(mcp_env):
+    """사용자 목록은 하루 캐시라 그 뒤에 들어온 사람이 없습니다."""
+    slack = _slack(["U03NEW"])
+    slack.users_lookupByEmail.side_effect = None
+    slack.users_lookupByEmail.return_value = {"user": {"id": "U03NEW"}}
+    build_tools = AsyncMock(return_value=[])
+
+    with patch("app.robot_mcp.get_access_token", return_value=REQUESTER), patch(
+        "app.robot_mcp.get_email_to_user_id_async", AsyncMock(return_value={})
+    ), patch("app.robot_mcp._build_tools", build_tools):
+        await build_mcp(slack).call_tool(
+            "list_robot_tools", {"slack_thread_url": THREAD_URL}
+        )
+
+    slack.users_lookupByEmail.assert_awaited_once_with(email="operator@team-mono.com")
+    assert build_tools.await_args.args[1] == "U03NEW"
+
+
+@pytest.mark.parametrize("kind", ["im", "mpim"])
+async def test_DM과_그룹_DM은_로봇이_참여자라_통과한다(mcp_env, kind):
+    build_tools = AsyncMock(return_value=[])
+
+    with patch("app.robot_mcp.get_access_token", return_value=REQUESTER), patch(
+        "app.robot_mcp.get_email_to_user_id_async",
+        AsyncMock(return_value={"operator@team-mono.com": "U01OWNER"}),
+    ), patch("app.robot_mcp._build_tools", build_tools):
+        await build_mcp(_slack(["U01OWNER"], kind=kind)).call_tool(
+            "list_robot_tools", {"slack_thread_url": THREAD_URL}
+        )
+
+    build_tools.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://monolith-keb2010.enterprise.slack.com/archives/C01ROBOT/p1700000000123456",
+        "https://app.slack.com/client/T01TEAM/C01ROBOT/thread/C01ROBOT-1700000000.123456",
+    ],
+)
+def test_엔터프라이즈_도메인과_브라우저_주소창_링크도_받는다(url):
+    assert parse_slack_thread_url(url) == ("C01ROBOT", "1700000000.123456")
+
+
+async def test_서버_안내에_슬랙_전송_지침이_없다(mcp_env):
+    """스레드 없이 부르면 결과가 슬랙으로 가지 않으므로 그 지침이 있으면 안 됩니다."""
+    instructions = build_mcp(_slack([])).instructions
+
+    assert "Athena 데이터베이스 가이드" in instructions
+    assert "show_result_to_user" not in instructions
+    assert "upload_file" not in instructions
+    assert "슬랙에 자동으로 업로드" not in instructions
+
+
+def test_슬랙_로봇의_지침은_그대로다():
+    assert ROBOT_INSTRUCTIONS == DATA_GUIDE + SLACK_DATA_GUIDE
+    assert "show_result_to_user=True" in ROBOT_INSTRUCTIONS
+    assert "upload_file" in ROBOT_INSTRUCTIONS
+
+
+async def test_시간_상한을_넘은_코드는_멈추고_다음_실행은_정상이다():
+    execute_python = get_execute_python_tool(timeout_seconds=0.5)
+
+    stopped = await execute_python.ainvoke({"code": "while True:\n    pass"})
+    after = await execute_python.ainvoke({"code": "print(sum(range(10)))"})
+
+    assert "TimeoutError" in stopped
+    assert "45" in after
+
+
+async def test_스레드가_없으면_파이썬_설명에_슬랙_차트_안내가_없다(mcp_env):
+    tools = {t.name: t for t in await build_mcp(_slack([])).list_tools()}
+    slack_python = get_execute_python_tool(
+        thread_ts="1.2", slack_client=AsyncMock(), channel="C01ROBOT"
+    )
+
+    assert CHART_GUIDE not in tools["execute_python"].description
+    assert (
+        "슬랙"
+        not in tools["execute_python"].description.split("**슬랙 스레드 없음**")[0]
+    )
+    assert CHART_GUIDE in slack_python.description
+
+
+async def test_웹_도구는_열지_않는다(mcp_env):
+    names = {t.name for t in await build_mcp(_slack([])).list_tools()}
+
+    assert "tavily_search_results_json" not in names
+    assert "get_web_page_from_url" not in names
