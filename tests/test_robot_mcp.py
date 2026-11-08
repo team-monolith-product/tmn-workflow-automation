@@ -250,3 +250,33 @@ async def test_스레드가_없으면_슬랙_전송_지침을_빼고_차트가_�
     # 슬랙 로봇에는 지침이 그대로 붙는다.
     slack_athena = get_execute_athena_query_tool(say=AsyncMock(), thread_ts="1.2")
     assert slack_athena.description.endswith(SLACK_RESULT_GUIDE)
+
+
+async def test_list로_만든_도구를_바로_이은_call이_한_번_쓴다(mcp_env):
+    @tool
+    async def post_channel_message(text: str) -> str:
+        """채널에 올립니다."""
+        return "올렸습니다"
+
+    build_tools = AsyncMock(return_value=[post_channel_message])
+    call = {
+        "slack_thread_url": THREAD_URL,
+        "name": "post_channel_message",
+        "arguments": {"text": "공지"},
+    }
+
+    with patch("app.robot_mcp.get_access_token", return_value=REQUESTER), patch(
+        "app.robot_mcp.get_email_to_user_id_async",
+        AsyncMock(return_value={"operator@team-mono.com": "U01OWNER"}),
+    ), patch("app.robot_mcp._build_tools", build_tools):
+        mcp = build_mcp(_slack(["U01OWNER"]))
+        listed = await mcp.call_tool(
+            "list_robot_tools", {"slack_thread_url": THREAD_URL}
+        )
+        await mcp.call_tool("call_robot_tool", call)
+        assert build_tools.await_count == 1
+        # 한 번 꺼내 쓰면 지운다. 도구 구성이 바뀌었을 수 있으니 다음은 새로 만든다.
+        await mcp.call_tool("call_robot_tool", call)
+        assert build_tools.await_count == 2
+
+    assert '"properties": {"text"' in listed.content[0].text

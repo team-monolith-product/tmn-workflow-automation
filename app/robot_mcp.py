@@ -28,6 +28,7 @@ import json
 import re
 from typing import Annotated, Any, cast
 
+from cachetools import TTLCache
 from langchain_core.tools import BaseTool
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import MCPServer
@@ -162,7 +163,7 @@ def placeless_tools() -> list[BaseTool]:
 
 async def _requester(slack: AsyncWebClient) -> str:
     """MCP 토큰의 이메일로 슬랙 사용자 ID를 찾습니다."""
-    email = cast(AdminToken, get_access_token()).email
+    email = _requester_email()
     # admin-rails 와 슬랙 프로필의 대소문자가 다를 수 있다. 메일 주소는 대소문자를 가리지 않는다.
     users = {
         address.lower(): user_id
@@ -208,6 +209,11 @@ async def _is_member(slack: AsyncWebClient, channel: str, user_id: str) -> bool:
             return False
 
 
+def _requester_email() -> str:
+    """MCP 토큰의 이메일입니다."""
+    return cast(AdminToken, get_access_token()).email
+
+
 async def thread_tools(slack: AsyncWebClient, slack_thread_url: str) -> list[BaseTool]:
     """그 스레드에서 질문자가 로봇을 불렀을 때와 같은 도구를 만듭니다.
 
@@ -238,6 +244,17 @@ def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:
     for lc_tool in placeless_tools():
         _register_langchain_tool(mcp, lc_tool, HIDDEN_PLACELESS_ARGS)
 
+    # 스레드 도구는 만들 때마다 슬랙·DB·노션을 여러 번 부른다. list_robot_tools 로
+    # 만든 것을 바로 이은 call_robot_tool 이 한 번 꺼내 쓴다. 꺼내면 지우므로 다음
+    # 호출은 새로 만든다 -- 작업 리스트를 켜는 것처럼 도구 구성이 바뀌는 호출 뒤에
+    # 옛 구성이 남지 않는다.
+    listed: TTLCache[tuple[str, str, str], list[BaseTool]] = TTLCache(
+        maxsize=100, ttl=300
+    )
+
+    def listed_key(slack_thread_url: str) -> tuple[str, str, str]:
+        return (_requester_email(), *parse_slack_thread_url(slack_thread_url))
+
     @mcp.tool(
         description=(
             "슬랙 스레드에서 팀모노리스 로봇이 쓸 수 있는 도구와 각 도구의 입력 "
@@ -250,8 +267,10 @@ def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:
     )
     async def list_robot_tools(slack_thread_url: str) -> str:
         tools = await thread_tools(slack, slack_thread_url)
+        listed[listed_key(slack_thread_url)] = tools
         return "\n\n".join(
-            f"## {t.name}\n{t.description}\n입력: {t.tool_call_schema.model_json_schema()}"
+            f"## {t.name}\n{t.description}\n입력: "
+            + json.dumps(t.tool_call_schema.model_json_schema(), ensure_ascii=False)
             for t in tools
         )
 
@@ -266,7 +285,10 @@ def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:
     async def call_robot_tool(
         slack_thread_url: str, name: str, arguments: dict[str, Any]
     ) -> str:
-        tools = {t.name: t for t in await thread_tools(slack, slack_thread_url)}
+        built = listed.pop(listed_key(slack_thread_url), None)
+        if built is None:
+            built = await thread_tools(slack, slack_thread_url)
+        tools = {t.name: t for t in built}
         if name not in tools:
             raise ToolError(
                 f"이 스레드에서는 {name} 도구를 쓸 수 없습니다. "
