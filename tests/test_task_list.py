@@ -465,19 +465,18 @@ NOTION_FACTORIES = (
     "get_create_notion_follow_up_task_tool",
     "get_update_notion_task_deadline_tool",
     "get_update_notion_task_status_tool",
-    "get_notion_page_tool",
 )
 
 
 async def build_tools_with(channel: str, **task_list_patch) -> set[str]:
-    """노션 도구를 제 이름표로 대신 세우고 _build_tools 가 고른 도구를 모은다"""
+    """노션 도구를 제 이름표로 대신 세우고 build_robot_tools 가 고른 도구를 모은다"""
     factories = {
         name: (lambda *args, name=name, **kwargs: name) for name in NOTION_FACTORIES
     }
     with patch.object(general, "find_channel_task_list", **task_list_patch):
         with patch.multiple(general, **factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
-                tools = await general._build_tools(
+                tools = await general.build_robot_tools(
                     AsyncMock(), REQUESTER, channel, "1700000000.000100", AsyncMock()
                 )
     return {getattr(tool, "name", tool) for tool in tools}
@@ -507,7 +506,8 @@ async def test_registered_channel_swaps_notion_task_tools_for_list_tools():
     } <= names
     assert "get_create_notion_task_tool" not in names
     assert "get_create_notion_follow_up_task_tool" not in names
-    assert "get_notion_page_tool" in names
+    # 노션 페이지 도구는 작업 DB 와 상관없어 진짜 도구가 들어온다.
+    assert "get_notion_page" in names
     assert "get_update_notion_task_status_tool" in names
     assert "enable_channel_task_list" not in names
 

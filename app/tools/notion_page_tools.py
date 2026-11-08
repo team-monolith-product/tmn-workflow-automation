@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from service import notion_page_copy
 
-from ..common import NotionPageId, notion
+from ..common import NotionPageId, get_notion_page_tool, notion
 
 
 class TextReplacement(BaseModel):
@@ -28,6 +28,17 @@ class TextReplacement(BaseModel):
 
     old: str = Field(description="원본에 있는 글자. 예: '11월'")
     new: str = Field(description="바꿀 글자. 예: '12월'")
+
+
+def get_notion_page_tools() -> list[StructuredTool]:
+    """노션 페이지 조회·찾기·구조 보기·본떠 만들기 도구를 돌려줍니다.
+
+    작업 DB 와 상관없이 페이지를 다루는 도구라 로봇과 MCP 가 똑같이 씁니다.
+
+    Returns:
+        list[StructuredTool]: [조회, 찾기, 구조 보기, 본떠 만들기]
+    """
+    return [get_notion_page_tool(), *get_notion_page_copy_tools()]
 
 
 def get_notion_page_copy_tools() -> list[StructuredTool]:

@@ -12,13 +12,8 @@ from service.llm import DEFAULT_MODEL, RESPONSES_OUTPUT_VERSION, extract_text
 from .common import KST, slack_users_list
 from .event_dedup import is_duplicate_event
 from .tool_status_handler import ToolStatusHandler
-from .tools.athena_tools import get_execute_athena_query_tool
-from .tools.python_tools import get_execute_python_tool
-from .tools.redash_tools import (
-    list_redash_dashboards,
-    read_redash_dashboard,
-    read_redash_query,
-)
+from .tools.data_tools import get_data_tools
+from .tools.slack_place import SlackPlace
 
 
 async def collect_thread_context(
@@ -272,24 +267,10 @@ async def answer_data_analysis(
         output_version=RESPONSES_OUTPUT_VERSION,
     )
 
-    # 데이터 분석 전용 Tools
-    # execute_athena_query tool은 Slack 메시지 전송을 위해 say, thread_ts, slack_client, channel을 주입
-    execute_athena_query = get_execute_athena_query_tool(
-        say=say, thread_ts=thread_ts, slack_client=slack_client, channel=channel
-    )
-    # execute_python tool은 차트 이미지를 슬랙에 업로드하기 위해 slack_client와 channel을 주입
-    # 이 도구에는 read_sheet 도 함께 주입된다(app/tools/python_tools.py). 데이터봇도
+    # 로봇·MCP 와 같은 데이터 분석 도구. 결과 표·차트는 이 스레드에 올라간다.
+    # 파이썬 도구에는 read_sheet 도 함께 주입된다(app/tools/python_tools.py). 데이터봇도
     # 구글 시트를 읽어 Athena 결과와 맞춰 볼 수 있다 -- 도구 설명에 사용법이 있다.
-    execute_python = get_execute_python_tool(
-        thread_ts=thread_ts, slack_client=slack_client, channel=channel
-    )
-    tools = [
-        list_redash_dashboards,
-        read_redash_dashboard,
-        read_redash_query,
-        execute_athena_query,
-        execute_python,
-    ]
+    tools = get_data_tools(SlackPlace(slack_client, channel, thread_ts, say))
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 

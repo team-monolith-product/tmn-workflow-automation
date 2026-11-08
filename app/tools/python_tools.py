@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from api import athena
+from app.tools.slack_place import SlackPlace
 from app.sms import POSTED_MARK
 from service.sheets.read import read_sheet
 
@@ -215,9 +216,7 @@ def _to_sync(
 
 
 def get_execute_python_tool(
-    thread_ts: str | None = None,
-    slack_client: Any | None = None,
-    channel: str | None = None,
+    place: SlackPlace | None = None,
     draft_sms: Callable[..., Awaitable[str]] | None = None,
     timeout_seconds: float | None = None,
 ):
@@ -225,9 +224,7 @@ def get_execute_python_tool(
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
 
     Args:
-        thread_ts: Slack 스레드 타임스탬프
-        slack_client: Slack WebClient 인스턴스
-        channel: Slack 채널 ID
+        place: 차트·파일을 올릴 슬랙 스레드. 없으면 올리지 않습니다
         draft_sms: 문자 초안 도구의 코루틴. 주면 코드가 같은 이름으로 부를 수
             있다. 수백 명짜리 명단을 도구 인자로 다시 받아쓰면 상한에 걸려
             잘리므로, 명단을 다루려면 이 길이 필요하다
@@ -328,7 +325,7 @@ def get_execute_python_tool(
             injected["draft_sms"] = draft
 
         pending_files: list[tuple[str, bytes, str | None]] = []
-        if slack_client and channel and thread_ts:
+        if place:
 
             def upload_file(
                 filename: str, data: bytes | str | None = None, title: str | None = None
@@ -390,9 +387,10 @@ def get_execute_python_tool(
 
         uploaded_message = ""
         if pending_files:
-            await slack_client.files_upload_v2(
-                channel=channel,
-                thread_ts=thread_ts,
+            # upload_file 은 place 가 있을 때만 주므로 여기 오면 place 가 있다.
+            await place.client.files_upload_v2(
+                channel=place.channel,
+                thread_ts=place.thread_ts,
                 file_uploads=[
                     {"file": data, "filename": filename, "title": title or filename}
                     for filename, data, title in pending_files
@@ -403,10 +401,10 @@ def get_execute_python_tool(
 
         if img_buffer is None:
             result_message = "✅ 코드 실행 성공"
-        elif slack_client and channel and thread_ts:
-            await slack_client.files_upload_v2(
-                channel=channel,
-                thread_ts=thread_ts,
+        elif place:
+            await place.client.files_upload_v2(
+                channel=place.channel,
+                thread_ts=place.thread_ts,
                 file=img_buffer,
                 filename="chart.png",
                 title="차트 시각화 결과",
@@ -420,7 +418,7 @@ def get_execute_python_tool(
             return f"{result_message}\n\nSTDOUT:\n{stdout_output}"
         return result_message
 
-    if slack_client and channel and thread_ts:
+    if place:
         execute_python.description += CHART_GUIDE + UPLOAD_FILE_GUIDE
     else:
         execute_python.description += NO_UPLOAD_GUIDE

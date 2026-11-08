@@ -4,13 +4,14 @@
 슬랙에서 로봇에게 시킬 수 있는 일은 Claude·Codex 같은 CLI 에이전트도 할 수
 있어야 합니다. 도구를 새로 짜지 않고 로봇이 쓰는 도구를 그대로 씁니다. 로봇에
 도구가 늘면 여기도 따라 늘어야 하므로, 목록을 따로 들고 있지 않고 로봇의
-_build_tools 를 그대로 부릅니다.
+build_robot_tools 를 그대로 부릅니다.
 
 도구는 두 갈래로 엽니다.
 
     ① 어디서 물어도 똑같이 도는 도구 (Athena·Redash·파이썬·노션 페이지)
-       → MCP 도구로 바로 등록합니다. 슬랙 스레드 없이 부릅니다. 웹 검색과 페이지
-         읽기는 Claude·Codex 에 이미 있어 열지 않습니다.
+       → MCP 도구로 바로 등록합니다. 로봇이 쓰는 get_data_tools·get_notion_page_tools
+         를 스레드 없이(place=None) 그대로 부릅니다. 웹 검색과 페이지 읽기는
+         Claude·Codex 에 이미 있어 열지 않습니다.
     ② 슬랙 스레드에 묶인 도구 (문자·메일 초안, 예약, 채널 공지, 노션 작업,
        채널 작업 리스트, 지식 수집 켜고 끄기)
        → 스레드 링크를 받아 list_robot_tools·call_robot_tool 로 부릅니다.
@@ -37,17 +38,10 @@ from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
-from app.common import get_notion_page_tool
-from app.general import DATA_GUIDE, _build_tools, thread_say
+from app.general import DATA_GUIDE, build_robot_tools, thread_say
 from app.mcp_common import AdminToken
-from app.tools.athena_tools import get_execute_athena_query_tool
-from app.tools.notion_page_tools import get_notion_page_copy_tools
-from app.tools.python_tools import get_execute_python_tool
-from app.tools.redash_tools import (
-    list_redash_dashboards,
-    read_redash_dashboard,
-    read_redash_query,
-)
+from app.tools.data_tools import get_data_tools
+from app.tools.notion_page_tools import get_notion_page_tools
 from service.slack import get_email_to_user_id_async
 
 ROBOT_MCP_INSTRUCTIONS = (
@@ -162,21 +156,15 @@ def _as_text(result: Any) -> str:
 def placeless_tools() -> list[BaseTool]:
     """슬랙 스레드 없이 똑같이 도는 로봇 도구입니다.
 
-    _build_tools 의 도구 중 채널·스레드·질문자를 받지 않는 것들입니다. 웹 검색과
-    페이지 읽기는 MCP 클라이언트에 이미 있어 뺍니다.
+    로봇의 build_robot_tools 가 쓰는 것과 같은 함수를 스레드 없이 부릅니다. 웹
+    검색과 페이지 읽기는 MCP 클라이언트에 이미 있어 뺍니다.
 
     Returns:
         list[BaseTool]: 로봇 도구 목록
     """
-    return [
-        get_notion_page_tool(),
-        *get_notion_page_copy_tools(),
-        get_execute_python_tool(timeout_seconds=MCP_PYTHON_TIMEOUT_SECONDS),
-        list_redash_dashboards,
-        read_redash_dashboard,
-        read_redash_query,
-        get_execute_athena_query_tool(),
-    ]
+    return get_notion_page_tools() + get_data_tools(
+        None, python_timeout_seconds=MCP_PYTHON_TIMEOUT_SECONDS
+    )
 
 
 def _requester_email() -> str:
@@ -288,7 +276,7 @@ async def thread_tools(slack: AsyncWebClient, slack_thread_url: str) -> list[Bas
     await _check_place(slack, channel, user_id)
 
     say = thread_say(slack, channel, thread_ts)
-    return await _build_tools(slack, user_id, channel, thread_ts, say)
+    return await build_robot_tools(slack, user_id, channel, thread_ts, say)
 
 
 def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:

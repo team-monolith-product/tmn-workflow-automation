@@ -2,22 +2,22 @@
 AWS Athena 관련 LangChain Tools
 """
 
-from typing import Annotated, Callable, Any
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from api import athena
+from app.tools.slack_place import SlackPlace
 
 
-class PlacelessAthenaQueryInput(BaseModel):
-    """슬랙 스레드 없이 쓸 때의 입력. 결과를 보낼 곳이 없어 show_result_to_user 가 없다."""
+class AthenaQueryInput(BaseModel):
+    """Athena 쿼리 입력"""
 
     query: str = Field(description="실행할 SQL 쿼리")
     database: str = Field(description="사용할 Athena 데이터베이스 이름 (필수)")
 
 
-# 슬랙 스레드가 있을 때만 붙인다. 스레드가 없으면 show_result_to_user 가 아무 일도
-# 하지 않으므로, 이 지침이 있으면 에이전트가 결과를 보여줄 길이 없다고 믿는다.
+# 슬랙 스레드가 있을 때만 붙인다. 스레드가 없으면 show_result_to_user 가 없으므로,
+# 이 지침이 있으면 에이전트가 결과를 보여줄 길이 없다고 믿는다.
 SLACK_RESULT_GUIDE = """
 
 **show_result_to_user**: 사용자에게 쿼리 결과를 보여주고 싶으면 반드시 이 값을 true로 설정해야 합니다.
@@ -115,122 +115,123 @@ def format_query_results_as_slack_table(results: dict) -> dict:
     return table_block
 
 
-def get_execute_athena_query_tool(
-    say: Callable[[dict[str, Any], str], Any] | None = None,
-    thread_ts: str | None = None,
-    slack_client: Any | None = None,
-    channel: str | None = None,
-):
+ATHENA_QUERY_DESCRIPTION = """AWS Athena에서 SQL 쿼리를 실행하고 결과를 반환합니다.
+
+이 도구는 데이터베이스에서 데이터를 조회할 때 사용합니다.
+쿼리는 표준 SQL 문법을 따릅니다.
+
+**중요**: database 파라미터는 필수입니다.
+Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
+동일한 데이터베이스를 반드시 지정해야 합니다.
+
+**SHOW TABLES 구문 주의사항**:
+Athena의 SHOW TABLES는 SQL 표준 LIKE가 아닌 정규표현식을 사용합니다.
+- ❌ 잘못된 예: SHOW TABLES IN database_name LIKE '%pattern%'
+- ✅ 올바른 예: SHOW TABLES IN database_name '*pattern*'
+- LIKE 키워드를 사용하지 마세요
+- % 대신 * 또는 .* 을 사용하세요
+- 예: SHOW TABLES IN jce_prd '*activ*' (activ를 포함하는 모든 테이블)
+- 예: SHOW TABLES IN jce_prd 'class_*' (class_로 시작하는 모든 테이블)
+
+결과는 마크다운 표로 돌려줍니다."""
+
+# Slack section block text 길이 제한 (3000자보다 여유있게)
+MAX_QUERY_LENGTH = 2900
+
+
+class SlackAthenaQueryInput(AthenaQueryInput):
+    """슬랙 스레드가 있을 때의 입력. 결과를 스레드에 올릴 수 있다."""
+
+    show_result_to_user: bool = Field(
+        default=False,
+        description="결과를 사용자에게 Slack 메시지로 직접 전송할지 여부",
+    )
+
+
+async def _post_result(place: SlackPlace, query: str, results: dict) -> str:
+    """쿼리와 결과 표를 스레드에 올립니다.
+
+    Args:
+        place: 결과를 올릴 슬랙 스레드
+        query: 실행한 SQL
+        results: Athena 결과
+
+    Returns:
+        str: 에이전트에게 돌려줄 안내
+    """
+    # 쿼리가 너무 길면 코드 스니펫으로 업로드, 짧으면 코드 블록으로 표시
+    if len(query) > MAX_QUERY_LENGTH:
+        await place.client.files_upload_v2(
+            channel=place.channel,
+            content=query,
+            filename="query.sql",
+            title="실행된 SQL 쿼리",
+            thread_ts=place.thread_ts,
+        )
+    else:
+        await place.say(
+            {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"```\n{query}\n```"},
+                    }
+                ]
+            },
+            thread_ts=place.thread_ts,
+        )
+
+    await place.say(
+        {"blocks": [format_query_results_as_slack_table(results)]},
+        thread_ts=place.thread_ts,
+    )
+
+    # 행 수 계산 (헤더 제외)
+    rows = results.get("ResultSet", {}).get("Rows", [])
+    row_count = len(rows) - 1 if len(rows) > 0 else 0
+    return f"쿼리 결과 총 {row_count}행을 슬랙 메시지로 전송했습니다."
+
+
+def get_execute_athena_query_tool(place: SlackPlace | None = None) -> StructuredTool:
     """
     Athena 쿼리 실행 도구를 반환합니다.
 
+    스레드가 있으면 결과를 스레드에 올리는 show_result_to_user 를 받고, 없으면
+    그 인자가 없습니다. 보낼 곳이 없는데 인자가 보이면 에이전트가 켜고는 결과가
+    갔다고 믿습니다.
+
     Args:
-        say: Slack 메시지 전송 함수
-        thread_ts: Slack 스레드 타임스탬프
-        slack_client: Slack 클라이언트 (파일 업로드용)
-        channel: Slack 채널 ID
+        place: 결과를 올릴 슬랙 스레드. 없으면 결과는 반환값으로만 돌아갑니다
 
     Returns:
         execute_athena_query tool
     """
 
-    @tool
     async def execute_athena_query(
-        query: Annotated[str, "실행할 SQL 쿼리"],
-        database: Annotated[str, "사용할 Athena 데이터베이스 이름 (필수)"],
-        show_result_to_user: Annotated[
-            bool, "결과를 사용자에게 Slack 메시지로 직접 전송할지 여부"
-        ] = False,
+        query: str, database: str, show_result_to_user: bool = False
     ) -> str:
-        """
-        AWS Athena에서 SQL 쿼리를 실행하고 결과를 반환합니다.
-
-        이 도구는 데이터베이스에서 데이터를 조회할 때 사용합니다.
-        쿼리는 표준 SQL 문법을 따릅니다.
-
-        **중요**: database 파라미터는 필수입니다.
-        Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
-        동일한 데이터베이스를 반드시 지정해야 합니다.
-
-        **SHOW TABLES 구문 주의사항**:
-        Athena의 SHOW TABLES는 SQL 표준 LIKE가 아닌 정규표현식을 사용합니다.
-        - ❌ 잘못된 예: SHOW TABLES IN database_name LIKE '%pattern%'
-        - ✅ 올바른 예: SHOW TABLES IN database_name '*pattern*'
-        - LIKE 키워드를 사용하지 마세요
-        - % 대신 * 또는 .* 을 사용하세요
-        - 예: SHOW TABLES IN jce_prd '*activ*' (activ를 포함하는 모든 테이블)
-        - 예: SHOW TABLES IN jce_prd 'class_*' (class_로 시작하는 모든 테이블)
-
-        Args:
-            query: 실행할 SQL 쿼리
-            database: 사용할 Athena 데이터베이스 이름 (필수)
-            show_result_to_user: 결과를 사용자에게 Slack으로 전송할지 여부 (기본값: False)
-
-        Returns:
-            str: show_result_to_user가 False이면 쿼리 실행 결과 (마크다운 테이블 형식),
-                 True이면 "쿼리 결과 총 {행수}행을 슬랙 메시지로 전송했습니다."
-        """
-        MAX_QUERY_LENGTH = (
-            2900  # Slack section block text 길이 제한 (3000자보다 여유있게)
-        )
-
         try:
             results = await athena.execute_and_wait(query, database=database)
-
-            if show_result_to_user and say and thread_ts:
-                # 1. 먼저 사용된 SQL 쿼리를 전송
-                # 쿼리가 너무 길면 코드 스니펫으로 업로드, 짧으면 코드 블록으로 표시
-                if len(query) > MAX_QUERY_LENGTH and slack_client and channel:
-                    # 코드 스니펫으로 업로드
-                    await slack_client.files_upload_v2(
-                        channel=channel,
-                        content=query,
-                        filename="query.sql",
-                        title="실행된 SQL 쿼리",
-                        thread_ts=thread_ts,
-                    )
-                else:
-                    # 코드 블록으로 전송
-                    await say(
-                        {
-                            "blocks": [
-                                {
-                                    "type": "section",
-                                    "text": {
-                                        "type": "mrkdwn",
-                                        "text": f"```\n{query}\n```",
-                                    },
-                                }
-                            ]
-                        },
-                        thread_ts=thread_ts,
-                    )
-
-                # 2. 그 다음 쿼리 결과를 table block으로 전송
-                table_block = format_query_results_as_slack_table(results)
-                await say(
-                    {"blocks": [table_block]},
-                    thread_ts=thread_ts,
-                )
-
-                # 행 수 계산 (헤더 제외)
-                result_set = results.get("ResultSet", {})
-                rows = result_set.get("Rows", [])
-                row_count = len(rows) - 1 if len(rows) > 0 else 0
-
-                return f"쿼리 결과 총 {row_count}행을 슬랙 메시지로 전송했습니다."
-
+            if show_result_to_user and place:
+                return await _post_result(place, query, results)
             # Agent가 분석용으로 사용할 때는 마크다운 테이블 반환
             return format_query_results_as_markdown(results)
         except Exception as e:
             return f"쿼리 실행 중 오류 발생: {str(e)}"
 
-    if say and thread_ts:
-        execute_athena_query.description += SLACK_RESULT_GUIDE
-    else:
-        # 보낼 곳이 없는데 인자가 보이면 에이전트가 켜고는 결과가 갔다고 믿는다.
-        execute_athena_query.args_schema = PlacelessAthenaQueryInput
-    return execute_athena_query
+    if place is None:
+        return StructuredTool.from_function(
+            coroutine=execute_athena_query,
+            name="execute_athena_query",
+            description=ATHENA_QUERY_DESCRIPTION,
+            args_schema=AthenaQueryInput,
+        )
+    return StructuredTool.from_function(
+        coroutine=execute_athena_query,
+        name="execute_athena_query",
+        description=ATHENA_QUERY_DESCRIPTION + SLACK_RESULT_GUIDE,
+        args_schema=SlackAthenaQueryInput,
+    )
 
 
 # 기본 tool (backward compatibility를 위해 유지)
