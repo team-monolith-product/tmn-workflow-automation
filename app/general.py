@@ -294,6 +294,32 @@ def revise_request(feedback: str, previous: str, verbatim: bool) -> str:
     )
 
 
+def thread_say(client: AsyncWebClient, channel: str, thread_ts: str):
+    """슬랙 이벤트 없이 스레드에 글을 올리는 say 를 만듭니다.
+
+    Bolt 의 say 와 같은 모양이라 _build_tools 에 그대로 넘깁니다.
+
+    Args:
+        client: 슬랙 클라이언트
+        channel: 채널 ID
+        thread_ts: 스레드 타임스탬프
+
+    Returns:
+        `async (payload, thread_ts=...) -> None` 콜백
+    """
+
+    async def say(payload, thread_ts=thread_ts):
+        # 표·코드 블록처럼 blocks 만 오는 글도 있다. 알림 미리보기에 쓸 글자다.
+        await client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=payload.get("text", "로봇 답변"),
+            **{k: v for k, v in payload.items() if k != "text"},
+        )
+
+    return say
+
+
 def get_thread_agent(app) -> ThreadAgent:
     """스레드에서 사람이 다음 질문을 한 것처럼 에이전트를 돌리는 콜백을 만듭니다.
 
@@ -313,15 +339,7 @@ def get_thread_agent(app) -> ThreadAgent:
     """
 
     async def run(channel: str, thread_ts: str, user: str, text: str) -> None:
-        async def say(payload, thread_ts=thread_ts):
-            # 표·코드 블록처럼 blocks 만 오는 글도 있다. 알림 미리보기에 쓸 글자다.
-            await app.client.chat_postMessage(
-                channel=channel,
-                thread_ts=thread_ts,
-                text=payload.get("text", "로봇 답변"),
-                **{k: v for k, v in payload.items() if k != "text"},
-            )
-
+        say = thread_say(app.client, channel, thread_ts)
         tools = await _build_tools(app.client, user, channel, thread_ts, say)
         await answer(
             thread_ts,

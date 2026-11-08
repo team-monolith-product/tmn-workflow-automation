@@ -57,6 +57,13 @@ UPLOAD_FILE_GUIDE = """
         zf.writestr("팀A.csv", df.to_csv(index=False).encode("utf-8-sig"))
     upload_file("conversations.zip", buf.getvalue())"""
 
+# 슬랙 스레드가 없으면 차트와 파일이 갈 곳이 없다. "자동으로 올라갑니다" 만
+# 믿고 그림만 그리면 결과가 통째로 사라진다.
+NO_UPLOAD_GUIDE = """
+
+**슬랙 스레드 없음**: 지금은 차트와 파일을 올릴 곳이 없습니다. 그림을 그려도
+전달되지 않으니, 결과는 print 로 집계 값을 내보내십시오."""
+
 DRAFT_SMS_GUIDE = """
 
 **문자 초안**: `draft_sms(content, targets, send_at="")` 를 코드 안에서도 부를 수
@@ -375,6 +382,8 @@ def get_execute_python_tool(
 
     if slack_client and channel and thread_ts:
         execute_python.description += UPLOAD_FILE_GUIDE
+    else:
+        execute_python.description += NO_UPLOAD_GUIDE
     if draft_sms:
         execute_python.description += DRAFT_SMS_GUIDE
 

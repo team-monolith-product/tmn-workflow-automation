@@ -6,6 +6,14 @@ from typing import Annotated, Callable, Any
 from langchain_core.tools import tool
 from api import athena
 
+# 슬랙 스레드가 있을 때만 붙인다. 스레드가 없으면 show_result_to_user 가 아무 일도
+# 하지 않으므로, 이 지침이 있으면 에이전트가 결과를 보여줄 길이 없다고 믿는다.
+SLACK_RESULT_GUIDE = """
+
+**show_result_to_user**: 사용자에게 쿼리 결과를 보여주고 싶으면 반드시 이 값을 true로 설정해야 합니다.
+이 값이 true일 때만 사용자가 결과를 볼 수 있습니다.
+agent가 직접 표를 작성하여 답변하는 것은 허용되지 않습니다."""
+
 
 def format_query_results_as_markdown(results: dict) -> str:
     """
@@ -134,10 +142,6 @@ def get_execute_athena_query_tool(
         Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
         동일한 데이터베이스를 반드시 지정해야 합니다.
 
-        **show_result_to_user**: 사용자에게 쿼리 결과를 보여주고 싶으면 반드시 이 값을 true로 설정해야 합니다.
-        이 값이 true일 때만 사용자가 결과를 볼 수 있습니다.
-        agent가 직접 표를 작성하여 답변하는 것은 허용되지 않습니다.
-
         **SHOW TABLES 구문 주의사항**:
         Athena의 SHOW TABLES는 SQL 표준 LIKE가 아닌 정규표현식을 사용합니다.
         - ❌ 잘못된 예: SHOW TABLES IN database_name LIKE '%pattern%'
@@ -211,6 +215,8 @@ def get_execute_athena_query_tool(
         except Exception as e:
             return f"쿼리 실행 중 오류 발생: {str(e)}"
 
+    if say and thread_ts:
+        execute_athena_query.description += SLACK_RESULT_GUIDE
     return execute_athena_query
 
 

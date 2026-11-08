@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from app.knowledge_mcp import build_mcp, build_mcp_app
 from app.mcp_common import AdminRailsTokenVerifier, AdminToken
 from app.plugin_marketplace import router as plugin_marketplace_router
+from app.robot_mcp import placeless_tools
 
 ADMIN = {
     "id": 7,
@@ -126,7 +127,10 @@ def test_FastAPI에_붙여도_기존_라우트가_먼저_잡힌다(mcp_env):
 async def test_질의_도구가_등록된다(mcp_env):
     tools = await build_mcp().list_tools()
 
-    assert "query_knowledge" in [tool.name for tool in tools]
+    # /mcp 에는 지식 질의와 로봇 도구만 있다. 다른 도구가 섞이면 여기서 드러난다.
+    assert {tool.name for tool in tools} == {"query_knowledge"} | {
+        t.name for t in placeless_tools()
+    } | {"list_robot_tools", "call_robot_tool"}
 
 
 @pytest.mark.asyncio

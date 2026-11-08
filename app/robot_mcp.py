@@ -24,6 +24,7 @@ _build_tools 를 그대로 부릅니다.
 """
 
 import inspect
+import json
 import re
 from typing import Annotated, Any, cast
 
@@ -31,10 +32,11 @@ from langchain_core.tools import BaseTool
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from app.common import get_notion_page_tool, get_web_page_from_url, search_tool
-from app.general import ROBOT_INSTRUCTIONS, _build_tools
+from app.general import ROBOT_INSTRUCTIONS, _build_tools, thread_say
 from app.mcp_common import AdminToken
 from app.tools.athena_tools import get_execute_athena_query_tool
 from app.tools.notion_page_tools import get_notion_page_copy_tools
@@ -136,7 +138,8 @@ def _as_text(result: Any) -> str:
         return "완료했습니다."
     if isinstance(result, str):
         return result
-    return str(result)
+    # 웹 검색처럼 목록을 돌려주는 도구가 있다. str() 은 파이썬 표기라 읽기 어렵다.
+    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 def placeless_tools() -> list[BaseTool]:
@@ -160,10 +163,35 @@ def placeless_tools() -> list[BaseTool]:
 async def _requester(slack: AsyncWebClient) -> str:
     """MCP 토큰의 이메일로 슬랙 사용자 ID를 찾습니다."""
     email = cast(AdminToken, get_access_token()).email
-    user_id = (await get_email_to_user_id_async(slack)).get(email)
+    # admin-rails 와 슬랙 프로필의 대소문자가 다를 수 있다. 메일 주소는 대소문자를 가리지 않는다.
+    users = {
+        address.lower(): user_id
+        for address, user_id in (await get_email_to_user_id_async(slack)).items()
+    }
+    user_id = users.get(email.lower())
     if user_id is None:
         raise ToolError(f"{email} 로 가입한 슬랙 사용자가 없습니다.")
     return user_id
+
+
+async def _check_channel(slack: AsyncWebClient, channel: str) -> None:
+    """로봇이 그 채널에 글을 올릴 수 있는지 봅니다.
+
+    로봇이 없는 비공개 채널과 남의 DM 은 channel_not_found 로 옵니다. 공개 채널은
+    로봇이 없어도 조회되지만 글을 올릴 때 not_in_channel 로 막힙니다.
+    """
+    try:
+        info = (await slack.conversations_info(channel=channel))["channel"]
+    except SlackApiError as error:
+        if error.response["error"] != "channel_not_found":
+            raise
+        raise ToolError(
+            "로봇이 볼 수 없는 채널입니다. 로봇을 채널에 초대해 주십시오."
+        ) from error
+    if not info.get("is_im") and not info["is_member"]:
+        raise ToolError(
+            "로봇이 들어가 있지 않은 채널입니다. 로봇을 채널에 초대해 주십시오."
+        )
 
 
 async def _is_member(slack: AsyncWebClient, channel: str, user_id: str) -> bool:
@@ -192,18 +220,11 @@ async def thread_tools(slack: AsyncWebClient, slack_thread_url: str) -> list[Bas
     """
     channel, thread_ts = parse_slack_thread_url(slack_thread_url)
     user_id = await _requester(slack)
+    await _check_channel(slack, channel)
     if not await _is_member(slack, channel, user_id):
         raise ToolError("들어가 있지 않은 채널의 스레드입니다.")
 
-    async def say(payload, thread_ts=thread_ts):
-        # app/general.py get_thread_agent 의 say 와 같다. Athena 결과 표를 올린다.
-        await slack.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=payload.get("text", "로봇 답변"),
-            **{k: v for k, v in payload.items() if k != "text"},
-        )
-
+    say = thread_say(slack, channel, thread_ts)
     return await _build_tools(slack, user_id, channel, thread_ts, say)
 
 
