@@ -10,6 +10,9 @@
 불투명 문자열이라 서명으로 확인할 것이 없어서입니다. 만료와 폐기 판정은
 발급자만 할 수 있습니다.
 
+같은 /mcp 에 팀모노리스 로봇의 도구도 함께 엽니다(app/robot_mcp.py). 플러그인이
+이미 이 경로에 붙어 있어 따로 설치할 것이 없습니다.
+
 FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저가 뜨지 않으면
 /mcp 요청이 전부 실패합니다.
 """
@@ -20,6 +23,7 @@ from typing import cast
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import MCPServer
+from slack_sdk.web.async_client import AsyncWebClient
 from starlette.applications import Starlette
 
 from app.mcp_common import (
@@ -28,6 +32,7 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
+from app.robot_mcp import ROBOT_MCP_INSTRUCTIONS, register_robot_tools
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
@@ -44,7 +49,7 @@ INSTRUCTIONS = """
 """.strip()
 
 
-def build_mcp() -> MCPServer:
+def build_mcp(slack_client: AsyncWebClient | None = None) -> MCPServer:
     """지식베이스 MCP 서버를 만듭니다.
 
     MCP_RESOURCE_URL에는 /mcp를 붙이지 않습니다. SDK가 401의
@@ -52,12 +57,15 @@ def build_mcp() -> MCPServer:
     만드는데, /mcp를 붙이면 실제로 열려 있는 경로와 어긋나 클라이언트가
     인가 서버를 찾지 못합니다.
 
+    Args:
+        slack_client: 로봇 도구가 쓸 대표 봇 슬랙 클라이언트. 테스트에서 넣습니다.
+
     Returns:
         MCPServer: 도구가 등록된 서버
     """
     mcp: MCPServer = MCPServer(
         "team-monolith-knowledge",
-        instructions=INSTRUCTIONS,
+        instructions=f"{INSTRUCTIONS}\n\n{ROBOT_MCP_INSTRUCTIONS}",
         token_verifier=AdminRailsTokenVerifier(),
         auth=admin_auth_settings(os.environ["MCP_RESOURCE_URL"]),
     )
@@ -68,6 +76,9 @@ def build_mcp() -> MCPServer:
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
+    register_robot_tools(
+        mcp, slack_client or AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    )
     return mcp
 
 

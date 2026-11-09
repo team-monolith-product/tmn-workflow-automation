@@ -77,7 +77,7 @@ def dm_event(**overrides):
 @pytest.fixture
 def mock_answer():
     with patch("app.general.answer", new_callable=AsyncMock) as answer, patch(
-        "app.general._build_tools", new_callable=AsyncMock
+        "app.general.build_robot_tools", new_callable=AsyncMock
     ) as build_tools:
         build_tools.return_value = []
         yield answer
@@ -188,14 +188,13 @@ async def test_athena_tool_posts_result_to_thread():
             "get_create_notion_follow_up_task_tool",
             "get_update_notion_task_deadline_tool",
             "get_update_notion_task_status_tool",
-            "get_notion_page_tool",
         )
     }
     say = AsyncMock()
     with patch.object(general, "find_channel_task_list", return_value=None):
         with patch.multiple(general, **notion_factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
-                tools = await general._build_tools(
+                tools = await general.build_robot_tools(
                     AsyncMock(), "U1", "C123", "1700000000.000100", say
                 )
     athena_tool = next(
@@ -232,7 +231,7 @@ async def test_수정_요청은_적은_문장을_그대로_쓰라는_안내와_�
     """[수정] 창의 글만 넘기면 에이전트가 적어 준 문장까지 다시 다듬는다"""
     app = AsyncMock()
     with patch.object(
-        general, "_build_tools", AsyncMock(return_value=[])
+        general, "build_robot_tools", AsyncMock(return_value=[])
     ), patch.object(general, "answer", AsyncMock()) as mock_answer:
         await general.get_draft_revise(app)(
             channel="C0CE8EQ3XK5",
