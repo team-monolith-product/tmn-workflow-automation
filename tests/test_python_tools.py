@@ -2,8 +2,11 @@
 차트 도구 테스트
 """
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from app.tools import python_tools
 from app.tools.python_tools import get_execute_python_tool
 from app.tools.slack_place import SlackPlace
 
@@ -296,3 +299,29 @@ def test_슬랙_정보가_있어야_upload_file_이_설명에_나온다():
 
     assert "upload_file" in 열린도구.description
     assert "upload_file" not in 닫힌도구.description
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "while True:\n    pass",
+        # 코드가 예외를 삼켜도 상한은 풀리지 않는다.
+        "while True:\n    try:\n        pass\n    except Exception:\n        pass",
+        # 코드 안에서 기다리는 Athena 는 추적 함수가 끼어들 수 없는 곳이다.
+        'execute_athena_query("SELECT 1", database="x")',
+    ],
+    ids=["loop", "swallow", "athena"],
+)
+async def test_시간_상한을_넘으면_멈추고_다음_실행은_정상이다(monkeypatch, code):
+    async def slow_query(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(python_tools, "PYTHON_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(python_tools.athena, "execute_and_wait", slow_query)
+    execute_python = get_execute_python_tool()
+
+    stopped = await execute_python.ainvoke({"code": code})
+    after = await execute_python.ainvoke({"code": "print(sum(range(10)))"})
+
+    assert "CodeTimeout" in stopped
+    assert "45" in after

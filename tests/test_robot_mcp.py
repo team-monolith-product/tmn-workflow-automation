@@ -12,6 +12,7 @@ from app.general import DATA_GUIDE, ROBOT_INSTRUCTIONS, SLACK_DATA_GUIDE
 from app.knowledge_mcp import build_mcp
 from app.robot_mcp import _as_text, parse_slack_thread_url
 from app.tools.athena_tools import SLACK_RESULT_GUIDE, get_execute_athena_query_tool
+from app.tools.notion_page_tools import get_notion_page_tools
 from app.tools.python_tools import (
     CHART_GUIDE,
     NO_UPLOAD_GUIDE,
@@ -348,16 +349,6 @@ def test_슬랙_로봇의_지침은_그대로다():
     assert "upload_file" in ROBOT_INSTRUCTIONS
 
 
-async def test_시간_상한을_넘은_코드는_멈추고_다음_실행은_정상이다():
-    execute_python = get_execute_python_tool(timeout_seconds=0.5)
-
-    stopped = await execute_python.ainvoke({"code": "while True:\n    pass"})
-    after = await execute_python.ainvoke({"code": "print(sum(range(10)))"})
-
-    assert "TimeoutError" in stopped
-    assert "45" in after
-
-
 async def test_스레드가_없으면_파이썬_설명에_슬랙_차트_안내가_없다(mcp_env):
     tools = {t.name: t for t in await build_mcp(_slack([])).list_tools()}
     slack_python = get_execute_python_tool(
@@ -377,3 +368,33 @@ async def test_웹_도구는_열지_않는다(mcp_env):
 
     assert "tavily_search_results_json" not in names
     assert "get_web_page_from_url" not in names
+
+
+async def test_스레드_도구_목록에는_바로_부를_수_있는_도구와_똑같은_것이_없다(mcp_env):
+    """노션 페이지처럼 스레드와 상관없는 도구는 빼고, 스레드에 결과를 올리는
+    Athena 처럼 모양이 다른 도구는 남깁니다."""
+
+    @tool
+    async def post_channel_message(text: str) -> str:
+        """채널에 올립니다."""
+        return text
+
+    place = SlackPlace(AsyncMock(), "C01ROBOT", "1700000000.123456", AsyncMock())
+    built = [
+        post_channel_message,
+        get_notion_page_tools()[0],
+        get_execute_athena_query_tool(place),
+    ]
+
+    with patch("app.robot_mcp.get_access_token", return_value=REQUESTER), patch(
+        "app.robot_mcp.get_email_to_user_id_async",
+        AsyncMock(return_value={"operator@team-mono.com": "U01OWNER"}),
+    ), patch("app.robot_mcp.build_robot_tools", AsyncMock(return_value=built)):
+        result = await build_mcp(_slack(["U01OWNER"])).call_tool(
+            "list_robot_tools", {"slack_thread_url": THREAD_URL}
+        )
+
+    listed = result.content[0].text
+    assert "## post_channel_message" in listed
+    assert "## execute_athena_query" in listed
+    assert f"## {get_notion_page_tools()[0].name}" not in listed

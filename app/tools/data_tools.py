@@ -24,14 +24,12 @@ def get_data_tools(
     place: SlackPlace | None,
     *,
     draft_sms: Callable[..., Awaitable[str]] | None = None,
-    python_timeout_seconds: float | None = None,
 ) -> list[BaseTool]:
     """Redash·Athena·파이썬 도구를 돌려줍니다.
 
     Args:
         place: 결과를 올릴 슬랙 스레드. 없으면 결과는 도구 반환값으로만 돌아갑니다
         draft_sms: 파이썬 코드 안에서 부를 문자 초안 코루틴
-        python_timeout_seconds: 파이썬 한 번 실행의 시간 상한
 
     Returns:
         list[BaseTool]: 데이터 분석 도구
@@ -41,7 +39,5 @@ def get_data_tools(
         read_redash_dashboard,
         read_redash_query,
         get_execute_athena_query_tool(place),
-        get_execute_python_tool(
-            place, draft_sms=draft_sms, timeout_seconds=python_timeout_seconds
-        ),
+        get_execute_python_tool(place, draft_sms=draft_sms),
     ]

@@ -7,6 +7,7 @@ import functools
 import io
 import os
 import sys
+import threading
 import time
 import traceback
 from collections import Counter
@@ -42,6 +43,11 @@ DRAFT_CALLS_PER_RUN = 50
 # 한 실행이 스레드에 올릴 수 있는 파일 수와 파일 하나의 크기 상한
 FILES_PER_RUN = 10
 FILE_SIZE_LIMIT = 100 * 1024 * 1024
+
+# 한 실행의 시간 상한. 코드 실행 워커는 봇 넷과 MCP 가 나눠 쓰는 하나뿐이라,
+# 끝나지 않는 코드 하나가 모두의 파이썬 실행을 막는다.
+PYTHON_TIMEOUT_SECONDS = 300
+TIMEOUT_MESSAGE = f"실행 시간 상한 {PYTHON_TIMEOUT_SECONDS}초를 넘어 멈췄습니다."
 
 CHART_GUIDE = """
 
@@ -124,33 +130,48 @@ def setup_korean_font():
 setup_korean_font()
 
 
-def _deadline_tracer(deadline: float) -> Callable[..., Any]:
-    """시각이 지나면 실행 중인 코드에 TimeoutError 를 일으키는 추적 함수를 만듭니다.
+class CodeTimeout(BaseException):
+    """실행 시간 상한을 넘었습니다.
 
-    워커 스레드는 밖에서 죽일 수 없으므로 코드가 스스로 멈추게 합니다. 함수에
-    들어갈 때마다 시각을 보고, 에이전트 코드(<string>) 안에서는 줄마다 봅니다.
-    라이브러리 안쪽까지 줄마다 보면 느려지므로 거기서는 줄 추적을 끕니다.
-    C 로 된 한 번의 긴 호출(큰 pandas 연산 등)은 끝난 뒤에야 멈춥니다.
-
-    Args:
-        deadline: time.monotonic() 기준 마감 시각
-
-    Returns:
-        sys.settrace 에 넘길 추적 함수
+    코드 안의 `except Exception` 에 잡히면 상한이 풀린 채 계속 돌므로
+    Exception 이 아니라 BaseException 을 잇습니다.
     """
 
-    def trace(frame, event, arg):
-        if time.monotonic() > deadline:
-            raise TimeoutError("실행 시간 상한을 넘어 코드를 멈췄습니다.")
-        return trace if frame.f_code.co_filename == "<string>" else None
 
-    return trace
+# 지금 워커 스레드에서 도는 코드의 마감 시각(time.monotonic() 기준)
+_deadline = threading.local()
+
+
+def _remaining_seconds() -> float:
+    """마감까지 남은 시간을 돌려줍니다. 지났으면 CodeTimeout 을 일으킵니다.
+
+    Returns:
+        float: 남은 초
+    """
+    left = _deadline.at - time.monotonic()
+    if left <= 0:
+        raise CodeTimeout(TIMEOUT_MESSAGE)
+    return left
+
+
+def _trace(frame, event, arg):
+    """마감이 지나면 코드를 멈추는 추적 함수입니다.
+
+    워커 스레드는 밖에서 죽일 수 없으므로 코드가 스스로 멈추게 합니다. 에이전트
+    코드(<string>) 의 줄에서만 시각을 봅니다. 라이브러리 안에서 멈추면 잠금을 쥔
+    채 빠져나가, 그 잠금을 기다리는 다음 실행이나 이벤트 루프가 멈춘다. 그래서
+    긴 라이브러리 호출(큰 pandas 연산, 시트 읽기 등)은 끝나고 에이전트 코드로
+    돌아온 뒤에 멈춥니다. 코드 안에서 기다리는 코루틴은 _to_sync 가 따로 끊습니다.
+    """
+    if frame.f_code.co_filename != "<string>":
+        return None
+    _remaining_seconds()
+    return _trace
 
 
 def _run_code(
     code: str,
     injected: dict[str, Callable[..., Any]],
-    timeout_seconds: float | None = None,
 ) -> tuple[str, io.BytesIO | None, str | None]:
     """
     LLM이 만든 코드를 실행하고 결과를 반환합니다.
@@ -160,7 +181,6 @@ def _run_code(
     Args:
         code: 실행할 파이썬 코드
         injected: 코드에 주입할 함수들. 이름이 그대로 코드 안의 이름이 된다
-        timeout_seconds: 실행 시간 상한. 없으면 끝날 때까지 돕니다
 
     Returns:
         tuple: (STDOUT 출력, 차트 PNG 버퍼 또는 None, 실패 시 스택트레이스)
@@ -177,9 +197,9 @@ def _run_code(
     }
 
     try:
-        if timeout_seconds is not None:
-            # 추적은 이 워커 스레드에만 걸린다. finally 에서 반드시 푼다.
-            sys.settrace(_deadline_tracer(time.monotonic() + timeout_seconds))
+        _deadline.at = time.monotonic() + PYTHON_TIMEOUT_SECONDS
+        # 추적은 이 워커 스레드에만 걸린다. finally 에서 반드시 푼다.
+        sys.settrace(_trace)
         exec(code, exec_globals)
         sys.settrace(None)
 
@@ -191,7 +211,7 @@ def _run_code(
         plt.savefig(img_buffer, format="png", dpi=150, bbox_inches="tight")
         img_buffer.seek(0)
         return captured_output.getvalue(), img_buffer, None
-    except Exception:
+    except (Exception, CodeTimeout):
         return captured_output.getvalue(), None, traceback.format_exc()
     finally:
         sys.settrace(None)
@@ -205,12 +225,22 @@ def _to_sync(
 
     `_code_executor` 를 다시 타는 코루틴을 주면 워커 하나를 호출자가 잡은 채
     그 워커를 기다리게 되어 그대로 멈춥니다.
+
+    기다림은 C 에서 일어나 추적 함수가 끼어들지 못하므로, 마감까지 남은 시간만
+    기다리고 넘으면 코루틴을 취소합니다.
     """
 
     def call(*args, **kwargs):
-        return asyncio.run_coroutine_threadsafe(
+        # 마감이 이미 지났으면 코루틴을 띄우기 전에 멈춘다.
+        timeout = _remaining_seconds()
+        future = asyncio.run_coroutine_threadsafe(
             coroutine_function(*args, **kwargs), loop
-        ).result()
+        )
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            raise CodeTimeout(TIMEOUT_MESSAGE) from None
 
     return call
 
@@ -218,7 +248,6 @@ def _to_sync(
 def get_execute_python_tool(
     place: SlackPlace | None = None,
     draft_sms: Callable[..., Awaitable[str]] | None = None,
-    timeout_seconds: float | None = None,
 ):
     """
     파이썬 코드를 실행하는 도구를 반환합니다. 차트를 그리면 슬랙으로 전송합니다.
@@ -228,8 +257,6 @@ def get_execute_python_tool(
         draft_sms: 문자 초안 도구의 코루틴. 주면 코드가 같은 이름으로 부를 수
             있다. 수백 명짜리 명단을 도구 인자로 다시 받아쓰면 상한에 걸려
             잘리므로, 명단을 다루려면 이 길이 필요하다
-        timeout_seconds: 한 번 실행의 시간 상한. 코드 실행 워커는 봇 넷이 나눠
-            쓰는 하나뿐이라, 누구나 부를 수 있는 곳(MCP)에서는 상한을 건다
 
     Returns:
         execute_python tool
@@ -352,7 +379,7 @@ def get_execute_python_tool(
 
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
             _code_executor,
-            functools.partial(_run_code, code, injected, timeout_seconds),
+            functools.partial(_run_code, code, injected),
         )
         # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
         if len(stdout_output) > STDOUT_LIMIT:
@@ -424,10 +451,9 @@ def get_execute_python_tool(
         execute_python.description += NO_UPLOAD_GUIDE
     if draft_sms:
         execute_python.description += DRAFT_SMS_GUIDE
-    if timeout_seconds is not None:
-        execute_python.description += (
-            f"\n\n**시간 상한**: 한 번 실행은 {timeout_seconds:g}초까지입니다. 넘으면"
-            " TimeoutError 로 멈춥니다. 오래 걸리는 일은 쿼리에서 먼저 줄이십시오."
-        )
+    execute_python.description += (
+        f"\n\n**시간 상한**: 한 번 실행은 {PYTHON_TIMEOUT_SECONDS:g}초까지입니다. 넘으면"
+        " CodeTimeout 으로 멈춥니다. 오래 걸리는 일은 쿼리에서 먼저 줄이십시오."
+    )
 
     return execute_python

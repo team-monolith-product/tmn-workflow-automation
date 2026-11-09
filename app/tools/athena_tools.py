@@ -207,27 +207,35 @@ def get_execute_athena_query_tool(place: SlackPlace | None = None) -> Structured
         execute_athena_query tool
     """
 
-    async def execute_athena_query(
-        query: str, database: str, show_result_to_user: bool = False
-    ) -> str:
+    async def run(query: str, database: str, post_to: SlackPlace | None) -> str:
         try:
             results = await athena.execute_and_wait(query, database=database)
-            if show_result_to_user and place:
-                return await _post_result(place, query, results)
+            if post_to:
+                return await _post_result(post_to, query, results)
             # Agent가 분석용으로 사용할 때는 마크다운 테이블 반환
             return format_query_results_as_markdown(results)
         except Exception as e:
             return f"쿼리 실행 중 오류 발생: {str(e)}"
 
     if place is None:
+
+        async def execute_athena_query(query: str, database: str) -> str:
+            return await run(query, database, None)
+
         return StructuredTool.from_function(
             coroutine=execute_athena_query,
             name="execute_athena_query",
             description=ATHENA_QUERY_DESCRIPTION,
             args_schema=AthenaQueryInput,
         )
+
+    async def execute_athena_query_in_thread(
+        query: str, database: str, show_result_to_user: bool = False
+    ) -> str:
+        return await run(query, database, place if show_result_to_user else None)
+
     return StructuredTool.from_function(
-        coroutine=execute_athena_query,
+        coroutine=execute_athena_query_in_thread,
         name="execute_athena_query",
         description=ATHENA_QUERY_DESCRIPTION + SLACK_RESULT_GUIDE,
         args_schema=SlackAthenaQueryInput,

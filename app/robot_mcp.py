@@ -53,11 +53,8 @@ ROBOT_MCP_INSTRUCTIONS = (
     "list_robot_tools 로 그 스레드에서 쓸 수 있는 도구와 입력 스키마를 확인한 뒤 "
     "call_robot_tool 로 부릅니다. 스레드 링크를 지어내지 않습니다.\n"
     "- 스레드 없이 부른 도구의 결과는 슬랙으로 가지 않습니다. Athena 결과는 직접 표로 "
-    "정리해 보여주고, 파이썬에서는 차트 대신 집계 값을 print 합니다." + DATA_GUIDE
+    "정리해 보여줍니다." + DATA_GUIDE
 )
-
-# 시간 상한. 코드 실행 워커는 봇 넷이 나눠 쓰는 하나뿐이다.
-MCP_PYTHON_TIMEOUT_SECONDS = 300
 
 # [링크 복사] 한 주소. 엔터프라이즈 도메인은 점이 더 들어간다.
 # https://<workspace>.slack.com/archives/C123/p1700000000123456[?thread_ts=...&cid=...]
@@ -162,9 +159,7 @@ def placeless_tools() -> list[BaseTool]:
     Returns:
         list[BaseTool]: 로봇 도구 목록
     """
-    return get_notion_page_tools() + get_data_tools(
-        None, python_timeout_seconds=MCP_PYTHON_TIMEOUT_SECONDS
-    )
+    return get_notion_page_tools() + get_data_tools(None)
 
 
 def _requester_email() -> str:
@@ -190,12 +185,13 @@ async def _requester(slack: AsyncWebClient) -> str:
     """
     email = _requester_email()
     # admin-rails 와 슬랙 프로필의 대소문자가 다를 수 있다. 메일 주소는 대소문자를 가리지 않는다.
-    users = {
-        address.lower(): user_id
-        for address, user_id in (await get_email_to_user_id_async(slack)).items()
-    }
-    if email.lower() in users:
-        return users[email.lower()]
+    users = await get_email_to_user_id_async(slack)
+    found = next(
+        (uid for address, uid in users.items() if address.lower() == email.lower()),
+        None,
+    )
+    if found:
+        return found
     try:
         return (await slack.users_lookupByEmail(email=email))["user"]["id"]
     except SlackApiError as error:
@@ -269,14 +265,32 @@ async def thread_tools(slack: AsyncWebClient, slack_thread_url: str) -> list[Bas
         slack_thread_url: 슬랙 스레드의 메시지 링크
 
     Returns:
-        list[BaseTool]: 로봇 도구 목록
+        list[BaseTool]: 로봇 도구 중 MCP 에 바로 등록하지 않은 것
     """
     channel, thread_ts = parse_slack_thread_url(slack_thread_url)
     user_id = await _requester(slack)
     await _check_place(slack, channel, user_id)
 
     say = thread_say(slack, channel, thread_ts)
-    return await build_robot_tools(slack, user_id, channel, thread_ts, say)
+    tools = await build_robot_tools(slack, user_id, channel, thread_ts, say)
+    # 바로 부를 수 있는 도구와 똑같은 것은 뺀다. 같은 설명·스키마가 두 번 나가고
+    # 같은 일을 두 길로 부르게 된다. 결과를 스레드에 올리는 Athena·파이썬은
+    # 설명과 스키마가 달라 남는다.
+    direct = {_fingerprint(t) for t in placeless_tools()}
+    return [t for t in tools if _fingerprint(t) not in direct]
+
+
+def _fingerprint(lc_tool: BaseTool) -> tuple[str, str, str]:
+    """도구가 같은지 비교할 이름·설명·입력 스키마입니다.
+
+    Args:
+        lc_tool: 로봇 도구
+
+    Returns:
+        tuple[str, str, str]: (이름, 설명, 입력 스키마 JSON)
+    """
+    schema = lc_tool.tool_call_schema.model_json_schema()
+    return lc_tool.name, lc_tool.description, json.dumps(schema, sort_keys=True)
 
 
 def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:
