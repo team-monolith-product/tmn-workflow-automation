@@ -10,6 +10,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field, create_model
+from requests.exceptions import ConnectionError, Timeout
 
 from cachetools import TTLCache
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
@@ -253,7 +254,7 @@ search_tool = TavilySearchResults(
 
 def _load_web_page(url: str):
     """WebBaseLoader는 동기 HTTP라 스레드에서 실행합니다."""
-    loader = WebBaseLoader(url)
+    loader = WebBaseLoader(url, requests_kwargs={"timeout": (5, 30)})
     return loader.load()
 
 
@@ -265,7 +266,13 @@ async def get_web_page_from_url(
     주어진 URL에서 웹 페이지를 로드하여 문서로 반환합니다.
     www.notion.so에 대한 링크는 이 도구를 사용하지 않고 get_notion_page 도구를 사용합니다.
     """
-    return await asyncio.to_thread(_load_web_page, url)
+    try:
+        return await asyncio.to_thread(_load_web_page, url)
+    except (Timeout, ConnectionError):
+        return (
+            "웹 페이지를 불러올 수 없습니다. 사이트 연결이 실패했거나 응답 시간이 "
+            "초과되었습니다. URL과 접근 가능 여부를 확인하거나 다른 출처를 사용하세요."
+        )
 
 
 async def _get_notion_assignee_id(user_email: str | None) -> str | None:
