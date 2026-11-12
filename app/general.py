@@ -90,6 +90,7 @@ ROBOT_INSTRUCTIONS: str = (
     "- 집계·대조·명단 추출·시각화는 execute_python 도구를 사용하세요.\n"
     "- 파이썬 코드를 실행하고, 차트를 그리면 슬랙에 자동으로 업로드합니다.\n"
     "- 코드 내에서 `execute_athena_query(query, database)` 함수를 직접 호출할 수 있습니다.\n"
+    "- 구글 시트 링크는 웹 페이지 도구로 열지 말고, 코드 안에서 `list_tabs(sheet)`로 탭부터 본 뒤 `read_sheet`로 읽으세요.\n"
     "- plt.savefig()나 plt.show()를 호출하지 마세요. 자동으로 처리됩니다.\n"
     "- CSV·엑셀·ZIP 등 결과 파일은 코드 안에서 `upload_file(filename, data)`로 스레드에 직접 첨부하세요. 드라이브·S3 링크를 요청하지 마세요.\n"
     "- 쿼리 작성 시 Athena(Presto) SQL 문법을 사용합니다.\n"
