@@ -11,11 +11,16 @@ from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
 from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 
-from app.general import get_draft_revise, register_general_handlers
+from app.general import (
+    get_draft_revise,
+    get_thread_agent,
+    register_general_handlers,
+)
 from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
 from app.justin import register_justin_handlers
 from app.ops_mail import register_ops_mail_handlers
+from app.scheduled_task import run_due_tasks
 from app.sms import register_sms_handlers
 from service.db import get_dsn
 from scheduler import start_scheduler
@@ -72,7 +77,17 @@ async def main():
     get_dsn()
 
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
-    start_scheduler()
+    scheduler = start_scheduler()
+    # 로봇에게 예약한 작업. 실행에 대표 봇이 필요해 config.yaml 이 아니라 여기서 건다.
+    # 회차마다 예약한 스레드에서, 예약한 사람이 다음 질문을 한 것처럼 에이전트를 돌린다.
+    scheduler.add_job(
+        run_due_tasks,
+        "interval",
+        minutes=1,
+        args=[get_thread_agent(app), app.client],
+        id="run_scheduled_tasks",
+        name="run_scheduled_tasks",
+    )
 
     # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
     handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])

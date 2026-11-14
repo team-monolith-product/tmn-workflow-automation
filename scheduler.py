@@ -37,8 +37,12 @@ def _make_job_callable(func, job_name: str, business_day_only: bool):
     return wrapper
 
 
-def start_scheduler():
-    """스케줄러를 생성하고 config.yaml의 작업을 등록한 뒤 시작"""
+def start_scheduler() -> AsyncIOScheduler:
+    """스케줄러를 생성하고 config.yaml의 작업을 등록한 뒤 시작
+
+    Returns:
+        AsyncIOScheduler: 시작한 스케줄러. 설정 밖의 작업을 더 걸 때 쓴다.
+    """
     config = load_config()
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
@@ -55,3 +59,4 @@ def start_scheduler():
 
     scheduler.start()
     print(f"[scheduler] {len(config.scheduled_jobs)}개 작업으로 스케줄러 시작")
+    return scheduler

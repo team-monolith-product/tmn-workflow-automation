@@ -6,7 +6,6 @@ LLM 호출 등 오래 걸리는 핸들러에서 Slack이 ~20초 후 이벤트를
 events_api 타입만 ack를 먼저 전송하고 처리를 백그라운드로 위임합니다.
 """
 
-import asyncio
 import logging
 from time import time
 
@@ -19,10 +18,9 @@ from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-logger = logging.getLogger(__name__)
+from .background import spawn
 
-# create_task 참조를 유지하여 GC 방지
-_background_tasks: set[asyncio.Task] = set()
+logger = logging.getLogger(__name__)
 
 
 class AsyncImmediateAckSocketModeHandler(AsyncSocketModeHandler):
@@ -37,9 +35,7 @@ class AsyncImmediateAckSocketModeHandler(AsyncSocketModeHandler):
                 SocketModeResponse(envelope_id=req.envelope_id)
             )
             # 리스너 루프를 블로킹하지 않도록 백그라운드 태스크로 실행
-            task = asyncio.create_task(self._dispatch_event(req))
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+            spawn(self._dispatch_event(req))
         else:
             # slash_commands, interactive 등은 ack에 응답 페이로드가 필요하므로
             # 기존 동작 유지 (핸들러 완료 후 ack)
