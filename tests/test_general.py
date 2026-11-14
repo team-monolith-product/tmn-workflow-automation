@@ -135,7 +135,6 @@ class TestGeneralBotDirectMessage:
         )
 
     async def test_answers_with_data_analysis_guide(self, mock_answer):
-        """로봇은 데이터 봇과 같은 데이터 분석 지침을 덧붙여 답한다"""
         app = build_general_app()
 
         # 앞 테스트와 같은 이벤트면 중복 이벤트 필터에 걸리므로 ts를 바꾼다

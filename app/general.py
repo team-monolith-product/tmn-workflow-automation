@@ -44,9 +44,6 @@ from service.slack_task_list import find_channel_task_list
 DATA_SOURCE_ID: str = "3e050c5a-11f3-4a3e-b6d0-498fe06c9d7b"  # 작업 DB (기본값)
 PROJECT_DATA_SOURCE_ID: str = "1023943f-84d1-4223-a5a6-0c26e22d09f0"  # 프로젝트 DB
 
-# 데이터 분석 지침. app/data_bot.py 시스템 프롬프트의 'Athena 데이터베이스 가이드'부터
-# '파이썬 실행'까지와 Presto 문법 안내를 옮겨 적은 것이다.
-# DB 안내든 도구 사용법이든 어느 쪽을 고치면 두 곳을 함께 고친다.
 ROBOT_INSTRUCTIONS: str = (
     "\n\n"
     "Athena 데이터베이스 가이드:\n"
@@ -240,7 +237,6 @@ async def _build_tools(
                 draft_sms=draft_sms.coroutine,
             )
         ]
-        # 데이터 봇과 같은 데이터 분석 도구. 사용 지침은 ROBOT_INSTRUCTIONS 에 있다.
         + [
             list_redash_dashboards,
             read_redash_dashboard,
