@@ -14,7 +14,6 @@ from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 from app.general import get_draft_revise, register_general_handlers
 from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
-from app.data_bot import register_data_handlers
 from app.justin import register_justin_handlers
 from app.ops_mail import register_ops_mail_handlers
 from app.sms import register_sms_handlers
@@ -51,7 +50,6 @@ sentry_sdk.init(
 # 앱 초기화
 app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
 app_contents = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_CONTENTS"))
-app_data = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_DATA"))
 app_justin = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN_JUSTIN"))
 
 # 이벤트 핸들러 등록
@@ -65,7 +63,6 @@ register_knowledge_middleware(app)
 register_sms_handlers(app, revise=get_draft_revise(app))
 register_ops_mail_handlers(app, revise=get_draft_revise(app))
 register_contents_handlers(app_contents)
-register_data_handlers(app_data)
 register_justin_handlers(app_justin)
 
 
@@ -85,10 +82,6 @@ async def main():
         app_contents, os.environ["SLACK_APP_TOKEN_CONTENTS"]
     ).start_async()
 
-    data_coroutine = AsyncImmediateAckSocketModeHandler(
-        app_data, os.environ["SLACK_APP_TOKEN_DATA"]
-    ).start_async()
-
     justin_coroutine = AsyncImmediateAckSocketModeHandler(
         app_justin, os.environ["SLACK_APP_TOKEN_JUSTIN"]
     ).start_async()
@@ -96,7 +89,6 @@ async def main():
     await asyncio.gather(
         bot_coroutine,
         contents_coroutine,
-        data_coroutine,
         justin_coroutine,
     )
 

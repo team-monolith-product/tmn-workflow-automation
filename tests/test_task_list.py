@@ -484,7 +484,6 @@ async def build_tools_with(channel: str, **task_list_patch) -> set[str]:
 
 
 async def test_build_tools_includes_data_analysis_tools():
-    """로봇 도구에 데이터 봇과 같은 Redash·Athena 도구가 들어간다"""
     names = await build_tools_with(CHANNEL, return_value=None)
 
     assert {

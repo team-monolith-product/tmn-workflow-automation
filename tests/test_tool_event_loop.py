@@ -1,11 +1,3 @@
-"""
-데이터 봇 툴이 단일 이벤트 루프 위에서 도는지 검증하는 테스트
-
-동기 툴(`@tool def`)을 하나라도 두면 langchain이 `invoke` 전체를 워커 스레드로 넘기고
-그 안에서 콜백을 새 이벤트 루프로 돌린다. 그러면 콜백 핸들러가 들고 있는
-`asyncio.Lock` 같은 루프 종속 객체가 깨진다.
-"""
-
 import asyncio
 import contextlib
 from unittest.mock import AsyncMock, patch
