@@ -1,10 +1,12 @@
-"""Notion 페이지를 파일 메타데이터가 불완전해도 마크다운으로 변환합니다."""
+"""Notion 페이지의 불완전한 파일과 빈 표도 마크다운으로 변환합니다."""
 
 import re
 from typing import Any
 
 from notion_client import Client
 from notion_to_md import NotionToMarkdown
+from notion_to_md.utils import md
+from notion_to_md.utils.notion import get_block_children
 
 
 def _file_without_type_to_markdown(block: dict[str, Any], page_id: str) -> str | None:
@@ -26,6 +28,24 @@ def _file_without_type_to_markdown(block: dict[str, Any], page_id: str) -> str |
     return f"[{title}]({url})"
 
 
+def _table_to_markdown(converter: NotionToMarkdown, block: dict[str, Any]) -> str:
+    """행이 없는 표는 비우고, 정상 표는 기존 셀·표 렌더링을 유지합니다."""
+    rows = []
+    if block.get("has_children"):
+        for child in get_block_children(converter.notion_client, block["id"]):
+            if child["type"] == "table_row":
+                rows.append(
+                    [
+                        converter.block_to_markdown(
+                            {"type": "paragraph", "paragraph": {"rich_text": cell}}
+                        )
+                        for cell in child["table_row"].get("cells", [])
+                    ]
+                )
+    # notion-to-md는 빈 행 목록에도 첫 행을 헤더로 읽어 IndexError가 난다.
+    return md.table(rows) if rows else ""
+
+
 def page_to_markdown(client: Client, page_id: str) -> str:
     """페이지 본문과 파일명을 보존하며 마크다운 문자열로 변환합니다.
 
@@ -39,6 +59,9 @@ def page_to_markdown(client: Client, page_id: str) -> str:
     converter = NotionToMarkdown(notion_client=client)
     converter.set_custom_transformer(
         "file", lambda block: _file_without_type_to_markdown(block, page_id)
+    )
+    converter.set_custom_transformer(
+        "table", lambda block: _table_to_markdown(converter, block)
     )
     blocks = converter.page_to_markdown(page_id)
     return converter.to_markdown_string(blocks).get("parent", "")

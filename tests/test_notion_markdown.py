@@ -1,4 +1,4 @@
-"""파일 메타데이터가 불완전한 페이지의 실제 변환기 회귀 테스트."""
+"""불완전한 파일과 빈 표가 있는 페이지의 실제 변환기 회귀 테스트."""
 
 from unittest.mock import Mock
 
@@ -120,4 +120,94 @@ def test_api_errors_still_propagate():
     client.blocks.children.list.side_effect = TimeoutError("Notion timeout")
 
     with pytest.raises(TimeoutError, match="Notion timeout"):
+        page_to_markdown(client, PAGE_ID)
+
+
+def _table(has_children):
+    return {
+        "id": "table",
+        "type": "table",
+        "has_children": has_children,
+        "table": {"table_width": 2, "has_column_header": True, "has_row_header": False},
+    }
+
+
+def _table_client(blocks, rows):
+    client = _client([])
+
+    def children(*, block_id, start_cursor):
+        return {
+            "results": rows if block_id == "table" else blocks,
+            "has_more": False,
+            "next_cursor": None,
+        }
+
+    client.blocks.children.list.side_effect = children
+    return client
+
+
+@pytest.mark.parametrize("has_children", [False, True])
+def test_empty_table_preserves_surrounding_text(has_children):
+    client = _table_client(
+        [_paragraph("앞 본문"), _table(has_children), _paragraph("뒤 본문")], []
+    )
+
+    markdown = page_to_markdown(client, PAGE_ID)
+
+    assert [line for line in markdown.splitlines() if line] == ["앞 본문", "뒤 본문"]
+
+
+def test_nested_empty_table_preserves_sibling_content():
+    client = _client([])
+    client.blocks.children.list.side_effect = [
+        {
+            "results": [
+                {
+                    "id": "toggle",
+                    "type": "toggle",
+                    "has_children": True,
+                    "toggle": {"rich_text": [_text("상세")]},
+                }
+            ]
+        },
+        {"results": [_table(False), _paragraph("중첩 본문")]},
+    ]
+
+    markdown = page_to_markdown(client, PAGE_ID)
+
+    assert "<summary>상세</summary>" in markdown
+    assert "중첩 본문" in markdown
+
+
+def test_normal_table_keeps_cells_and_rich_text():
+    linked = {**_text("원문"), "href": "https://example.com"}
+    bold = {**_text("중요"), "annotations": {"bold": True}}
+    rows = [
+        {
+            "id": "header",
+            "type": "table_row",
+            "table_row": {"cells": [[_text("제목")], [_text("링크")]]},
+        },
+        {"id": "row", "type": "table_row", "table_row": {"cells": [[bold], [linked]]}},
+    ]
+    client = _table_client([_table(True)], rows)
+
+    markdown = page_to_markdown(client, PAGE_ID)
+
+    assert "제목" in markdown
+    assert "링크" in markdown
+    assert "**중요**" in markdown
+    assert "[원문](https://example.com)" in markdown
+    assert markdown.count("**중요**") == 1
+
+
+def test_table_api_errors_still_propagate():
+    client = _client([])
+    client.blocks.children.list.side_effect = [
+        {"results": [_table(True)]},
+        {"results": []},
+        TimeoutError("Table timeout"),
+    ]
+
+    with pytest.raises(TimeoutError, match="Table timeout"):
         page_to_markdown(client, PAGE_ID)

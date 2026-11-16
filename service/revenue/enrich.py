@@ -65,11 +65,10 @@ WHERE school_name IS NOT NULL AND school_name <> ''
 """
 SQL_DEALS = """
 SELECT o.school_name AS school,
-       json_format(CAST(array_sort(array_agg(DISTINCT nullif(d."예산출처", ''))) AS JSON)) AS budget,
-       json_format(CAST(array_sort(array_agg(DISTINCT nullif(d."사용학기", ''))) AS JSON)) AS terms
+       d."예산출처" AS budget,
+       json_format(CAST(d."사용학기" AS JSON)) AS terms
 FROM notion_prd.organizations o
 JOIN notion_prd.deals d ON contains(d."학교", o.id)
-GROUP BY o.school_name
 """
 SQL_PROGRAMS = """
 SELECT "이름" AS name, "발주처" AS client, "사업비" AS budget,
@@ -141,8 +140,8 @@ def customer_key(name: str) -> str:
 
 
 def crm_list(value: Any) -> list[str]:
-    values = json.loads(value) if isinstance(value, str) else (value or [])
-    return [v for v in values if v]
+    values = json.loads(value) if isinstance(value, str) else value
+    return [v for v in (values or []) if v]
 
 
 def customer_info(name: str, orgs: list[dict], deals: list[dict]) -> dict:
@@ -202,6 +201,17 @@ def enrich_rows(
 
 async def fetch_crm() -> tuple[list[dict], list[dict], list[dict]]:
     orgs = await run_sql(SQL_ORGS)
-    deals = await run_sql(SQL_DEALS)
+    deal_rows = await run_sql(SQL_DEALS)
+    # 예산출처는 문자열, 사용학기는 복수 선택 배열이다. 학교별로 개별 값을 합친다.
+    schools: dict[str, dict[str, set[str]]] = {}
+    for row in deal_rows:
+        values = schools.setdefault(row["school"], {"budget": set(), "terms": set()})
+        if row["budget"]:
+            values["budget"].add(row["budget"])
+        values["terms"].update(crm_list(row["terms"]))
+    deals = [
+        {"school": school, **{key: sorted(values) for key, values in fields.items()}}
+        for school, fields in schools.items()
+    ]
     programs = await run_sql(SQL_PROGRAMS)
     return orgs, deals, programs

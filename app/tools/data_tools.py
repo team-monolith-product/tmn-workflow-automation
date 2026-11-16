@@ -1,9 +1,9 @@
 """
 데이터 분석 도구 묶음입니다.
 
-팀모노리스 로봇(app/general.py), 데이터봇(app/data_bot.py), MCP(app/robot_mcp.py)가
-모두 여기서 받습니다. 셋이 같은 도구를 쓰는 것을 조립하는 곳을 하나로 두어
-보장합니다 -- 따로 조립하면 한쪽에만 도구가 생기거나 빠집니다. 도구의 사용
+팀모노리스 로봇(app/general.py)과 MCP(app/robot_mcp.py)가 모두 여기서 받습니다.
+둘이 같은 도구를 쓰는 것을 조립하는 곳을 하나로 두어 보장합니다 -- 따로
+조립하면 한쪽에만 도구가 생기거나 빠집니다. 도구의 사용
 지침(DATA_GUIDE·SLACK_DATA_GUIDE)도 도구 곁인 여기에 둡니다.
 """
 
@@ -20,9 +20,7 @@ from app.tools.redash_tools import (
 )
 from app.tools.slack_place import SlackPlace
 
-# 데이터 분석 지침. app/data_bot.py 시스템 프롬프트의 'Athena 데이터베이스 가이드'부터
-# '파이썬 실행'까지와 Presto 문법 안내를 옮겨 적은 것이다.
-# DB 안내든 도구 사용법이든 어느 쪽을 고치면 두 곳을 함께 고친다.
+# 데이터 분석 지침.
 #
 # 어디서 물어도 같은 DB·도구 안내(DATA_GUIDE)와, 결과가 슬랙 스레드로 가는 경우의
 # 지침(SLACK_DATA_GUIDE)을 나눠 둔다. MCP 는 스레드가 없어 앞의 것만 쓴다

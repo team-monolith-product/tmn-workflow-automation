@@ -7,6 +7,7 @@ from revenue_fixture import TABS, sheet_response
 
 from scripts import sync_revenue_ledger as batch
 from scripts.sync_revenue_ledger import KST
+from service.revenue import enrich
 from service.revenue.enrich import crm_list
 
 
@@ -56,6 +57,52 @@ def test_dry_run_does_not_connect_database_or_report_sentry(source_data, monkeyp
 def test_crm_list_preserves_embedded_comma_and_all_values():
     assert crm_list('["A,B", "C", null, ""]') == ["A,B", "C"]
     assert crm_list(None) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_crm_merges_multiselect_terms_across_deals(monkeypatch):
+    orgs = [{"school": "도담고등학교", "level": "고등학교", "office": "세종교육청"}]
+    programs = [{"name": "사업"}]
+    query = AsyncMock(
+        side_effect=[
+            orgs,
+            [
+                {
+                    "school": "도담고등학교",
+                    "budget": "자체,정책",
+                    "terms": '["2학기", "1학기"]',
+                },
+                {
+                    "school": "도담고등학교",
+                    "budget": "교육청",
+                    "terms": '["1학기", "", null]',
+                },
+                {"school": "도담고등학교", "budget": "교육청", "terms": "[]"},
+                {"school": "빈학교", "budget": "", "terms": None},
+                {"school": "빈학교", "budget": None, "terms": "null"},
+                {"school": "다른학교", "budget": "기타", "terms": '["여름방학"]'},
+            ],
+            programs,
+        ]
+    )
+    monkeypatch.setattr(enrich, "run_sql", query)
+
+    actual_orgs, deals, actual_programs = await enrich.fetch_crm()
+
+    assert actual_orgs == orgs and actual_programs == programs
+    assert deals == [
+        {
+            "school": "도담고등학교",
+            "budget": ["교육청", "자체,정책"],
+            "terms": ["1학기", "2학기"],
+        },
+        {"school": "빈학교", "budget": [], "terms": []},
+        {"school": "다른학교", "budget": ["기타"], "terms": ["여름방학"]},
+    ]
+    assert enrich.customer_info("도담고등학교", orgs, deals)["terms"] == [
+        "1학기",
+        "2학기",
+    ]
 
 
 COMPLETED_AT = datetime(2026, 9, 14, 0, 10, tzinfo=KST)

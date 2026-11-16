@@ -49,12 +49,13 @@ class ToolStatusHandler(BaseCallbackHandler):
         """
         툴 실행 상태를 Slack 메시지 형식으로 포맷팅합니다.
 
-        Slack section block의 3000자 제한을 고려하여 params는 50자로 통일
+        짧은 이력은 모두 표시하고, 길어지면 완료 건수와 최신 실행/오류를 표시한다.
 
         Returns:
             str: 포맷된 상태 메시지
         """
         MAX_PARAM_LENGTH = 50
+        MAX_STATUS_LENGTH = 3000
         status_lines = []
 
         # LangSmith 링크 추가 (개발자용)
@@ -74,6 +75,8 @@ class ToolStatusHandler(BaseCallbackHandler):
                 status_lines.append(f"🔍 LangSmith Run ID: `{self.langsmith_run_id}`")
 
             status_lines.append("")  # 빈 줄 추가
+
+        header_lines = status_lines.copy()
 
         # 상태별로 분류
         completed = [t for t in self.tool_history if t["status"] == "completed"]
@@ -110,7 +113,30 @@ class ToolStatusHandler(BaseCallbackHandler):
             )
             status_lines.append(f"⏳ {tool_info['name']}({params_short})")
 
-        return "\n".join(status_lines)
+        status_text = "\n".join(status_lines)
+        if len(status_text) <= MAX_STATUS_LENGTH:
+            return status_text
+
+        # 완료 이력을 요약하고 실행 중인 호출부터 보여 준다.
+        summary = (
+            f"✅ 완료 {len(completed)}개 · ❌ 오류 {len(errors)}개 · "
+            f"⏳ 실행 중 {len(running)}개"
+        )
+        status_text = "\n".join(header_lines + [summary])
+        footer = "\n… 이전 호출 상세 생략"
+        for tools, icon in ((running, "⏳"), (errors, "❌")):
+            for tool_info in reversed(tools):
+                params = tool_info["params"]
+                params_short = (
+                    params[:MAX_PARAM_LENGTH] + "..."
+                    if len(params) > MAX_PARAM_LENGTH
+                    else params
+                )
+                line = f"\n{icon} {tool_info['name']}({params_short})"
+                if len(status_text) + len(line) + len(footer) > MAX_STATUS_LENGTH:
+                    return status_text + footer
+                status_text += line
+        return status_text + footer
 
     async def on_chain_start(
         self,
