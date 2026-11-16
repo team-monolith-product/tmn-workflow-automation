@@ -527,12 +527,6 @@ def register_general_handlers(app):
             "리뷰 통계 수집",
         ),
         (
-            ("collect-coding-rule-feedbacks", "ccrf"),
-            "scripts.collect_coding_rule_feedbacks",
-            "main",
-            "코딩 규칙 피드백 수집",
-        ),
-        (
             ("post-scrum-message", "psm"),
             "scripts.post_scrum_message",
             "main",
