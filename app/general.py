@@ -16,7 +16,6 @@ from . import analyze_oom, route_bug, route_dev_env_infra_bug
 from .background import spawn
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .ops_mail import get_ops_mail_tools
-from .scheduled_task import get_scheduled_task_tools
 from .sms import get_draft_sms_tool
 from .task_list import get_enable_task_list_tools, get_task_list_write_tools
 from .tools.notion_page_tools import get_notion_page_tools
@@ -209,7 +208,6 @@ async def build_thread_tools(
         + get_knowledge_channel_tools(client, channel)
         + [draft_sms]
         + get_ops_mail_tools(client, channel, thread_ts)
-        + get_scheduled_task_tools(channel, thread_ts, user_id)
         + [get_post_channel_message_tool(client, channel)]
         # MCP 와 같은 데이터 분석 도구. 사용 지침은 ROBOT_INSTRUCTIONS 에 있다.
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
@@ -264,7 +262,6 @@ def get_thread_agent(app) -> ThreadAgent:
     슬랙 이벤트 없이 에이전트를 태울 때 씁니다. 질문(text)은 스레드의 메시지가
     아니라 밖에서 오므로, 스레드의 마지막 메시지도 대화 기록에 남깁니다.
         - 문자·메일 초안 카드의 [수정]: get_draft_revise 가 수정 요청으로 감싸 태운다
-        - 예약 작업의 회차: 예약을 건 스레드에서 예약한 사람이 물은 것처럼 돈다
 
     app/sms.py 등이 아니라 여기서 만듭니다. 저쪽에서 이 모듈을 부르면
     general → sms → general 로 순환합니다.
