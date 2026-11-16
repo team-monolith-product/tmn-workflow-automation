@@ -4,6 +4,7 @@ Redash 관련 LangChain Tools
 
 from typing import Annotated
 from langchain_core.tools import tool
+from pydantic import Field
 from api import redash
 
 
@@ -37,7 +38,7 @@ async def list_redash_dashboards() -> str:
 
 @tool
 async def read_redash_dashboard(
-    dashboard_id: Annotated[int, "대시보드 ID"],
+    dashboard_id: Annotated[int, Field(description="대시보드 ID")],
 ) -> str:
     """
     Redash 대시보드의 쿼리 목록을 조회합니다.
@@ -107,7 +108,7 @@ async def read_redash_dashboard(
 
 @tool
 async def read_redash_query(
-    query_id: Annotated[int, "쿼리 ID"],
+    query_id: Annotated[int, Field(description="쿼리 ID")],
 ) -> str:
     """
     Redash 쿼리의 상세 정보를 조회합니다.

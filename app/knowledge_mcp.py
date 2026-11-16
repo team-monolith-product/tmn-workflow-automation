@@ -10,6 +10,9 @@
 불투명 문자열이라 서명으로 확인할 것이 없어서입니다. 만료와 폐기 판정은
 발급자만 할 수 있습니다.
 
+같은 /mcp 에 팀모노리스 로봇의 데이터 조회 도구도 함께 엽니다(app/robot_mcp.py).
+플러그인이 이미 이 경로에 붙어 있어 따로 설치할 것이 없습니다.
+
 FastAPI에 mount할 때 lifespan을 함께 넘겨야 합니다. 세션 매니저가 뜨지 않으면
 /mcp 요청이 전부 실패합니다.
 """
@@ -28,6 +31,7 @@ from app.mcp_common import (
     admin_auth_settings,
     build_streamable_http_app,
 )
+from app.robot_mcp import ROBOT_MCP_INSTRUCTIONS, register_robot_tools
 from service.knowledge.query import (
     DEFAULT_CHAR_LIMIT,
     QUERY_TOOL_DESCRIPTION,
@@ -57,7 +61,7 @@ def build_mcp() -> MCPServer:
     """
     mcp: MCPServer = MCPServer(
         "team-monolith-knowledge",
-        instructions=INSTRUCTIONS,
+        instructions=f"{INSTRUCTIONS}\n\n{ROBOT_MCP_INSTRUCTIONS}",
         token_verifier=AdminRailsTokenVerifier(),
         auth=admin_auth_settings(os.environ["MCP_RESOURCE_URL"]),
     )
@@ -68,6 +72,7 @@ def build_mcp() -> MCPServer:
         # psycopg는 동기라 스레드에서 실행합니다.
         return await asyncio.to_thread(run_query, sql, token.email, "mcp", char_limit)
 
+    register_robot_tools(mcp)
     return mcp
 
 

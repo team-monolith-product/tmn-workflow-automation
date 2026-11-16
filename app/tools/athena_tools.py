@@ -2,9 +2,15 @@
 AWS Athena 관련 LangChain Tools
 """
 
+import re
 from typing import Annotated, Callable, Any
 from langchain_core.tools import tool
+from pydantic import Field
 from api import athena
+
+# 조회 문의 첫 낱말. Athena 는 한 번에 한 문장만 실행하므로 첫 낱말로 충분하다.
+# EXPLAIN 은 뺀다 -- EXPLAIN ANALYZE 는 문장을 실제로 실행한다.
+_READ_ONLY_KEYWORDS = ("SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "VALUES")
 
 
 def format_query_results_as_markdown(results: dict) -> str:
@@ -212,6 +218,65 @@ def get_execute_athena_query_tool(
             return f"쿼리 실행 중 오류 발생: {str(e)}"
 
     return execute_athena_query
+
+
+def is_read_only_query(query: str) -> bool:
+    """조회만 하는 쿼리인지 봅니다.
+
+    앞의 공백·주석·여는 괄호를 한 번 훑어 건너뛴 뒤 첫 낱말을 봅니다. 정규식
+    하나로 쓰면 주석이 겹친 입력에서 백트래킹이 폭발하므로 직접 훑습니다.
+
+    Args:
+        query: SQL 쿼리
+
+    Returns:
+        bool: _READ_ONLY_KEYWORDS 의 낱말로 시작하면 True
+    """
+    i, end = 0, len(query)
+    while i < end:
+        if query[i].isspace() or query[i] == "(":
+            i += 1
+        elif query.startswith("--", i):
+            newline = query.find("\n", i)
+            i = end if newline == -1 else newline + 1
+        elif query.startswith("/*", i):
+            closing = query.find("*/", i + 2)
+            if closing == -1:
+                return False
+            i = closing + 2
+        else:
+            break
+    word = re.match(r"[A-Za-z]+", query[i:])
+    return word is not None and word.group().upper() in _READ_ONLY_KEYWORDS
+
+
+# MCP 처럼 슬랙 스레드가 없고, 쓰는 사람이 쿼리를 직접 정하는 곳에서 쓴다.
+# 테이블을 만들거나 지우는 문장은 IAM 권한과 상관없이 여기서 막는다.
+@tool("execute_athena_query")
+async def read_only_athena_query(
+    query: Annotated[str, Field(description="실행할 SQL 쿼리. 조회 문만 됩니다")],
+    database: Annotated[
+        str, Field(description="사용할 Athena 데이터베이스 이름 (필수)")
+    ],
+) -> str:
+    """
+    AWS Athena에서 조회 쿼리를 실행하고 결과를 마크다운 표로 돌려줍니다.
+    테이블을 만들거나 바꾸는 문장은 실행하지 않습니다.
+
+    **중요**: database 파라미터는 필수입니다.
+    Redash 쿼리를 참고할 때는 해당 쿼리에서 사용된 데이터베이스를 확인하고
+    동일한 데이터베이스를 반드시 지정해야 합니다.
+
+    **SHOW TABLES 구문 주의사항**: Athena 의 SHOW TABLES 는 LIKE 가 아니라
+    정규표현식을 씁니다. 예: SHOW TABLES IN jce_prd '*activ*'
+    """
+    if not is_read_only_query(query):
+        return f"조회 문({'·'.join(_READ_ONLY_KEYWORDS)})만 실행할 수 있습니다."
+    try:
+        results = await athena.execute_and_wait(query, database=database)
+        return format_query_results_as_markdown(results)
+    except Exception as e:
+        return f"쿼리 실행 중 오류 발생: {str(e)}"
 
 
 # 기본 tool (backward compatibility를 위해 유지)
