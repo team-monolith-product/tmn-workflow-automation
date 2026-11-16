@@ -242,15 +242,6 @@ scheduled_jobs:
       day_of_week: mon-fri
     business_day_only: false
 
-  - name: collect_coding_rule_feedbacks
-    module: scripts.collect_coding_rule_feedbacks
-    function: main
-    cron:
-      hour: 9
-      minute: 15
-      day_of_week: mon
-    business_day_only: false
-
   - name: post_scrum_intro
     module: scripts.post_scrum_intro
     function: main

@@ -7,14 +7,11 @@ import concurrent.futures
 import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Any
 
 # PyGithub 라이브러리에서 필요한 클래스 임포트
 from github import Auth, Github, GithubIntegration
 from github.PullRequest import PullRequest
 from github.TimelineEvent import TimelineEvent
-from github.PullRequestComment import PullRequestComment
-from github.Reaction import Reaction
 
 
 def get_github_client() -> Github:
@@ -127,71 +124,3 @@ def fetch_pr_timeline_events_parallel(
             pr_id_to_events[pr_id] = events
 
     return pr_id_to_events
-
-
-def fetch_pr_review_comments_parallel(
-    pull_requests: list[PullRequest],
-) -> dict[int, list[PullRequestComment]]:
-    """
-    여러 PR의 리뷰 댓글을 병렬로 가져옵니다.
-
-    Args:
-        pull_requests: PR 객체 목록
-
-    Returns:
-        dict[int, list[PullRequestComment]]: PR의 고유 ID와 관련 리뷰 댓글을 매핑한 딕셔너리
-    """
-    if not pull_requests:
-        return {}
-
-    # 병렬 처리를 위한 최대 워커 수 설정
-    MAX_WORKERS = min(50, len(pull_requests))
-
-    # 각 PR의 리뷰 댓글을 가져오는 함수
-    def fetch_pr_comments(pr):
-        return pr.id, list(pr.get_review_comments())
-
-    # 병렬 처리
-    pr_id_to_comments = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # 모든 PR에 대해 병렬로 리뷰 댓글 로드
-        for pr_id, comments in executor.map(fetch_pr_comments, pull_requests):
-            pr_id_to_comments[pr_id] = comments
-
-    return pr_id_to_comments
-
-
-def fetch_comment_reactions_parallel(
-    comments: list[PullRequestComment],
-) -> dict[int, list[Reaction]]:
-    """
-    여러 PR 리뷰 댓글의 반응(Reaction)을 병렬로 가져옵니다.
-    PullRequestComment 클래스의 get_reactions() 메서드를 활용합니다.
-
-    Args:
-        comments: PullRequestComment 객체 목록
-
-    Returns:
-        dict[int, list[Reaction]]: 댓글 ID와 반응 객체 목록을 매핑한 딕셔너리
-    """
-    if not comments:
-        return {}
-
-    MAX_WORKERS = min(50, len(comments))
-
-    def fetch_comment_reaction(comment):
-        reactions = list(comment.get_reactions())
-        return comment.id, reactions
-
-    # 병렬 처리
-    comment_id_to_reactions = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(fetch_comment_reaction, comment) for comment in comments
-        ]
-
-        for future in concurrent.futures.as_completed(futures):
-            comment_id, reactions = future.result()
-            comment_id_to_reactions[comment_id] = reactions
-
-    return comment_id_to_reactions
