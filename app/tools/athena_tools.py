@@ -169,7 +169,7 @@ async def _post_result(place: SlackPlace, query: str, results: dict) -> str:
             thread_ts=place.thread_ts,
         )
     else:
-        await place.say(
+        await place.post(
             {
                 "blocks": [
                     {
@@ -177,14 +177,10 @@ async def _post_result(place: SlackPlace, query: str, results: dict) -> str:
                         "text": {"type": "mrkdwn", "text": f"```\n{query}\n```"},
                     }
                 ]
-            },
-            thread_ts=place.thread_ts,
+            }
         )
 
-    await place.say(
-        {"blocks": [format_query_results_as_slack_table(results)]},
-        thread_ts=place.thread_ts,
-    )
+    await place.post({"blocks": [format_query_results_as_slack_table(results)]})
 
     # 행 수 계산 (헤더 제외)
     rows = results.get("ResultSet", {}).get("Rows", [])
@@ -207,40 +203,22 @@ def get_execute_athena_query_tool(place: SlackPlace | None = None) -> Structured
         execute_athena_query tool
     """
 
-    async def run(query: str, database: str, post_to: SlackPlace | None) -> str:
+    async def execute_athena_query(
+        query: str, database: str, show_result_to_user: bool = False
+    ) -> str:
         try:
             results = await athena.execute_and_wait(query, database=database)
-            if post_to:
-                return await _post_result(post_to, query, results)
+            # show_result_to_user 는 place 가 있을 때의 스키마에만 있다.
+            if show_result_to_user:
+                return await _post_result(place, query, results)
             # Agent가 분석용으로 사용할 때는 마크다운 테이블 반환
             return format_query_results_as_markdown(results)
         except Exception as e:
             return f"쿼리 실행 중 오류 발생: {str(e)}"
 
-    if place is None:
-
-        async def execute_athena_query(query: str, database: str) -> str:
-            return await run(query, database, None)
-
-        return StructuredTool.from_function(
-            coroutine=execute_athena_query,
-            name="execute_athena_query",
-            description=ATHENA_QUERY_DESCRIPTION,
-            args_schema=AthenaQueryInput,
-        )
-
-    async def execute_athena_query_in_thread(
-        query: str, database: str, show_result_to_user: bool = False
-    ) -> str:
-        return await run(query, database, place if show_result_to_user else None)
-
     return StructuredTool.from_function(
-        coroutine=execute_athena_query_in_thread,
+        coroutine=execute_athena_query,
         name="execute_athena_query",
-        description=ATHENA_QUERY_DESCRIPTION + SLACK_RESULT_GUIDE,
-        args_schema=SlackAthenaQueryInput,
+        description=ATHENA_QUERY_DESCRIPTION + (SLACK_RESULT_GUIDE if place else ""),
+        args_schema=SlackAthenaQueryInput if place else AthenaQueryInput,
     )
-
-
-# 기본 tool (backward compatibility를 위해 유지)
-execute_athena_query = get_execute_athena_query_tool()

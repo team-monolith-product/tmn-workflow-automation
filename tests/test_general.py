@@ -190,12 +190,12 @@ async def test_athena_tool_posts_result_to_thread():
             "get_update_notion_task_status_tool",
         )
     }
-    say = AsyncMock()
+    client = AsyncMock()
     with patch.object(general, "find_channel_task_list", return_value=None):
         with patch.multiple(general, **notion_factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
                 tools = await general.build_robot_tools(
-                    AsyncMock(), "U1", "C123", "1700000000.000100", say
+                    client, "U1", "C123", "1700000000.000100"
                 )
     athena_tool = next(
         tool for tool in tools if getattr(tool, "name", "") == "execute_athena_query"
@@ -221,9 +221,12 @@ async def test_athena_tool_posts_result_to_thread():
             }
         )
 
-    assert say.await_count == 2  # 실행한 SQL, 결과 표
+    posts = client.chat_postMessage.await_args_list
+    assert len(posts) == 2  # 실행한 SQL, 결과 표
     assert all(
-        call.kwargs["thread_ts"] == "1700000000.000100" for call in say.await_args_list
+        call.kwargs["channel"] == "C123"
+        and call.kwargs["thread_ts"] == "1700000000.000100"
+        for call in posts
     )
 
 

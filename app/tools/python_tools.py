@@ -170,8 +170,7 @@ def _trace(frame, event, arg):
 
 
 def _run_code(
-    code: str,
-    injected: dict[str, Callable[..., Any]],
+    code: str, injected: dict[str, Callable[..., Any]]
 ) -> tuple[str, io.BytesIO | None, str | None]:
     """
     LLM이 만든 코드를 실행하고 결과를 반환합니다.
@@ -201,7 +200,6 @@ def _run_code(
         # 추적은 이 워커 스레드에만 걸린다. finally 에서 반드시 푼다.
         sys.settrace(_trace)
         exec(code, exec_globals)
-        sys.settrace(None)
 
         fig = plt.gcf()
         if not fig.get_axes():
@@ -378,8 +376,7 @@ def get_execute_python_tool(
             injected["upload_file"] = upload_file
 
         stdout_output, img_buffer, error_traceback = await loop.run_in_executor(
-            _code_executor,
-            functools.partial(_run_code, code, injected),
+            _code_executor, functools.partial(_run_code, code, injected)
         )
         # DataFrame 을 통째로 print 하면 컨텍스트가 통째로 날아간다.
         if len(stdout_output) > STDOUT_LIMIT:

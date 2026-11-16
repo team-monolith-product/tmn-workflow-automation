@@ -270,7 +270,7 @@ async def answer_data_analysis(
     # 로봇·MCP 와 같은 데이터 분석 도구. 결과 표·차트는 이 스레드에 올라간다.
     # 파이썬 도구에는 read_sheet 도 함께 주입된다(app/tools/python_tools.py). 데이터봇도
     # 구글 시트를 읽어 Athena 결과와 맞춰 볼 수 있다 -- 도구 설명에 사용법이 있다.
-    tools = get_data_tools(SlackPlace(slack_client, channel, thread_ts, say))
+    tools = get_data_tools(SlackPlace(slack_client, channel, thread_ts))
 
     agent_executor = create_react_agent(chat_model, tools, debug=True)
 

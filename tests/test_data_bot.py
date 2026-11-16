@@ -152,7 +152,7 @@ class TestAthenaTools:
             }
         }
 
-        result = await athena_tools.execute_athena_query.ainvoke(
+        result = await athena_tools.get_execute_athena_query_tool().ainvoke(
             {"query": "SELECT COUNT(*) as count FROM test", "database": "test_db"}
         )
 

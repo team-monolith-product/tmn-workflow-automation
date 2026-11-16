@@ -4,16 +4,16 @@
 슬랙에서 로봇에게 시킬 수 있는 일은 Claude·Codex 같은 CLI 에이전트도 할 수
 있어야 합니다. 도구를 새로 짜지 않고 로봇이 쓰는 도구를 그대로 씁니다. 로봇에
 도구가 늘면 여기도 따라 늘어야 하므로, 목록을 따로 들고 있지 않고 로봇의
-build_robot_tools 를 그대로 부릅니다.
+build_thread_tools 를 그대로 부릅니다.
 
 도구는 두 갈래로 엽니다.
 
     ① 어디서 물어도 똑같이 도는 도구 (Athena·Redash·파이썬·노션 페이지)
        → MCP 도구로 바로 등록합니다. 로봇이 쓰는 get_data_tools·get_notion_page_tools
          를 스레드 없이(place=None) 그대로 부릅니다. 웹 검색과 페이지 읽기는
-         Claude·Codex 에 이미 있어 열지 않습니다.
+         Claude·Codex 에, 지식 질의는 이 서버에 이미 있어 열지 않습니다.
     ② 슬랙 스레드에 묶인 도구 (문자·메일 초안, 예약, 채널 공지, 노션 작업,
-       채널 작업 리스트, 지식 수집 켜고 끄기)
+       채널 작업 리스트, 지식 수집 켜고 끄기, 결과를 스레드에 올리는 Athena·파이썬)
        → 스레드 링크를 받아 list_robot_tools·call_robot_tool 로 부릅니다.
          로봇은 멘션이 온 채널과 질문한 사람으로 도구를 만들고, 채널과 스쿼드에
          따라 도구 구성과 입력 스키마가 달라집니다. 그래서 고정 목록으로 등록하지
@@ -38,9 +38,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
-from app.general import DATA_GUIDE, build_robot_tools, thread_say
+from app.general import build_thread_tools
 from app.mcp_common import AdminToken
-from app.tools.data_tools import get_data_tools
+from app.tools.data_tools import DATA_GUIDE, get_data_tools
 from app.tools.notion_page_tools import get_notion_page_tools
 from service.slack import get_email_to_user_id_async
 
@@ -154,7 +154,8 @@ def placeless_tools() -> list[BaseTool]:
     """슬랙 스레드 없이 똑같이 도는 로봇 도구입니다.
 
     로봇의 build_robot_tools 가 쓰는 것과 같은 함수를 스레드 없이 부릅니다. 웹
-    검색과 페이지 읽기는 MCP 클라이언트에 이미 있어 뺍니다.
+    검색과 페이지 읽기는 MCP 클라이언트에 이미 있어 뺍니다. 스레드에 묶인 도구는
+    build_thread_tools 가 따로 만들므로 둘이 겹치지 않습니다.
 
     Returns:
         list[BaseTool]: 로봇 도구 목록
@@ -265,32 +266,13 @@ async def thread_tools(slack: AsyncWebClient, slack_thread_url: str) -> list[Bas
         slack_thread_url: 슬랙 스레드의 메시지 링크
 
     Returns:
-        list[BaseTool]: 로봇 도구 중 MCP 에 바로 등록하지 않은 것
+        list[BaseTool]: 로봇 도구 중 그 스레드와 질문자에 묶인 것
     """
     channel, thread_ts = parse_slack_thread_url(slack_thread_url)
     user_id = await _requester(slack)
     await _check_place(slack, channel, user_id)
 
-    say = thread_say(slack, channel, thread_ts)
-    tools = await build_robot_tools(slack, user_id, channel, thread_ts, say)
-    # 바로 부를 수 있는 도구와 똑같은 것은 뺀다. 같은 설명·스키마가 두 번 나가고
-    # 같은 일을 두 길로 부르게 된다. 결과를 스레드에 올리는 Athena·파이썬은
-    # 설명과 스키마가 달라 남는다.
-    direct = {_fingerprint(t) for t in placeless_tools()}
-    return [t for t in tools if _fingerprint(t) not in direct]
-
-
-def _fingerprint(lc_tool: BaseTool) -> tuple[str, str, str]:
-    """도구가 같은지 비교할 이름·설명·입력 스키마입니다.
-
-    Args:
-        lc_tool: 로봇 도구
-
-    Returns:
-        tuple[str, str, str]: (이름, 설명, 입력 스키마 JSON)
-    """
-    schema = lc_tool.tool_call_schema.model_json_schema()
-    return lc_tool.name, lc_tool.description, json.dumps(schema, sort_keys=True)
+    return await build_thread_tools(slack, user_id, channel, thread_ts)
 
 
 def register_robot_tools(mcp: MCPServer, slack: AsyncWebClient) -> None:

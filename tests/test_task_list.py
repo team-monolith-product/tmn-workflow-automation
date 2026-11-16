@@ -477,7 +477,7 @@ async def build_tools_with(channel: str, **task_list_patch) -> set[str]:
         with patch.multiple(general, **factories):
             with patch.object(general, "_get_user_squad", AsyncMock(return_value=None)):
                 tools = await general.build_robot_tools(
-                    AsyncMock(), REQUESTER, channel, "1700000000.000100", AsyncMock()
+                    AsyncMock(), REQUESTER, channel, "1700000000.000100"
                 )
     return {getattr(tool, "name", tool) for tool in tools}
 

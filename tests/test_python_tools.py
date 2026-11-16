@@ -22,7 +22,7 @@ async def test_execute_python_success_with_chart():
 
     # 도구 생성
     tool = get_execute_python_tool(
-        SlackPlace(mock_slack_client, "C123456", "1234567890.123456", AsyncMock()),
+        SlackPlace(mock_slack_client, "C123456", "1234567890.123456"),
     )
 
     # 테스트용 파이썬 코드 (matplotlib 차트 생성)
@@ -66,7 +66,7 @@ async def test_execute_python_success_without_chart():
 
     # 도구 생성
     tool = get_execute_python_tool(
-        SlackPlace(mock_slack_client, "C123456", "1234567890.123456", AsyncMock()),
+        SlackPlace(mock_slack_client, "C123456", "1234567890.123456"),
     )
 
     # 테스트용 파이썬 코드 (차트 없음)
@@ -98,7 +98,7 @@ async def test_execute_python_failure():
 
     # 도구 생성
     tool = get_execute_python_tool(
-        SlackPlace(mock_slack_client, "C123456", "1234567890.123456", AsyncMock()),
+        SlackPlace(mock_slack_client, "C123456", "1234567890.123456"),
     )
 
     # 테스트용 파이썬 코드 (에러 발생)
@@ -143,7 +143,7 @@ async def test_execute_python_with_athena_mock():
 
         # 도구 생성
         tool = get_execute_python_tool(
-            SlackPlace(mock_slack_client, "C123456", "1234567890.123456", AsyncMock()),
+            SlackPlace(mock_slack_client, "C123456", "1234567890.123456"),
         )
 
         # 테스트용 파이썬 코드 (athena 사용)
@@ -221,7 +221,7 @@ def _슬랙에_올리는_도구():
     slack_client = AsyncMock()
     slack_client.files_upload_v2 = AsyncMock()
     tool = get_execute_python_tool(
-        SlackPlace(slack_client, "C123456", "1234567890.123456", AsyncMock()),
+        SlackPlace(slack_client, "C123456", "1234567890.123456"),
     )
     return tool, slack_client
 

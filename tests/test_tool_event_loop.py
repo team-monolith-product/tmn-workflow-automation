@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from api import athena
-from app.tools.athena_tools import execute_athena_query
+from app.tools.athena_tools import get_execute_athena_query_tool
 from app.tools.redash_tools import (
     list_redash_dashboards,
     read_redash_dashboard,
@@ -106,7 +106,7 @@ async def test_tool_callbacks_stay_on_one_event_loop(
             list_redash_dashboards,
             read_redash_dashboard,
             read_redash_query,
-            execute_athena_query,
+            get_execute_athena_query_tool(),
         ],
     )
     probe = LoopProbe()
