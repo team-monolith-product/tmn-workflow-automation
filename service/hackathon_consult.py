@@ -15,7 +15,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from service.hackathon_inquiry import rich_text_chunks
+from service.hackathon_inquiry import (
+    BODY_LABELS,
+    SCALE_LABELS,
+    SCHEDULE_LABELS,
+    TARGET_LABELS,
+    Submission,
+    rich_text_chunks,
+)
 
 # 봇이 처리한 댓글에 다는 이모지. 처리 여부를 따로 저장하지 않고 이 이모지로 읽는다.
 RECORDED_REACTION = "memo"
@@ -24,6 +31,8 @@ SKIPPED_REACTION = "heavy_minus_sign"
 # 상담 페이지 템플릿의 제목. 이 이름으로 블록을 찾는다.
 ESSENTIALS_HEADING = "1. 필수 7항목"
 CALL_LOG_HEADING = "3. 통화 기록"
+# 필수 7항목 표 아래 한 줄짜리 칸. 이 글자로 시작하는 문단을 찾는다.
+MOTIVE_LABEL = "계기 (사업명, 목적, 누가 원하는지):"
 ESSENTIALS_DONE_CHECKBOX = "7항목 모두 확인"
 
 ESSENTIAL_ITEMS = (
@@ -416,3 +425,77 @@ def format_record_reply(
 def comment_date_of(ts: str, tz) -> date:
     """슬랙 ts 의 날짜"""
     return datetime.fromtimestamp(float(ts), tz=tz).date()
+
+
+def _form_value(submission: Submission, labels: tuple[str, ...]) -> str:
+    """폼에 적힌 값. 슬랙에서 잘린 채 남은 값은 쓰지 않는다."""
+    for label in labels:
+        if label in submission.fields:
+            if label in submission.truncated:
+                return ""
+            return submission.fields[label].strip()
+    return ""
+
+
+def intake_essentials(submission: Submission) -> dict[int, str]:
+    """폼으로 미리 채울 수 있는 필수 항목 (번호 → 답). 폼에 없는 값은 만들지 않는다.
+
+    1번 「학년 / 인원」은 대상과 규모, 3번 「희망 날짜·시기」는 희망 시기를 그대로 옮긴다.
+    """
+    values = {}
+    who = " / ".join(
+        v
+        for v in (
+            _form_value(submission, TARGET_LABELS),
+            _form_value(submission, SCALE_LABELS),
+        )
+        if v
+    )
+    if who:
+        values[1] = who
+    schedule = _form_value(submission, SCHEDULE_LABELS)
+    if schedule:
+        values[3] = schedule
+    return values
+
+
+def intake_motive(submission: Submission) -> str:
+    """「계기」 칸에 옮길 문의 내용. 잘렸거나 없으면 빈 문자열."""
+    if any(label in submission.truncated for label in BODY_LABELS):
+        return ""
+    return submission.body.strip()
+
+
+def plan_intake(
+    rows: list[dict], motive_block: dict | None, submission: Submission
+) -> tuple[list[tuple[str, list]], dict | None]:
+    """새 상담 페이지에 폼 내용을 미리 적을 곳을 정합니다. 빈 칸만 채웁니다.
+
+    Args:
+        rows: 필수 7항목 표의 table_row 블록들 (머리행 포함)
+        motive_block: 「계기」 문단 블록. 없으면 None
+        submission: 문의
+
+    Returns:
+        tuple: (고칠 행 [(블록 ID, 새 cells)], 「계기」 문단의 새 paragraph 또는 None)
+    """
+    values = intake_essentials(submission)
+    updates = []
+    for row in rows:
+        cells = row["table_row"]["cells"]
+        number = cell_text(cells[0])
+        if not number.isdigit() or int(number) not in values or cell_text(cells[2]):
+            continue
+        new_cells = [cells[0], cells[1], [{"text": {"content": values[int(number)]}}]]
+        updates.append((row["id"], new_cells))
+
+    motive = intake_motive(submission)
+    paragraph = None
+    if motive and motive_block is not None:
+        text = "".join(
+            p["plain_text"] for p in motive_block["paragraph"]["rich_text"]
+        ).strip()
+        # 사람이 이미 적었으면 두지 않는다
+        if text == MOTIVE_LABEL:
+            paragraph = {"rich_text": rich_text_chunks(f"{MOTIVE_LABEL}\n{motive}")}
+    return updates, paragraph

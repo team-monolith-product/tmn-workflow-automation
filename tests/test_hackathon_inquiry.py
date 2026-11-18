@@ -5,7 +5,7 @@
 """
 
 from datetime import date, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,10 +15,12 @@ from service.hackathon_consult import (
     call_log_number,
     pending_comments,
     plan_essentials,
+    plan_intake,
     plan_properties,
 )
 from service.hackathon_inquiry import (
     KST,
+    Submission,
     SUMMARY_MARKER,
     apply_continuations,
     customer_type,
@@ -687,3 +689,105 @@ def test_문의지기_도구는_문의_채널과_담당자_DM_에서만_준다()
         )
     ) == ["check_hackathon_leads"]
     assert app_inquiry.get_hackathon_tools(client, "C999", "1.0", "UX") == []
+
+
+def _motive(text: str = "계기 (사업명, 목적, 누가 원하는지):") -> dict:
+    return {
+        "id": "m",
+        "type": "paragraph",
+        "paragraph": {"rich_text": [{"plain_text": text}]},
+    }
+
+
+def _intake_rows() -> list[dict]:
+    return [
+        _row("h", "#", "항목", "답"),
+        _row("r1", "1", "학년 / 인원", ""),
+        _row("r2", "2", "차시·시간 / 정규·방과후", ""),
+        _row("r3", "3", "희망 날짜·시기 / 피할 기간", ""),
+        _row("r4", "4", "예산 규모", ""),
+    ]
+
+
+def test_새_상담_페이지에는_폼에_적힌_대상_규모_희망시기_문의내용만_옮긴다():
+    submission = Submission(
+        title="해커톤 문의",
+        fields={
+            "대상": "고등학교 2학년",
+            "규모": "60명",
+            "희망 시기": "12월 셋째 주",
+            "문의 내용": "진로 주간 행사로 해커톤을 하고 싶습니다.",
+        },
+        admin_url=None,
+    )
+    updates, motive = plan_intake(_intake_rows(), _motive(), submission)
+
+    # 1·3번만 채우고, 폼에 없는 차시·예산은 비워 둔다
+    assert [(row_id, cells[2][0]["text"]["content"]) for row_id, cells in updates] == [
+        ("r1", "고등학교 2학년 / 60명"),
+        ("r3", "12월 셋째 주"),
+    ]
+    assert motive["rich_text"][0]["text"]["content"] == (
+        "계기 (사업명, 목적, 누가 원하는지):\n진로 주간 행사로 해커톤을 하고 싶습니다."
+    )
+
+
+def test_폼에_없거나_슬랙에서_잘린_값은_적지_않는다():
+    submission = Submission(
+        title="해커톤 문의",
+        fields={"규모": "60명", "문의 내용": "앞부분만..."},
+        admin_url=None,
+        truncated={"문의 내용"},
+    )
+    updates, motive = plan_intake(_intake_rows(), _motive(), submission)
+
+    # 대상이 없으면 규모만, 희망 시기가 없으면 3번은 그대로, 잘린 문의 내용은 옮기지 않는다
+    assert [row_id for row_id, _ in updates] == ["r1"]
+    assert updates[0][1][2][0]["text"]["content"] == "60명"
+    assert motive is None
+
+
+def test_사람이_이미_적은_칸은_덮어쓰지_않는다():
+    submission = Submission(
+        title="해커톤 문의",
+        fields={"대상": "고2", "희망 시기": "12월", "문의 내용": "문의"},
+        admin_url=None,
+    )
+    rows = _intake_rows()
+    rows[1] = _row("r1", "1", "학년 / 인원", "고2 58명 (통화 확인)")
+    updates, motive = plan_intake(
+        rows, _motive("계기 (사업명, 목적, 누가 원하는지): 진로 주간"), submission
+    )
+    assert [row_id for row_id, _ in updates] == ["r3"]
+    assert motive is None
+
+
+def test_템플릿_본문이_생길_때까지_기다렸다가_적는다(monkeypatch):
+    heading = {
+        "id": "h2",
+        "type": "heading_2",
+        "heading_2": {"rich_text": [{"plain_text": "1. 필수 7항목"}]},
+    }
+    table = {"id": "t", "type": "table", "table": {}}
+    pages = {"page": [[], [heading, table, _motive()]], "t": [_intake_rows()]}
+    calls = {"page": 0, "t": 0}
+
+    def list_children(block_id, start_cursor=None):
+        result = pages[block_id][min(calls[block_id], len(pages[block_id]) - 1)]
+        calls[block_id] += 1
+        return {"results": result, "has_more": False, "next_cursor": None}
+
+    notion = MagicMock()
+    notion.blocks.children.list.side_effect = list_children
+    monkeypatch.setattr(app_inquiry, "notion", notion)
+    monkeypatch.setattr(app_inquiry.time, "sleep", lambda s: None)
+
+    submission = Submission(
+        title="해커톤 문의", fields={"희망 시기": "12월"}, admin_url=None
+    )
+    app_inquiry._fill_intake("page", submission)
+
+    # 처음엔 본문이 비어 다시 읽고, 표가 생기자 3번만 적는다
+    assert calls["page"] == 2
+    notion.blocks.update.assert_called_once()
+    assert notion.blocks.update.call_args.kwargs["block_id"] == "r3"

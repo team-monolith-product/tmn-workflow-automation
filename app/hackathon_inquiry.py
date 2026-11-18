@@ -18,6 +18,7 @@ SUMMARY_MARKER 가 있으면 처리한 것입니다. 노션은 비고의 어드�
 """
 
 import asyncio
+import time
 from datetime import date, datetime, timedelta
 
 from langchain_core.tools import StructuredTool, tool
@@ -30,6 +31,7 @@ from service.hackathon_consult import (
     CALL_LOG_HEADING,
     ESSENTIALS_HEADING,
     EXTRACT_SYSTEM_PROMPT,
+    MOTIVE_LABEL,
     RECORDED_REACTION,
     SKIPPED_REACTION,
     ConsultExtract,
@@ -40,6 +42,7 @@ from service.hackathon_consult import (
     format_record_reply,
     pending_comments,
     plan_essentials,
+    plan_intake,
     plan_properties,
 )
 from service.hackathon_inquiry import (
@@ -184,7 +187,51 @@ def _create_lead(submission: Submission, slack_ts: str, source: str) -> str:
         ),
         template={"type": "template_id", "template_id": CONSULT_TEMPLATE_ID},
     )
+    _fill_intake(page["id"], submission)
     return page["url"]
+
+
+# 노션은 템플릿 본문을 페이지를 만든 뒤에 따로 채운다. 표가 생길 때까지 기다리는 횟수·간격.
+TEMPLATE_WAIT_TRIES = 10
+TEMPLATE_WAIT_SECONDS = 2
+
+
+def _fill_intake(page_id: str, submission: Submission) -> None:
+    """새 상담 페이지의 필수 7항목 1·3번과 「계기」에 폼 내용을 적습니다.
+
+    스레드에서 to_thread 로 돌므로 time.sleep 이 루프를 막지 않습니다.
+    """
+    for _ in range(TEMPLATE_WAIT_TRIES):
+        blocks = collect_paginated_api(notion.blocks.children.list, block_id=page_id)
+        section = None
+        table_id = None
+        motive_block = None
+        for block in blocks:
+            if block["type"] == "heading_2":
+                section = _block_text(block).strip()
+            elif section == ESSENTIALS_HEADING and block["type"] == "table":
+                table_id = table_id or block["id"]
+            elif (
+                section == ESSENTIALS_HEADING
+                and block["type"] == "paragraph"
+                and _block_text(block).strip().startswith(MOTIVE_LABEL)
+            ):
+                motive_block = block
+        if table_id:
+            break
+        time.sleep(TEMPLATE_WAIT_SECONDS)
+    else:
+        print(
+            f"[hackathon_inquiry] 템플릿 본문이 아직 없어 미리 적기 건너뜀: {page_id}"
+        )
+        return
+
+    rows = collect_paginated_api(notion.blocks.children.list, block_id=table_id)
+    row_updates, motive = plan_intake(rows, motive_block, submission)
+    for row_id, cells in row_updates:
+        notion.blocks.update(block_id=row_id, table_row={"cells": cells})
+    if motive:
+        notion.blocks.update(block_id=motive_block["id"], paragraph=motive)
 
 
 async def handle_submission(
