@@ -14,6 +14,11 @@ from app.socket_mode_handler import AsyncImmediateAckSocketModeHandler
 from app.general import get_draft_revise, register_general_handlers
 from app.knowledge import register_knowledge_middleware
 from app.contents import register_contents_handlers
+from app.hackathon_inquiry import (
+    poll_new_inquiries,
+    remind_unconfirmed,
+    sync_consult_comments,
+)
 from app.justin import register_justin_handlers
 from app.ops_mail import register_ops_mail_handlers
 from app.sms import register_sms_handlers
@@ -72,7 +77,23 @@ async def main():
     get_dsn()
 
     # 스케줄러 시작 (이벤트 루프에 크론 작업 등록)
-    start_scheduler()
+    scheduler = start_scheduler()
+
+    # 해커톤 문의 접수·독촉·상담 기록. 폼 글을 대표 봇 자신이 올려
+    # 이벤트로 받을 수 없으므로 채널을 주기적으로 읽는다(app/hackathon_inquiry.py).
+    for func, minutes in (
+        (poll_new_inquiries, 1),
+        (sync_consult_comments, 2),
+        (remind_unconfirmed, 10),
+    ):
+        scheduler.add_job(
+            func,
+            "interval",
+            minutes=minutes,
+            args=[app.client],
+            id=func.__name__,
+            name=func.__name__,
+        )
 
     # Async Socket Mode Handler (즉시 ack로 이벤트 재전송 방지)
     handler = AsyncImmediateAckSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])

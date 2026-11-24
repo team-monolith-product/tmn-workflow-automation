@@ -13,6 +13,7 @@ from slack_bolt.context.respond.async_respond import AsyncRespond
 from slack_sdk.web.async_client import AsyncWebClient
 
 from . import analyze_oom, route_bug, route_dev_env_infra_bug
+from .hackathon_inquiry import get_hackathon_tools
 from .knowledge import get_knowledge_channel_tools, get_knowledge_query_tools
 from .ops_mail import get_ops_mail_tools
 from .sms import get_draft_sms_tool
@@ -197,6 +198,7 @@ async def _build_tools(
         + get_knowledge_query_tools(client, user_id)
         + [draft_sms]
         + get_ops_mail_tools(client, channel, thread_ts)
+        + get_hackathon_tools(client, channel, thread_ts, user_id)
         # 수백 행짜리 집계는 표를 컨텍스트에 실어 눈으로 세면 틀린다. 코드로 센다.
         # 차트는 슬랙에 올라가므로 클라이언트와 채널을 함께 넘긴다.
         + [
