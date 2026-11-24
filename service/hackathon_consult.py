@@ -10,7 +10,7 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -46,6 +46,65 @@ ESSENTIAL_ITEMS = (
 )
 
 WEEKDAYS = "월화수목금토일"
+
+
+def block_text(block: dict) -> str:
+    """블록 본문 글자. 글자가 없는 블록(표 등)은 빈 문자열."""
+    body = block[block["type"]]
+    return "".join(part["plain_text"] for part in body.get("rich_text", []))
+
+
+@dataclass
+class ConsultLayout:
+    """상담 페이지 최상위 블록 중 봇이 읽고 쓰는 자리"""
+
+    essentials_table_id: str | None = None
+    # 「계기」 문단. 폼 내용을 미리 적는다.
+    motive_block: dict | None = None
+    # 「7항목 모두 확인」을 체크했는지
+    essentials_confirmed: bool = False
+    # 새 통화 기록을 붙일 블록. 템플릿 이전 페이지라 제목이 없으면 None (맨 끝).
+    call_log_after: str | None = None
+    call_log_titles: list[str] = field(default_factory=list)
+
+
+def parse_consult_layout(blocks: list[dict]) -> ConsultLayout:
+    """상담 페이지 최상위 블록을 제목(heading_2) 단위로 읽어 봇이 쓸 자리를 찾습니다.
+
+    Args:
+        blocks: blocks.children.list 로 받은 페이지 최상위 블록들
+
+    Returns:
+        ConsultLayout: 찾은 자리. 없는 것은 기본값
+    """
+    layout = ConsultLayout()
+    section = None
+    for block in blocks:
+        kind = block["type"]
+        if kind == "heading_2":
+            section = block_text(block).strip()
+            if section == CALL_LOG_HEADING:
+                layout.call_log_after = block["id"]
+        elif section == ESSENTIALS_HEADING:
+            if kind == "table" and layout.essentials_table_id is None:
+                layout.essentials_table_id = block["id"]
+            elif kind == "paragraph" and block_text(block).strip().startswith(
+                MOTIVE_LABEL
+            ):
+                layout.motive_block = block
+            elif (
+                kind == "to_do"
+                and ESSENTIALS_DONE_CHECKBOX in block_text(block)
+                and block["to_do"]["checked"]
+            ):
+                layout.essentials_confirmed = True
+        elif section == CALL_LOG_HEADING:
+            if kind == "paragraph" and not layout.call_log_titles:
+                # 「통화할 때마다 … 맨 위에 추가한다」 안내 바로 아래가 맨 위다
+                layout.call_log_after = block["id"]
+            elif kind == "heading_3":
+                layout.call_log_titles.append(block_text(block))
+    return layout
 
 
 class ConsultExtract(BaseModel):
@@ -357,39 +416,48 @@ def cell_text(cell: list[dict]) -> str:
     return "".join(part["plain_text"] for part in cell).strip()
 
 
-def plan_essentials(
-    rows: list[dict], extract: ConsultExtract
+def fill_essential_rows(
+    rows: list[dict], answers: dict[int, str]
 ) -> tuple[list[tuple[str, list]], list[str], list[str]]:
-    """필수 7항목 표의 빈 답 칸을 댓글 값으로 채웁니다.
+    """필수 7항목 표의 빈 답 칸을 채웁니다. 이미 답이 있는 칸은 건드리지 않습니다.
 
     Args:
         rows: 표의 table_row 블록들 (머리행 포함)
-        extract: 댓글에서 읽은 값
+        answers: 항목 번호(1~7) → 적을 답
 
     Returns:
         tuple: (고칠 행 [(블록 ID, 새 cells)], 채운 항목 이름, 아직 빈 항목 이름)
     """
-    values = extract.essentials()
     updates = []
     filled = []
     empty = []
     for row in rows:
         cells = row["table_row"]["cells"]
         number = cell_text(cells[0])
-        if not number.isdigit() or not 1 <= int(number) <= 7:
+        if not number.isdigit() or not 1 <= int(number) <= 7 or cell_text(cells[2]):
             continue
-        index = int(number) - 1
         label = cell_text(cells[1])
-        if cell_text(cells[2]):
-            continue
-        value = values[index]
-        if value:
-            new_cells = [cells[0], cells[1], [{"text": {"content": value}}], *cells[3:]]
+        answer = answers.get(int(number))
+        if answer:
+            new_cells = [
+                cells[0],
+                cells[1],
+                [{"text": {"content": answer}}],
+                *cells[3:],
+            ]
             updates.append((row["id"], new_cells))
             filled.append(label)
         else:
             empty.append(label)
     return updates, filled, empty
+
+
+def plan_essentials(
+    rows: list[dict], extract: ConsultExtract
+) -> tuple[list[tuple[str, list]], list[str], list[str]]:
+    """필수 7항목 표의 빈 답 칸을 댓글 값으로 채웁니다. 반환값은 fill_essential_rows 와 같습니다."""
+    answers = {i + 1: v for i, v in enumerate(extract.essentials()) if v}
+    return fill_essential_rows(rows, answers)
 
 
 def format_record_reply(
@@ -420,11 +488,6 @@ def format_record_reply(
         )
         lines += [f"· {conflict}" for conflict in plan.conflicts]
     return "\n".join(lines)
-
-
-def comment_date_of(ts: str, tz) -> date:
-    """슬랙 ts 의 날짜"""
-    return datetime.fromtimestamp(float(ts), tz=tz).date()
 
 
 def _form_value(submission: Submission, labels: tuple[str, ...]) -> str:
@@ -479,28 +542,12 @@ def plan_intake(
     Returns:
         tuple: (고칠 행 [(블록 ID, 새 cells)], 「계기」 문단의 새 paragraph 또는 None)
     """
-    values = intake_essentials(submission)
-    updates = []
-    for row in rows:
-        cells = row["table_row"]["cells"]
-        number = cell_text(cells[0])
-        if not number.isdigit() or int(number) not in values or cell_text(cells[2]):
-            continue
-        new_cells = [
-            cells[0],
-            cells[1],
-            [{"text": {"content": values[int(number)]}}],
-            *cells[3:],
-        ]
-        updates.append((row["id"], new_cells))
+    updates, _, _ = fill_essential_rows(rows, intake_essentials(submission))
 
     motive = intake_motive(submission)
     paragraph = None
     if motive and motive_block is not None:
-        text = "".join(
-            p["plain_text"] for p in motive_block["paragraph"]["rich_text"]
-        ).strip()
         # 사람이 이미 적었으면 두지 않는다
-        if text == MOTIVE_LABEL:
+        if block_text(motive_block).strip() == MOTIVE_LABEL:
             paragraph = {"rich_text": rich_text_chunks(f"{MOTIVE_LABEL}\n{motive}")}
     return updates, paragraph

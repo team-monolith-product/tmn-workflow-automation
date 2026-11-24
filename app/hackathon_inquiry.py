@@ -19,6 +19,7 @@ SUMMARY_MARKER 가 있으면 처리한 것입니다. 노션은 비고의 어드�
 
 import asyncio
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from langchain_core.tools import StructuredTool, tool
@@ -29,18 +30,16 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from service.business_days import is_business_day
 from service.hackathon_consult import (
-    CALL_LOG_HEADING,
-    ESSENTIALS_HEADING,
     EXTRACT_SYSTEM_PROMPT,
-    MOTIVE_LABEL,
     RECORDED_REACTION,
     SKIPPED_REACTION,
     ConsultExtract,
+    ConsultLayout,
     call_log_block,
     call_log_number,
-    comment_date_of,
     extract_prompt,
     format_record_reply,
+    parse_consult_layout,
     pending_comments,
     plan_essentials,
     plan_intake,
@@ -202,22 +201,10 @@ def _fill_intake(page_id: str, submission: Submission) -> None:
     스레드에서 to_thread 로 돌므로 time.sleep 이 루프를 막지 않습니다.
     """
     for _ in range(TEMPLATE_WAIT_TRIES):
-        blocks = collect_paginated_api(notion.blocks.children.list, block_id=page_id)
-        section = None
-        table_id = None
-        motive_block = None
-        for block in blocks:
-            if block["type"] == "heading_2":
-                section = _block_text(block).strip()
-            elif section == ESSENTIALS_HEADING and block["type"] == "table":
-                table_id = table_id or block["id"]
-            elif (
-                section == ESSENTIALS_HEADING
-                and block["type"] == "paragraph"
-                and _block_text(block).strip().startswith(MOTIVE_LABEL)
-            ):
-                motive_block = block
-        if table_id:
+        layout = parse_consult_layout(
+            collect_paginated_api(notion.blocks.children.list, block_id=page_id)
+        )
+        if layout.essentials_table_id:
             break
         time.sleep(TEMPLATE_WAIT_SECONDS)
     else:
@@ -226,12 +213,31 @@ def _fill_intake(page_id: str, submission: Submission) -> None:
         )
         return
 
-    rows = collect_paginated_api(notion.blocks.children.list, block_id=table_id)
-    row_updates, motive = plan_intake(rows, motive_block, submission)
+    rows = collect_paginated_api(
+        notion.blocks.children.list, block_id=layout.essentials_table_id
+    )
+    row_updates, motive = plan_intake(rows, layout.motive_block, submission)
     for row_id, cells in row_updates:
         notion.blocks.update(block_id=row_id, table_row={"cells": cells})
     if motive:
-        notion.blocks.update(block_id=motive_block["id"], paragraph=motive)
+        notion.blocks.update(block_id=layout.motive_block["id"], paragraph=motive)
+
+
+def _ensure_lead(
+    submission: Submission, slack_ts: str, source: str
+) -> tuple[str, str | None, str | None]:
+    """문의를 노션 리드에 잇습니다. 같은 제출이나 같은 기관이 있으면 새로 만들지 않습니다.
+
+    Returns:
+        tuple: (리드 페이지 URL, 링크 옆 설명, 정리 글 맨 앞 표시)
+    """
+    existing = _find_existing_lead(submission)
+    if existing is None:
+        return _create_lead(submission, slack_ts, source), None, None
+    url, same_submission = existing
+    if same_submission:
+        return url, "이미 등록됨", None
+    return url, "기존 페이지, 새로 만들지 않음", "[긴급] 재문의"
 
 
 async def handle_submission(
@@ -271,28 +277,18 @@ async def process_submission(
         str: 스레드에 단 정리 글
     """
     business_hours = await business_hours_now()
-    flags: list[str] = []
-    notion_note = None
-    vacation_note = None
-
     assignee, is_backup = await resolve_assignee(client)
-    if is_backup:
-        vacation_note = "이주현 님이 휴가 중이라 김세윤 님께 안내합니다."
+    flags: list[str] = []
     # 노션이 실패해도 담당자 멘션은 나가야 한다. 정리 글에 실패를 적어 올린 뒤
     # 오류를 그대로 다시 던진다. 정리 글이 달렸으므로 다음 폴링은 이 건을 건너뛴다.
-    notion_url = None
+    notion_url = notion_note = None
     notion_error = None
     try:
-        existing = await asyncio.to_thread(_find_existing_lead, submission)
-        if existing and existing[1]:
-            notion_url, notion_note = existing[0], "이미 등록됨"
-        elif existing:
-            flags.append("[긴급] 재문의")
-            notion_url, notion_note = existing[0], "기존 페이지, 새로 만들지 않음"
-        else:
-            notion_url = await asyncio.to_thread(
-                _create_lead, submission, thread_ts, source
-            )
+        notion_url, notion_note, flag = await asyncio.to_thread(
+            _ensure_lead, submission, thread_ts, source
+        )
+        if flag:
+            flags.append(flag)
     except (HTTPResponseError, RequestTimeoutError) as error:
         notion_error = error
         flags.append("[노션 등록 실패, 직접 등록 필요]")
@@ -310,9 +306,8 @@ async def process_submission(
         notion_note=notion_note,
         estimate=estimate,
         flags=flags,
+        backup=is_backup,
     )
-    if vacation_note:
-        text += "\n" + vacation_note
     await client.chat_postMessage(
         channel=CHANNEL_ID, thread_ts=thread_ts, text=text, unfurl_links=False
     )
@@ -501,52 +496,30 @@ def _page_id(notion_url: str) -> str:
     return notion_url.split("?")[0].rstrip("/").split("-")[-1].split("/")[-1]
 
 
-def _block_text(block: dict) -> str:
-    body = block[block["type"]]
-    return "".join(part["plain_text"] for part in body.get("rich_text", []))
+@dataclass
+class ConsultPage:
+    """상담 페이지에서 F5 가 읽는 것"""
+
+    properties: dict
+    layout: ConsultLayout
+    # 필수 7항목 표의 행들. 템플릿 이전 페이지라 표가 없으면 빈 목록
+    essential_rows: list[dict]
 
 
-def _read_consult_page(page_id: str) -> dict:
-    """상담 페이지에서 F5 가 고칠 곳을 읽습니다.
-
-    Returns:
-        dict: properties, 통화 기록을 넣을 위치(after, 없으면 None 으로 맨 끝),
-            기존 통화 토글 제목들, 필수 7항목 표의 행들
-    """
+def _read_consult_page(page_id: str) -> ConsultPage:
+    """상담 페이지의 속성과 본문 구조를 읽습니다."""
     properties = notion.pages.retrieve(page_id=page_id)["properties"]
-    blocks = collect_paginated_api(notion.blocks.children.list, block_id=page_id)
-
-    section = None
-    after = None
-    toggle_titles: list[str] = []
-    essentials_table = None
-    for block in blocks:
-        if block["type"] == "heading_2":
-            section = _block_text(block).strip()
-            if section == CALL_LOG_HEADING:
-                after = block["id"]
-            continue
-        if section == ESSENTIALS_HEADING and block["type"] == "table":
-            essentials_table = essentials_table or block["id"]
-        if section == CALL_LOG_HEADING:
-            if block["type"] == "paragraph" and not toggle_titles:
-                # 「통화할 때마다 … 맨 위에 추가한다」 안내 바로 아래가 맨 위다
-                after = block["id"]
-            elif block["type"] == "heading_3":
-                toggle_titles.append(_block_text(block))
-    # 템플릿 이전에 만든 페이지(재문의로 이어 쓰는 옛 리드)는 제목이 없다. 그때는 맨 끝에 단다.
-
+    layout = parse_consult_layout(
+        collect_paginated_api(notion.blocks.children.list, block_id=page_id)
+    )
     rows = (
-        collect_paginated_api(notion.blocks.children.list, block_id=essentials_table)
-        if essentials_table
+        collect_paginated_api(
+            notion.blocks.children.list, block_id=layout.essentials_table_id
+        )
+        if layout.essentials_table_id
         else []
     )
-    return {
-        "properties": properties,
-        "after": after,
-        "toggle_titles": toggle_titles,
-        "rows": rows,
-    }
+    return ConsultPage(properties, layout, rows)
 
 
 def _write_consult_page(
@@ -591,7 +564,7 @@ async def record_consultation(
     """상담 댓글 묶음 하나를 노션에 옮기고 스레드에 결과를 답합니다."""
     last = comments[-1]
     text = "\n\n".join(c["text"] for c in comments)
-    call_date = comment_date_of(last["ts"], KST)
+    call_date = ts_to_datetime(last["ts"]).date()
     extract = await extract_consult(text, call_date)
 
     if not extract.is_consultation:
@@ -604,10 +577,10 @@ async def record_consultation(
 
     page_id = _page_id(notion_url)
     page = await asyncio.to_thread(_read_consult_page, page_id)
-    number = call_log_number(page["toggle_titles"])
+    number = call_log_number(page.layout.call_log_titles)
     author = USER_NAMES[last["user"]]
-    plan = plan_properties(page["properties"], extract, call_date)
-    row_updates, filled, empty = plan_essentials(page["rows"], extract)
+    plan = plan_properties(page.properties, extract, call_date)
+    row_updates, filled, empty = plan_essentials(page.essential_rows, extract)
     log_block = call_log_block(
         number,
         call_date,
@@ -619,7 +592,7 @@ async def record_consultation(
     await asyncio.to_thread(
         _write_consult_page,
         page_id,
-        page["after"],
+        page.layout.call_log_after,
         log_block,
         plan.updates,
         row_updates,
@@ -727,21 +700,21 @@ def get_hackathon_tools(
         Returns:
             스레드에 단 정리 글
         """
+        fields = {
+            "기관명": org,
+            "담당자": contact,
+            "연락처": phone,
+            "이메일": email,
+            "대상": target,
+            "규모": scale,
+            "희망 시기": schedule,
+            "문의 내용": body,
+        }
         submission = Submission(
             title="해커톤 문의 새 제출",
-            fields={
-                "기관명": org,
-                "담당자": contact,
-                "연락처": phone,
-                "이메일": email,
-                "대상": target,
-                "규모": scale,
-                "희망 시기": schedule,
-                "문의 내용": body,
-            },
+            fields={label: value for label, value in fields.items() if value},
             admin_url=None,
         )
-        submission.fields = {k: v for k, v in submission.fields.items() if v}
         thread = await _thread(client, thread_ts)
         if any(_is_summary(m) for m in thread):
             return "이 스레드는 이미 접수했습니다. 정리 글을 확인하세요."

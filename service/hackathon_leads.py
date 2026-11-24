@@ -15,8 +15,11 @@ from datetime import date, datetime
 from notion_client import Client as NotionClient
 from notion_client.helpers import collect_paginated_api
 
-from service.hackathon_consult import ESSENTIALS_DONE_CHECKBOX, ESSENTIALS_HEADING
-from service.hackathon_consult import cell_text
+from service.hackathon_consult import (
+    ConsultLayout,
+    cell_text,
+    parse_consult_layout,
+)
 from service.hackathon_inquiry import CHANNEL_ID, KST, LEAD_DATA_SOURCE_ID
 
 # 진행 순서. "X 이상" 은 이 목록에서 X 와 같거나 뒤.
@@ -176,54 +179,39 @@ def missing_items(lead: Lead, essentials_filled: int | None, today: date) -> lis
     return items
 
 
-def count_essentials(blocks: list[dict], rows: list[dict] | None) -> int | None:
+def count_essentials(layout: ConsultLayout, rows: list[dict] | None) -> int | None:
     """필수 7항목 중 답이 있는 수. 「7항목 모두 확인」을 체크했으면 7.
 
     Args:
-        blocks: 상담 페이지 최상위 블록들
+        layout: 상담 페이지 구조
         rows: 필수 7항목 표의 행들. 표가 없으면 None
 
     Returns:
         int | None: 템플릿 이전에 만든 페이지라 표가 없으면 None (점검하지 않음)
     """
-    section = None
-    for block in blocks:
-        if block["type"] == "heading_2":
-            section = "".join(
-                p["plain_text"] for p in block["heading_2"]["rich_text"]
-            ).strip()
-        elif section == ESSENTIALS_HEADING and block["type"] == "to_do":
-            text = "".join(p["plain_text"] for p in block["to_do"]["rich_text"])
-            if ESSENTIALS_DONE_CHECKBOX in text and block["to_do"]["checked"]:
-                return 7
+    if layout.essentials_confirmed:
+        return 7
     if rows is None:
         return None
-    filled = 0
-    for row in rows:
-        cells = row["table_row"]["cells"]
-        if cell_text(cells[0]).isdigit() and cell_text(cells[2]):
-            filled += 1
-    return filled
+    return sum(
+        1
+        for row in rows
+        if cell_text(row["table_row"]["cells"][0]).isdigit()
+        and cell_text(row["table_row"]["cells"][2])
+    )
 
 
 def _read_essentials(notion: NotionClient, page_id: str) -> int | None:
     blocks = collect_paginated_api(notion.blocks.children.list, block_id=page_id)
-    section = None
-    table_id = None
-    for block in blocks:
-        if block["type"] == "heading_2":
-            section = "".join(
-                p["plain_text"] for p in block["heading_2"]["rich_text"]
-            ).strip()
-        elif section == ESSENTIALS_HEADING and block["type"] == "table":
-            table_id = block["id"]
-            break
+    layout = parse_consult_layout(blocks)
     rows = (
-        collect_paginated_api(notion.blocks.children.list, block_id=table_id)
-        if table_id
+        collect_paginated_api(
+            notion.blocks.children.list, block_id=layout.essentials_table_id
+        )
+        if layout.essentials_table_id
         else None
     )
-    return count_essentials(blocks, rows)
+    return count_essentials(layout, rows)
 
 
 @dataclass

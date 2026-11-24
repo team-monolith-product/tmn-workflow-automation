@@ -13,6 +13,8 @@ from notion_client.errors import RequestTimeoutError
 from app import hackathon_inquiry as app_inquiry
 from service.hackathon_consult import (
     ConsultExtract,
+    ConsultLayout,
+    parse_consult_layout,
     call_log_number,
     pending_comments,
     plan_essentials,
@@ -650,12 +652,14 @@ def consult_env(env, frozen_now, monkeypatch):
     monkeypatch.setattr(
         app_inquiry,
         "_read_consult_page",
-        lambda page_id: {
-            "properties": CONSULT_PROPS,
-            "after": "intro",
-            "toggle_titles": ["통화 1 · YYYY-MM-DD · 상담자"],
-            "rows": [_row("r1", "1", "학년 / 인원", "")],
-        },
+        lambda page_id: app_inquiry.ConsultPage(
+            properties=CONSULT_PROPS,
+            layout=ConsultLayout(
+                call_log_after="intro",
+                call_log_titles=["통화 1 · YYYY-MM-DD · 상담자"],
+            ),
+            essential_rows=[_row("r1", "1", "학년 / 인원", "")],
+        ),
     )
     monkeypatch.setattr(
         app_inquiry,
@@ -952,3 +956,38 @@ def test_실제_폼_봇_글은_블록으로_읽어_항목과_전문을_채운다
     assert submission.fields["제출 시각"] == "2026-11-10 11:44"
     assert submission.body == "ㅇ 장소 확정 & 식대 확정 : 1인 25000원"
     assert not submission.truncated
+
+
+def _block(block_id: str, kind: str, text: str = "", **extra) -> dict:
+    body = {"rich_text": [{"plain_text": text}] if text else [], **extra}
+    return {"id": block_id, "type": kind, kind: body}
+
+
+def test_상담_페이지_템플릿에서_봇이_쓸_자리를_찾는다():
+    # Given : 실제 「상담 페이지」 템플릿의 최상위 블록 순서
+    blocks = [
+        _block("c", "callout", "상담기록지 v0.2"),
+        _block("h1", "heading_2", "1. 필수 7항목"),
+        _block("t", "table"),
+        _block("done", "to_do", "7항목 모두 확인", checked=False),
+        _block("m", "paragraph", "계기 (사업명, 목적, 누가 원하는지):"),
+        _block("p2", "paragraph", "결재 라인 두 번째 사람 (부장·행정실, 연락처):"),
+        _block("h2", "heading_2", "2. 문제와 가치 (선생님 말 그대로, 따옴표로)"),
+        _block("t2", "table"),
+        _block("h3", "heading_2", "3. 통화 기록"),
+        _block(
+            "guide", "paragraph", "통화할 때마다 아래 토글을 복사해 맨 위에 추가한다."
+        ),
+        _block("log", "heading_3", "통화 1 · YYYY-MM-DD · 상담자", is_toggleable=True),
+        _block("h4", "heading_2", "4. 공동 일정표 (통화 2 이후)"),
+        _block("p4", "paragraph", "수주확률 기준"),
+    ]
+
+    layout = parse_consult_layout(blocks)
+
+    # Then : 7항목 표, 「계기」 문단, 통화 기록을 넣을 안내문 아래를 찾는다
+    assert layout.essentials_table_id == "t"
+    assert layout.motive_block["id"] == "m"
+    assert layout.essentials_confirmed is False
+    assert layout.call_log_after == "guide"
+    assert layout.call_log_titles == ["통화 1 · YYYY-MM-DD · 상담자"]

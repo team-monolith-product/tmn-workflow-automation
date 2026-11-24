@@ -6,6 +6,7 @@
 from datetime import date
 from unittest.mock import MagicMock
 
+from service.hackathon_consult import parse_consult_layout
 from service.hackathon_leads import (
     Lead,
     build_morning_report,
@@ -84,7 +85,7 @@ def test_7항목_모두_확인을_체크했으면_7로_센다():
             },
         },
     ]
-    assert count_essentials(blocks, []) == 7
+    assert count_essentials(parse_consult_layout(blocks), []) == 7
 
 
 def _page(status: str, created: str = "2026-11-24T01:00:00.000Z", **props) -> dict:

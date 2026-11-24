@@ -484,6 +484,7 @@ def format_summary(
     notion_note: str | None,
     estimate: str | None,
     flags: list[str],
+    backup: bool = False,
 ) -> str:
     """스레드에 다는 정리 글을 만듭니다.
 
@@ -495,6 +496,7 @@ def format_summary(
         notion_note: 노션 링크 옆에 붙일 설명 (예: "기존 페이지")
         estimate: 견적 초안 한 줄
         flags: 맨 앞에 굵게 붙일 표시 (예: "[긴급] 재문의")
+        backup: 이주현 님 휴가로 김세윤 님께 안내하는지
 
     Returns:
         str: 슬랙 mrkdwn
@@ -559,6 +561,8 @@ def format_summary(
         lines.append(
             "확인하면 이 글에 이모지를 눌러 주세요. 2시간 동안 반응이 없으면 DM 드립니다."
         )
+    if backup:
+        lines.append("이주현 님이 휴가 중이라 김세윤 님께 안내합니다.")
     return "\n".join(lines)
 
 
