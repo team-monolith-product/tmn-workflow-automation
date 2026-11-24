@@ -10,20 +10,23 @@
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from notion_client import Client as NotionClient
 from notion_client.helpers import collect_paginated_api
 
 from service.hackathon_consult import ESSENTIALS_DONE_CHECKBOX, ESSENTIALS_HEADING
 from service.hackathon_consult import cell_text
-from service.hackathon_inquiry import CHANNEL_ID, LEAD_DATA_SOURCE_ID
+from service.hackathon_inquiry import CHANNEL_ID, KST, LEAD_DATA_SOURCE_ID
 
 # 진행 순서. "X 이상" 은 이 목록에서 X 와 같거나 뒤.
 STAGES = ("문의접수", "상담", "제안·견적", "협의", "수주·계약", "운영·완료")
 OPEN_STAGES = ("문의접수", "상담", "제안·견적", "협의")
 DROPPED_STAGES = ("무산", "보류")
 STALE_DAYS = 14
+# 빠진 자료는 봇을 켠 날 이후에 만든 리드만 본다. 그 전 리드는 빈칸이 많아
+# 매일 수십 건이 떠서 정작 새 리드를 가린다. 오늘 연락할 리드는 날짜와 무관하게 본다.
+MISSING_CHECK_SINCE = date(2026, 11, 24)
 
 SLACK_LINK_RE = re.compile(rf"/archives/{CHANNEL_ID}/p(\d{{10}})(\d{{6}})")
 WEEKDAYS = "월화수목금토일"
@@ -41,6 +44,7 @@ class Lead:
     last_contact: date | None
     empty: set[str]
     slack_thread_ts: str | None
+    created: date
 
 
 # 비었는지 보는 속성
@@ -91,6 +95,7 @@ def lead_from_page(page: dict) -> Lead:
         last_contact=_date(props["마지막 접촉일"]),
         empty={name for name in CHECKED_PROPERTIES if _is_empty(props[name])},
         slack_thread_ts=f"{match.group(1)}.{match.group(2)}" if match else None,
+        created=datetime.fromisoformat(page["created_time"]).astimezone(KST).date(),
     )
 
 
@@ -276,6 +281,8 @@ def build_morning_report(notion: NotionClient, today: date) -> MorningReport | N
     )
     missing = []
     for lead in leads:
+        if lead.created < MISSING_CHECK_SINCE:
+            continue
         filled = (
             _read_essentials(notion, lead.page_id)
             if needs_essentials_check(lead)

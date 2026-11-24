@@ -29,6 +29,7 @@ def _lead(status: str, empty: set[str] = frozenset(), **overrides) -> Lead:
         "last_contact": TODAY,
         "empty": set(empty),
         "slack_thread_ts": None,
+        "created": TODAY,
     }
     return Lead(**{**values, **overrides})
 
@@ -86,7 +87,7 @@ def test_7항목_모두_확인을_체크했으면_7로_센다():
     assert count_essentials(blocks, []) == 7
 
 
-def _page(status: str, **props) -> dict:
+def _page(status: str, created: str = "2026-11-24T01:00:00.000Z", **props) -> dict:
     def text(value: str) -> list:
         return [{"plain_text": value}] if value else []
 
@@ -113,7 +114,7 @@ def _page(status: str, **props) -> dict:
         "무산 사유": {"type": "select", "select": None},
         "이탈 단계": {"type": "select", "select": None},
     }
-    return {"id": "page-1", "properties": {**base, **props}}
+    return {"id": "page-1", "created_time": created, "properties": {**base, **props}}
 
 
 def test_노션_페이지에서_슬랙_스레드를_읽는다():
@@ -133,3 +134,22 @@ def test_아침_정리는_오늘_연락할_리드와_빠진_자료를_한_글로
     assert "11/17(화) 아침 정리" in report.text
     assert "예시대 글로컬캠퍼스: 기획안 검토 결과 확인 (2일 지남)" in report.text
     assert report.due_thread_ts == ["1794299497.612819"]
+
+
+def test_봇을_켜기_전에_만든_리드는_빠진_자료를_보지_않고_연락일만_챙긴다():
+    notion = MagicMock()
+    notion.data_sources.query.return_value = {
+        "results": [
+            _page("협의", created="2026-11-23T14:59:00.000Z"),  # KST 11/23
+            _page("무산", created="2026-11-23T15:00:00.000Z"),  # KST 11/24 0시
+        ],
+        "has_more": False,
+        "next_cursor": None,
+    }
+    report = build_morning_report(notion, date(2026, 11, 25))
+
+    # Then : 빠진 자료는 11/24 이후 리드 하나만, 오늘 연락할 리드는 그대로
+    assert "자료가 빠진 리드 1건" in report.text
+    assert "(무산)" in report.text and "(협의)" not in report.text
+    assert "오늘 연락할 리드 1건" in report.text
+    notion.blocks.children.list.assert_not_called()
