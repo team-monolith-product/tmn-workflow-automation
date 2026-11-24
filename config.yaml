@@ -233,6 +233,16 @@ scheduled_jobs:
       day_of_week: mon-fri
     business_day_only: true
 
+  # 해커톤 리드 아침 정리 DM (F6·F7). 업무시간 시작에 맞춘다.
+  - name: notify_hackathon_leads
+    module: scripts.notify_hackathon_leads
+    function: main
+    cron:
+      hour: 10
+      minute: 0
+      day_of_week: mon-fri
+    business_day_only: true
+
   - name: collect_review_stats
     module: scripts.collect_review_stats
     function: main
